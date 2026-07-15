@@ -1,0 +1,9 @@
+---
+description: Core project rules that apply to every task
+alwaysApply: true
+---
+- Preserve the existing project structure and TypeScript compatibility.
+- Keep page, component, and API responsibilities clearly separated.
+- Do not add, remove, or refactor features outside the requested scope.
+- Validate changes with type checks, linting, and a production build.
+- Never store API keys, credentials, or other secrets in the repository.

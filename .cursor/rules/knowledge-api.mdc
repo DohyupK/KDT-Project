@@ -1,0 +1,8 @@
+---
+description: Rules for the KnowledgePage API module
+globs: src/api/knowledgeApi.ts
+alwaysApply: false
+---
+# Knowledge API
+
+API-specific rules will be defined here.
