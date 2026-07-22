@@ -3,16 +3,6 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import {
-  Search,
-  Bell,
-  User,
-  BookText,
-  Home,
-  LayoutDashboard,
-  AlertCircle,
-  BookOpen,
-  HelpCircle,
-  Briefcase,
   Settings,
   RotateCcw,
   Save,
@@ -122,16 +112,6 @@ const loadSavedSettings = (): SavedSettings | null => {
   }
 }
 
-const SIDEBAR_MENUS = [
-  { name: 'Main', icon: Home, active: false },
-  { name: 'Dashboard', icon: LayoutDashboard, active: false },
-  { name: 'Issue', icon: AlertCircle, active: false },
-  { name: 'Knowledge', icon: BookOpen, active: false },
-  { name: 'Inquiry', icon: HelpCircle, active: false },
-  { name: 'Management', icon: Briefcase, active: false },
-  { name: 'Setting', icon: Settings, active: true },
-]
-
 export default function SettingPage() {
   const [fontSize, setFontSize] = useState<FontSize>(DEFAULT_FONT_SIZE)
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE)
@@ -195,7 +175,6 @@ export default function SettingPage() {
   }
 
   const isDarkMode = themeMode === 0
-  const currentDateTime = dayjs().format('YYYY-MM-DD HH:mm')
   const previewFontSize = `${fontSize}px`
   const textPrimary = isDarkMode ? 'text-slate-100' : 'text-gray-800'
   const textSecondary = isDarkMode ? 'text-slate-400' : 'text-gray-500'
@@ -205,80 +184,11 @@ export default function SettingPage() {
     : 'bg-white border-gray-200'
 
   return (
-    <div className={`min-h-screen w-full flex flex-col lg:flex-row font-sans ${textPrimary}`}>
-      <div data-sidebar className="w-full lg:w-[18%] lg:shrink-0 bg-slate-900 text-white flex flex-col p-4 lg:p-6">
-        <div className="sidebar-title mb-10 font-bold leading-tight text-blue-400">
-          양극재 품질 AI<br />예측 시스템
-        </div>
-        <ul className="flex flex-col gap-2 flex-1">
-          {SIDEBAR_MENUS.map((menu) => {
-            const Icon = menu.icon
-            return (
-              <li
-                key={menu.name}
-                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                  menu.active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Icon size={20} />
-                <span className="sidebar-menu font-medium">{menu.name}</span>
-              </li>
-            )
-          })}
-        </ul>
-        <div className="mt-auto flex items-center gap-2 p-3 bg-slate-800 rounded-lg">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
-          <span className="sidebar-status font-medium text-slate-300">시스템 운영 정상</span>
-        </div>
-      </div>
-
-      <div className={`w-full lg:w-[82%] lg:min-w-0 flex flex-col ${isDarkMode ? 'bg-slate-900' : 'bg-gray-50'}`}>
-        <div className={`w-full border-b flex flex-col md:flex-row md:justify-between md:items-center gap-4 px-4 md:px-8 py-4 shrink-0 ${
-          isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
-        }`}>
-          <div className="w-full md:w-[40%] relative flex items-center">
-            <Search className={`absolute left-3 ${isDarkMode ? 'text-slate-400' : 'text-gray-400'}`} size={20} />
-            <input
-              type="text"
-              placeholder="LOT ID 또는 조건을 검색하세요..."
-              className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                isDarkMode
-                  ? 'border-slate-600 bg-slate-700 text-slate-100 placeholder-slate-400'
-                  : 'border-gray-300 bg-gray-50 text-gray-800 placeholder-gray-400'
-              }`}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-3 md:gap-6">
-            <button className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              isDarkMode
-                ? 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60'
-                : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-            }`}>
-              <BookText size={18} />
-              <span className="hidden sm:inline">사이트 메뉴얼</span>
-            </button>
-            <button className={`relative p-2 rounded-full transition-colors ${
-              isDarkMode
-                ? 'text-slate-300 hover:bg-slate-700'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}>
-              <Bell size={24} />
-              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />
-            </button>
-            <div className={`hidden sm:block font-medium whitespace-nowrap ${isDarkMode ? 'text-slate-200' : 'text-gray-600'}`}>
-              {currentDateTime}
-            </div>
-            <button className={`p-2 rounded-full transition-colors ${
-              isDarkMode
-                ? 'text-slate-300 bg-slate-700 hover:bg-slate-600'
-                : 'text-gray-600 bg-gray-200 hover:bg-gray-100'
-            }`}>
-              <User size={24} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 min-h-0 w-full p-4 md:p-6 overflow-y-auto">
+    <div
+      className={`h-full w-full overflow-y-auto p-4 md:p-6 font-sans ${textPrimary} ${
+        isDarkMode ? 'bg-slate-900' : 'bg-transparent'
+      }`}
+    >
           <div className="flex flex-col gap-6 w-full">
             <header>
               <div className="flex items-center gap-3 mb-1">
@@ -490,8 +400,6 @@ export default function SettingPage() {
               )}
             </div>
           </div>
-        </div>
-      </div>
     </div>
   )
 }

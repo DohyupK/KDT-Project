@@ -34,7 +34,7 @@
 
 | 패키지 | 역할 | 상태 |
 |--------|------|------|
-| `frontend/` | Next.js App Router UI | Main / Management / Setting UI 구현, 나머지 placeholder |
+| `frontend/` | Next.js App Router UI | AppShell 네비 + `/login` 헤더 진입 연동, Login UI는 placeholder |
 | `backend/` | Express + MariaDB API | 의존성 스캐폴드, 서버 로직 미구현 |
 | `ai-service/` | AI 서비스 (챗봇·Gemini 등) | 폴더만 존재 |
 
@@ -43,10 +43,13 @@
 - React(Vite) → Next.js App Router 마이그레이션 (`frontend`)
 - api / data / types / assets 이전 (`fillThreshold` 보존)
 - 루트 `docs/` · 룰·스킬(전체/개별) · README/AGENTS 역할 분리 (2026-07-22)
+- Issue / Knowledge / Inquiry 페이지 UI 마이그레이션 (2026-07-22)
+- Dashboard 마이그레이션 + 공통 AppShell (`/main` 이동, `/` → `/main`) (2026-07-22)
+- AppShell 헤더 → `/login` 진입 연동 (2026-07-22)
 
 ## 다음 우선순위
 
-1. **frontend:** Dashboard / Login / Issue / Knowledge / Inquiry UI, 공통 Layout  
+1. **frontend:** Login UI  
 2. **backend:** Express 서버·API 구현, DB 연동, frontend `rewrites` 연동  
 3. **ai-service:** 챗봇·Agent(Gemini + RAG + Tool) 역할·진입점 정의 후 구현  
 

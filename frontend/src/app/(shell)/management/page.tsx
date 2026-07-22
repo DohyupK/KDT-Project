@@ -1,20 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import {
-  Search,
-  Bell,
-  User,
-  BookText,
-  Home,
-  LayoutDashboard,
-  AlertCircle,
-  BookOpen,
-  HelpCircle,
-  Briefcase,
-  Settings,
-} from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
 type MailImportance = '높음' | '보통' | '낮음'
 type InquiryStatus = '대기' | '진행중' | '완료'
@@ -359,16 +346,6 @@ function getAlertLines(records: DefectRecord[], threshold: number) {
   return alerts
 }
 
-const MENUS = [
-  { name: 'Main', icon: Home, path: '/' },
-  { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-  { name: 'Issue', icon: AlertCircle, path: '/issue' },
-  { name: 'Knowledge', icon: BookOpen, path: '/knowledge' },
-  { name: 'Inquiry', icon: HelpCircle, path: '/inquiry' },
-  { name: 'Management', icon: Briefcase, path: '/management' },
-  { name: 'Setting', icon: Settings, path: '/setting' },
-]
-
 const TABS: { id: TabId; label: string }[] = [
   { id: 'mail', label: '메일 관리' },
   { id: 'inquiry', label: '문의/답변 관리' },
@@ -376,7 +353,6 @@ const TABS: { id: TabId; label: string }[] = [
 ]
 
 export default function ManagementPage() {
-  const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabId>('mail')
   const [mails, setMails] = useState<MailItem[]>(INITIAL_MAILS)
   const [selectedMailId, setSelectedMailId] = useState<string | null>(null)
@@ -392,7 +368,6 @@ export default function ManagementPage() {
   const filteredInquiries =
     statusFilter === '전체' ? inquiries : inquiries.filter((i) => i.status === statusFilter)
   const alertLines = getAlertLines(DEFECT_RECORDS, threshold)
-  const unreadCount = mails.filter((m) => !m.isRead).length
 
   const handleSelectMail = (id: string) => {
     setSelectedMailId(id)
@@ -436,66 +411,7 @@ export default function ManagementPage() {
   }
 
   return (
-    <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
-      <div className="w-[18%] h-full bg-slate-900 text-white flex flex-col p-6">
-        <div className="mb-10 font-bold text-xl leading-tight text-blue-400">
-          양극재 품질 AI
-          <br />
-          예측 시스템
-        </div>
-        <ul className="flex flex-col gap-2 flex-1">
-          {MENUS.map((menu) => {
-            const Icon = menu.icon
-            const active = menu.path === '/management'
-            return (
-              <li
-                key={menu.path}
-                onClick={() => router.push(menu.path)}
-                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                  active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Icon size={20} />
-                <span className="font-medium">{menu.name}</span>
-              </li>
-            )
-          })}
-        </ul>
-        <div className="mt-auto flex items-center gap-2 p-3 bg-slate-800 rounded-lg">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-sm font-medium text-slate-300">시스템 운영 정상</span>
-        </div>
-      </div>
-
-      <div className="w-[82%] h-full bg-gray-50 flex flex-col">
-        <div className="h-[10%] w-full bg-white border-b border-gray-200 flex justify-between items-center px-8">
-          <div className="w-[40%] relative flex items-center">
-            <Search className="absolute left-3 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="메일, 문의, 라인 ID를 검색하세요..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-            />
-          </div>
-          <div className="flex items-center gap-6">
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100 transition-colors">
-              <BookText size={18} />
-              <span>사이트 메뉴얼</span>
-            </button>
-            <button className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-              <Bell size={24} />
-              {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />
-              )}
-            </button>
-            <div className="text-gray-600 font-medium whitespace-nowrap">2026-07-16 14:30</div>
-            <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors bg-gray-200">
-              <User size={24} />
-            </button>
-          </div>
-        </div>
-
-        <div className="h-[90%] w-full flex flex-col p-6 gap-4 overflow-hidden">
+    <div className="h-full w-full flex flex-col p-6 gap-4 overflow-hidden text-gray-800">
           <div className="flex items-center justify-between gap-4 shrink-0">
             <div>
               <h1 className="text-xl font-bold text-gray-800">Management</h1>
@@ -911,8 +827,6 @@ export default function ManagementPage() {
               </div>
             )}
           </div>
-        </div>
-      </div>
     </div>
   )
 }

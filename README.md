@@ -22,7 +22,7 @@
 
 | 폴더 / 파일 | 하는 일 | 상태 |
 |-------------|---------|------|
-| [`frontend/`](./frontend/) | 웹 화면 (Next.js) | Main · Management · Setting UI 있음 |
+| [`frontend/`](./frontend/) | 웹 화면 (Next.js) | AppShell + Main·Dashboard·Issue·Knowledge·Inquiry·Management·Setting |
 | [`backend/`](./backend/) | 서버 API (Express + MariaDB) | 준비 중 |
 | [`ai-service/`](./ai-service/) | AI 관련 서비스 | 준비 중 |
 | [`docs/`](./docs/) | 팀 전체 방향 · 작업 일지 · 계획 | 사용 중 |

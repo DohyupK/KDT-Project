@@ -18,8 +18,10 @@
 양극재 품질 AI 예측 시스템의 **프론트엔드**입니다.  
 사용자는 브라우저에서 LOT·품질·관리·설정 화면을 사용합니다.
 
-이미 화면이 있는 페이지: **Main**, **Management**, **Setting**  
-이름만 있는 페이지: Dashboard, Login, Issue, Knowledge, Inquiry
+이미 화면이 있는 페이지: **Main** (`/main`), **Dashboard**, **Management**, **Setting**, **Issue**, **Knowledge**, **Inquiry**  
+이름만 있는 페이지: Login  
+공통: 좌측 네비 + 상단 헤더 (`AppShell`, Login 제외). `/`는 `/main`으로 이동.  
+헤더 유저 아이콘 → `/login` (UI는 추후 작성).
 
 ---
 
@@ -58,13 +60,20 @@ npm run dev
 ```
 frontend/
 ├── src/
-│   ├── app/           # 주소별 페이지 (/, /management, /setting …)
-│   ├── api/           # 백엔드 호출용 모듈
-│   ├── data/          # 가상·정적 데이터
-│   ├── types/         # 공통 타입 (fillThreshold 등)
-│   └── assets/        # 이미지 등
-├── docs/              # 안내만 (본문 기록은 루트 ../docs/)
-├── AGENTS.md          # FE용 AI 규칙 (짧게)
+│   ├── app/
+│   │   ├── (shell)/       # 공통 AppShell (사이드바·헤더)
+│   │   │   ├── main/
+│   │   │   ├── dashboard/
+│   │   │   └── …
+│   │   ├── login/         # 셸 밖
+│   │   └── page.tsx       # / → /main 리다이렉트
+│   ├── components/layout/ # AppShell
+│   ├── api/
+│   ├── data/
+│   ├── types/
+│   └── assets/
+├── docs/                  # 안내만 (본문 기록은 루트 ../docs/)
+├── AGENTS.md
 └── package.json
 ```
 
@@ -72,25 +81,28 @@ frontend/
 
 | 주소 | 파일 |
 |------|------|
-| `/` | `src/app/page.tsx` |
-| `/dashboard` | `src/app/dashboard/page.tsx` |
+| `/` | `src/app/page.tsx` → `/main` |
+| `/main` | `src/app/(shell)/main/page.tsx` |
+| `/dashboard` | `src/app/(shell)/dashboard/page.tsx` |
 | `/login` | `src/app/login/page.tsx` |
-| `/issue` | `src/app/issue/page.tsx` |
-| `/inquiry` | `src/app/inquiry/page.tsx` |
-| `/knowledge` | `src/app/knowledge/page.tsx` |
-| `/management` | `src/app/management/page.tsx` |
-| `/setting` | `src/app/setting/page.tsx` |
+| `/issue` | `src/app/(shell)/issue/page.tsx` |
+| `/inquiry` | `src/app/(shell)/inquiry/page.tsx` |
+| `/knowledge` | `src/app/(shell)/knowledge/page.tsx` |
+| `/management` | `src/app/(shell)/management/page.tsx` |
+| `/setting` | `src/app/(shell)/setting/page.tsx` |
 
 ---
 
 ## 진행 상황
 
 - [x] Next.js + TypeScript 구성
-- [x] 8개 페이지 라우트 연결
+- [x] 페이지 라우트 연결
 - [x] API · 타입 · 데이터 뼈대
 - [x] Main / Management / Setting UI
-- [ ] Dashboard / Login / Issue / Knowledge / Inquiry UI
-- [ ] 공통 레이아웃(사이드바·헤더) 정리
+- [x] Issue / Knowledge / Inquiry UI
+- [x] Dashboard UI
+- [x] 공통 레이아웃(AppShell 사이드바·헤더)
+- [ ] Login UI
 - [ ] backend API 연동
 
 ---
@@ -117,6 +129,5 @@ frontend/
 
 ## 다음에 할 일 (Frontend)
 
-- DashboardPage, LoginPage, IssuePage, KnowledgePage, InquiryPage UI
-- 공통 Layout 추출
+- LoginPage UI
 - Express backend 연동
