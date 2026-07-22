@@ -88,6 +88,52 @@ type DefectAnalysis = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Process 2.5D Visualization Types                                           */
+/* -------------------------------------------------------------------------- */
+
+type ProcessStageStatus = '정상' | '주의' | '위험';
+
+type StageMetric = {
+  label: string;
+  value: string;
+  normalRange?: string;
+};
+
+type StageIssue = {
+  cause: string;
+  detail: string;
+  recommendation: string;
+  aiSummary: string;
+};
+
+type ProcessStage = {
+  id: string;
+  name: string;
+  shortLabel: string;
+  status: ProcessStageStatus;
+  metrics: StageMetric[];
+  issue?: StageIssue;
+  affectedLots: number;
+  lastUpdated: string;
+  delta: string;
+};
+
+type ProcessViewMode = 'all' | 'issues';
+
+type ProcessVizTheme = {
+  panel: string;
+  panelAlt: string;
+  line: string;
+  text: string;
+  muted: string;
+  blue: string;
+  green: string;
+  orange: string;
+  red: string;
+  yellow: string;
+};
+
+/* -------------------------------------------------------------------------- */
 /* Constants & Mock Data                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -738,14 +784,780 @@ function DefectTrendChart({ dailyRates }: { dailyRates: Array<{ date: string; ra
 }
 
 /* -------------------------------------------------------------------------- */
+/* Process 2.5D Visualization                                                 */
+/* -------------------------------------------------------------------------- */
+
+const PROCESS_VIZ_THEME: ProcessVizTheme = {
+  panel: '#ffffff',
+  panelAlt: '#f8fafc',
+  line: '#e2e8f0',
+  text: '#0f172a',
+  muted: '#64748b',
+  blue: '#3b82f6',
+  green: '#22c55e',
+  orange: '#f59e0b',
+  red: '#ef4444',
+  yellow: '#eab308',
+};
+
+function processStatusColor(status: ProcessStageStatus) {
+  if (status === '정상') return PROCESS_VIZ_THEME.green;
+  if (status === '주의') return PROCESS_VIZ_THEME.orange;
+  return PROCESS_VIZ_THEME.red;
+}
+
+function processStatusRank(status: ProcessStageStatus) {
+  if (status === '위험') return 3;
+  if (status === '주의') return 2;
+  return 1;
+}
+
+function buildProcessStages(seed: number): ProcessStage[] {
+  const sinterTemp = 830 + (seed % 5) * 3;
+  const sinterRisk: ProcessStageStatus = sinterTemp >= 840 ? '위험' : sinterTemp >= 834 ? '주의' : '정상';
+  const rpm = 1220 + (seed % 7) * 5;
+  const rpmStatus: ProcessStageStatus = rpm >= 1245 ? '주의' : '정상';
+  const feed = Math.round((99.0 + (seed % 4) * 0.15) * 10) / 10;
+  const ni = Math.round((0.8 + (seed % 3) * 0.005) * 100) / 100;
+  const cool = Math.round((1.6 + (seed % 5) * 0.2) * 10) / 10;
+  const pass = Math.round((97.2 + (seed % 6) * 0.15) * 10) / 10;
+  const waitLots = 8 + (seed % 9);
+
+  return [
+    {
+      id: 'feed',
+      name: '원료 투입',
+      shortLabel: feed >= 99.5 ? '투입 안정' : '투입비 편차 모니터링',
+      status: feed < 99.1 ? '주의' : '정상',
+      metrics: [
+        { label: '투입비', value: `${feed}%`, normalRange: '99.0~100.5%' },
+        { label: '계량 편차', value: `${Math.round((100.2 - feed) * 10) / 10}%` },
+      ],
+      issue: {
+        cause: '원료 투입비 편차',
+        detail: '계량기 보정 주기 지연으로 배합비 미세 이탈이 관찰됩니다.',
+        recommendation: '계량기 보정, 배합비 재확인',
+        aiSummary: '투입비 편차가 후단 조성/소성 품질 변동으로 전파될 수 있습니다.',
+      },
+      affectedLots: feed < 99.1 ? 1 : 0,
+      lastUpdated: '2026-07-22 10:38:02',
+      delta: feed < 99.1 ? '-0.4%p' : '+0.1%p',
+    },
+    {
+      id: 'mix',
+      name: '혼합 / 분쇄',
+      shortLabel: rpmStatus === '주의' ? 'RPM 변동 감지' : '혼합 안정',
+      status: rpmStatus,
+      metrics: [
+        { label: 'RPM', value: String(rpm), normalRange: '1180~1240' },
+        { label: '혼합 시간', value: `${28 + (seed % 3)}분` },
+      ],
+      issue: {
+        cause: 'RPM 변동, 혼합 시간 편차',
+        detail: '모터 부하 변동으로 회전수 편차가 발생했습니다.',
+        recommendation: '회전수 재조정, 모터/베어링 점검',
+        aiSummary: 'RPM 상향이 지속되면 입도 분포가 넓어져 검사 불량률이 증가할 수 있습니다.',
+      },
+      affectedLots: rpmStatus === '주의' ? 1 : 0,
+      lastUpdated: '2026-07-22 10:39:41',
+      delta: rpmStatus === '주의' ? `+${rpm - 1240}` : '+8',
+    },
+    {
+      id: 'compose',
+      name: '조성 단계 / 전구체 준비',
+      shortLabel: ni > 0.81 ? 'Ni 비율 상한 근접' : '조성 비율 양호',
+      status: ni > 0.812 ? '주의' : '정상',
+      metrics: [
+        { label: 'Ni 비율', value: String(ni), normalRange: '0.79~0.81' },
+        { label: '수분', value: `${0.18 + (seed % 3) * 0.01}%` },
+      ],
+      issue: {
+        cause: '조성 비율 이탈',
+        detail: '원재료 lot 편차로 Ni 비율이 목표 상한을 초과했습니다.',
+        recommendation: '레시피 재검토, 원재료 lot 확인',
+        aiSummary: '조성 비율 이탈은 소성 후 용량/안전성 지표에 영향을 줄 수 있습니다.',
+      },
+      affectedLots: ni > 0.812 ? 1 : 0,
+      lastUpdated: '2026-07-22 10:40:18',
+      delta: ni > 0.81 ? `+${Math.round((ni - 0.81) * 1000) / 1000}` : '0.00',
+    },
+    {
+      id: 'sinter',
+      name: '소성',
+      shortLabel: sinterRisk === '위험' ? '3구역 온도 상한 초과' : '소성 온도 모니터링',
+      status: sinterRisk,
+      metrics: [
+        { label: '3구역 온도', value: `${sinterTemp}℃`, normalRange: '810~830℃' },
+        { label: 'O2 농도', value: `${(19.4 - (seed % 3) * 0.2).toFixed(1)}%` },
+      ],
+      issue: {
+        cause: 'zone 온도 상승, O2 농도 저하, 체류시간 편차',
+        detail: '히터 출력 편차와 산소 공급 저하가 동시에 관찰됩니다.',
+        recommendation: '히터 출력 5% 감쇠, 가스 유량 점검, conveyor 속도 점검, 센서 교정 확인',
+        aiSummary: '온도 상승과 산소 농도 저하가 동시에 발생하여 불량 위험이 증가하는 패턴입니다.',
+      },
+      affectedLots: sinterRisk === '위험' ? 2 : sinterRisk === '주의' ? 1 : 0,
+      lastUpdated: '2026-07-22 10:42:15',
+      delta: `+${sinterTemp - 830}℃`,
+    },
+    {
+      id: 'classify',
+      name: '분급 / 냉각',
+      shortLabel: cool > 2.2 ? '냉각 편차 확대' : '냉각 안정',
+      status: cool > 2.4 ? '주의' : '정상',
+      metrics: [
+        { label: '냉각 편차', value: `${cool}%`, normalRange: '0~2.2%' },
+        { label: '분급 수율', value: `${96.5 + (seed % 4) * 0.2}%` },
+      ],
+      issue: {
+        cause: '냉각 속도 불균형, 분급 편차',
+        detail: '냉각팬 풍량 편차로 배치 간 온도 하강 속도가 불균형합니다.',
+        recommendation: '냉각팬 상태 확인, 분급기 세팅 조정',
+        aiSummary: '냉각 편차가 커지면 입자 응집/입도 불량이 증가할 수 있습니다.',
+      },
+      affectedLots: cool > 2.4 ? 1 : 0,
+      lastUpdated: '2026-07-22 10:43:02',
+      delta: cool > 2.2 ? `+${(cool - 2.0).toFixed(1)}%p` : '+0.2%p',
+    },
+    {
+      id: 'inspect',
+      name: '검사 / 품질 판정',
+      shortLabel: pass < 97.5 ? '합격률 하락' : '검사 양호',
+      status: pass < 97.4 ? '주의' : '정상',
+      metrics: [
+        { label: '합격률', value: `${pass}%`, normalRange: '97.5% 이상' },
+        { label: '입도 Cv', value: `${(3.1 + (seed % 4) * 0.1).toFixed(1)}%` },
+      ],
+      issue: {
+        cause: '불량률 상승, 입도/밀도 편차',
+        detail: '이전 공정(소성/분급) 편차가 최종 검사 지표로 전이되었습니다.',
+        recommendation: '이전 공정 이력 추적, 검사 기준 및 샘플링 재점검',
+        aiSummary: '합격률 하락은 단일 검사 이슈보다 상류 공정 누적 편차 가능성이 큽니다.',
+      },
+      affectedLots: pass < 97.4 ? 2 : 0,
+      lastUpdated: '2026-07-22 10:44:11',
+      delta: pass < 97.5 ? `${(pass - 98).toFixed(1)}%p` : '+0.2%p',
+    },
+    {
+      id: 'pack',
+      name: '포장 / 출하 대기',
+      shortLabel: waitLots > 12 ? '출하 적체' : '출하 대기 정상',
+      status: waitLots > 14 ? '주의' : '정상',
+      metrics: [
+        { label: '출하 대기', value: `${waitLots} LOT`, normalRange: '10 LOT 이하' },
+        { label: '라벨링 지연', value: `${seed % 4}건` },
+      ],
+      issue: {
+        cause: '라벨링 지연, 출하 적체',
+        detail: '포장 라인 처리량 대비 대기 LOT가 증가했습니다.',
+        recommendation: '포장 라인 처리량 확인, 출하 스케줄 조정',
+        aiSummary: '출하 적체는 품질 이슈보다 물류 병목일 가능성이 높습니다.',
+      },
+      affectedLots: waitLots > 14 ? 1 : 0,
+      lastUpdated: '2026-07-22 10:45:00',
+      delta: waitLots > 12 ? `+${waitLots - 10} LOT` : '0 LOT',
+    },
+  ];
+}
+
+function pickDefaultProcessStage(stages: ProcessStage[]) {
+  const sorted = [...stages].sort(
+    (a, b) => processStatusRank(b.status) - processStatusRank(a.status) || b.affectedLots - a.affectedLots,
+  );
+  return sorted[0]?.id ?? stages[0]?.id ?? '';
+}
+
+function ProcessStageNode({
+  stage,
+  step,
+  selected,
+  hovered,
+  onHover,
+  onSelect,
+}: {
+  stage: ProcessStage;
+  step: number;
+  selected: boolean;
+  hovered: boolean;
+  onHover: (id: string | null) => void;
+  onSelect: (id: string) => void;
+}) {
+  const color = processStatusColor(stage.status);
+  const lift = hovered || selected;
+  const face = selected ? '#eff6ff' : PROCESS_VIZ_THEME.panel;
+  const topFace =
+    stage.status === '위험' ? '#fee2e2' : stage.status === '주의' ? '#ffedd5' : '#ecfdf5';
+  const sideFace =
+    stage.status === '위험' ? '#fecaca' : stage.status === '주의' ? '#fed7aa' : '#dbeafe';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(stage.id)}
+      onMouseEnter={() => onHover(stage.id)}
+      onMouseLeave={() => onHover(null)}
+      title={`${stage.name} · ${stage.status} · ${stage.metrics[0]?.value ?? ''}`}
+      style={{
+        position: 'relative',
+        border: 0,
+        background: 'transparent',
+        padding: 0,
+        cursor: 'pointer',
+        width: '100%',
+        minWidth: 0,
+        textAlign: 'left',
+        transform: lift ? 'translateY(-4px)' : 'translateY(0)',
+        transition: 'transform 0.15s ease',
+        filter:
+          stage.status === '위험'
+            ? `drop-shadow(0 0 ${selected ? 12 : 7}px rgba(239,68,68,0.4))`
+            : selected
+              ? 'drop-shadow(0 8px 14px rgba(37,99,235,0.22))'
+              : 'drop-shadow(0 6px 10px rgba(15,23,42,0.1))',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: 8,
+          right: 0,
+          top: 8,
+          bottom: -4,
+          background: sideFace,
+          borderRadius: 10,
+          transform: 'skewY(-3deg)',
+        }}
+      />
+      <div
+        style={{
+          position: 'relative',
+          borderRadius: 12,
+          border: `2px solid ${selected ? PROCESS_VIZ_THEME.blue : color}`,
+          background: face,
+          overflow: 'hidden',
+          boxShadow:
+            stage.status === '위험'
+              ? '0 0 0 2px rgba(239,68,68,0.18), 0 10px 18px rgba(239,68,68,0.14)'
+              : '0 6px 14px rgba(15,23,42,0.06)',
+        }}
+      >
+        <div
+          style={{
+            height: 12,
+            background: topFace,
+            borderBottom: `1px solid ${PROCESS_VIZ_THEME.line}`,
+          }}
+        />
+        <div style={{ padding: '8px 10px 10px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 4,
+              alignItems: 'center',
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: 999,
+                background: PROCESS_VIZ_THEME.blue,
+                color: '#fff',
+                fontSize: 10,
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              {step}
+            </span>
+            <span
+              style={{
+                borderRadius: 999,
+                padding: '2px 6px',
+                fontSize: 10,
+                fontWeight: 800,
+                color: '#0b1220',
+                background: color,
+                flexShrink: 0,
+              }}
+            >
+              {stage.status}
+            </span>
+          </div>
+          <strong
+            style={{
+              display: 'block',
+              fontSize: 12,
+              color: PROCESS_VIZ_THEME.text,
+              lineHeight: 1.35,
+              marginBottom: 4,
+              wordBreak: 'keep-all',
+            }}
+          >
+            {stage.name}
+          </strong>
+          <div
+            style={{
+              fontSize: 10,
+              color: PROCESS_VIZ_THEME.muted,
+              lineHeight: 1.35,
+              minHeight: 28,
+              wordBreak: 'keep-all',
+            }}
+          >
+            {stage.shortLabel}
+          </div>
+          <div style={{ marginTop: 6, display: 'grid', gap: 3 }}>
+            {stage.metrics.slice(0, 2).map((metric) => (
+              <div
+                key={metric.label}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 4,
+                  fontSize: 10,
+                }}
+              >
+                <span style={{ color: PROCESS_VIZ_THEME.muted }}>{metric.label}</span>
+                <span style={{ color: PROCESS_VIZ_THEME.text, fontWeight: 800 }}>{metric.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {stage.status === '위험' || stage.status === '주의' ? (
+          <span
+            style={{
+              position: 'absolute',
+              top: 6,
+              left: 6,
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              background: color,
+              color: '#fff',
+              fontSize: 11,
+              fontWeight: 900,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: `0 0 8px ${color}`,
+            }}
+          >
+            !
+          </span>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+function ProcessFlowVisualizationSection() {
+  const [seed, setSeed] = useState(3);
+  const [viewMode, setViewMode] = useState<ProcessViewMode>('all');
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [hoveredUi, setHoveredUi] = useState<string | null>(null);
+  const [isNarrow, setIsNarrow] = useState(false);
+  const stages = useMemo(() => buildProcessStages(seed), [seed]);
+  const [selectedId, setSelectedId] = useState(() => pickDefaultProcessStage(buildProcessStages(3)));
+
+  useEffect(() => {
+    const update = () => setIsNarrow(window.innerWidth < 980);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(() => {
+    const next = buildProcessStages(seed);
+    const stillExists = next.some((stage) => stage.id === selectedId);
+    if (!stillExists) setSelectedId(pickDefaultProcessStage(next));
+  }, [seed, selectedId]);
+
+  const visibleStages = useMemo(() => {
+    if (viewMode === 'issues') {
+      return stages.filter((stage) => stage.status !== '정상');
+    }
+    return stages;
+  }, [stages, viewMode]);
+
+  const selectedStage = useMemo(() => {
+    return stages.find((stage) => stage.id === selectedId) ?? stages[0] ?? null;
+  }, [stages, selectedId]);
+
+  const dangerCount = stages.filter((stage) => stage.status === '위험').length;
+  const warnCount = stages.filter((stage) => stage.status === '주의').length;
+  const affectedLots = stages.reduce((sum, stage) => sum + stage.affectedLots, 0);
+  const overallStatus: ProcessStageStatus =
+    dangerCount > 0 ? '위험' : warnCount > 0 ? '주의' : '정상';
+  const lastUpdated =
+    stages.slice().sort((a, b) => (a.lastUpdated < b.lastUpdated ? 1 : -1))[0]?.lastUpdated ??
+    '2026-07-22 10:42:15';
+
+  const panelStyle: CSSProperties = {
+    background: PROCESS_VIZ_THEME.panel,
+    border: `1px solid ${PROCESS_VIZ_THEME.line}`,
+    borderRadius: 16,
+    boxShadow: '0 8px 24px rgba(15,23,42,0.06)',
+  };
+
+  const chipStyle = (active: boolean): CSSProperties => ({
+    border: `1px solid ${active ? PROCESS_VIZ_THEME.blue : PROCESS_VIZ_THEME.line}`,
+    background: active ? 'rgba(59,130,246,0.12)' : PROCESS_VIZ_THEME.panelAlt,
+    color: active ? PROCESS_VIZ_THEME.blue : PROCESS_VIZ_THEME.text,
+    borderRadius: 999,
+    padding: '7px 12px',
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: 'pointer',
+  });
+
+  return (
+    <section
+      style={{
+        ...panelStyle,
+        padding: isNarrow ? 16 : 20,
+        marginBottom: 8,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, color: PROCESS_VIZ_THEME.text }}>
+            양극재 생산 공정 시각화
+          </h2>
+          <p style={{ margin: '6px 0 0', color: PROCESS_VIZ_THEME.muted, fontSize: 13 }}>
+            공정 흐름, 이상 위치, 추정 원인, 권장 대처방안을 직관적으로 확인
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setSeed((prev) => prev + 1);
+            const next = buildProcessStages(seed + 1);
+            setSelectedId(pickDefaultProcessStage(next));
+          }}
+          onMouseEnter={() => setHoveredUi('refresh')}
+          onMouseLeave={() => setHoveredUi(null)}
+          style={{
+            border: 0,
+            borderRadius: 10,
+            padding: '10px 14px',
+            background: hoveredUi === 'refresh' ? '#2563eb' : PROCESS_VIZ_THEME.blue,
+            color: '#fff',
+            fontWeight: 800,
+            cursor: 'pointer',
+            height: 40,
+          }}
+        >
+          새로고침
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isNarrow ? '1fr 1fr' : 'repeat(4, minmax(0, 1fr))',
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        {[
+          { label: '전체 공정 상태', value: overallStatus },
+          { label: '위험 공정', value: `${dangerCount}` },
+          { label: '영향 LOT', value: `${affectedLots}` },
+          { label: '마지막 갱신', value: lastUpdated },
+        ].map((item) => (
+          <div
+            key={item.label}
+            style={{
+              background: PROCESS_VIZ_THEME.panelAlt,
+              border: `1px solid ${PROCESS_VIZ_THEME.line}`,
+              borderRadius: 12,
+              padding: '12px 14px',
+            }}
+          >
+            <div style={{ fontSize: 11, color: PROCESS_VIZ_THEME.muted, fontWeight: 700 }}>
+              {item.label}
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: item.label === '마지막 갱신' ? 13 : 20,
+                fontWeight: 900,
+                color:
+                  item.label === '전체 공정 상태'
+                    ? processStatusColor(overallStatus)
+                    : PROCESS_VIZ_THEME.text,
+              }}
+            >
+              {item.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 10,
+          alignItems: 'center',
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginRight: 'auto' }}>
+          {(['정상', '주의', '위험'] as ProcessStageStatus[]).map((status) => (
+            <span
+              key={status}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                color: PROCESS_VIZ_THEME.muted,
+                fontWeight: 700,
+              }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: processStatusColor(status),
+                }}
+              />
+              {status}
+            </span>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setViewMode('all')}
+          style={chipStyle(viewMode === 'all')}
+        >
+          전체 보기
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('issues')}
+          style={chipStyle(viewMode === 'issues')}
+        >
+          이상 공정만 보기
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div
+          style={{
+            background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)',
+            border: `1px solid ${PROCESS_VIZ_THEME.line}`,
+            borderRadius: 14,
+            padding: isNarrow ? 12 : 16,
+          }}
+        >
+          {visibleStages.length === 0 ? (
+            <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 13, padding: 20 }}>
+              이상 공정이 없습니다. 전체 보기로 전환해 주세요.
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginBottom: 12,
+                  flexWrap: 'wrap',
+                  fontSize: 11,
+                  color: PROCESS_VIZ_THEME.muted,
+                  fontWeight: 700,
+                }}
+              >
+                {visibleStages.map((stage, index) => (
+                  <span key={`flow-${stage.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: processStatusColor(stage.status) }}>{stage.name}</span>
+                    {index < visibleStages.length - 1 ? (
+                      <span style={{ color: PROCESS_VIZ_THEME.blue }}>→</span>
+                    ) : null}
+                  </span>
+                ))}
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isNarrow
+                    ? 'repeat(2, minmax(0, 1fr))'
+                    : 'repeat(7, minmax(0, 1fr))',
+                  gap: 10,
+                }}
+              >
+                {visibleStages.map((stage, index) => (
+                  <ProcessStageNode
+                    key={stage.id}
+                    stage={stage}
+                    step={index + 1}
+                    selected={selectedId === stage.id}
+                    hovered={hoveredId === stage.id}
+                    onHover={setHoveredId}
+                    onSelect={setSelectedId}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div
+          style={{
+            background: PROCESS_VIZ_THEME.panelAlt,
+            border: `1px solid ${PROCESS_VIZ_THEME.line}`,
+            borderRadius: 14,
+            padding: 16,
+          }}
+        >
+          {selectedStage ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  alignItems: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                <h3 style={{ margin: 0, fontSize: 16, color: PROCESS_VIZ_THEME.text }}>
+                  {selectedStage.name}
+                </h3>
+                <span
+                  style={{
+                    borderRadius: 999,
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: '#0b1220',
+                    background: processStatusColor(selectedStage.status),
+                  }}
+                >
+                  {selectedStage.status}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+                <div>
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    현재 측정값
+                  </div>
+                  <div style={{ marginTop: 4, fontWeight: 800 }}>
+                    {selectedStage.metrics.map((m) => `${m.label} ${m.value}`).join(' · ')}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    기준값 / 허용 범위
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    {selectedStage.metrics
+                      .map((m) => `${m.label}: ${m.normalRange ?? '-'}`)
+                      .join(' / ')}
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                      변화량
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 800 }}>{selectedStage.delta}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                      영향 LOT 수
+                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 800 }}>{selectedStage.affectedLots}건</div>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    추정 원인
+                  </div>
+                  <div style={{ marginTop: 4, lineHeight: 1.55 }}>
+                    {selectedStage.issue?.cause ?? '특이 이상 없음'}
+                    {selectedStage.issue ? ` — ${selectedStage.issue.detail}` : ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    권장 대처방안
+                  </div>
+                  <div style={{ marginTop: 4, lineHeight: 1.55 }}>
+                    {selectedStage.issue?.recommendation ??
+                      '현재 정상 범위입니다. 주기 점검만 유지하세요.'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    최근 이벤트 시간
+                  </div>
+                  <div style={{ marginTop: 4, fontWeight: 700 }}>{selectedStage.lastUpdated}</div>
+                </div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    background: PROCESS_VIZ_THEME.panel,
+                    border: `1px solid ${PROCESS_VIZ_THEME.line}`,
+                    borderRadius: 12,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
+                    AI 분석 요약
+                  </div>
+                  <div style={{ marginTop: 6, lineHeight: 1.6, color: PROCESS_VIZ_THEME.text }}>
+                    {selectedStage.issue?.aiSummary ??
+                      '선택 공정은 안정 구간입니다. 상류/하류 연계 지표만 주기적으로 확인하면 됩니다.'}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ color: PROCESS_VIZ_THEME.muted }}>표시할 공정이 없습니다.</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main Page                                                                  */
 /* -------------------------------------------------------------------------- */
 
 export default function DashBoardPage() {
-  const [startDate, setStartDate] = useState(DATA_MIN_DATE);
-  const [endDate, setEndDate] = useState(DATA_MAX_DATE);
-  const [productFilter, setProductFilter] = useState('전체');
-  const [lineFilter, setLineFilter] = useState('전체');
+  const [draftFilter, setDraftFilter] = useState({
+    startDate: DATA_MIN_DATE,
+    endDate: DATA_MAX_DATE,
+    product: '전체',
+    line: '전체',
+  });
+  const [appliedFilter, setAppliedFilter] = useState({
+    startDate: DATA_MIN_DATE,
+    endDate: DATA_MAX_DATE,
+    product: '전체',
+    line: '전체',
+  });
+  const { startDate, endDate, product: productFilter, line: lineFilter } = appliedFilter;
   const [chartType, setChartType] = useState<ChartType>('bar');
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
@@ -1123,21 +1935,24 @@ export default function DashBoardPage() {
     return list.slice(0, 3);
   }, [hasData, kpi, defectAnalysis]);
 
-  const handleFilterDateChange = (which: 'start' | 'end', value: string) => {
-    const nextStart = which === 'start' ? value : startDate;
-    const nextEnd = which === 'end' ? value : endDate;
-    if (which === 'start') setStartDate(value);
-    else setEndDate(value);
-    if (nextStart > nextEnd) {
+  const handleSearchFilters = () => {
+    if (draftFilter.startDate > draftFilter.endDate) {
       pushToast('시작일이 종료일보다 늦을 수 없습니다.', 'error');
+      return;
     }
+    setAppliedFilter({ ...draftFilter });
+    pushToast('필터가 적용되었습니다.', 'success');
   };
 
   const handleResetFilters = () => {
-    setStartDate(DATA_MIN_DATE);
-    setEndDate(DATA_MAX_DATE);
-    setProductFilter('전체');
-    setLineFilter('전체');
+    const reset = {
+      startDate: DATA_MIN_DATE,
+      endDate: DATA_MAX_DATE,
+      product: '전체',
+      line: '전체',
+    };
+    setDraftFilter(reset);
+    setAppliedFilter(reset);
     pushToast('필터가 초기화되었습니다.', 'info');
   };
 
@@ -1225,6 +2040,7 @@ export default function DashBoardPage() {
 
   const inputClass =
     'rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm hover:border-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30';
+  const filterControlClass = `${inputClass} box-border h-10 w-[180px]`;
   const btnSecondary =
     'rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40';
   const btnPrimary =
@@ -1260,30 +2076,36 @@ export default function DashBoardPage() {
         {/* Filters */}
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-end gap-4">
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
+            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
               시작일
               <input
                 type="date"
-                value={startDate}
-                onChange={(e) => handleFilterDateChange('start', e.target.value)}
-                className={inputClass}
+                value={draftFilter.startDate}
+                onChange={(e) =>
+                  setDraftFilter((prev) => ({ ...prev, startDate: e.target.value }))
+                }
+                className={filterControlClass}
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
+            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
               종료일
               <input
                 type="date"
-                value={endDate}
-                onChange={(e) => handleFilterDateChange('end', e.target.value)}
-                className={inputClass}
+                value={draftFilter.endDate}
+                onChange={(e) =>
+                  setDraftFilter((prev) => ({ ...prev, endDate: e.target.value }))
+                }
+                className={filterControlClass}
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
+            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
               제품
               <select
-                value={productFilter}
-                onChange={(e) => setProductFilter(e.target.value)}
-                className={`${inputClass} min-w-[180px]`}
+                value={draftFilter.product}
+                onChange={(e) =>
+                  setDraftFilter((prev) => ({ ...prev, product: e.target.value }))
+                }
+                className={filterControlClass}
               >
                 {productOptions.map((p) => (
                   <option key={p} value={p}>
@@ -1292,12 +2114,14 @@ export default function DashBoardPage() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
+            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
               라인
               <select
-                value={lineFilter}
-                onChange={(e) => setLineFilter(e.target.value)}
-                className={`${inputClass} min-w-[140px]`}
+                value={draftFilter.line}
+                onChange={(e) =>
+                  setDraftFilter((prev) => ({ ...prev, line: e.target.value }))
+                }
+                className={filterControlClass}
               >
                 {lineOptions.map((l) => (
                   <option key={l} value={l}>
@@ -1306,10 +2130,19 @@ export default function DashBoardPage() {
                 ))}
               </select>
             </label>
-            <button type="button" className={btnSecondary} onClick={handleResetFilters}>
-              초기화
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" className={`${btnPrimary} h-10`} onClick={handleSearchFilters}>
+                검색
+              </button>
+              <button type="button" className={`${btnSecondary} h-10`} onClick={handleResetFilters}>
+                초기화
+              </button>
+            </div>
           </div>
+          <p className="mt-3 text-xs text-slate-500">
+            적용 필터: {appliedFilter.startDate} ~ {appliedFilter.endDate} · {appliedFilter.product} ·{' '}
+            {appliedFilter.line}
+          </p>
         </section>
 
         {/* KPI */}
@@ -1342,6 +2175,8 @@ export default function DashBoardPage() {
             </>
           )}
         </section>
+
+        <ProcessFlowVisualizationSection />
 
         {/* Charts + Defect side */}
         <section className="mb-6 grid grid-cols-[2fr_1fr] gap-5">
