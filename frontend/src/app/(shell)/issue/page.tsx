@@ -1759,9 +1759,10 @@ ${issues
   };
 
   return (
-    <main
+    <div
       style={{
-        minHeight: '100vh',
+        height: '100%',
+        overflowY: 'auto',
         boxSizing: 'border-box',
         background: colors.background,
         color: colors.navy,
@@ -1824,6 +1825,6 @@ ${issues
           onDownloadCsv={handleDownloadCsv}
         />
       )}
-    </main>
+    </div>
   );
 };

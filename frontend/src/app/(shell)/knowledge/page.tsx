@@ -436,9 +436,10 @@ export default function KnowledgePage() {
   };
 
   return (
-    <main
+    <div
       style={{
-        minHeight: '100vh',
+        height: '100%',
+        overflowY: 'auto',
         boxSizing: 'border-box',
         background: colors.background,
         color: colors.navy,
@@ -983,6 +984,6 @@ export default function KnowledgePage() {
           </section>
         )}
       </div>
-    </main>
+    </div>
   );
 };
