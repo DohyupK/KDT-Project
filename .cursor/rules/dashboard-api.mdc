@@ -1,0 +1,8 @@
+---
+description: Rules for the DashBoardPage API module
+globs: frontend/src/api/dashboardApi.ts
+alwaysApply: false
+---
+# Dashboard API
+
+API-specific rules will be defined here.

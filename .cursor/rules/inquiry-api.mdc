@@ -1,0 +1,8 @@
+---
+description: Rules for the InquiryPage API module
+globs: frontend/src/api/inquiryApi.ts
+alwaysApply: false
+---
+# Inquiry API
+
+API-specific rules will be defined here.

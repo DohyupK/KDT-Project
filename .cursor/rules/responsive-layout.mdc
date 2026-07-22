@@ -1,0 +1,29 @@
+---
+description: Responsive layout for Setting page (개별 룰 · 중요 페이지)
+globs: frontend/src/app/setting/page.tsx
+alwaysApply: false
+---
+
+# Responsive Layout
+
+## 원칙
+- Mobile-first: 기본은 모바일, `md:` `lg:` `xl:`로 PC 확장
+- 고정 px 너비 레이아웃 금지 (예: w-[400px])
+- 화면 전체 zoom/transform scale 금지 — 레이아웃은 flex/grid + breakpoint로 조절
+- Sidebar+Content: 모바일 `flex-col`, PC `lg:flex-row`
+
+## Tailwind breakpoint (Tailwind 4 기본)
+- sm: 640px, md: 768px, lg: 1024px, xl: 1280px
+
+## 페이지 레이아웃 패턴
+- Root: `min-h-screen w-full` (w-screen + overflow-hidden 남용 금지)
+- Sidebar: `w-full lg:w-[18%]`, Content: `w-full lg:w-[82%]`, 모바일에서 사이드바 상단 이동
+- Grid: `grid-cols-1 md:grid-cols-2`
+- Header: `flex-col md:flex-row`, 검색창 `w-full md:w-[40%]`
+
+## 금지
+- html font-size % 로 전체 UI 스케일 (레이아웃 깨짐)
+- 모든 페이지에 서로 다른 breakpoint 혼용
+
+## 검증
+- Chrome DevTools: 375px(모바일), 768px(태블릿), 1280px(PC) 확인

@@ -1,0 +1,8 @@
+---
+description: Rules for the MainPage API module
+globs: frontend/src/api/mainApi.ts
+alwaysApply: false
+---
+# Main API
+
+API-specific rules will be defined here.

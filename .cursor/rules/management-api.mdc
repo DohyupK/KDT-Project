@@ -1,0 +1,8 @@
+---
+description: Rules for the ManagementPage API module
+globs: frontend/src/api/managementApi.ts
+alwaysApply: false
+---
+# Management API
+
+API-specific rules will be defined here.
