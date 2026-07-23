@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import UserAuthMenu from '@/components/layout/UserAuthMenu';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -819,15 +820,7 @@ export default function MainPage() {
               ) : null}
             </div>
 
-            <a
-              href="/login"
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200/60 bg-white pl-1.5 pr-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
-                나
-              </span>
-              프로필
-            </a>
+            <UserAuthMenu />
           </div>
         </header>
 
