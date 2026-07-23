@@ -45,10 +45,10 @@ npm run dev
 
 ### 챗봇 실연동 (ai-service와 함께)
 
-전역 챗봇(`AppShell` → `GlobalChatbot`)은 **ai-service(:8000)** 가 켜져 있어야 합니다.  
+전역 챗봇(`AppShell` → `GlobalChatbot`)은 **ai-service(:8800)** 가 켜져 있어야 합니다.  
 루트 README의 **[로컬 실행 — 챗봇 (터미널 2개)](../README.md#로컬-실행--챗봇-터미널-2개)** 를 따릅니다.
 
-- rewrite: `next.config.ts` — `/ai` → `127.0.0.1:8000` (변경 후 Next 재시작)
+- rewrite: `next.config.ts` — `/ai` → `127.0.0.1:8800` (변경 후 Next 재시작)
 - 클라이언트: `src/api/aiApi.ts` → `POST /ai/chat`
 
 ---
@@ -134,7 +134,6 @@ frontend/
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
 - [2026-07-23 ai-service ML·챗봇 연동 작업서](../docs/work-log/2026-07-23.md)
-- [2026-07-23 PC 재시작 체크포인트](../docs/plans/2026-07-23-session-handoff.md)
 
 ---
 

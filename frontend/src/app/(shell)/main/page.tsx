@@ -559,7 +559,8 @@ function TrendChart({
 /* -------------------------------------------------------------------------- */
 
 export default function MainPage() {
-  const [now, setNow] = useState(() => formatDateTime(new Date()));
+  // Empty on SSR so server/client HTML match; clock starts after mount.
+  const [now, setNow] = useState('');
   const [seed, setSeed] = useState(7);
   const [draftFilter, setDraftFilter] = useState<FilterState>(DEFAULT_FILTER);
   const [appliedFilter, setAppliedFilter] = useState<FilterState>(DEFAULT_FILTER);
@@ -684,6 +685,7 @@ export default function MainPage() {
   const unreadCount = notifications.filter((n) => n.unread).length;
 
   useEffect(() => {
+    setNow(formatDateTime(new Date()));
     const timer = setInterval(() => setNow(formatDateTime(new Date())), 1000);
     return () => clearInterval(timer);
   }, []);

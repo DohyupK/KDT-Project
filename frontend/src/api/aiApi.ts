@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-/** Proxied to ai-service via next.config rewrite (`/ai` → :8000). */
+/** Proxied to ai-service via next.config rewrite (`/ai` → :8800). */
 export const aiClient = axios.create({
   baseURL: '/ai',
   timeout: 60_000,

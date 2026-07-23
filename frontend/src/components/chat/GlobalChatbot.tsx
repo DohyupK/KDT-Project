@@ -100,7 +100,7 @@ export default function GlobalChatbot() {
         {
           id: idRef.current,
           role: 'ai',
-          text: `ai-service 연결에 실패했습니다. uvicorn(:8000)과 /ai rewrite를 확인해 주세요.\n(${detail})`,
+          text: `ai-service 연결에 실패했습니다. uvicorn(:8800)과 /ai rewrite를 확인해 주세요.\n(${detail})`,
         },
       ])
     } finally {
