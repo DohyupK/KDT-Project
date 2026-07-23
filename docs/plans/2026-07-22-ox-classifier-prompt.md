@@ -20,7 +20,7 @@
 1. **데이터**: `ai-service/data/cathode_clf_data.csv`. 타깃 `quality_defect` ∈ {0,1}, 불량=1. 범주형은 `operator_id`만. 나머지=수치 Feature.
 2. **학습 종료**: Optuna(best) → Train 전체 refit → Test 1회 평가 → `models/` 저장. 앙상블 가중치 0.5:0.5 고정(Test로 weight 튜닝 금지).
 3. **predict**: polars 1행만. `probability >= fillThreshold` → `defect_status=1`. Feature는 `metadata.feature_columns` 강제.
-4. **top_risk_factors**: **전역** SHAP importance 평균 Top-3 이름 (샘플별 SHAP은 후속).
+4. **top_risk_factors**: **전역** SHAP importance 평균 Top-4 이름 (EDA 주요 원인 4개와 맞춤; 샘플별 SHAP은 후속).
 5. **결측**: 수치=Train 평균, 범주=`__MISSING__`.
 6. **Optuna**: study 분리 `xgb_ox_clf` / `cat_ox_clf`, SQLite resume, 목적=ROC-AUC, search space 프롬프트에 고정.
 7. **GPU**: cuda/GPU 시도 후 실패 또는 `USE_GPU=0`이면 CPU fallback.

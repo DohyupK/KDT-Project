@@ -27,9 +27,12 @@ CSV가 아직 저장소에 없을 수 있다. **파일이 추가되면 이 표�
 
 ## 수치 Feature
 
-- 위 고정 컬럼을 제외한 **나머지 모든 컬럼**은 수치형 Feature로 취급한다.
+고정 컬럼을 제외한 나머지 컬럼은 수치형 Feature다. 현재 CSV 기준:
+
+`d50`, `d90`, `metal_impurity`, `lithium_input`, `additive_ratio`, `process_time`, `sintering_temp`, `humidity`, `tank_pressure`
+
 - 학습 시 Float으로 강제 변환한다. 변환 실패 컬럼이 있으면 즉시 실패한다.
-- 컬럼 **이름·개수·순서**는 학습 종료 시 `models/metadata.json`의 `feature_columns`에 동결한다.
+- 컬럼 **이름·개수·순서**는 학습 종료 시 `models/metadata.json`의 `feature_columns`에 동결한다 (`operator_id` 포함).
 - `predict()` 입력은 이 목록과 이름·순서가 일치해야 한다. 누락·추가·순서 불일치 시 즉시 실패.
 
 ## 타깃 인코딩

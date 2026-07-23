@@ -23,8 +23,8 @@
 | 폴더 / 파일 | 하는 일 | 상태 |
 |-------------|---------|------|
 | [`frontend/`](./frontend/) | 웹 화면 (Next.js) | AppShell + Main·Dashboard·Issue·Knowledge·Inquiry·Management·Setting |
-| [`backend/`](./backend/) | 서버 API (Express + MariaDB) | 준비 중 |
-| [`ai-service/`](./ai-service/) | AI 관련 서비스 | 준비 중 |
+| [`backend/`](./backend/) | 서버 API (Express + MariaDB) | 의존성 스캐폴드 |
+| [`ai-service/`](./ai-service/) | ML 진단 · FastAPI · 챗봇(예정) | `train_pipeline` + 100trial models + `/predict` API |
 | [`docs/`](./docs/) | 팀 전체 방향 · 작업 일지 · 계획 | 사용 중 |
 | [`AGENTS.md`](./AGENTS.md) | AI용 **짧은** 공통 규칙 | 사용 중 |
 
@@ -55,6 +55,39 @@ npm run dev
 
 ---
 
+## 기술 스택 (모노레포)
+
+패키지별로 README에도 동일하게 유지합니다. **새 라이브러리를 설치하면 해당 README 기술 스택을 반드시 갱신**합니다. (룰: `.cursor/rules/ask-before-run.mdc`)
+
+### frontend
+- Next.js (App Router), React, TypeScript, Tailwind CSS
+- Zustand, Axios, Recharts, Lucide React, Day.js  
+→ 상세: [`frontend/README.md`](./frontend/README.md)
+
+### backend
+- Express, TypeScript (tsx), MariaDB, CORS, dotenv  
+→ 상세: [`backend/package.json`](./backend/package.json) (README는 후속)
+
+### ai-service
+- Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib
+- FastAPI, Uvicorn, Pydantic  
+- LangGraph, LangChain Core, (선택) LangChain OpenAI  
+→ 상세: [`ai-service/README.md`](./ai-service/README.md)
+
+---
+
+## AI 서비스 실행 (ai-service)
+
+```bash
+cd ai-service
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+자세한 엔드포인트·스택은 **[`ai-service/README.md`](./ai-service/README.md)**.
+
+---
+
 ## 문서와 AI 규칙, 어떻게 나뉘나
 
 처음 보면 `README` / `AGENTS` / `docs` / `.cursor`가 헷갈릴 수 있습니다.  
@@ -62,10 +95,11 @@ npm run dev
 
 | 구분 | 누구를 위한가 | 어디에 있나 | 무엇을 담나 |
 |------|----------------|-------------|-------------|
-| **루트 README** (이 파일) | 사람 | `/README.md` | 저장소 지도, 실행 입구, 규칙이 **어떻게** 도는지 |
+| **루트 README** (이 파일) | 사람 | `/README.md` | 저장소 지도, 실행 입구, **모노레포 기술 스택**, 규칙이 **어떻게** 도는지 |
 | **루트 AGENTS** | AI | `/AGENTS.md` | 전 패키지 공통으로 지킬 **짧은** bullet |
 | **frontend README** | 사람 | `/frontend/README.md` | FE만의 실행법·스택·진행 상황 |
 | **frontend AGENTS** | AI | `/frontend/AGENTS.md` | FE만의 **추가** 규칙 + 루트 AGENTS 안내 |
+| **ai-service README** | 사람 | `/ai-service/README.md` | AI 실행법·ML/API 스택 |
 | **docs/** | 사람 (+ AI가 방향 확인) | `/docs/` | 오늘 할 일, 일지, 확정 계획 (긴 본문) |
 
 한 줄로:

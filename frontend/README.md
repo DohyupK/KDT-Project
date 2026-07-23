@@ -124,6 +124,7 @@ frontend/
 - [2026-07-15 프로젝트 생성 및 초기 구성](../docs/work-log/2026-07-15.md)
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
+- [2026-07-23 ai-service ML·챗봇 연동 작업서](../docs/work-log/2026-07-23.md)
 
 ---
 

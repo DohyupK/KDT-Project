@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Training artifacts / local data (keep CSV locally; do not force-commit large files)
+optuna.db
+optuna.db-*
+models/*
+!models/.gitkeep
+logs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db

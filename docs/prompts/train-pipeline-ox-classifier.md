@@ -140,8 +140,8 @@ TreeExplainer 객체 피클링 금지.
 
 **top_risk_factors (1단계 확정 = 전역 Importance):**
 - 샘플별(row-wise) SHAP이 아님.
-- predict 시 두 CSV를 읽어 feature별 importance 산술 평균 → 상위 3개 **이름만** 배열 반환.
-- 동일 입력이면 항상 같은 Top-3 (모델 아티팩트가 바뀌기 전까지).
+- predict 시 두 CSV를 읽어 feature별 importance 산술 평균 → 상위 4개 **이름만** 배열 반환.
+- 동일 입력이면 항상 같은 Top-4 (모델 아티팩트가 바뀌기 전까지).
 - 챗봇용 샘플별 설명은 후속 단계. 이 단계에서 임의 생성하지 말 것.
 
 # =====================================================================
@@ -207,7 +207,7 @@ predict(df, fillThreshold=0.5):
   "defect_status": int,          # 0 or 1
   "probability": float,          # 불량(1) 확률
   "applied_threshold": float,
-  "top_risk_factors": [str, str, str]  # 전역 Top-3 이름
+  "top_risk_factors": [str, str, str, str]  # 전역 Top-4 이름
 }
 
 파라미터 조절·처치 권고 필드 추가 금지.

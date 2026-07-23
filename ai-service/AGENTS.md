@@ -3,7 +3,17 @@
 **용도:** 챗봇(Agent)과 AI 모델(학습·추론)을 만들 때만 본다.  
 프론트 UI·일반 backend CRUD에는 쓰지 않는다.
 
-최종 갱신: 2026-07-22
+최종 갱신: 2026-07-23
+
+**실행 전 승인:** `pip` 설치, `train_model`/Optuna 학습, `predict` 스모크·테스트는  
+사용자에게 무엇을·왜·예상 시간을 보고하고 **승인받은 뒤에만** 실행한다.  
+(전체 룰: `.cursor/rules/ask-before-run.mdc`)
+
+**설치 후:** `pip`로 새 패키지를 넣으면 `README.md` 기술 스택·루트 README 모노레포 스택을 같은 작업에서 갱신한다.
+
+**v1.2.0 파이프라인:** 도메인 피처(온도 편차·임계 플래그·온습도 교차·particle_span) + `domain_thresholds.json`.  
+이전: `logs/train.log`, Optuna `gc.collect`, metadata 버전·해시·`feature_types`,  
+CV=`TimeSeriesSplit`, cost 기반 `default_threshold`, `predict` 스키마 드리프트, SHAP CSV+JSON.
 
 ---
 
@@ -128,11 +138,11 @@ SHAP: TreeExplainer로 학습 후 importance CSV만 저장. **Explainer 피클 �
   "defect_status": 0,
   "probability": 0.0,
   "applied_threshold": 0.5,
-  "top_risk_factors": ["feat_a", "feat_b", "feat_c"]
+  "top_risk_factors": ["feat_a", "feat_b", "feat_c", "feat_d"]
 }
 ```
 
-**top_risk_factors (1단계 확정):** 두 SHAP CSV importance **평균의 전역 Top-3 이름**.  
+**top_risk_factors (1단계 확정):** 두 SHAP CSV importance **평균의 전역 Top-4 이름** (EDA 주요 원인 4개와 맞춤).  
 이번 행의 샘플별 SHAP이 아님. 샘플별 설명은 챗봇 고도화 단계에서 따로.
 
 처치·제어·조절 제안 필드 **추가 금지**.
@@ -156,28 +166,28 @@ SHAP: TreeExplainer로 학습 후 importance CSV만 저장. **Explainer 피클 �
 
 ```
 ai-service/
-  AGENTS.md                 ← 이 파일 (챗봇·모델 작업 시만)
-  data/
-    cathode_clf_data.csv    ← 학습용 (추후 DB)
-  models/                   ← 학습 산출물
-  train_pipeline.py         ← 1단계
+  AGENTS.md
+  data/cathode_clf_data.csv
+  models/                   ← 100 trial 최종 산출물 (사용 중)
+  train_pipeline.py         ← 1단계 완료
   requirements.txt
-  optuna.db                 ← Optuna resume (gitignore 권장)
-  (이후) app/ 또는 api/     ← FastAPI
-  (이후) agent/             ← LangGraph + tools
+  logs/
+  app/                      ← FastAPI (/health, /predict, /chat)
+  agent/                    ← LangGraph (최소 그래프)
 ```
 
-실행: 항상 `ai-service/` 를 CWD로.
+프론트 챗봇 UI 목업: `frontend/src/app/(shell)/main/page.tsx`  
+연동 작업서: `docs/plans/2026-07-23-chatbot-integration.md`
 
 ---
 
 ## 7. 챗봇 구현 시 체크리스트
 
-- [ ] 진단은 `predict` Tool 결과만 인용 (임의 불량 확률 생성 금지)  
+- [x] 진단은 `predict` Tool 결과만 인용 (임의 불량 확률 생성 금지) — `agent/tools.py` + template/LLM compose  
 - [ ] 문서 답은 RAG/backend 검색 결과 인용  
 - [ ] “조절해서 실행”은 권한 확인 후에만 Tool 호출  
-- [ ] 1단계 `top_risk_factors`는 전역 중요도임을 사용자 문구에서 과장하지 않기  
-- [ ] 시크릿·API 키는 저장소에 넣지 않기  
+- [x] 1단계 `top_risk_factors`는 전역 중요도임을 사용자 문구에서 과장하지 않기  
+- [x] 시크릿·API 키는 저장소에 넣지 않기 (`OPENAI_API_KEY`는 환경변수만)
 
 ---
 
