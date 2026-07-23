@@ -9,6 +9,7 @@ alwaysApply: true
 - 작업 시작 전 `docs/direction.md`를 읽는다.
 - README에는 상세 변경을 쓰지 않는다. 날짜별 상세는 `docs/work-log/YYYY-MM-DD.md`에 쓴다.
 - README 개발 기록에는 링크만 추가한다.
+- **예외·필수:** 패키지 설치 시에는 해당 패키지 README(및 루트 README 모노레포 스택)의 **기술 스택 목록을 반드시 갱신**한다. 자세한 절차는 `ask-before-run.mdc`.
 - 확정 계획은 `docs/plans/`, 재사용 문장은 `docs/prompts/`, 경로·제약은 `docs/references/`에 둔다.
 - 사용자가 「정리해줘 / work-log / direction 갱신」이라고 하면 위 위치에 세부 기록한다.
 
