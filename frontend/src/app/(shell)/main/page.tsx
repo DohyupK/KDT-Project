@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -10,7 +10,6 @@ import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 type StatusTone = '정상' | '주의' | '경고' | '위험' | '이상';
 type ChartType = 'bar' | 'line' | 'pie';
 type TrendInterval = '1h' | '2h' | 'shift';
-type ChatRole = 'user' | 'ai';
 
 type FilterState = {
   startDate: string;
@@ -62,12 +61,6 @@ type ToastItem = {
   variant: 'success' | 'error' | 'info';
 };
 
-type ChatMessage = {
-  id: number;
-  role: ChatRole;
-  text: string;
-};
-
 type NotificationItem = {
   id: string;
   time: string;
@@ -84,12 +77,6 @@ const DEFAULT_FILTER: FilterState = {
   startDate: '2026-07-20',
   endDate: '2026-07-22',
 };
-
-const SUGGESTED_QUESTIONS = [
-  '현재 위험 LOT 알려줘',
-  '오늘 불량률 요약해줘',
-  '소성 온도 이상 원인 분석',
-] as const;
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -278,23 +265,6 @@ function buildProcessParams(records: LotRecord[]): ProcessParam[] {
       status: add > 3.8 ? '이상' : add > 3.5 ? '주의' : '정상',
     },
   ];
-}
-
-function buildAiReply(input: string, riskLots: RiskLotView[], passRate: string) {
-  const text = input.toLowerCase();
-  const top = riskLots[0];
-  if (text.includes('위험') || text.includes('lot')) {
-    return top
-      ? `우선 조치 대상은 ${top.id}입니다. 원인: ${top.riskReason}. 위험도 ${top.riskScore.toFixed(2)}.`
-      : '현재 필터 조건에서 위험 LOT가 없습니다.';
-  }
-  if (text.includes('불량') || text.includes('합격') || text.includes('요약')) {
-    return `현재 합격률은 ${passRate}이며 위험 LOT는 ${riskLots.length}건입니다.`;
-  }
-  if (text.includes('온도') || text.includes('소성')) {
-    return '소성온도 상한 초과 시 히터 출력 하향, 가스/체류시간 점검 후 Risk Index를 재확인하세요.';
-  }
-  return '위험 LOT, 불량률, 소성 온도에 대해 질문해 주시면 현재 화면 기준으로 안내합니다.';
 }
 
 /* -------------------------------------------------------------------------- */
@@ -598,16 +568,7 @@ export default function MainPage() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
   const [allRiskOpen, setAllRiskOpen] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
   const [isNotifyOpen, setIsNotifyOpen] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      role: 'ai',
-      text: '안녕하세요. AI 공정 지원 챗봇입니다. 위험 LOT, 불량률, 소성 온도에 대해 질문해 주세요.',
-    },
-  ]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([
     {
       id: 'n1',
@@ -627,9 +588,6 @@ export default function MainPage() {
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const chatIdRef = useRef(2);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifyRef = useRef<HTMLDivElement | null>(null);
 
   const dataset = useMemo(() => buildLotDataset(seed), [seed]);
@@ -723,18 +681,12 @@ export default function MainPage() {
   }, [filteredRecords, trendInterval]);
 
   const params = useMemo(() => buildProcessParams(filteredRecords), [filteredRecords]);
-  const passKpi = kpis.find((k) => k.id === 'pass')?.value ?? '0%';
   const unreadCount = notifications.filter((n) => n.unread).length;
 
   useEffect(() => {
     const timer = setInterval(() => setNow(formatDateTime(new Date())), 1000);
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!isChatOpen) return;
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isChatOpen]);
 
   useEffect(() => {
     if (!isNotifyOpen) return;
@@ -748,7 +700,6 @@ export default function MainPage() {
 
   useEffect(() => {
     return () => {
-      if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
       toastTimersRef.current.forEach((t) => clearTimeout(t));
     };
   }, []);
@@ -779,34 +730,6 @@ export default function MainPage() {
 
   const handleLotAction = (lot: RiskLotView) => {
     pushToast(`${lot.id} 조치/알림이 접수되었습니다.`, 'success');
-  };
-
-  const sendMessage = (raw: string) => {
-    const text = raw.trim();
-    if (!text) return;
-    chatIdRef.current += 1;
-    setMessages((prev) => [...prev, { id: chatIdRef.current, role: 'user', text }]);
-    setChatInput('');
-    if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
-    replyTimerRef.current = setTimeout(() => {
-      chatIdRef.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        { id: chatIdRef.current, role: 'ai', text: buildAiReply(text, riskLots, passKpi) },
-      ]);
-    }, 500 + Math.floor(Math.random() * 400));
-  };
-
-  const onChatSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    sendMessage(chatInput);
-  };
-
-  const onChatKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(chatInput);
-    }
   };
 
   return (
@@ -1234,69 +1157,6 @@ export default function MainPage() {
         </div>
       </Modal>
 
-      {isChatOpen ? (
-        <div className="fixed bottom-24 right-4 z-[60] flex h-[min(520px,70vh)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:right-6">
-          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <strong className="text-sm">AI 공정 지원 챗봇</strong>
-            <button type="button" onClick={() => setIsChatOpen(false)} className="font-bold text-slate-500">
-              X
-            </button>
-          </div>
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto bg-slate-50/60 p-3">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
-                  m.role === 'user'
-                    ? 'ml-auto rounded-br-md bg-blue-600 text-white'
-                    : 'mr-auto rounded-bl-md border border-slate-200 bg-white text-slate-800'
-                }`}
-              >
-                {m.text}
-              </div>
-            ))}
-            <div ref={chatEndRef} />
-          </div>
-          <div className="border-t border-slate-200 p-3">
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {SUGGESTED_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  onClick={() => sendMessage(q)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-            <form onSubmit={onChatSubmit} className="flex gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={onChatKeyDown}
-                placeholder="메시지를 입력하세요..."
-                className="h-10 flex-1 rounded-xl border border-slate-300 px-3 text-sm"
-              />
-              <button type="submit" className="rounded-xl bg-blue-600 px-3 text-sm font-bold text-white">
-                전송
-              </button>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        aria-label="AI 챗봇"
-        onClick={() => {
-          setIsNotifyOpen(false);
-          setIsChatOpen((v) => !v);
-        }}
-        className="fixed bottom-5 right-5 z-[65] flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-lg text-white shadow-lg hover:bg-blue-700"
-      >
-        💬
-      </button>
     </div>
   );
 }

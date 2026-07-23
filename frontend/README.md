@@ -20,8 +20,9 @@
 
 이미 화면이 있는 페이지: **Main** (`/main`), **Dashboard**, **Management**, **Setting**, **Issue**, **Knowledge**, **Inquiry**  
 이름만 있는 페이지: Login  
-공통: 좌측 네비 + 상단 헤더 (`AppShell`, Login 제외). `/`는 `/main`으로 이동.  
-헤더 유저 아이콘 → `/login` (UI는 추후 작성).
+공통: 좌측 네비 (`AppShell`, Login 제외). `/`는 `/main`으로 이동.  
+헤더 유저 아이콘 → `/login` (UI는 추후 작성).  
+**AI 챗봇:** AppShell 전역 플로팅 (`src/components/chat/GlobalChatbot.tsx`) — Main만이 아님.
 
 ---
 
@@ -41,6 +42,14 @@ npm run dev
 | `npm run dev` | 개발 서버 |
 | `npm run build` | 프로덕션 빌드 |
 | `npm run lint` | 린트 |
+
+### 챗봇 실연동 (ai-service와 함께)
+
+전역 챗봇(`AppShell` → `GlobalChatbot`)은 **ai-service(:8000)** 가 켜져 있어야 합니다.  
+루트 README의 **[로컬 실행 — 챗봇 (터미널 2개)](../README.md#로컬-실행--챗봇-터미널-2개)** 를 따릅니다.
+
+- rewrite: `next.config.ts` — `/ai` → `127.0.0.1:8000` (변경 후 Next 재시작)
+- 클라이언트: `src/api/aiApi.ts` → `POST /ai/chat`
 
 ---
 
@@ -125,10 +134,13 @@ frontend/
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
 - [2026-07-23 ai-service ML·챗봇 연동 작업서](../docs/work-log/2026-07-23.md)
+- [2026-07-23 PC 재시작 체크포인트](../docs/plans/2026-07-23-session-handoff.md)
 
 ---
 
 ## 다음에 할 일 (Frontend)
 
+- [x] 챗봇 전역 UI + `/ai` rewrite 실연동 (2026-07-23)
 - LoginPage UI
 - Express backend 연동
+- LOT → chat features 자동 주입
