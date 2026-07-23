@@ -21,8 +21,6 @@ type DefectBreakdown = Record<DefectType, number>;
 
 type ProductionRecord = {
   date: string;
-  product: string;
-  line: string;
   production: number;
   defectCount: number;
   targetProduction: number;
@@ -36,8 +34,6 @@ type StaffMember = {
   rank: string;
   email: string;
 };
-
-type ChartType = 'bar' | 'line' | 'donut';
 
 type AutoSendFrequency = '일일' | '주간' | '월간';
 
@@ -60,17 +56,31 @@ type DailyAggregate = {
   targetProduction: number;
 };
 
-type ProductAggregate = {
-  product: string;
-  production: number;
-};
-
 type KpiSummary = {
   totalProduction: number;
   avgDefectRate: number | null;
-  topLine: string | null;
-  topLineProduction: number;
+  peakDate: string | null;
+  peakProduction: number;
   targetAchievementRate: number | null;
+};
+
+type CathodeLot = {
+  date: string;
+  capacity: number;
+  qualityDefect: 0 | 1;
+  metalImpurity: number;
+  sinteringTemp: number;
+};
+
+type KpiBadgeTone = 'ok' | 'warn';
+
+type DetailedKpi = {
+  key: string;
+  label: string;
+  value: string;
+  unit: string;
+  sub: string;
+  badge?: { label: string; tone: KpiBadgeTone };
 };
 
 type DefectAnalysis = {
@@ -139,10 +149,6 @@ type ProcessVizTheme = {
 
 const DEFECT_TYPES: DefectType[] = ['기계 결함', '원자재 불량', '작업자 실수', '온도 이상'];
 
-const PRODUCTS = ['프레스 모듈 A', '모터 하우징 B', '센서 유닛 C', '컨트롤러 D', '배터리 팩 E'] as const;
-
-const LINES = ['라인-1', '라인-2', '라인-3', '라인-4', '라인-5'] as const;
-
 const STAFF_MEMBERS: StaffMember[] = [
   { id: 's1', name: '김민수', department: '생산관리', rank: '과장', email: 'minsu.kim@factory.com' },
   { id: 's2', name: '이서연', department: '품질보증', rank: '대리', email: 'seoyeon.lee@factory.com' },
@@ -197,65 +203,219 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-function buildMockRecords(): ProductionRecord[] {
-  const rand = seededRandom(42);
-  const records: ProductionRecord[] = [];
+/** 양극재 LOT 단위 Mock — 날짜 필터·KPI·차트 공통 원천 */
+function buildCathodeLots(): CathodeLot[] {
+  const rand = seededRandom(20260520);
+  const lots: CathodeLot[] = [];
   const start = parseDate('2026-05-01');
+  const dayCount = 45;
+  const totalLots = 10000;
+  const peakDay = 19; // 2026-05-20
 
-  for (let dayOffset = 0; dayOffset < 45; dayOffset += 1) {
+  // 일별 가중치: 5/20 전후 피크 (~2,400 LOT)
+  const weights: number[] = [];
+  for (let d = 0; d < dayCount; d += 1) {
+    const dist = Math.abs(d - peakDay);
+    weights.push(Math.exp(-(dist * dist) / (2 * 1.72 * 1.72)));
+  }
+  const weightSum = weights.reduce((s, w) => s + w, 0);
+  const dayCounts: number[] = weights.map((w) => Math.floor((totalLots * w) / weightSum));
+  let assigned = dayCounts.reduce((s, n) => s + n, 0);
+  dayCounts[peakDay] += totalLots - assigned;
+
+  for (let dayOffset = 0; dayOffset < dayCount; dayOffset += 1) {
     const d = new Date(start);
     d.setDate(start.getDate() + dayOffset);
     const date = formatDate(d);
+    const count = dayCounts[dayOffset];
 
-    for (let pi = 0; pi < PRODUCTS.length; pi += 1) {
-      for (let li = 0; li < LINES.length; li += 1) {
-        if (rand() > 0.55) continue;
+    for (let i = 0; i < count; i += 1) {
+      // ~91.3% 합격 (quality_defect === 0)
+      const qualityDefect: 0 | 1 = rand() < 0.087 ? 1 : 0;
+      const capacity = 190 + rand() * 20 + (rand() - 0.5) * 4;
+      const metalImpurity = 0.016 + rand() * 0.016 + (qualityDefect ? 0.004 : 0);
+      const sinteringTemp = 780 + rand() * 40 + (rand() - 0.5) * 6;
 
-        const base = 180 + Math.floor(rand() * 220) + pi * 12 + li * 8;
-        const wave = Math.sin((dayOffset + pi + li) / 4) * 30;
-        const production = Math.max(80, Math.round(base + wave + rand() * 40));
-        const targetProduction = Math.round(production * (0.92 + rand() * 0.2));
-
-        const defects: DefectBreakdown = {
-          '기계 결함': Math.floor(rand() * 8),
-          '원자재 불량': Math.floor(rand() * 6),
-          '작업자 실수': Math.floor(rand() * 5),
-          '온도 이상': Math.floor(rand() * 4),
-        };
-
-        // Slight improvement trend in later days
-        if (dayOffset > 25) {
-          defects['기계 결함'] = Math.max(0, defects['기계 결함'] - 2);
-          defects['온도 이상'] = Math.max(0, defects['온도 이상'] - 1);
-        }
-
-        const defectCount = DEFECT_TYPES.reduce((sum, t) => sum + defects[t], 0);
-
-        records.push({
-          date,
-          product: PRODUCTS[pi],
-          line: LINES[li],
-          production,
-          defectCount,
-          targetProduction,
-          defects,
-        });
-      }
+      lots.push({
+        date,
+        capacity: Math.round(capacity * 10) / 10,
+        qualityDefect,
+        metalImpurity: Math.round(metalImpurity * 1e6) / 1e6,
+        sinteringTemp: Math.round(sinteringTemp * 10) / 10,
+      });
     }
   }
 
-  return records;
+  return lots;
 }
 
-const MOCK_RECORDS: ProductionRecord[] = buildMockRecords();
+function lotsToProductionRecords(lots: CathodeLot[]): ProductionRecord[] {
+  const byDate = new Map<
+    string,
+    { production: number; defectCount: number; defects: DefectBreakdown }
+  >();
 
-const DATA_MIN_DATE = MOCK_RECORDS.reduce(
+  for (const lot of lots) {
+    const cur = byDate.get(lot.date) ?? {
+      production: 0,
+      defectCount: 0,
+      defects: emptyDefectBreakdown(),
+    };
+    cur.production += 1;
+    if (lot.qualityDefect === 1) {
+      cur.defectCount += 1;
+      // 분류 라벨이 없어 불량 LOT는 원자재/온도 축으로만 배분 (합계 = defectCount)
+      if (lot.metalImpurity > 0.028) cur.defects['원자재 불량'] += 1;
+      else if (lot.sinteringTemp < 785 || lot.sinteringTemp > 815) cur.defects['온도 이상'] += 1;
+      else if (lot.capacity < 195) cur.defects['기계 결함'] += 1;
+      else cur.defects['작업자 실수'] += 1;
+    }
+    byDate.set(lot.date, cur);
+  }
+
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, v]) => ({
+      date,
+      production: v.production,
+      defectCount: v.defectCount,
+      targetProduction: Math.max(1, Math.round(v.production * 1.05)),
+      defects: v.defects,
+    }));
+}
+
+function computeDetailedKpis(lots: CathodeLot[]): DetailedKpi[] {
+  if (lots.length === 0) {
+    return [
+      { key: 'total', label: '총 생산량 (LOT)', value: '-', unit: '', sub: '선택 기간 총 생산 실적' },
+      {
+        key: 'capacity',
+        label: '평균 방전 용량',
+        value: '-',
+        unit: '',
+        sub: '양극재 방전 용량 평균 (목표 195~205)',
+      },
+      {
+        key: 'pass',
+        label: '공정 합격률',
+        value: '-',
+        unit: '',
+        sub: '품질 검사 통과 비율',
+      },
+      {
+        key: 'metal',
+        label: '금속 불순물 농도',
+        value: '-',
+        unit: '',
+        sub: '금속 이물 함량 (기준치 0.03% 이하)',
+      },
+      {
+        key: 'sinter',
+        label: '평균 소성 온도',
+        value: '-',
+        unit: '',
+        sub: '열처리 소성로 평균 온도 (목표 800°C)',
+      },
+      {
+        key: 'peak',
+        label: '최고 생산일 & 실적',
+        value: '-',
+        unit: '',
+        sub: '일간 최고 실적',
+      },
+    ];
+  }
+
+  const total = lots.length;
+  let capacitySum = 0;
+  let passCount = 0;
+  let metalSum = 0;
+  let sinterSum = 0;
+  const daily = new Map<string, number>();
+
+  for (const lot of lots) {
+    capacitySum += lot.capacity;
+    if (lot.qualityDefect === 0) passCount += 1;
+    metalSum += lot.metalImpurity;
+    sinterSum += lot.sinteringTemp;
+    daily.set(lot.date, (daily.get(lot.date) ?? 0) + 1);
+  }
+
+  const avgCapacity = capacitySum / total;
+  const passRate = passCount / total;
+  const avgMetal = metalSum / total;
+  const avgSinter = sinterSum / total;
+
+  let peakDate = '';
+  let peakCount = 0;
+  for (const [date, count] of daily) {
+    if (count > peakCount) {
+      peakCount = count;
+      peakDate = date;
+    }
+  }
+
+  const passOk = passRate >= 0.9;
+  const metalWarn = avgMetal > 0.028;
+
+  return [
+    {
+      key: 'total',
+      label: '총 생산량 (LOT)',
+      value: formatNumber(total),
+      unit: '개',
+      sub: '선택 기간 총 생산 실적',
+    },
+    {
+      key: 'capacity',
+      label: '평균 방전 용량',
+      value: avgCapacity.toFixed(1),
+      unit: 'mAh/g',
+      sub: '양극재 방전 용량 평균 (목표 195~205)',
+    },
+    {
+      key: 'pass',
+      label: '공정 합격률',
+      value: (passRate * 100).toFixed(1),
+      unit: '%',
+      sub: '품질 검사 통과 비율',
+      badge: { label: passOk ? '정상' : '주의', tone: passOk ? 'ok' : 'warn' },
+    },
+    {
+      key: 'metal',
+      label: '금속 불순물 농도',
+      value: avgMetal.toFixed(3),
+      unit: '%',
+      sub: '금속 이물 함량 (기준치 0.03% 이하)',
+      badge: { label: metalWarn ? '주의' : '정상', tone: metalWarn ? 'warn' : 'ok' },
+    },
+    {
+      key: 'sinter',
+      label: '평균 소성 온도',
+      value: avgSinter.toFixed(1),
+      unit: '°C',
+      sub: '열처리 소성로 평균 온도 (목표 800°C)',
+    },
+    {
+      key: 'peak',
+      label: '최고 생산일 & 실적',
+      value: formatNumber(peakCount),
+      unit: '개',
+      sub: peakDate ? `${peakDate} 달성 (일간 최고)` : '일간 최고 실적',
+    },
+  ];
+}
+
+const MOCK_LOTS: CathodeLot[] = buildCathodeLots();
+const MOCK_RECORDS: ProductionRecord[] = lotsToProductionRecords(MOCK_LOTS);
+
+const DATA_MIN_DATE = MOCK_LOTS.reduce(
   (min, r) => (r.date < min ? r.date : min),
-  MOCK_RECORDS[0].date,
+  MOCK_LOTS[0].date,
 );
-const DATA_MAX_DATE = MOCK_RECORDS.reduce(
+const DATA_MAX_DATE = MOCK_LOTS.reduce(
   (max, r) => (r.date > max ? r.date : max),
-  MOCK_RECORDS[0].date,
+  MOCK_LOTS[0].date,
 );
 
 /* -------------------------------------------------------------------------- */
@@ -274,6 +434,17 @@ function formatPercent(value: number | null, digits = 1): string {
 
 function formatNumber(value: number): string {
   return value.toLocaleString('ko-KR');
+}
+
+/** Chart axis only — rounds domain to clean tick intervals (e.g. 0, 500, 1000…). */
+function niceChartMax(rawMax: number, tickCount = 5): number {
+  if (rawMax <= 0) return tickCount * 100;
+  const roughStep = rawMax / tickCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const residual = roughStep / magnitude;
+  const niceFactor = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  const step = niceFactor * magnitude;
+  return Math.ceil(rawMax / step) * step;
 }
 
 function emptyDefectBreakdown(): DefectBreakdown {
@@ -421,17 +592,37 @@ function Modal({
 function KpiCard({
   label,
   value,
+  unit,
   sub,
+  badge,
 }: {
   label: string;
   value: string;
+  unit?: string;
   sub?: string;
+  badge?: { label: string; tone: KpiBadgeTone };
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{value}</p>
-      {sub ? <p className="mt-1 text-xs text-slate-500">{sub}</p> : null}
+    <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-slate-500">{label}</p>
+        {badge ? (
+          <span
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
+              badge.tone === 'warn'
+                ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/80'
+                : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80'
+            }`}
+          >
+            {badge.label}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 flex items-baseline gap-1.5 tracking-tight text-slate-800">
+        <span className="text-2xl font-bold">{value}</span>
+        {unit ? <span className="text-xs font-medium text-slate-400">{unit}</span> : null}
+      </p>
+      {sub ? <p className="mt-1.5 text-[11px] leading-snug text-slate-500">{sub}</p> : null}
     </div>
   );
 }
@@ -445,181 +636,140 @@ function EmptyState({ message }: { message: string }) {
 }
 
 function ProductionTrendChart({
-  chartType,
   daily,
-  byProduct,
+  dailyRates = [],
 }: {
-  chartType: ChartType;
   daily: DailyAggregate[];
-  byProduct: ProductAggregate[];
+  dailyRates?: Array<{ date: string; rate: number | null }>;
 }) {
   const width = 720;
   const height = 280;
-  const pad = { top: 24, right: 20, bottom: 40, left: 52 };
+  const pad = { top: 24, right: 52, bottom: 40, left: 52 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-
-  if (chartType === 'donut') {
-    if (byProduct.length === 0) {
-      return <EmptyState message="표시할 생산 데이터가 없습니다." />;
-    }
-    const total = byProduct.reduce((s, p) => s + p.production, 0);
-    const cx = 160;
-    const cy = 140;
-    const r = 88;
-    const stroke = 36;
-    let angle = -Math.PI / 2;
-    const arcs = byProduct.map((item, i) => {
-      const ratio = total === 0 ? 0 : item.production / total;
-      const sweep = ratio * Math.PI * 2;
-      const start = angle;
-      const end = angle + sweep;
-      angle = end;
-      const large = sweep > Math.PI ? 1 : 0;
-      const x1 = cx + r * Math.cos(start);
-      const y1 = cy + r * Math.sin(start);
-      const x2 = cx + r * Math.cos(end);
-      const y2 = cy + r * Math.sin(end);
-      const path =
-        ratio === 0
-          ? ''
-          : ratio >= 0.9999
-            ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy - r}`
-            : `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
-      return { item, path, color: CHART_COLORS[i % CHART_COLORS.length], ratio };
-    });
-
-    return (
-      <div className="flex items-center gap-8">
-        <svg viewBox="0 0 320 280" className="h-[280px] w-[320px] shrink-0" role="img" aria-label="제품별 생산량 원형 차트">
-          {arcs.map((a) =>
-            a.path ? (
-              <path
-                key={a.item.product}
-                d={a.path}
-                fill="none"
-                stroke={a.color}
-                strokeWidth={stroke}
-                strokeLinecap="butt"
-              />
-            ) : null,
-          )}
-          <circle cx={cx} cy={cy} r={r - stroke / 2 - 4} fill="#fff" />
-          <text x={cx} y={cy - 6} textAnchor="middle" className="fill-slate-500 text-[11px]">
-            총 생산량
-          </text>
-          <text x={cx} y={cy + 16} textAnchor="middle" className="fill-slate-900 text-[16px] font-semibold">
-            {formatNumber(total)}
-          </text>
-        </svg>
-        <ul className="space-y-2 text-sm">
-          {arcs.map((a) => (
-            <li key={a.item.product} className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: a.color }} />
-              <span className="text-slate-700">{a.item.product}</span>
-              <span className="ml-auto tabular-nums text-slate-500">
-                {formatNumber(a.item.production)} ({formatPercent(a.ratio)})
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
 
   if (daily.length === 0) {
     return <EmptyState message="표시할 생산 데이터가 없습니다." />;
   }
 
-  const maxY = Math.max(...daily.map((d) => d.production), 1);
+  const rateByDate = new Map(
+    dailyRates.filter((d) => d.rate !== null).map((d) => [d.date, d.rate as number]),
+  );
+  const rawMaxY = Math.max(...daily.map((d) => d.production), 1);
+  const tickCount = 5;
+  const maxY = niceChartMax(rawMaxY, tickCount);
+  const maxRate = Math.max(...Array.from(rateByDate.values()), 0.001);
   const n = daily.length;
-  const gap = n > 1 ? innerW / (n - (chartType === 'bar' ? 0 : 1)) : innerW;
-  const barW = chartType === 'bar' ? Math.max(4, (innerW / n) * 0.65) : 0;
+  const barW = Math.max(4, (innerW / n) * 0.65);
 
   const points = daily.map((d, i) => {
-    const x =
-      chartType === 'bar'
-        ? pad.left + (innerW / n) * i + (innerW / n - barW) / 2 + barW / 2
-        : pad.left + (n === 1 ? innerW / 2 : gap * i);
+    const x = pad.left + (innerW / n) * i + (innerW / n - barW) / 2 + barW / 2;
     const y = pad.top + innerH - (d.production / maxY) * innerH;
-    return { ...d, x, y };
+    const rate = rateByDate.get(d.date) ?? null;
+    const rateY =
+      rate === null ? null : pad.top + innerH - (rate / maxRate) * innerH;
+    return { ...d, x, y, rate, rateY };
   });
 
-  const ticks = 4;
-  const yTicks = Array.from({ length: ticks + 1 }, (_, i) => {
-    const v = (maxY / ticks) * i;
+  const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => {
+    const v = (maxY / tickCount) * i;
     const y = pad.top + innerH - (v / maxY) * innerH;
     return { v, y };
   });
 
+  const rateTicks = [0, 0.25, 0.5, 0.75, 1].map((r) => ({
+    v: maxRate * r,
+    y: pad.top + innerH - r * innerH,
+  }));
+
+  const defectPoints = points.filter((p) => p.rateY !== null);
   const labelStep = Math.max(1, Math.ceil(n / 8));
 
   return (
-    <div>
-      <p className="mb-2 text-xs text-slate-500">날짜별 총 생산량 (필터 적용)</p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[280px] w-full" role="img" aria-label="날짜별 생산량 차트">
-        {yTicks.map((t) => (
-          <g key={t.v}>
-            <line
-              x1={pad.left}
-              x2={width - pad.right}
-              y1={t.y}
-              y2={t.y}
-              stroke="#e2e8f0"
-              strokeWidth={1}
-            />
-            <text x={pad.left - 8} y={t.y + 4} textAnchor="end" className="fill-slate-400 text-[10px]">
-              {Math.round(t.v)}
-            </text>
-          </g>
-        ))}
-        {chartType === 'bar'
-          ? points.map((p) => (
-              <rect
-                key={p.date}
-                x={p.x - barW / 2}
-                y={p.y}
-                width={barW}
-                height={pad.top + innerH - p.y}
-                fill="#2563eb"
-                rx={2}
-              >
-                <title>{`${p.date}: ${formatNumber(p.production)}`}</title>
-              </rect>
-            ))
-          : null}
-        {chartType === 'line' ? (
-          <>
-            <polyline
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth={2.5}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              points={points.map((p) => `${p.x},${p.y}`).join(' ')}
-            />
-            {points.map((p) => (
-              <circle key={p.date} cx={p.x} cy={p.y} r={3.5} fill="#2563eb">
-                <title>{`${p.date}: ${formatNumber(p.production)}`}</title>
-              </circle>
-            ))}
-          </>
-        ) : null}
-        {points.map((p, i) =>
-          i % labelStep === 0 || i === n - 1 ? (
-            <text
-              key={`label-${p.date}`}
-              x={p.x}
-              y={height - 12}
-              textAnchor="middle"
-              className="fill-slate-500 text-[10px]"
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-[280px] w-full"
+      role="img"
+      aria-label="날짜별 생산량 및 불량률 이중 축 차트"
+    >
+      {yTicks.map((t) => (
+        <g key={`prod-${t.v}`}>
+          <line
+            x1={pad.left}
+            x2={width - pad.right}
+            y1={t.y}
+            y2={t.y}
+            stroke="#e2e8f0"
+            strokeWidth={1}
+          />
+          <text x={pad.left - 8} y={t.y + 4} textAnchor="end" className="fill-slate-400 text-[10px]">
+            {formatNumber(Math.round(t.v))}
+          </text>
+        </g>
+      ))}
+      {rateTicks.map((t) => (
+        <text
+          key={`rate-${t.v}`}
+          x={width - pad.right + 8}
+          y={t.y + 4}
+          textAnchor="start"
+          className="fill-amber-500 text-[10px]"
+        >
+          {formatPercent(t.v)}
+        </text>
+      ))}
+      {points.map((p) => (
+        <rect
+          key={p.date}
+          x={p.x - barW / 2}
+          y={p.y}
+          width={barW}
+          height={pad.top + innerH - p.y}
+          fill="#2563eb"
+          rx={2}
+        >
+          <title>{`${p.date}: ${formatNumber(p.production)}`}</title>
+        </rect>
+      ))}
+      {defectPoints.length > 0 ? (
+        <>
+          <polyline
+            fill="none"
+            stroke="#ea580c"
+            strokeWidth={3}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            points={defectPoints.map((p) => `${p.x},${p.rateY}`).join(' ')}
+          />
+          {defectPoints.map((p) => (
+            <circle
+              key={`rate-${p.date}`}
+              cx={p.x}
+              cy={p.rateY as number}
+              r={4.5}
+              fill="#ea580c"
+              stroke="#ffffff"
+              strokeWidth={2}
             >
-              {p.date.slice(5)}
-            </text>
-          ) : null,
-        )}
-      </svg>
-    </div>
+              <title>{`${p.date}: 불량률 ${formatPercent(p.rate)}`}</title>
+            </circle>
+          ))}
+        </>
+      ) : null}
+      {points.map((p, i) =>
+        i % labelStep === 0 || i === n - 1 ? (
+          <text
+            key={`label-${p.date}`}
+            x={p.x}
+            y={height - 12}
+            textAnchor="middle"
+            className="fill-slate-500 text-[10px]"
+          >
+            {p.date.slice(5)}
+          </text>
+        ) : null,
+      )}
+    </svg>
   );
 }
 
@@ -719,67 +869,6 @@ function ExpandStepDropdown({
         </ul>
       </div>
     </div>
-  );
-}
-
-function DefectTrendChart({ dailyRates }: { dailyRates: Array<{ date: string; rate: number | null }> }) {
-  const width = 640;
-  const height = 240;
-  const pad = { top: 20, right: 16, bottom: 36, left: 48 };
-  const innerW = width - pad.left - pad.right;
-  const innerH = height - pad.top - pad.bottom;
-
-  const usable = dailyRates.filter((d) => d.rate !== null) as Array<{ date: string; rate: number }>;
-  if (usable.length === 0) {
-    return <EmptyState message="표시할 불량률 데이터가 없습니다." />;
-  }
-
-  const maxRate = Math.max(...usable.map((d) => d.rate), 0.001);
-  const n = usable.length;
-  const gap = n > 1 ? innerW / (n - 1) : innerW;
-
-  const points = usable.map((d, i) => {
-    const x = pad.left + (n === 1 ? innerW / 2 : gap * i);
-    const y = pad.top + innerH - (d.rate / maxRate) * innerH;
-    return { ...d, x, y };
-  });
-
-  const labelStep = Math.max(1, Math.ceil(n / 7));
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[240px] w-full" role="img" aria-label="날짜별 불량률 선 차트">
-      {[0, 0.25, 0.5, 0.75, 1].map((r) => {
-        const y = pad.top + innerH - r * innerH;
-        return (
-          <g key={r}>
-            <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#e2e8f0" />
-            <text x={pad.left - 6} y={y + 3} textAnchor="end" className="fill-slate-400 text-[10px]">
-              {formatPercent(maxRate * r)}
-            </text>
-          </g>
-        );
-      })}
-      <polyline
-        fill="none"
-        stroke="#dc2626"
-        strokeWidth={2.5}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        points={points.map((p) => `${p.x},${p.y}`).join(' ')}
-      />
-      {points.map((p) => (
-        <circle key={p.date} cx={p.x} cy={p.y} r={3} fill="#dc2626">
-          <title>{`${p.date}: ${formatPercent(p.rate)}`}</title>
-        </circle>
-      ))}
-      {points.map((p, i) =>
-        i % labelStep === 0 || i === n - 1 ? (
-          <text key={`dl-${p.date}`} x={p.x} y={height - 10} textAnchor="middle" className="fill-slate-500 text-[10px]">
-            {p.date.slice(5)}
-          </text>
-        ) : null,
-      )}
-    </svg>
   );
 }
 
@@ -967,6 +1056,16 @@ function pickDefaultProcessStage(stages: ProcessStage[]) {
   return sorted[0]?.id ?? stages[0]?.id ?? '';
 }
 
+function processStatusBadgeClass(status: ProcessStageStatus): string {
+  if (status === '위험') {
+    return 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200';
+  }
+  if (status === '주의') {
+    return 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200';
+  }
+  return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200';
+}
+
 function ProcessStageNode({
   stage,
   step,
@@ -986,9 +1085,9 @@ function ProcessStageNode({
   const lift = hovered || selected;
   const face = selected ? '#eff6ff' : PROCESS_VIZ_THEME.panel;
   const topFace =
-    stage.status === '위험' ? '#fee2e2' : stage.status === '주의' ? '#ffedd5' : '#ecfdf5';
+    stage.status === '위험' ? '#ffe4e6' : stage.status === '주의' ? '#fffbeb' : '#ecfdf5';
   const sideFace =
-    stage.status === '위험' ? '#fecaca' : stage.status === '주의' ? '#fed7aa' : '#dbeafe';
+    stage.status === '위험' ? '#fecdd3' : stage.status === '주의' ? '#fde68a' : '#dbeafe';
 
   return (
     <button
@@ -997,156 +1096,96 @@ function ProcessStageNode({
       onMouseEnter={() => onHover(stage.id)}
       onMouseLeave={() => onHover(null)}
       title={`${stage.name} · ${stage.status} · ${stage.metrics[0]?.value ?? ''}`}
+      className={`relative w-full min-w-0 rounded-xl text-left transition duration-150 ${
+        selected ? 'z-10 ring-2 ring-blue-500 shadow-md' : 'ring-0 shadow-sm'
+      }`}
       style={{
-        position: 'relative',
         border: 0,
         background: 'transparent',
         padding: 0,
         cursor: 'pointer',
-        width: '100%',
-        minWidth: 0,
-        textAlign: 'left',
-        transform: lift ? 'translateY(-4px)' : 'translateY(0)',
-        transition: 'transform 0.15s ease',
+        transform: lift ? 'translateY(-3px)' : 'translateY(0)',
         filter:
           stage.status === '위험'
-            ? `drop-shadow(0 0 ${selected ? 12 : 7}px rgba(239,68,68,0.4))`
-            : selected
-              ? 'drop-shadow(0 8px 14px rgba(37,99,235,0.22))'
-              : 'drop-shadow(0 6px 10px rgba(15,23,42,0.1))',
+            ? `drop-shadow(0 0 ${selected ? 10 : 6}px rgba(244,63,94,0.3))`
+            : stage.status === '주의'
+              ? `drop-shadow(0 0 ${selected ? 8 : 5}px rgba(245,158,11,0.25))`
+              : undefined,
       }}
     >
       <div
         style={{
           position: 'absolute',
-          left: 8,
+          left: 6,
           right: 0,
-          top: 8,
-          bottom: -4,
+          top: 7,
+          bottom: -3,
           background: sideFace,
           borderRadius: 10,
           transform: 'skewY(-3deg)',
         }}
       />
       <div
+        className="relative overflow-hidden rounded-xl"
         style={{
-          position: 'relative',
-          borderRadius: 12,
-          border: `2px solid ${selected ? PROCESS_VIZ_THEME.blue : color}`,
+          border: `1.5px solid ${
+            selected
+              ? PROCESS_VIZ_THEME.blue
+              : stage.status === '주의'
+                ? '#f59e0b'
+                : stage.status === '위험'
+                  ? '#f43f5e'
+                  : '#cbd5e1'
+          }`,
           background: face,
-          overflow: 'hidden',
-          boxShadow:
-            stage.status === '위험'
-              ? '0 0 0 2px rgba(239,68,68,0.18), 0 10px 18px rgba(239,68,68,0.14)'
-              : '0 6px 14px rgba(15,23,42,0.06)',
         }}
       >
         <div
           style={{
-            height: 12,
+            height: 10,
             background: topFace,
             borderBottom: `1px solid ${PROCESS_VIZ_THEME.line}`,
           }}
         />
-        <div style={{ padding: '8px 10px 10px' }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 4,
-              alignItems: 'center',
-              marginBottom: 4,
-            }}
-          >
-            <span
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                background: PROCESS_VIZ_THEME.blue,
-                color: '#fff',
-                fontSize: 10,
-                fontWeight: 800,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
+        <div className="px-2.5 pb-2.5 pt-2 sm:px-3">
+          <div className="mb-1.5 flex items-center justify-between gap-1.5">
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-extrabold text-white">
               {step}
             </span>
             <span
-              style={{
-                borderRadius: 999,
-                padding: '2px 6px',
-                fontSize: 10,
-                fontWeight: 800,
-                color: '#0b1220',
-                background: color,
-                flexShrink: 0,
-              }}
+              className={`shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold ${processStatusBadgeClass(stage.status)}`}
             >
               {stage.status}
             </span>
           </div>
           <strong
-            style={{
-              display: 'block',
-              fontSize: 12,
-              color: PROCESS_VIZ_THEME.text,
-              lineHeight: 1.35,
-              marginBottom: 4,
-              wordBreak: 'keep-all',
-            }}
+            className="mb-1 block truncate text-[11px] font-bold leading-tight text-slate-800 sm:text-xs"
+            title={stage.name}
           >
             {stage.name}
           </strong>
           <div
-            style={{
-              fontSize: 10,
-              color: PROCESS_VIZ_THEME.muted,
-              lineHeight: 1.35,
-              minHeight: 28,
-              wordBreak: 'keep-all',
-            }}
+            className="line-clamp-2 min-h-[28px] text-[10px] leading-snug text-slate-500"
+            title={stage.shortLabel}
           >
             {stage.shortLabel}
           </div>
-          <div style={{ marginTop: 6, display: 'grid', gap: 3 }}>
+          <div className="mt-2 grid gap-1">
             {stage.metrics.slice(0, 2).map((metric) => (
               <div
                 key={metric.label}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 4,
-                  fontSize: 10,
-                }}
+                className="flex items-baseline justify-between gap-1 text-[10px]"
               >
-                <span style={{ color: PROCESS_VIZ_THEME.muted }}>{metric.label}</span>
-                <span style={{ color: PROCESS_VIZ_THEME.text, fontWeight: 800 }}>{metric.value}</span>
+                <span className="truncate text-slate-400">{metric.label}</span>
+                <span className="shrink-0 font-extrabold text-slate-800">{metric.value}</span>
               </div>
             ))}
           </div>
         </div>
         {stage.status === '위험' || stage.status === '주의' ? (
           <span
-            style={{
-              position: 'absolute',
-              top: 6,
-              left: 6,
-              width: 16,
-              height: 16,
-              borderRadius: '50%',
-              background: color,
-              color: '#fff',
-              fontSize: 11,
-              fontWeight: 900,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 0 8px ${color}`,
-            }}
+            className="absolute left-1.5 top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-black text-white"
+            style={{ background: color, boxShadow: `0 0 6px ${color}` }}
           >
             !
           </span>
@@ -1156,14 +1195,14 @@ function ProcessStageNode({
   );
 }
 
-function ProcessFlowVisualizationSection() {
-  const [seed, setSeed] = useState(3);
+function ProcessFlowVisualizationSection({ seed }: { seed: number }) {
   const [viewMode, setViewMode] = useState<ProcessViewMode>('all');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [hoveredUi, setHoveredUi] = useState<string | null>(null);
   const [isNarrow, setIsNarrow] = useState(false);
   const stages = useMemo(() => buildProcessStages(seed), [seed]);
-  const [selectedId, setSelectedId] = useState(() => pickDefaultProcessStage(buildProcessStages(3)));
+  const [selectedId, setSelectedId] = useState(() =>
+    pickDefaultProcessStage(buildProcessStages(seed)),
+  );
 
   useEffect(() => {
     const update = () => setIsNarrow(window.innerWidth < 980);
@@ -1174,23 +1213,39 @@ function ProcessFlowVisualizationSection() {
 
   useEffect(() => {
     const next = buildProcessStages(seed);
-    const stillExists = next.some((stage) => stage.id === selectedId);
-    if (!stillExists) setSelectedId(pickDefaultProcessStage(next));
-  }, [seed, selectedId]);
+    setSelectedId(pickDefaultProcessStage(next));
+  }, [seed]);
+
+  const issueStages = useMemo(
+    () => stages.filter((stage) => stage.status !== '정상'),
+    [stages],
+  );
 
   const visibleStages = useMemo(() => {
-    if (viewMode === 'issues') {
-      return stages.filter((stage) => stage.status !== '정상');
-    }
+    if (viewMode === 'issues') return issueStages;
     return stages;
-  }, [stages, viewMode]);
+  }, [stages, issueStages, viewMode]);
+
+  useEffect(() => {
+    if (visibleStages.length === 0) return;
+    if (!visibleStages.some((s) => s.id === selectedId)) {
+      setSelectedId(pickDefaultProcessStage(visibleStages));
+    }
+  }, [visibleStages, selectedId]);
 
   const selectedStage = useMemo(() => {
     return stages.find((stage) => stage.id === selectedId) ?? stages[0] ?? null;
   }, [stages, selectedId]);
 
+  const selectedStep = useMemo(() => {
+    if (!selectedStage) return 0;
+    const idx = stages.findIndex((s) => s.id === selectedStage.id);
+    return idx >= 0 ? idx + 1 : 0;
+  }, [stages, selectedStage]);
+
   const dangerCount = stages.filter((stage) => stage.status === '위험').length;
   const warnCount = stages.filter((stage) => stage.status === '주의').length;
+  const issueCount = warnCount + dangerCount;
   const affectedLots = stages.reduce((sum, stage) => sum + stage.affectedLots, 0);
   const overallStatus: ProcessStageStatus =
     dangerCount > 0 ? '위험' : warnCount > 0 ? '주의' : '정상';
@@ -1198,109 +1253,44 @@ function ProcessFlowVisualizationSection() {
     stages.slice().sort((a, b) => (a.lastUpdated < b.lastUpdated ? 1 : -1))[0]?.lastUpdated ??
     '2026-07-22 10:42:15';
 
-  const panelStyle: CSSProperties = {
-    background: PROCESS_VIZ_THEME.panel,
-    border: `1px solid ${PROCESS_VIZ_THEME.line}`,
-    borderRadius: 16,
-    boxShadow: '0 8px 24px rgba(15,23,42,0.06)',
-  };
-
-  const chipStyle = (active: boolean): CSSProperties => ({
-    border: `1px solid ${active ? PROCESS_VIZ_THEME.blue : PROCESS_VIZ_THEME.line}`,
-    background: active ? 'rgba(59,130,246,0.12)' : PROCESS_VIZ_THEME.panelAlt,
-    color: active ? PROCESS_VIZ_THEME.blue : PROCESS_VIZ_THEME.text,
-    borderRadius: 999,
-    padding: '7px 12px',
-    fontSize: 12,
-    fontWeight: 800,
-    cursor: 'pointer',
-  });
+  const stageIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    stages.forEach((s, i) => map.set(s.id, i + 1));
+    return map;
+  }, [stages]);
 
   return (
-    <section
-      style={{
-        ...panelStyle,
-        padding: isNarrow ? 16 : 20,
-        marginBottom: 8,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-          marginBottom: 14,
-        }}
-      >
+    <section className="mb-2 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-3.5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, color: PROCESS_VIZ_THEME.text }}>
-            양극재 생산 공정 시각화
-          </h2>
-          <p style={{ margin: '6px 0 0', color: PROCESS_VIZ_THEME.muted, fontSize: 13 }}>
+          <h2 className="text-lg font-semibold text-slate-900">양극재 생산 공정 시각화</h2>
+          <p className="mt-1 text-sm text-slate-500">
             공정 흐름, 이상 위치, 추정 원인, 권장 대처방안을 직관적으로 확인
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setSeed((prev) => prev + 1);
-            const next = buildProcessStages(seed + 1);
-            setSelectedId(pickDefaultProcessStage(next));
-          }}
-          onMouseEnter={() => setHoveredUi('refresh')}
-          onMouseLeave={() => setHoveredUi(null)}
-          style={{
-            border: 0,
-            borderRadius: 10,
-            padding: '10px 14px',
-            background: hoveredUi === 'refresh' ? '#2563eb' : PROCESS_VIZ_THEME.blue,
-            color: '#fff',
-            fontWeight: 800,
-            cursor: 'pointer',
-            height: 40,
-          }}
-        >
-          새로고침
-        </button>
       </div>
 
       <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isNarrow ? '1fr 1fr' : 'repeat(4, minmax(0, 1fr))',
-          gap: 10,
-          marginBottom: 14,
-        }}
+        className={`mb-3.5 grid gap-2.5 ${isNarrow ? 'grid-cols-2' : 'grid-cols-4'}`}
       >
         {[
-          { label: '전체 공정 상태', value: overallStatus },
-          { label: '위험 공정', value: `${dangerCount}` },
+          { label: '전체 공정 상태', value: overallStatus, accent: true },
+          { label: '주의/위험 공정', value: `${issueCount}` },
           { label: '영향 LOT', value: `${affectedLots}` },
-          { label: '마지막 갱신', value: lastUpdated },
+          { label: '마지막 갱신', value: lastUpdated, compact: true },
         ].map((item) => (
           <div
             key={item.label}
-            style={{
-              background: PROCESS_VIZ_THEME.panelAlt,
-              border: `1px solid ${PROCESS_VIZ_THEME.line}`,
-              borderRadius: 12,
-              padding: '12px 14px',
-            }}
+            className="rounded-xl border border-slate-200/80 bg-slate-50/70 px-3.5 py-3"
           >
-            <div style={{ fontSize: 11, color: PROCESS_VIZ_THEME.muted, fontWeight: 700 }}>
-              {item.label}
-            </div>
+            <div className="text-[11px] font-semibold text-slate-500">{item.label}</div>
             <div
-              style={{
-                marginTop: 6,
-                fontSize: item.label === '마지막 갱신' ? 13 : 20,
-                fontWeight: 900,
-                color:
-                  item.label === '전체 공정 상태'
-                    ? processStatusColor(overallStatus)
-                    : PROCESS_VIZ_THEME.text,
-              }}
+              className={`mt-1.5 font-extrabold tracking-tight ${
+                item.compact ? 'text-sm text-slate-800' : 'text-xl text-slate-900'
+              }`}
+              style={
+                item.accent ? { color: processStatusColor(overallStatus) } : undefined
+              }
             >
               {item.value}
             </div>
@@ -1308,231 +1298,187 @@ function ProcessFlowVisualizationSection() {
         ))}
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 10,
-          alignItems: 'center',
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginRight: 'auto' }}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {(['정상', '주의', '위험'] as ProcessStageStatus[]).map((status) => (
             <span
               key={status}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                color: PROCESS_VIZ_THEME.muted,
-                fontWeight: 700,
-              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"
             >
               <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 999,
-                  background: processStatusColor(status),
-                }}
+                className={`h-2.5 w-2.5 rounded-full ${
+                  status === '정상'
+                    ? 'bg-emerald-500'
+                    : status === '주의'
+                      ? 'bg-amber-500'
+                      : 'bg-rose-500'
+                }`}
               />
               {status}
             </span>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setViewMode('all')}
-          style={chipStyle(viewMode === 'all')}
+
+        <div
+          role="tablist"
+          aria-label="공정 표시 필터"
+          className="inline-flex rounded-lg border border-slate-200 bg-slate-100/80 p-0.5"
         >
-          전체 보기
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode('issues')}
-          style={chipStyle(viewMode === 'issues')}
-        >
-          이상 공정만 보기
-        </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'all'}
+            onClick={() => setViewMode('all')}
+            className={`inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold transition ${
+              viewMode === 'all'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            전체 ({stages.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'issues'}
+            onClick={() => setViewMode('issues')}
+            className={`inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold transition ${
+              viewMode === 'issues'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            이상 공정만 ({issueCount})
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gap: 14 }}>
-        <div
-          style={{
-            background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)',
-            border: `1px solid ${PROCESS_VIZ_THEME.line}`,
-            borderRadius: 14,
-            padding: isNarrow ? 12 : 16,
-          }}
-        >
+      <div className="grid gap-3.5">
+        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-indigo-50/40 p-3 sm:p-4">
           {visibleStages.length === 0 ? (
-            <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 13, padding: 20 }}>
+            <div className="px-4 py-6 text-sm text-slate-500">
               이상 공정이 없습니다. 전체 보기로 전환해 주세요.
             </div>
           ) : (
-            <>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  marginBottom: 12,
-                  flexWrap: 'wrap',
-                  fontSize: 11,
-                  color: PROCESS_VIZ_THEME.muted,
-                  fontWeight: 700,
-                }}
-              >
-                {visibleStages.map((stage, index) => (
-                  <span key={`flow-${stage.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: processStatusColor(stage.status) }}>{stage.name}</span>
-                    {index < visibleStages.length - 1 ? (
-                      <span style={{ color: PROCESS_VIZ_THEME.blue }}>→</span>
-                    ) : null}
-                  </span>
-                ))}
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: isNarrow
-                    ? 'repeat(2, minmax(0, 1fr))'
-                    : 'repeat(7, minmax(0, 1fr))',
-                  gap: 10,
-                }}
-              >
-                {visibleStages.map((stage, index) => (
-                  <ProcessStageNode
-                    key={stage.id}
-                    stage={stage}
-                    step={index + 1}
-                    selected={selectedId === stage.id}
-                    hovered={hoveredId === stage.id}
-                    onHover={setHoveredId}
-                    onSelect={setSelectedId}
-                  />
-                ))}
-              </div>
-            </>
+            <div
+              className={`grid gap-2.5 ${
+                isNarrow ? 'grid-cols-2' : 'grid-cols-7'
+              }`}
+            >
+              {visibleStages.map((stage) => (
+                <ProcessStageNode
+                  key={stage.id}
+                  stage={stage}
+                  step={stageIndexById.get(stage.id) ?? 0}
+                  selected={selectedId === stage.id}
+                  hovered={hoveredId === stage.id}
+                  onHover={setHoveredId}
+                  onSelect={setSelectedId}
+                />
+              ))}
+            </div>
           )}
         </div>
 
-        <div
-          style={{
-            background: PROCESS_VIZ_THEME.panelAlt,
-            border: `1px solid ${PROCESS_VIZ_THEME.line}`,
-            borderRadius: 14,
-            padding: 16,
-          }}
-        >
+        <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 sm:p-5">
           {selectedStage ? (
             <>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  alignItems: 'center',
-                  marginBottom: 12,
-                }}
-              >
-                <h3 style={{ margin: 0, fontSize: 16, color: PROCESS_VIZ_THEME.text }}>
-                  {selectedStage.name}
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-semibold text-slate-900">
+                  {selectedStep}. {selectedStage.name} 공정 세부 모니터링
                 </h3>
                 <span
-                  style={{
-                    borderRadius: 999,
-                    padding: '4px 10px',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    color: '#0b1220',
-                    background: processStatusColor(selectedStage.status),
-                  }}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${processStatusBadgeClass(selectedStage.status)}`}
                 >
                   {selectedStage.status}
                 </span>
               </div>
 
-              <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-                <div>
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    현재 측정값
-                  </div>
-                  <div style={{ marginTop: 4, fontWeight: 800 }}>
-                    {selectedStage.metrics.map((m) => `${m.label} ${m.value}`).join(' · ')}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    기준값 / 허용 범위
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    {selectedStage.metrics
-                      .map((m) => `${m.label}: ${m.normalRange ?? '-'}`)
-                      .join(' / ')}
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div>
-                    <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                      변화량
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {/* Card A — metrics */}
+                <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-500">현재 측정값 & 기준범위</p>
+                  <div className="mt-3 space-y-2.5">
+                    {selectedStage.metrics.map((m) => (
+                      <div
+                        key={m.label}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-medium text-slate-500">{m.label}</p>
+                          <p className="text-sm font-bold text-slate-800">{m.value}</p>
+                        </div>
+                        <span className="rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200/80">
+                          {m.normalRange ?? '-'}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
+                      <span className="text-[11px] font-semibold text-blue-700">편차</span>
+                      <span className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-blue-800 ring-1 ring-blue-200/70">
+                        {selectedStage.delta}
+                      </span>
                     </div>
-                    <div style={{ marginTop: 4, fontWeight: 800 }}>{selectedStage.delta}</div>
+                    <p className="text-[11px] text-slate-400">
+                      최근 이벤트 · {selectedStage.lastUpdated}
+                    </p>
                   </div>
-                  <div>
-                    <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                      영향 LOT 수
+                </div>
+
+                {/* Card B — cause & recommendation */}
+                <div className="rounded-xl border border-amber-200/60 bg-amber-50/60 p-4 shadow-sm">
+                  <p className="text-xs font-semibold text-amber-800">추정 원인 & 권장 대처방안</p>
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-lg border border-amber-200/50 bg-white/70 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700/80">
+                        추정 원인
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {selectedStage.issue?.cause ?? '특이 이상 없음'}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                        {selectedStage.issue?.detail ??
+                          '현재 측정값이 허용 범위 내에서 안정적으로 유지되고 있습니다.'}
+                      </p>
                     </div>
-                    <div style={{ marginTop: 4, fontWeight: 800 }}>{selectedStage.affectedLots}건</div>
+                    <div className="rounded-lg border border-blue-200/50 bg-blue-50/70 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700/80">
+                        권장 대처방안
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                        {selectedStage.issue?.recommendation ??
+                          '현재 정상 범위입니다. 주기 점검만 유지하세요.'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    추정 원인
+
+                {/* Card C — AI summary */}
+                <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-[11px] font-black text-white"
+                      aria-hidden
+                    >
+                      AI
+                    </span>
+                    <p className="text-xs font-semibold text-slate-500">AI 분석 요약 & 영향 LOT</p>
                   </div>
-                  <div style={{ marginTop: 4, lineHeight: 1.55 }}>
-                    {selectedStage.issue?.cause ?? '특이 이상 없음'}
-                    {selectedStage.issue ? ` — ${selectedStage.issue.detail}` : ''}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    권장 대처방안
-                  </div>
-                  <div style={{ marginTop: 4, lineHeight: 1.55 }}>
-                    {selectedStage.issue?.recommendation ??
-                      '현재 정상 범위입니다. 주기 점검만 유지하세요.'}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    최근 이벤트 시간
-                  </div>
-                  <div style={{ marginTop: 4, fontWeight: 700 }}>{selectedStage.lastUpdated}</div>
-                </div>
-                <div
-                  style={{
-                    marginTop: 4,
-                    background: PROCESS_VIZ_THEME.panel,
-                    border: `1px solid ${PROCESS_VIZ_THEME.line}`,
-                    borderRadius: 12,
-                    padding: 12,
-                  }}
-                >
-                  <div style={{ color: PROCESS_VIZ_THEME.muted, fontSize: 11, fontWeight: 700 }}>
-                    AI 분석 요약
-                  </div>
-                  <div style={{ marginTop: 6, lineHeight: 1.6, color: PROCESS_VIZ_THEME.text }}>
+                  <p className="mt-3 text-sm leading-relaxed text-slate-700">
                     {selectedStage.issue?.aiSummary ??
                       '선택 공정은 안정 구간입니다. 상류/하류 연계 지표만 주기적으로 확인하면 됩니다.'}
+                  </p>
+                  <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200/80">
+                    <span className="text-[11px] font-medium text-slate-500">영향 LOT 수</span>
+                    <span className="text-sm font-extrabold text-slate-900">
+                      {selectedStage.affectedLots}건
+                    </span>
                   </div>
                 </div>
               </div>
             </>
           ) : (
-            <div style={{ color: PROCESS_VIZ_THEME.muted }}>표시할 공정이 없습니다.</div>
+            <div className="text-sm text-slate-500">표시할 공정이 없습니다.</div>
           )}
         </div>
       </div>
@@ -1548,17 +1494,12 @@ export default function DashBoardPage() {
   const [draftFilter, setDraftFilter] = useState({
     startDate: DATA_MIN_DATE,
     endDate: DATA_MAX_DATE,
-    product: '전체',
-    line: '전체',
   });
   const [appliedFilter, setAppliedFilter] = useState({
     startDate: DATA_MIN_DATE,
     endDate: DATA_MAX_DATE,
-    product: '전체',
-    line: '전체',
   });
-  const { startDate, endDate, product: productFilter, line: lineFilter } = appliedFilter;
-  const [chartType, setChartType] = useState<ChartType>('bar');
+  const { startDate, endDate } = appliedFilter;
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
 
@@ -1573,19 +1514,16 @@ export default function DashBoardPage() {
   });
   const [autoSendSaved, setAutoSendSaved] = useState<AutoSendConfig | null>(null);
   const [tableFilterDraft, setTableFilterDraft] = useState({
-    product: '전체',
-    line: '전체',
     startDate: '',
     endDate: '',
   });
   const [tableFilterApplied, setTableFilterApplied] = useState({
-    product: '전체',
-    line: '전체',
     startDate: '',
     endDate: '',
   });
   const [expandStep, setExpandStep] = useState<ExpandStep>(10);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const [processSeed, setProcessSeed] = useState(3);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -1597,61 +1535,18 @@ export default function DashBoardPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const productOptions = useMemo(() => ['전체', ...PRODUCTS], []);
-  const lineOptions = useMemo(() => ['전체', ...LINES], []);
+  const filteredLots = useMemo(() => {
+    if (startDate > endDate) return [];
+    return MOCK_LOTS.filter((lot) => lot.date >= startDate && lot.date <= endDate);
+  }, [startDate, endDate]);
 
   const filteredRecords = useMemo(() => {
     if (startDate > endDate) return [];
-    return MOCK_RECORDS.filter((r) => {
-      if (r.date < startDate || r.date > endDate) return false;
-      if (productFilter !== '전체' && r.product !== productFilter) return false;
-      if (lineFilter !== '전체' && r.line !== lineFilter) return false;
-      return true;
-    });
-  }, [startDate, endDate, productFilter, lineFilter]);
+    return MOCK_RECORDS.filter((r) => r.date >= startDate && r.date <= endDate);
+  }, [startDate, endDate]);
 
-  const hasData = filteredRecords.length > 0;
-
-  const kpi: KpiSummary = useMemo(() => {
-    if (!hasData) {
-      return {
-        totalProduction: 0,
-        avgDefectRate: null,
-        topLine: null,
-        topLineProduction: 0,
-        targetAchievementRate: null,
-      };
-    }
-
-    let totalProduction = 0;
-    let totalDefects = 0;
-    let totalTarget = 0;
-    const lineMap = new Map<string, number>();
-
-    for (const r of filteredRecords) {
-      totalProduction += r.production;
-      totalDefects += r.defectCount;
-      totalTarget += r.targetProduction;
-      lineMap.set(r.line, (lineMap.get(r.line) ?? 0) + r.production);
-    }
-
-    let topLine: string | null = null;
-    let topLineProduction = 0;
-    for (const [line, prod] of lineMap) {
-      if (prod > topLineProduction) {
-        topLine = line;
-        topLineProduction = prod;
-      }
-    }
-
-    return {
-      totalProduction,
-      avgDefectRate: safeRate(totalDefects, totalProduction),
-      topLine,
-      topLineProduction,
-      targetAchievementRate: safeRate(totalProduction, totalTarget),
-    };
-  }, [filteredRecords, hasData]);
+  const hasData = filteredLots.length > 0;
+  const detailedKpis = useMemo(() => computeDetailedKpis(filteredLots), [filteredLots]);
 
   const dailyAggregates: DailyAggregate[] = useMemo(() => {
     const map = new Map<string, DailyAggregate>();
@@ -1670,23 +1565,45 @@ export default function DashBoardPage() {
     return Array.from(map.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
   }, [filteredRecords]);
 
-  const productAggregates: ProductAggregate[] = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of filteredRecords) {
-      map.set(r.product, (map.get(r.product) ?? 0) + r.production);
+  const kpi: KpiSummary = useMemo(() => {
+    if (!hasData) {
+      return {
+        totalProduction: 0,
+        avgDefectRate: null,
+        peakDate: null,
+        peakProduction: 0,
+        targetAchievementRate: null,
+      };
     }
-    return Array.from(map.entries())
-      .map(([product, production]) => ({ product, production }))
-      .sort((a, b) => b.production - a.production);
-  }, [filteredRecords]);
+
+    let totalProduction = 0;
+    let totalDefects = 0;
+    let totalTarget = 0;
+
+    for (const r of filteredRecords) {
+      totalProduction += r.production;
+      totalDefects += r.defectCount;
+      totalTarget += r.targetProduction;
+    }
+
+    const peak =
+      dailyAggregates.length === 0
+        ? null
+        : dailyAggregates.reduce((a, b) => (b.production > a.production ? b : a));
+
+    return {
+      totalProduction,
+      avgDefectRate: safeRate(totalDefects, totalProduction),
+      peakDate: peak?.date ?? null,
+      peakProduction: peak?.production ?? 0,
+      targetAchievementRate: safeRate(totalProduction, totalTarget),
+    };
+  }, [filteredRecords, dailyAggregates, hasData]);
 
   const tableRows = useMemo(() => {
     return filteredRecords
       .slice()
-      .sort((a, b) => {
-        if (a.date === b.date) return a.product.localeCompare(b.product);
-        return a.date > b.date ? -1 : 1;
-      })
+      .sort((a, b) => (a.date === b.date ? 0 : a.date > b.date ? -1 : 1))
       .map((r) => ({
         ...r,
         defectRate: safeRate(r.defectCount, r.production),
@@ -1695,13 +1612,11 @@ export default function DashBoardPage() {
   }, [filteredRecords]);
 
   const detailFilteredRows = useMemo(() => {
-    const { product, line, startDate: tStart, endDate: tEnd } = tableFilterApplied;
+    const { startDate: tStart, endDate: tEnd } = tableFilterApplied;
     const hasInvalidDateRange = tStart !== '' && tEnd !== '' && tStart > tEnd;
     if (hasInvalidDateRange) return [];
 
     return tableRows.filter((r) => {
-      if (product !== '전체' && r.product !== product) return false;
-      if (line !== '전체' && r.line !== line) return false;
       if (tStart !== '' && r.date < tStart) return false;
       if (tEnd !== '' && r.date > tEnd) return false;
       return true;
@@ -1719,16 +1634,10 @@ export default function DashBoardPage() {
   const canCollapse = clampedVisibleCount > INITIAL_VISIBLE_COUNT;
 
   const hasAppliedTableFilters =
-    tableFilterApplied.product !== '전체' ||
-    tableFilterApplied.line !== '전체' ||
-    tableFilterApplied.startDate !== '' ||
-    tableFilterApplied.endDate !== '';
+    tableFilterApplied.startDate !== '' || tableFilterApplied.endDate !== '';
 
   const hasDraftTableFilters =
-    tableFilterDraft.product !== '전체' ||
-    tableFilterDraft.line !== '전체' ||
-    tableFilterDraft.startDate !== '' ||
-    tableFilterDraft.endDate !== '';
+    tableFilterDraft.startDate !== '' || tableFilterDraft.endDate !== '';
 
   const handleSearchTableFilters = () => {
     const { startDate: tStart, endDate: tEnd } = tableFilterDraft;
@@ -1742,8 +1651,6 @@ export default function DashBoardPage() {
 
   const handleResetTableFilters = () => {
     const empty = {
-      product: '전체',
-      line: '전체',
       startDate: '',
       endDate: '',
     };
@@ -1768,13 +1675,11 @@ export default function DashBoardPage() {
   const tableStatusText =
     totalDetailCount === 0
       ? '표시할 데이터가 없습니다.'
-      : hiddenRowCount > 0
-        ? `${formatNumber(clampedVisibleCount)}건 표시 중 · 나머지 ${formatNumber(hiddenRowCount)}건 숨김`
-        : `전체 데이터 표시 중 (총 ${formatNumber(totalDetailCount)}건)`;
+      : `총 ${formatNumber(totalDetailCount)}건 중 ${formatNumber(clampedVisibleCount)}건 표시`;
 
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_COUNT);
-  }, [tableFilterApplied, startDate, endDate, productFilter, lineFilter]);
+  }, [tableFilterApplied, startDate, endDate]);
 
   const defectAnalysis: DefectAnalysis = useMemo(() => {
     const dailyRates = dailyAggregates.map((d) => ({
@@ -1812,12 +1717,9 @@ export default function DashBoardPage() {
 
     if (prevRange && startDate <= endDate) {
       previousPeriodLabel = `${prevRange.start} ~ ${prevRange.end}`;
-      const prevRecords = MOCK_RECORDS.filter((r) => {
-        if (r.date < prevRange.start || r.date > prevRange.end) return false;
-        if (productFilter !== '전체' && r.product !== productFilter) return false;
-        if (lineFilter !== '전체' && r.line !== lineFilter) return false;
-        return true;
-      });
+      const prevRecords = MOCK_RECORDS.filter(
+        (r) => r.date >= prevRange.start && r.date <= prevRange.end,
+      );
 
       if (prevRecords.length > 0) {
         hasComparison = true;
@@ -1889,8 +1791,6 @@ export default function DashBoardPage() {
     filteredRecords,
     startDate,
     endDate,
-    productFilter,
-    lineFilter,
     hasData,
   ]);
 
@@ -1898,23 +1798,20 @@ export default function DashBoardPage() {
     if (!hasData || dailyAggregates.length === 0) return '데이터 없음';
     const peak = dailyAggregates.reduce((a, b) => (b.production > a.production ? b : a));
     const avg = kpi.totalProduction / dailyAggregates.length;
-    const topProduct = productAggregates[0];
-    return `기간 내 일평균 생산 ${formatNumber(Math.round(avg))}개, 최고일 ${peak.date} (${formatNumber(peak.production)}개)${
-      topProduct ? `, 주력 제품 ${topProduct.product}` : ''
-    }`;
-  }, [hasData, dailyAggregates, kpi.totalProduction, productAggregates]);
+    return `기간 내 일평균 생산 ${formatNumber(Math.round(avg))}개, 최고일 ${peak.date} (${formatNumber(peak.production)}개)`;
+  }, [hasData, dailyAggregates, kpi.totalProduction]);
 
   const insights = useMemo(() => {
     if (!hasData) return [] as string[];
     const list: string[] = [];
-    if (kpi.topLine) {
+    if (kpi.peakDate) {
       list.push(
-        `${kpi.topLine}이(가) 생산량 ${formatNumber(kpi.topLineProduction)}개로 최고 실적을 기록했습니다. 해당 라인의 가동·배치 기준을 표준화하면 전사 생산성을 끌어올릴 수 있습니다.`,
+        `${kpi.peakDate}에 생산량 ${formatNumber(kpi.peakProduction)}개로 최고 실적을 기록했습니다. 해당 일의 가동·배치 기준을 표준화하면 전사 생산성을 끌어올릴 수 있습니다.`,
       );
     }
     if (defectAnalysis.hasComparison && defectAnalysis.changeRatePercent !== null && defectAnalysis.changeRatePercent < 0) {
       list.push(
-        `직전 동일 길이 기간 대비 불량률이 개선되었습니다. ${defectAnalysis.topDecreaseFactor}. 동일 조치를 다른 라인·제품에 확산하는 것을 권장합니다.`,
+        `직전 동일 길이 기간 대비 불량률이 개선되었습니다. ${defectAnalysis.topDecreaseFactor}. 동일 조치를 다른 구간에도 확산하는 것을 권장합니다.`,
       );
     } else {
       list.push(
@@ -1924,11 +1821,11 @@ export default function DashBoardPage() {
     if (kpi.targetAchievementRate !== null) {
       if (kpi.targetAchievementRate >= 1) {
         list.push(
-          `목표 달성률이 ${formatPercent(kpi.targetAchievementRate)}로 목표를 상회합니다. 여유 생산 능력을 신제품 또는 병목 라인 지원에 배분할 수 있습니다.`,
+          `목표 달성률이 ${formatPercent(kpi.targetAchievementRate)}로 목표를 상회합니다. 여유 생산 능력을 병목 공정 지원에 배분할 수 있습니다.`,
         );
       } else {
         list.push(
-          `목표 달성률이 ${formatPercent(kpi.targetAchievementRate)}로 목표에 미달합니다. 저실적 라인의 설비 비가동·자재 공급 지연을 점검하세요.`,
+          `목표 달성률이 ${formatPercent(kpi.targetAchievementRate)}로 목표에 미달합니다. 설비 비가동·자재 공급 지연을 점검하세요.`,
         );
       }
     }
@@ -1948,8 +1845,6 @@ export default function DashBoardPage() {
     const reset = {
       startDate: DATA_MIN_DATE,
       endDate: DATA_MAX_DATE,
-      product: '전체',
-      line: '전체',
     };
     setDraftFilter(reset);
     setAppliedFilter(reset);
@@ -1963,26 +1858,20 @@ export default function DashBoardPage() {
     }
     const headers = [
       '날짜',
-      '제품',
-      '라인',
-      '생산량',
+      '총 생산량',
+      '양품 수',
       '불량수',
       '불량률',
-      '목표생산량',
-      '목표달성률',
     ];
     const lines = [
       headers.map(escapeCsvCell).join(','),
       ...tableRows.map((r) =>
         [
           r.date,
-          r.product,
-          r.line,
           r.production,
+          Math.max(0, r.production - r.defectCount),
           r.defectCount,
           r.defectRate === null ? '' : (r.defectRate * 100).toFixed(2) + '%',
-          r.targetProduction,
-          r.achievementRate === null ? '' : (r.achievementRate * 100).toFixed(2) + '%',
         ]
           .map(escapeCsvCell)
           .join(','),
@@ -2032,15 +1921,8 @@ export default function DashBoardPage() {
     pushToast('자동 전송 예약이 해제되었습니다.', 'info');
   };
 
-  const chartButtons: Array<{ type: ChartType; label: string }> = [
-    { type: 'bar', label: '막대' },
-    { type: 'line', label: '선형' },
-    { type: 'donut', label: '원형' },
-  ];
-
   const inputClass =
     'rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm hover:border-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30';
-  const filterControlClass = `${inputClass} box-border h-10 w-[180px]`;
   const btnSecondary =
     'rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40';
   const btnPrimary =
@@ -2048,16 +1930,28 @@ export default function DashBoardPage() {
 
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50">
-      <div className="mx-auto max-w-[1600px] px-8 py-8">
-        <header className="mb-8 flex items-start justify-between gap-6">
-          <div>
+      <div className="mx-auto max-w-[1600px] px-6 py-6 lg:px-8">
+        <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
             <p className="text-sm font-medium text-blue-700">Production Operations</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">생산 대시보드</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              기간·제품·라인 필터에 따라 KPI, 추이, 불량 분석, 리포트가 동기화됩니다.
+            <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-slate-900 lg:text-3xl">
+              생산 대시보드
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              기간 필터에 따라 KPI, 추이, 불량 분석, 리포트가 동기화됩니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={btnSecondary}
+              onClick={() => {
+                setProcessSeed((prev) => prev + 1);
+                pushToast('공정 데이터가 갱신되었습니다.', 'success');
+              }}
+            >
+              새로고침
+            </button>
             <button type="button" className={btnSecondary} onClick={() => setAutoSendOpen(true)}>
               자동 전송 설정
             </button>
@@ -2073,338 +1967,175 @@ export default function DashBoardPage() {
           </div>
         ) : null}
 
-        {/* Filters */}
-        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-end gap-4">
-            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
-              시작일
+        {/* Filters — slim bar (main page style) */}
+        <section className="mb-5 rounded-xl border border-slate-200/70 bg-white px-4 py-2.5 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50/80 sm:w-auto">
               <input
                 type="date"
+                aria-label="시작일"
                 value={draftFilter.startDate}
                 onChange={(e) =>
                   setDraftFilter((prev) => ({ ...prev, startDate: e.target.value }))
                 }
-                className={filterControlClass}
+                className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-700 outline-none sm:w-[138px] sm:flex-none sm:px-2.5"
               />
-            </label>
-            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
-              종료일
+              <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
               <input
                 type="date"
+                aria-label="종료일"
                 value={draftFilter.endDate}
                 onChange={(e) =>
                   setDraftFilter((prev) => ({ ...prev, endDate: e.target.value }))
                 }
-                className={filterControlClass}
+                className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-700 outline-none sm:w-[138px] sm:flex-none sm:px-2.5"
               />
-            </label>
-            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
-              제품
-              <select
-                value={draftFilter.product}
-                onChange={(e) =>
-                  setDraftFilter((prev) => ({ ...prev, product: e.target.value }))
-                }
-                className={filterControlClass}
-              >
-                {productOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex w-[180px] flex-col gap-1.5 text-xs font-medium text-slate-600">
-              라인
-              <select
-                value={draftFilter.line}
-                onChange={(e) =>
-                  setDraftFilter((prev) => ({ ...prev, line: e.target.value }))
-                }
-                className={filterControlClass}
-              >
-                {lineOptions.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex items-center gap-2">
-              <button type="button" className={`${btnPrimary} h-10`} onClick={handleSearchFilters}>
-                검색
-              </button>
-              <button type="button" className={`${btnSecondary} h-10`} onClick={handleResetFilters}>
-                초기화
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={handleSearchFilters}
+              className="inline-flex h-8 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              적용
+            </button>
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              초기화
+            </button>
           </div>
-          <p className="mt-3 text-xs text-slate-500">
-            적용 필터: {appliedFilter.startDate} ~ {appliedFilter.endDate} · {appliedFilter.product} ·{' '}
-            {appliedFilter.line}
-          </p>
         </section>
 
-        {/* KPI */}
-        <section className="mb-6 grid grid-cols-4 gap-4">
-          {hasData ? (
-            <>
-              <KpiCard label="총 생산량" value={`${formatNumber(kpi.totalProduction)}개`} />
-              <KpiCard
-                label="평균 불량률"
-                value={formatPercent(kpi.avgDefectRate)}
-                sub="총 불량수 / 총 생산량"
-              />
-              <KpiCard
-                label="최고 생산 라인"
-                value={kpi.topLine ?? '-'}
-                sub={kpi.topLine ? `생산량 ${formatNumber(kpi.topLineProduction)}개` : undefined}
-              />
-              <KpiCard
-                label="목표 달성률"
-                value={formatPercent(kpi.targetAchievementRate)}
-                sub="총 생산량 / 목표 생산량 합계"
-              />
-            </>
-          ) : (
-            <>
-              <EmptyState message="데이터 없음" />
-              <EmptyState message="데이터 없음" />
-              <EmptyState message="데이터 없음" />
-              <EmptyState message="데이터 없음" />
-            </>
-          )}
+        {/* KPI — 6 detailed data-driven cards */}
+        <section className="mb-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
+          {detailedKpis.map((card) => (
+            <KpiCard
+              key={card.key}
+              label={card.label}
+              value={card.value}
+              unit={card.unit}
+              sub={card.sub}
+              badge={card.badge}
+            />
+          ))}
         </section>
 
-        <ProcessFlowVisualizationSection />
+        <ProcessFlowVisualizationSection seed={processSeed} />
 
-        {/* Charts + Defect side */}
-        <section className="mb-6 grid grid-cols-[2fr_1fr] gap-5">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">생산 추이</h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {chartType === 'donut' ? '제품별 생산량 비중' : '날짜별 총 생산량'}
-                </p>
-              </div>
-              <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
-                {chartButtons.map((b) => (
-                  <button
-                    key={b.type}
-                    type="button"
-                    onClick={() => setChartType(b.type)}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      chartType === b.type
-                        ? 'bg-white text-blue-700 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {b.label}
-                  </button>
-                ))}
+        {/* Charts + Defect summary — compact 12-col grid */}
+        <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-8">
+            <div className="mb-3">
+              <h2 className="text-base font-semibold text-slate-900">생산 추이</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] font-medium text-slate-500">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-blue-600" />
+                  생산량 (좌측)
+                </span>
+                <span className="text-slate-300" aria-hidden>
+                  |
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-amber-600" />
+                  불량률 (우측)
+                </span>
               </div>
             </div>
             {hasData ? (
               <ProductionTrendChart
-                chartType={chartType}
                 daily={dailyAggregates}
-                byProduct={productAggregates}
+                dailyRates={defectAnalysis.dailyRates}
               />
             ) : (
               <EmptyState message="선택한 조건에 해당하는 생산 데이터가 없습니다." />
             )}
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-4">
             <h2 className="text-base font-semibold text-slate-900">불량 유형 비중</h2>
-            <p className="mt-0.5 mb-4 text-xs text-slate-500">필터 기간 내 유형별 건수</p>
-            {hasData && defectAnalysis.typeTotalSum > 0 ? (
-              <ul className="space-y-3">
-                {DEFECT_TYPES.map((t, i) => {
-                  const count = defectAnalysis.typeTotals[t];
-                  const ratio = safeRate(count, defectAnalysis.typeTotalSum);
-                  const pct = ratio === null ? 0 : ratio * 100;
-                  return (
-                    <li key={t}>
-                      <div className="mb-1 flex justify-between text-sm">
-                        <span className="text-slate-700">{t}</span>
-                        <span className="tabular-nums text-slate-500">
-                          {formatNumber(count)}건 ({formatPercent(ratio)})
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full"
-                          style={
-                            {
-                              width: `${pct}%`,
-                              backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                            } as CSSProperties
-                          }
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+            <p className="mt-0.5 text-xs text-slate-500">필터 기간 내 요약 · 유형별 건수</p>
+
+            {hasData ? (
+              <>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="inline-flex min-w-0 flex-1 items-baseline gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50 px-2.5 py-2">
+                    <span className="shrink-0 text-[11px] font-medium text-slate-500">현재 불량률</span>
+                    <span className="truncate text-sm font-bold tabular-nums text-slate-900">
+                      {formatPercent(defectAnalysis.currentDefectRate)}
+                    </span>
+                  </div>
+                  <div className="inline-flex min-w-0 flex-[1.4] items-baseline gap-1.5 rounded-lg border border-slate-200/80 bg-slate-50 px-2.5 py-2">
+                    <span className="shrink-0 text-[11px] font-medium text-slate-500">최대 원인</span>
+                    <span className="truncate text-sm font-bold text-slate-900">
+                      {defectAnalysis.maxDefectType}
+                      {DEFECT_TYPES.includes(defectAnalysis.maxDefectType as DefectType)
+                        ? ` (${formatNumber(defectAnalysis.typeTotals[defectAnalysis.maxDefectType as DefectType])}건)`
+                        : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {defectAnalysis.typeTotalSum > 0 ? (
+                  <ul className="mt-4 space-y-2.5">
+                    {DEFECT_TYPES.map((t, i) => {
+                      const count = defectAnalysis.typeTotals[t];
+                      const ratio = safeRate(count, defectAnalysis.typeTotalSum);
+                      const pct = ratio === null ? 0 : ratio * 100;
+                      return (
+                        <li key={t}>
+                          <div className="mb-0.5 flex justify-between text-sm">
+                            <span className="text-slate-700">{t}</span>
+                            <span className="tabular-nums text-slate-500">
+                              {formatNumber(count)}건 ({formatPercent(ratio)})
+                            </span>
+                          </div>
+                          <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full"
+                              style={
+                                {
+                                  width: `${pct}%`,
+                                  backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+                                } as CSSProperties
+                              }
+                            />
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <div className="mt-4">
+                    <EmptyState message="불량 유형 데이터가 없습니다." />
+                  </div>
+                )}
+              </>
             ) : (
-              <EmptyState message="불량 유형 데이터가 없습니다." />
+              <div className="mt-4">
+                <EmptyState message="선택한 조건에 해당하는 불량 데이터가 없습니다." />
+              </div>
             )}
           </div>
         </section>
 
-        {/* Defect analysis */}
-        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-1 text-base font-semibold text-slate-900">불량 분석</h2>
-          <p className="mb-4 text-xs text-slate-500">날짜별 불량률과 직전 동일 기간 비교</p>
-          {!hasData ? (
-            <EmptyState message="선택한 조건에 해당하는 불량 분석 데이터가 없습니다." />
-          ) : (
-            <div className="grid grid-cols-3 gap-5">
-              <div className="col-span-2">
-                <DefectTrendChart dailyRates={defectAnalysis.dailyRates} />
-              </div>
-              <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-4 text-sm">
-                <div>
-                  <p className="text-xs font-medium text-slate-500">현재 기간 불량률</p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
-                    {formatPercent(defectAnalysis.currentDefectRate)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">비교 기간</p>
-                  <p className="mt-1 text-slate-800">
-                    {defectAnalysis.hasComparison && defectAnalysis.previousPeriodLabel
-                      ? defectAnalysis.previousPeriodLabel
-                      : '비교 데이터 없음'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">직전 기간 불량률</p>
-                  <p className="mt-1 text-slate-800">
-                    {defectAnalysis.hasComparison
-                      ? formatPercent(defectAnalysis.previousDefectRate)
-                      : '비교 데이터 없음'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">불량률 변화율</p>
-                  <p className="mt-1 font-medium text-slate-900">
-                    {defectAnalysis.hasComparison && defectAnalysis.changeRatePercent !== null
-                      ? `${defectAnalysis.changeRatePercent > 0 ? '+' : ''}${defectAnalysis.changeRatePercent.toFixed(1)}%`
-                      : '비교 데이터 없음'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">개선 효과</p>
-                  <p className="mt-1 text-slate-800">{defectAnalysis.improvementEffect}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">주요 감소 요인</p>
-                  <p className="mt-1 text-slate-800">{defectAnalysis.topDecreaseFactor}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">최대 불량 유형</p>
-                  <p className="mt-1 text-slate-800">{defectAnalysis.maxDefectType}</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
         {/* Table */}
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900">생산 상세 테이블</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                {!hasData
-                  ? '0건'
-                  : hasAppliedTableFilters
-                    ? `필터 결과 ${formatNumber(detailFilteredRows.length)}건 / 상위 필터 ${formatNumber(tableRows.length)}건`
-                    : `총 ${formatNumber(tableRows.length)}건`}
+                {!hasData ? '0건' : `총 ${formatNumber(tableRows.length)}건`}
               </p>
             </div>
-            <button type="button" className={btnSecondary} onClick={handleExportCsv}>
-              엑셀 추출 (CSV)
-            </button>
-          </div>
-
-          <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-100 bg-slate-50 p-4">
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
-              시작일 필터
-              <input
-                type="date"
-                value={tableFilterDraft.startDate}
-                min={startDate}
-                max={tableFilterDraft.endDate || endDate}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, startDate: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
-              종료일 필터
-              <input
-                type="date"
-                value={tableFilterDraft.endDate}
-                min={tableFilterDraft.startDate || startDate}
-                max={endDate}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, endDate: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
-              제품 필터
-              <select
-                value={tableFilterDraft.product}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, product: e.target.value }))
-                }
-                className={`${inputClass} min-w-[180px]`}
-              >
-                {productOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600">
-              라인 필터
-              <select
-                value={tableFilterDraft.line}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, line: e.target.value }))
-                }
-                className={`${inputClass} min-w-[140px]`}
-              >
-                {lineOptions.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" className={btnPrimary} onClick={handleSearchTableFilters}>
-              검색
-            </button>
             <button
               type="button"
-              className={btnSecondary}
-              onClick={handleResetTableFilters}
-              disabled={
-                !hasAppliedTableFilters &&
-                !hasDraftTableFilters &&
-                expandStep === 10 &&
-                visibleCount === INITIAL_VISIBLE_COUNT
-              }
+              onClick={handleExportCsv}
+              disabled={!hasData}
+              className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              필터 초기화
+              CSV 다운로드
             </button>
           </div>
 
@@ -2415,52 +2146,52 @@ export default function DashBoardPage() {
           ) : (
             <div className="space-y-3">
               <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <table className="w-full min-w-[720px] border-collapse text-sm">
+                  <thead className="bg-slate-100/70 text-xs font-semibold uppercase tracking-wider text-slate-600">
                     <tr>
-                      <th className="w-[120px] px-4 py-3 font-semibold">날짜</th>
-                      <th className="w-[160px] px-4 py-3 font-semibold">제품</th>
-                      <th className="w-[100px] px-4 py-3 font-semibold">라인</th>
-                      <th className="w-[110px] px-4 py-3 font-semibold">생산량</th>
-                      <th className="w-[100px] px-4 py-3 font-semibold">불량수</th>
-                      <th className="w-[110px] px-4 py-3 font-semibold">불량률</th>
-                      <th className="w-[120px] px-4 py-3 font-semibold">목표생산량</th>
-                      <th className="w-[120px] px-4 py-3 font-semibold">목표달성률</th>
+                      <th className="w-[140px] px-4 py-3 text-left">날짜</th>
+                      <th className="w-[130px] px-4 py-3 text-right">총 생산량</th>
+                      <th className="w-[120px] px-4 py-3 text-right">양품 수</th>
+                      <th className="w-[110px] px-4 py-3 text-right">불량수</th>
+                      <th className="w-[120px] px-4 py-3 text-right">불량률</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleTableRows.map((r, idx) => (
-                      <tr
-                        key={`${r.date}-${r.product}-${r.line}-${idx}`}
-                        className="border-t border-slate-100 hover:bg-slate-50/80"
-                      >
-                        <td className="px-4 py-3 tabular-nums text-slate-700">{r.date}</td>
-                        <td className="px-4 py-3 text-slate-800">{r.product}</td>
-                        <td className="px-4 py-3 text-slate-700">{r.line}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-800">
-                          {formatNumber(r.production)}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-800">
-                          {formatNumber(r.defectCount)}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-700">
-                          {formatPercent(r.defectRate)}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-800">
-                          {formatNumber(r.targetProduction)}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-700">
-                          {formatPercent(r.achievementRate)}
-                        </td>
-                      </tr>
-                    ))}
+                    {visibleTableRows.map((r, idx) => {
+                      const goodUnits = Math.max(0, r.production - r.defectCount);
+                      const highDefect = r.defectRate !== null && r.defectRate >= 0.1;
+                      return (
+                        <tr
+                          key={`${r.date}-${idx}`}
+                          className="border-b border-slate-100 transition-colors hover:bg-slate-50/80"
+                        >
+                          <td className="px-4 py-3 text-left font-medium text-slate-700">
+                            {r.date}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
+                            {formatNumber(r.production)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
+                            {formatNumber(goodUnits)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-800">
+                            {formatNumber(r.defectCount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                            <span className={highDefect ? 'text-rose-600' : 'text-slate-700'}>
+                              {formatPercent(r.defectRate)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
-              <div className="grid grid-cols-3 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="grid grid-cols-1 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-3">
                 <p className="justify-self-start text-sm text-slate-600">{tableStatusText}</p>
-                <div className="justify-self-center">
+                <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
                     className={btnPrimary}
@@ -2469,13 +2200,13 @@ export default function DashBoardPage() {
                   >
                     {expandStep === 'all' ? '전부 펼치기' : `펼치기 (+${expandStep})`}
                   </button>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
                   {canCollapse ? (
                     <button type="button" className={btnSecondary} onClick={handleCollapseRows}>
                       접기
                     </button>
                   ) : null}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <ExpandStepDropdown
                     value={expandStep}
                     onChange={(next) => {
@@ -2512,14 +2243,6 @@ export default function DashBoardPage() {
                 </dd>
               </div>
               <div className="flex justify-between border-b border-slate-100 py-1.5">
-                <dt className="text-slate-500">제품</dt>
-                <dd>{productFilter}</dd>
-              </div>
-              <div className="flex justify-between border-b border-slate-100 py-1.5">
-                <dt className="text-slate-500">라인</dt>
-                <dd>{lineFilter}</dd>
-              </div>
-              <div className="flex justify-between border-b border-slate-100 py-1.5">
                 <dt className="text-slate-500">데이터 건수</dt>
                 <dd>{formatNumber(filteredRecords.length)}건</dd>
               </div>
@@ -2537,7 +2260,7 @@ export default function DashBoardPage() {
                   평균 불량률: <strong>{formatPercent(kpi.avgDefectRate)}</strong>
                 </div>
                 <div className="rounded-lg bg-slate-50 px-3 py-2">
-                  최고 생산 라인: <strong>{kpi.topLine ?? '-'}</strong>
+                  최고 생산일: <strong>{kpi.peakDate ? `${formatNumber(kpi.peakProduction)}개 (${kpi.peakDate})` : '-'}</strong>
                 </div>
                 <div className="rounded-lg bg-slate-50 px-3 py-2">
                   목표 달성률: <strong>{formatPercent(kpi.targetAchievementRate)}</strong>
