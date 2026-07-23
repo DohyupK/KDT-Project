@@ -9,6 +9,10 @@
 
 ## 실행
 
+챗봇을 **화면과 함께** 쓰려면 루트 README  
+**[로컬 실행 — 챗봇 (터미널 2개)](../README.md#로컬-실행--챗봇-터미널-2개)**  
+처럼 frontend(:3000) + 이 서비스(:8000)를 **각각** 켭니다.
+
 ```bash
 cd ai-service
 pip install -r requirements.txt
@@ -19,6 +23,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 - Health: `GET http://127.0.0.1:8000/health`
 - Predict: `POST http://127.0.0.1:8000/predict`
+- Chat: `POST http://127.0.0.1:8000/chat` (프론트는 `/ai/chat`로 rewrite)
 - Docs: `http://127.0.0.1:8000/docs`
 - **CWD는 항상 `ai-service/`** (`models/` 상대 경로)
 

@@ -1,8 +1,10 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-07-23
+최종 갱신: 2026-07-23 (PC 재시작 전 체크포인트)
 
 모노레포 기준입니다. `frontend` / `backend` / `ai-service`를 모두 포함합니다.
+
+**이어하기:** [`docs/plans/2026-07-23-session-handoff.md`](./plans/2026-07-23-session-handoff.md)
 
 ---
 
@@ -30,7 +32,7 @@
 
 | 패키지 | 역할 | 상태 |
 |--------|------|------|
-| `frontend/` | Next.js App Router UI | AppShell + Main **챗봇 UI 목업**, Login placeholder |
+| `frontend/` | Next.js App Router UI | AppShell + **전역 GlobalChatbot** (`/ai` rewrite) |
 | `backend/` | Express + MariaDB API | 스캐폴드만 (후순위) |
 | `ai-service/` | ML 진단 + FastAPI/챗봇 | `train_pipeline` + models + `/predict` + LangGraph `/chat` |
 
@@ -44,9 +46,9 @@
 
 ## 다음 우선순위
 
-1. **frontend:** Main 챗봇 목업 → ai-service 실연동 (`/ai` rewrite)  
+1. **frontend:** Login UI  
 2. **ai-service:** (선택) `CHAT_USE_LLM=1` + API 키로 LLM 문장화  
-3. **frontend:** Login UI (병행 가능)  
+3. **frontend:** LOT 선택 → chat `features` 자동 주입  
 4. **backend:** Express·DB·RAG (후순위)
 
 ## 제약

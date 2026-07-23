@@ -16,10 +16,12 @@
 
 | 경로 | 설명 |
 |------|------|
-| `frontend/src/app/(shell)/main/page.tsx` | Main + **AI 챗봇 UI 목업** (실연동 예정) |
+| `frontend/src/app/(shell)/main/page.tsx` | Main 모니터링 (챗봇은 AppShell 전역) |
+| `frontend/src/components/chat/GlobalChatbot.tsx` | Shell 전역 AI 챗봇 (`POST /ai/chat`) |
+| `frontend/src/api/aiApi.ts` | ai-service 클라이언트 (`baseURL: '/ai'`) |
 | `frontend/src/types/index.ts` | `AppData.fillThreshold` — 이름 변경 금지 |
 | `frontend/src/api/axios.ts` | `baseURL: '/api'` (backend) |
-| `frontend/next.config.ts` | `/api` → `:3001`; 이후 `/ai` → ai-service 추가 예정 |
+| `frontend/next.config.ts` | `/api` → `:3001`; `/ai` → `127.0.0.1:8000` |
 
 ## ai-service
 
@@ -29,8 +31,8 @@
 | `ai-service/train_pipeline.py` | `train_model` / `predict` |
 | `ai-service/data/cathode_clf_data.csv` | 학습 CSV |
 | `ai-service/models/` | **최종 모델** (xgb/cat/encoder/imputer/metadata/SHAP) |
-| `ai-service/app/` | FastAPI (`/predict`) |
-| `ai-service/agent/` | LangGraph 챗봇 (예정) |
+| `ai-service/app/` | FastAPI (`/health`, `/predict`, `/chat`) |
+| `ai-service/agent/` | LangGraph 챗봇 |
 | `docs/references/cathode-clf-schema.md` | CSV 스키마 |
 | `docs/prompts/train-pipeline-ox-classifier.md` | 학습 프롬프트 |
 

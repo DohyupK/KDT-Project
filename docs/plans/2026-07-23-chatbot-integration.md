@@ -1,7 +1,8 @@
 # AI 챗봇 · 연동 작업서
 
 일자: 2026-07-23  
-상태: ML 진단(1단계) 완료 → FastAPI/`predict` API 착수 → 챗봇 → Main UI 연동
+상태: ML + FastAPI + LangGraph `/chat` + **전역 GlobalChatbot `/ai` 실연동 완료**  
+이어하기(PC 재시작): [`2026-07-23-session-handoff.md`](./2026-07-23-session-handoff.md)
 
 이 문서는 **경로를 헷갈리지 않고** 따라가기 위한 전체 작업서다.  
 상세 일지: [`docs/work-log/2026-07-23.md`](../work-log/2026-07-23.md)  
@@ -12,8 +13,8 @@ AI 참고: [`ai-service/AGENTS.md`](../../ai-service/AGENTS.md)
 ## 1. 스택에서의 현재 위치
 
 ```text
-Polars → ML(XGBoost+CatBoost) → LangGraph → LLM → FastAPI/프론트
-         ▲ 여기까지 완료            ▲ 다음              ▲ UI는 목업만
+Polars → ML(XGBoost+CatBoost) → LangGraph → LLM(선택) → FastAPI + 전역 FE 챗봇
+         ▲ 완료                    ▲ 템플릿 완료   ▲ 미연결      ▲ /ai 실연동 완료
 ```
 
 | 단계 | 상태 | 핵심 경로 |
@@ -22,7 +23,9 @@ Polars → ML(XGBoost+CatBoost) → LangGraph → LLM → FastAPI/프론트
 | 학습 산출물 | **완료** | `ai-service/models/` |
 | FastAPI `predict` | **완료** | `ai-service/app/` |
 | LangGraph 챗봇 | **완료** (템플릿 `/chat` 스모크 OK; LLM 선택) | `ai-service/agent/` + `POST /chat` |
-| Main 챗봇 UI | UI만 있음 | `frontend/src/app/(shell)/main/page.tsx` |
+| Main 챗봇 UI | **전역 실연동** | `frontend/src/components/chat/GlobalChatbot.tsx` + AppShell |
+| next `/ai` rewrite | **완료** | `frontend/next.config.ts` → `:8000` |
+| chat API 클라이언트 | **완료** | `frontend/src/api/aiApi.ts` |
 | backend RAG/DB | 나중 | `backend/` |
 
 **정책:** backend가 늦어도 **frontend ↔ ai-service** 만으로 챗봇 연동한다. RAG·제어는 이후.
@@ -42,7 +45,7 @@ Polars → ML(XGBoost+CatBoost) → LangGraph → LLM → FastAPI/프론트
 | [`ai-service/requirements.txt`](../../ai-service/requirements.txt) | Python 의존성 |
 | [`ai-service/logs/`](../../ai-service/logs/) | `train.log`, 100trial 로그 |
 | `ai-service/app/` | FastAPI (`/health`, `/predict`, `/chat`) |
-| `ai-service/agent/` | LangGraph + predict Tool (**코드 작성**, 설치 대기) |
+| `ai-service/agent/` | LangGraph + predict Tool (**완료**, 템플릿 기본) |
 
 ### models/ 최종 아티팩트 (2026-07-23 100 trial)
 
@@ -114,10 +117,10 @@ Polars → ML(XGBoost+CatBoost) → LangGraph → LLM → FastAPI/프론트
 ## 4. 구현 순서 (이 작업서 기준)
 
 1. **FastAPI** `POST /predict` (+ health) — **완료**  
-2. **agent/** 최소 챗봇 — LangGraph + `POST /chat` — **코드 작성** (pip 설치·스모크 승인 대기)  
-3. **frontend Main** — 목업 → 실 API (입력/전송/메시지 상태)  
-4. **next.config** — `/ai` rewrite → ai-service 포트  
-5. (나중) backend RAG·DB·제어
+2. **agent/** 최소 챗봇 — LangGraph + `POST /chat` — **완료**  
+3. **frontend GlobalChatbot** — AppShell 전역 + `aiApi` — **완료**  
+4. **next.config** — `/ai` rewrite → ai-service — **완료**  
+5. (나중) LOT→features 주입 · LLM · backend RAG·DB·제어
 
 ---
 
