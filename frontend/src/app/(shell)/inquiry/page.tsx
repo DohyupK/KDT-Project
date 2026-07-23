@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
+import Link from 'next/link';
+import axios from 'axios';
 import {
   AlertCircle,
   CalendarClock,
@@ -20,6 +22,10 @@ import {
   User,
   X,
 } from 'lucide-react';
+import { authApi } from '@/api/authApi';
+import { inquiryApi } from '@/api/inquiryApi';
+import { getAuthUser, isLoggedIn } from '@/lib/authStorage';
+import type { AuthUser } from '@/types';
 
 const CATEGORIES = [
   { name: '시스템 오류 제보', icon: <AlertCircle size={18} /> },
@@ -29,10 +35,18 @@ const CATEGORIES = [
   { name: '기타', icon: <MoreHorizontal size={18} /> },
 ] as const;
 
-const USER_NAME = '홍길동';
-const USER_EMAIL = 'hong@example.com';
+function getApiErrorMessage(err: unknown, fallback: string) {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { message?: string } | undefined;
+    if (data?.message) return data.message;
+  }
+  return fallback;
+}
 
 export default function InquiryPage() {
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [profile, setProfile] = useState<AuthUser | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [category, setCategory] = useState<string | null>(null);
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
@@ -40,9 +54,37 @@ export default function InquiryPage() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const categoryRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      setIsLoadingProfile(true);
+      if (!isLoggedIn()) {
+        setLoggedIn(false);
+        setProfile(null);
+        setIsLoadingProfile(false);
+        return;
+      }
+
+      setLoggedIn(true);
+      const cached = getAuthUser();
+      if (cached) setProfile(cached);
+
+      try {
+        const { data } = await authApi.getProfile();
+        setProfile(data.user);
+      } catch {
+        if (!cached) setProfile(null);
+      } finally {
+        setIsLoadingProfile(false);
+      }
+    };
+
+    loadProfile();
+  }, []);
 
   useEffect(() => {
     if (!isCategoryOpen) return;
@@ -77,11 +119,15 @@ export default function InquiryPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
 
+    if (!loggedIn || !profile) {
+      setErrorMessage('문의 접수는 로그인 후 이용할 수 있습니다.');
+      return;
+    }
     if (!category) {
       setErrorMessage('문의 카테고리를 선택해주세요.');
       return;
@@ -95,23 +141,35 @@ export default function InquiryPage() {
       return;
     }
 
-    console.log('문의 접수 데이터:', {
-      카테고리: category,
-      이름: USER_NAME,
-      이메일: USER_EMAIL,
-      제목: subject.trim(),
-      내용: content.trim(),
-      파일목록: files.map((file) => file.name),
-      공개여부: isPrivate ? '비공개' : '공개',
-    });
+    setIsSubmitting(true);
+    try {
+      const { data } = await inquiryApi.createInquiry({
+        category,
+        title: subject.trim(),
+        content: content.trim(),
+        isPrivate,
+        attachments: files.map((file) => file.name),
+        authorName: profile.name,
+        email: profile.email,
+        phone: profile.phone,
+      });
 
-    setSuccessMessage(
-      isPrivate
-        ? '비공개 문의가 정상적으로 접수되었습니다. 빠른 시일 내에 답변드리겠습니다.'
-        : '문의가 정상적으로 접수되었습니다. 빠른 시일 내에 답변드리겠습니다.',
-    );
-    resetForm();
+      setSuccessMessage(
+        data.message ??
+          (isPrivate
+            ? '비공개 문의가 정상적으로 접수되었습니다. 빠른 시일 내에 답변드리겠습니다.'
+            : '문의가 정상적으로 접수되었습니다. 빠른 시일 내에 답변드리겠습니다.'),
+      );
+      resetForm();
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '문의 접수에 실패했습니다. 잠시 후 다시 시도해주세요.'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const userName = profile?.name ?? '';
+  const userEmail = profile?.email ?? '';
 
   return (
     <div className="h-full w-full bg-gray-50 text-gray-800 font-sans overflow-y-auto">
@@ -125,6 +183,21 @@ export default function InquiryPage() {
             서비스 이용 중 궁금한 점이나 요청 사항을 남겨주세요.
           </p>
         </div>
+
+        {!isLoadingProfile && !loggedIn && (
+          <div
+            role="alert"
+            className="flex items-center gap-3 p-4 mb-6 bg-amber-50 border border-amber-100 rounded-xl"
+          >
+            <AlertCircle className="text-amber-500 shrink-0" size={20} />
+            <span className="text-sm text-amber-800">
+              문의 접수는 로그인 후 이용할 수 있습니다.{' '}
+              <Link href="/login" className="font-bold text-blue-600 hover:underline">
+                로그인하기
+              </Link>
+            </span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
           {/* 문의 카테고리 선택 */}
@@ -216,7 +289,7 @@ export default function InquiryPage() {
                   <input
                     id="inquiry-name"
                     type="text"
-                    value={USER_NAME}
+                    value={isLoadingProfile ? '불러오는 중...' : userName}
                     readOnly
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500 cursor-default focus:outline-none"
                   />
@@ -234,7 +307,7 @@ export default function InquiryPage() {
                   <input
                     id="inquiry-email"
                     type="email"
-                    value={USER_EMAIL}
+                    value={isLoadingProfile ? '불러오는 중...' : userEmail}
                     readOnly
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500 cursor-default focus:outline-none"
                   />
@@ -401,9 +474,10 @@ export default function InquiryPage() {
           {/* 제출 버튼 */}
           <button
             type="submit"
-            className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition cursor-pointer flex items-center justify-center gap-2"
+            disabled={!loggedIn || isSubmitting || isLoadingProfile}
+            className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Send size={18} /> 문의 접수
+            <Send size={18} /> {isSubmitting ? '접수 중...' : '문의 접수'}
           </button>
         </form>
       </div>

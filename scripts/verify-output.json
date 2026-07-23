@@ -1,0 +1,25 @@
+﻿powershell : 위치 C:\Users\sky_k\OneDrive\Desktop\KDT-PROJECT\KDT-Project\scripts\verify-integration.ps1:196 문자:53
+위치 C:\Users\sky_k\AppData\Local\Temp\ps-script-a9759ef7-7db0-48e2-a19f-e4bb23cd5edb.ps1:102 문자:1
++ powershell -NoProfile -ExecutionPolicy Bypass -File "c:\Users\sky_k\O ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (위치 C:\Users\sky...n.ps1:196 문자:53:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
++     assignee = '源?꾩닔'; status = '議곗튂 以?; action = 'Verify action'; c ...
++                                                     ~~~~~~
+식 또는 문에서 예기치 않은 'Verify' 토큰입니다.
+위치 C:\Users\sky_k\OneDrive\Desktop\KDT-PROJECT\KDT-Project\scripts\verify-integration.ps1:196 문자:53
++     assignee = '源?꾩닔'; status = '議곗튂 以?; action = 'Verify action'; c ...
++                                                     ~
+해시 리터럴이 완전하지 않습니다.
+위치 C:\Users\sky_k\OneDrive\Desktop\KDT-PROJECT\KDT-Project\scripts\verify-integration.ps1:256 문자:55
++ $skip = ($results | Where-Object { $_.Status -eq 'SKIP' }).Count
++                                                       ~~~~~~~~~~
+문자열에 ' 종결자가 없습니다.
+위치 C:\Users\sky_k\OneDrive\Desktop\KDT-PROJECT\KDT-Project\scripts\verify-integration.ps1:194 문자:15
++ if ($issueId) {
++               ~
+문 블록 또는 형식 정의에 닫는 '}'가 없습니다.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+ 

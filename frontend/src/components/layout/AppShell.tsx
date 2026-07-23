@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 import {
   Search,
   Bell,
@@ -14,8 +15,11 @@ import {
   HelpCircle,
   Briefcase,
   Settings,
+  LogOut,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { authApi } from '@/api/authApi'
+import { clearAuthSession, getAuthUser, isLoggedIn } from '@/lib/authStorage'
 
 export const NAV_MENUS = [
   { name: 'Main', icon: Home, path: '/main' },
@@ -29,6 +33,45 @@ export const NAV_MENUS = [
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const [loggedIn, setLoggedIn] = useState(false)
+  const [userName, setUserName] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const syncAuth = () => {
+      setLoggedIn(isLoggedIn())
+      setUserName(getAuthUser()?.name ?? '')
+    }
+    syncAuth()
+    window.addEventListener('storage', syncAuth)
+    return () => window.removeEventListener('storage', syncAuth)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [menuOpen])
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {
+      // 토큰 만료 등으로 실패해도 클라이언트 세션은 제거
+    }
+    clearAuthSession()
+    setLoggedIn(false)
+    setUserName('')
+    setMenuOpen(false)
+    router.push('/login')
+  }
 
   return (
     <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
@@ -89,13 +132,39 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />
             </button>
             <div className="text-gray-600 font-medium whitespace-nowrap">2026-06-25 10:30</div>
-            <Link
-              href="/login"
-              aria-label="로그인"
-              className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors bg-gray-200"
-            >
-              <User size={24} />
-            </Link>
+            {loggedIn ? (
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((prev) => !prev)}
+                  aria-label="사용자 메뉴"
+                  className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-full transition-colors bg-gray-200"
+                >
+                  <User size={22} />
+                  <span className="text-sm font-medium max-w-[80px] truncate">{userName}</span>
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-20">
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <LogOut size={16} />
+                      로그아웃
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                aria-label="로그인"
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors bg-gray-200"
+              >
+                <User size={24} />
+              </Link>
+            )}
           </div>
         </header>
 

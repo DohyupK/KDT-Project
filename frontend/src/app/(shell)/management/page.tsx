@@ -1,7 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import dayjs from 'dayjs'
 import { AlertCircle } from 'lucide-react'
+import { managementApi } from '@/api/managementApi'
+import type { Inquiry } from '@/types'
 
 type MailImportance = '높음' | '보통' | '낮음'
 type InquiryStatus = '대기' | '진행중' | '완료'
@@ -63,235 +66,6 @@ type DefectRecord = {
   prevDefectRate?: number
 }
 
-const INITIAL_MAILS: MailItem[] = [
-  {
-    id: 'MAIL-001',
-    sender: 'quality@posco.com',
-    subject: '[긴급] A라인 품질 이상 보고',
-    body: '금일 오전 A라인에서 표면 결함률이 급증했습니다. 첨부된 측정 리포트를 확인 후 조치 부탁드립니다.',
-    receivedAt: '2026-07-16 09:12',
-    cc: ['plant-manager@posco.com', 'qc-lead@posco.com'],
-    hasAttachment: true,
-    attachments: ['A라인_품질리포트_0716.pdf', '측정데이터.xlsx'],
-    importance: '높음',
-    tags: ['품질', '긴급'],
-    isRead: false,
-  },
-  {
-    id: 'MAIL-002',
-    sender: 'ops@partner.co.kr',
-    subject: '주간 생산 실적 공유',
-    body: '지난주 생산 실적 및 가동률 요약본을 공유드립니다. 특이사항은 B라인 정비로 인한 가동률 하락입니다.',
-    receivedAt: '2026-07-16 08:45',
-    cc: ['planning@posco.com'],
-    hasAttachment: true,
-    attachments: ['주간실적_0710-0715.xlsx'],
-    importance: '보통',
-    tags: ['생산', '주간보고'],
-    isRead: false,
-  },
-  {
-    id: 'MAIL-003',
-    sender: 'safety@posco.com',
-    subject: '안전점검 일정 안내',
-    body: '7월 18일 전 라인 대상 정기 안전점검이 예정되어 있습니다. 담당자별 체크리스트를 사전 확인해주세요.',
-    receivedAt: '2026-07-15 17:20',
-    importance: '보통',
-    tags: ['안전'],
-    isRead: true,
-    hasAttachment: false,
-  },
-  {
-    id: 'MAIL-004',
-    sender: 'vendor@material.kr',
-    subject: '원자재 납품 일정 변경 요청',
-    body: '기상 이슈로 인해 7월 17일 납품분이 하루 지연될 예정입니다. 양해 부탁드립니다.',
-    receivedAt: '2026-07-15 14:03',
-    cc: ['procurement@posco.com'],
-    hasAttachment: false,
-    importance: '높음',
-    tags: ['구매', '납품'],
-    isRead: false,
-  },
-  {
-    id: 'MAIL-005',
-    sender: 'hr@posco.com',
-    subject: '7월 교육 일정 공지',
-    body: '신규 입사자 대상 품질 기초 교육 일정을 안내드립니다. 참석자 명단을 회신해주세요.',
-    receivedAt: '2026-07-14 11:30',
-    importance: '낮음',
-    tags: ['교육', 'HR'],
-    isRead: true,
-    hasAttachment: true,
-    attachments: ['교육일정표.pdf'],
-  },
-  {
-    id: 'MAIL-006',
-    sender: 'it-support@posco.com',
-    subject: 'MES 시스템 정기 점검 안내',
-    body: '7월 20일 02:00~04:00 MES 정기 점검으로 일부 조회 기능이 제한됩니다.',
-    receivedAt: '2026-07-14 09:05',
-    importance: '보통',
-    tags: ['IT', 'MES'],
-    isRead: true,
-    hasAttachment: false,
-  },
-  {
-    id: 'MAIL-007',
-    sender: 'customer@battery.com',
-    subject: 'LOT-8821 품질 문의',
-    body: '납품 LOT-8821 샘플에서 수분 함량 편차가 확인되어 원인 분석 요청드립니다.',
-    receivedAt: '2026-07-13 16:40',
-    cc: ['cs@posco.com'],
-    hasAttachment: true,
-    attachments: ['고객클레임_시료사진.zip'],
-    importance: '높음',
-    tags: ['고객', '클레임'],
-    isRead: false,
-  },
-]
-
-const INITIAL_INQUIRIES: InquiryItem[] = [
-  {
-    id: 'INQ-001',
-    authorName: '김민수',
-    email: 'minsu.kim@example.com',
-    phone: '010-1234-5678',
-    title: '대시보드 불량률 수치 오류 문의',
-    content: '메인 대시보드의 A라인 불량률이 실제 MES 수치와 다르게 표시됩니다. 확인 부탁드립니다.',
-    createdAt: '2026-07-16 10:20',
-    type: '시스템',
-    attachments: ['스크린샷.png'],
-    priority: '높음',
-    department: '품질관리팀',
-    updatedAt: '2026-07-16 10:20',
-    status: '대기',
-  },
-  {
-    id: 'INQ-002',
-    authorName: '이서연',
-    email: 'seoyeon.lee@example.com',
-    phone: '010-2345-6789',
-    title: '문의 답변 알림 메일 미수신',
-    content: '이전 문의에 대한 답변 알림 메일이 도착하지 않았습니다. 수신 설정을 확인하고 싶습니다.',
-    createdAt: '2026-07-15 15:40',
-    type: '계정/알림',
-    priority: '보통',
-    department: 'IT지원팀',
-    updatedAt: '2026-07-15 16:10',
-    status: '진행중',
-  },
-  {
-    id: 'INQ-003',
-    authorName: '박준호',
-    email: 'junho.park@example.com',
-    phone: '010-3456-7890',
-    title: '지식베이스 문서 접근 권한 요청',
-    content: '공정 매뉴얼 문서 열람 권한이 없어 업무에 어려움이 있습니다. 권한 부여를 요청합니다.',
-    createdAt: '2026-07-15 09:15',
-    type: '권한',
-    priority: '보통',
-    department: '생산기술팀',
-    updatedAt: '2026-07-16 08:00',
-    status: '완료',
-    reply: {
-      inquiryId: 'INQ-003',
-      content: '생산기술팀 권한 그룹에 포함 처리 완료했습니다. 재로그인 후 확인해 주세요.',
-      assignee: '관리자 최유진',
-      replyStatus: '완료',
-      repliedAt: '2026-07-16 08:00',
-      internalMemo: '권한 그룹 TECH_PROD 추가',
-      priority: '보통',
-      adminConfirmed: true,
-    },
-  },
-  {
-    id: 'INQ-004',
-    authorName: '정하늘',
-    email: 'haneul.jung@example.com',
-    phone: '010-4567-8901',
-    title: 'C라인 센서 데이터 지연 현상',
-    content: 'C라인 온도 센서 데이터가 약 5분 지연되어 표시됩니다. 원인 파악이 필요합니다.',
-    createdAt: '2026-07-14 18:05',
-    type: '설비/데이터',
-    attachments: ['지연로그.txt'],
-    priority: '높음',
-    department: '설비보전팀',
-    updatedAt: '2026-07-14 18:05',
-    status: '대기',
-  },
-  {
-    id: 'INQ-005',
-    authorName: '오수진',
-    email: 'sujin.oh@example.com',
-    phone: '010-5678-9012',
-    title: '보고서 엑셀 다운로드 실패',
-    content: '주간 품질 보고서 엑셀 다운로드 시 500 오류가 발생합니다.',
-    createdAt: '2026-07-14 11:22',
-    type: '시스템',
-    priority: '낮음',
-    department: 'IT지원팀',
-    updatedAt: '2026-07-15 09:30',
-    status: '진행중',
-  },
-  {
-    id: 'INQ-006',
-    authorName: '한도윤',
-    email: 'doyoon.han@example.com',
-    phone: '010-6789-0123',
-    title: '모바일 화면 레이아웃 깨짐',
-    content: '태블릿에서 문의 페이지 테이블이 가로로 넘칩니다. 반응형 수정 요청드립니다.',
-    createdAt: '2026-07-13 13:50',
-    type: 'UI/UX',
-    priority: '보통',
-    department: '프론트엔드',
-    updatedAt: '2026-07-13 13:50',
-    status: '대기',
-  },
-  {
-    id: 'INQ-007',
-    authorName: '윤채원',
-    email: 'chaewon.yoon@example.com',
-    phone: '010-7890-1234',
-    title: '알림 임계값 기본값 변경 요청',
-    content: '불량률 알림 기본 임계값을 3%에서 2.5%로 변경하고 싶습니다.',
-    createdAt: '2026-07-12 16:00',
-    type: '설정',
-    priority: '낮음',
-    department: '품질관리팀',
-    updatedAt: '2026-07-13 10:15',
-    status: '완료',
-    reply: {
-      inquiryId: 'INQ-007',
-      content: '관리자 화면에서 임계값 수정 가능하도록 안내드렸습니다. 즉시 반영됩니다.',
-      assignee: '관리자 김도현',
-      replyStatus: '완료',
-      repliedAt: '2026-07-13 10:15',
-      internalMemo: '사용자 교육 완료',
-      priority: '낮음',
-      adminConfirmed: true,
-    },
-  },
-]
-
-const DEFECT_RECORDS: DefectRecord[] = [
-  { lineId: 'LINE-A', lineName: 'A라인', defectRate: 4.2, baseDate: '2026-07-14', defectCount: 42, totalCount: 1000, causeCategory: '표면결함', department: '품질관리팀', prevDefectRate: 2.1 },
-  { lineId: 'LINE-A', lineName: 'A라인', defectRate: 3.8, baseDate: '2026-07-15', defectCount: 38, totalCount: 1000, causeCategory: '표면결함', department: '품질관리팀', prevDefectRate: 4.2 },
-  { lineId: 'LINE-A', lineName: 'A라인', defectRate: 4.5, baseDate: '2026-07-16', defectCount: 45, totalCount: 1000, causeCategory: '치수불량', department: '품질관리팀', prevDefectRate: 3.8 },
-  { lineId: 'LINE-B', lineName: 'B라인', defectRate: 1.8, baseDate: '2026-07-14', defectCount: 18, totalCount: 1000, causeCategory: '이물질', department: '생산1팀', prevDefectRate: 1.5 },
-  { lineId: 'LINE-B', lineName: 'B라인', defectRate: 2.0, baseDate: '2026-07-15', defectCount: 20, totalCount: 1000, causeCategory: '이물질', department: '생산1팀', prevDefectRate: 1.8 },
-  { lineId: 'LINE-B', lineName: 'B라인', defectRate: 1.6, baseDate: '2026-07-16', defectCount: 16, totalCount: 1000, causeCategory: '이물질', department: '생산1팀', prevDefectRate: 2.0 },
-  { lineId: 'LINE-C', lineName: 'C라인', defectRate: 3.5, baseDate: '2026-07-14', defectCount: 35, totalCount: 1000, causeCategory: '온도편차', department: '생산2팀', prevDefectRate: 2.9 },
-  { lineId: 'LINE-C', lineName: 'C라인', defectRate: 3.9, baseDate: '2026-07-15', defectCount: 39, totalCount: 1000, causeCategory: '온도편차', department: '생산2팀', prevDefectRate: 3.5 },
-  { lineId: 'LINE-C', lineName: 'C라인', defectRate: 4.1, baseDate: '2026-07-16', defectCount: 41, totalCount: 1000, causeCategory: '온도편차', department: '생산2팀', prevDefectRate: 3.9 },
-  { lineId: 'LINE-D', lineName: 'D라인', defectRate: 3.2, baseDate: '2026-07-14', defectCount: 32, totalCount: 1000, causeCategory: '원료편차', department: '생산3팀', prevDefectRate: 2.4 },
-  { lineId: 'LINE-D', lineName: 'D라인', defectRate: 2.1, baseDate: '2026-07-15', defectCount: 21, totalCount: 1000, causeCategory: '원료편차', department: '생산3팀', prevDefectRate: 3.2 },
-  { lineId: 'LINE-D', lineName: 'D라인', defectRate: 3.4, baseDate: '2026-07-16', defectCount: 34, totalCount: 1000, causeCategory: '원료편차', department: '생산3팀', prevDefectRate: 2.1 },
-  { lineId: 'LINE-E', lineName: 'E라인', defectRate: 0.9, baseDate: '2026-07-14', defectCount: 9, totalCount: 1000, causeCategory: '기타', department: '생산1팀', prevDefectRate: 1.1 },
-  { lineId: 'LINE-E', lineName: 'E라인', defectRate: 1.2, baseDate: '2026-07-15', defectCount: 12, totalCount: 1000, causeCategory: '기타', department: '생산1팀', prevDefectRate: 0.9 },
-  { lineId: 'LINE-E', lineName: 'E라인', defectRate: 1.0, baseDate: '2026-07-16', defectCount: 10, totalCount: 1000, causeCategory: '기타', department: '생산1팀', prevDefectRate: 1.2 },
-]
-
 type ReplyFormState = {
   content: string
   assignee: string
@@ -320,10 +94,38 @@ function badgePriority(v?: InquiryPriority) {
   return 'bg-yellow-100 text-yellow-600'
 }
 
-function formatNow() {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+function formatDateTime(iso: string) {
+  return dayjs(iso).format('YYYY-MM-DD HH:mm')
+}
+
+function mapInquiryToItem(inquiry: Inquiry): InquiryItem {
+  return {
+    id: inquiry.id,
+    authorName: inquiry.authorName,
+    email: inquiry.email,
+    phone: inquiry.phone ?? '',
+    title: inquiry.title,
+    content: inquiry.content,
+    createdAt: formatDateTime(inquiry.createdAt),
+    type: inquiry.category,
+    attachments: inquiry.attachments,
+    priority: (inquiry.priority as InquiryPriority) ?? '보통',
+    department: inquiry.department ?? undefined,
+    updatedAt: formatDateTime(inquiry.updatedAt),
+    status: (inquiry.status as InquiryStatus) ?? '대기',
+    reply: inquiry.reply
+      ? {
+          inquiryId: inquiry.id,
+          content: inquiry.reply.content,
+          assignee: inquiry.reply.assignee,
+          replyStatus: inquiry.reply.replyStatus,
+          repliedAt: inquiry.reply.repliedAt ? formatDateTime(inquiry.reply.repliedAt) : undefined,
+          internalMemo: inquiry.reply.internalMemo ?? undefined,
+          priority: (inquiry.reply.priority as InquiryPriority) ?? '보통',
+          adminConfirmed: inquiry.reply.adminConfirmed,
+        }
+      : undefined,
+  }
 }
 
 function getAlertLines(records: DefectRecord[], threshold: number) {
@@ -354,24 +156,124 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function ManagementPage() {
   const [activeTab, setActiveTab] = useState<TabId>('mail')
-  const [mails, setMails] = useState<MailItem[]>(INITIAL_MAILS)
+  const [mails, setMails] = useState<MailItem[]>([])
+  const [mailsLoading, setMailsLoading] = useState(false)
+  const [mailError, setMailError] = useState('')
   const [selectedMailId, setSelectedMailId] = useState<string | null>(null)
-  const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES)
+  const [inquiries, setInquiries] = useState<InquiryItem[]>([])
+  const [inquiriesLoading, setInquiriesLoading] = useState(false)
+  const [inquiryError, setInquiryError] = useState('')
+  const [replySubmitting, setReplySubmitting] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('전체')
   const [selectedInquiryId, setSelectedInquiryId] = useState<string | null>(null)
   const [replyForm, setReplyForm] = useState<ReplyFormState>(EMPTY_REPLY_FORM)
+  const [defectRecords, setDefectRecords] = useState<DefectRecord[]>([])
+  const [defectsLoading, setDefectsLoading] = useState(false)
+  const [defectError, setDefectError] = useState('')
   const [threshold, setThreshold] = useState(3)
   const [n8nEnabled, setN8nEnabled] = useState(true)
+  const settingsLoadedRef = useRef(false)
+
+  const loadMails = useCallback(async () => {
+    setMailsLoading(true)
+    setMailError('')
+    try {
+      const { data } = await managementApi.getMails()
+      setMails(data.mails)
+    } catch {
+      setMailError('메일 목록을 불러오지 못했습니다. 로그인 상태와 백엔드 연결을 확인해주세요.')
+    } finally {
+      setMailsLoading(false)
+    }
+  }, [])
+
+  const loadInquiries = useCallback(async () => {
+    setInquiriesLoading(true)
+    setInquiryError('')
+    try {
+      const { data } = await managementApi.getInquiries()
+      setInquiries(data.inquiries.map(mapInquiryToItem))
+    } catch {
+      setInquiryError('문의 목록을 불러오지 못했습니다. 로그인 상태와 백엔드 연결을 확인해주세요.')
+    } finally {
+      setInquiriesLoading(false)
+    }
+  }, [])
+
+  const loadDefects = useCallback(async () => {
+    setDefectsLoading(true)
+    setDefectError('')
+    try {
+      const [recordsRes, settingsRes] = await Promise.all([
+        managementApi.getDefectRecords(),
+        managementApi.getDefectSettings(),
+      ])
+      setDefectRecords(recordsRes.data.records)
+      setThreshold(settingsRes.data.settings.threshold)
+      setN8nEnabled(settingsRes.data.settings.n8nEnabled)
+      settingsLoadedRef.current = true
+    } catch {
+      setDefectError('불량률 데이터를 불러오지 못했습니다. 로그인 상태와 백엔드 연결을 확인해주세요.')
+    } finally {
+      setDefectsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'mail') {
+      void loadMails()
+    }
+  }, [activeTab, loadMails])
+
+  useEffect(() => {
+    if (activeTab === 'inquiry') {
+      void loadInquiries()
+    }
+  }, [activeTab, loadInquiries])
+
+  useEffect(() => {
+    if (activeTab === 'defect') {
+      void loadDefects()
+    }
+  }, [activeTab, loadDefects])
+
+  useEffect(() => {
+    if (!settingsLoadedRef.current) return
+
+    const timer = window.setTimeout(() => {
+      void managementApi.updateDefectSettings({ threshold }).catch(() => {
+        setDefectError('임계값 저장에 실패했습니다.')
+      })
+    }, 500)
+
+    return () => window.clearTimeout(timer)
+  }, [threshold])
 
   const selectedMail = mails.find((m) => m.id === selectedMailId) ?? null
   const selectedInquiry = inquiries.find((i) => i.id === selectedInquiryId) ?? null
   const filteredInquiries =
     statusFilter === '전체' ? inquiries : inquiries.filter((i) => i.status === statusFilter)
-  const alertLines = getAlertLines(DEFECT_RECORDS, threshold)
+  const alertLines = getAlertLines(defectRecords, threshold)
 
-  const handleSelectMail = (id: string) => {
+  const handleSelectMail = async (id: string) => {
     setSelectedMailId(id)
     setMails((prev) => prev.map((m) => (m.id === id ? { ...m, isRead: true } : m)))
+    try {
+      await managementApi.markMailRead(id)
+    } catch {
+      setMailError('메일 읽음 처리에 실패했습니다.')
+    }
+  }
+
+  const handleToggleN8n = async () => {
+    const next = !n8nEnabled
+    setN8nEnabled(next)
+    try {
+      await managementApi.updateDefectSettings({ n8nEnabled: next })
+    } catch {
+      setN8nEnabled(!next)
+      setDefectError('n8n 설정 저장에 실패했습니다.')
+    }
   }
 
   const handleSelectInquiry = (id: string) => {
@@ -390,24 +292,26 @@ export default function ManagementPage() {
     }
   }
 
-  const handleSubmitReply = () => {
+  const handleSubmitReply = async () => {
     if (!selectedInquiryId || !replyForm.content.trim() || !replyForm.assignee.trim()) return
-    const now = formatNow()
-    const reply: InquiryReply = {
-      inquiryId: selectedInquiryId,
-      content: replyForm.content.trim(),
-      assignee: replyForm.assignee.trim(),
-      replyStatus: '완료',
-      repliedAt: now,
-      internalMemo: replyForm.internalMemo.trim() || undefined,
-      priority: replyForm.priority,
-      adminConfirmed: replyForm.adminConfirmed,
+
+    setReplySubmitting(true)
+    setInquiryError('')
+    try {
+      const { data } = await managementApi.submitReply(selectedInquiryId, {
+        content: replyForm.content.trim(),
+        assignee: replyForm.assignee.trim(),
+        priority: replyForm.priority,
+        internalMemo: replyForm.internalMemo.trim() || undefined,
+        adminConfirmed: replyForm.adminConfirmed,
+      })
+      const updated = mapInquiryToItem(data.inquiry)
+      setInquiries((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    } catch {
+      setInquiryError('답변 등록에 실패했습니다. 입력값과 서버 연결을 확인해주세요.')
+    } finally {
+      setReplySubmitting(false)
     }
-    setInquiries((prev) =>
-      prev.map((item) =>
-        item.id === selectedInquiryId ? { ...item, status: '완료', updatedAt: now, reply } : item,
-      ),
-    )
   }
 
   return (
@@ -440,8 +344,15 @@ export default function ManagementPage() {
               <div className="h-full bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100 shrink-0">
                   <h2 className="text-lg font-bold text-gray-800">메일 조회 및 확인 (MEMO01_MAIL_VIEW01)</h2>
-                  <p className="text-sm text-gray-500 mt-1">수신 메일을 선택하면 상세를 확인하고 읽음 처리됩니다.</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {mailsLoading ? '메일 목록을 불러오는 중…' : '수신 메일을 선택하면 상세를 확인하고 읽음 처리됩니다.'}
+                  </p>
                 </div>
+                {mailError && (
+                  <div className="mx-5 mt-4 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700 shrink-0">
+                    {mailError}
+                  </div>
+                )}
                 <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5">
                   <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-gray-100 overflow-y-auto">
                     {mails.length === 0 ? (
@@ -453,7 +364,7 @@ export default function ManagementPage() {
                           <button
                             key={mail.id}
                             type="button"
-                            onClick={() => handleSelectMail(mail.id)}
+                            onClick={() => void handleSelectMail(mail.id)}
                             className={`w-full text-left px-4 py-3 border-b border-gray-50 transition-colors ${
                               selected ? 'bg-blue-50' : 'hover:bg-gray-50'
                             }`}
@@ -528,11 +439,18 @@ export default function ManagementPage() {
 
             {activeTab === 'inquiry' && (
               <div className="h-full flex flex-col gap-4 overflow-hidden">
+                {inquiryError && (
+                  <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700 shrink-0">
+                    {inquiryError}
+                  </div>
+                )}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden shrink-0 max-h-[42%]">
                   <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h2 className="text-lg font-bold text-gray-800">문의 내역 조회 (MEMO02_INQUIRY_VIEW01)</h2>
-                      <p className="text-sm text-gray-500">행을 선택하면 상세와 답변 패널이 연동됩니다.</p>
+                      <p className="text-sm text-gray-500">
+                        {inquiriesLoading ? '문의 목록을 불러오는 중…' : '행을 선택하면 상세와 답변 패널이 연동됩니다.'}
+                      </p>
                     </div>
                     <div className="flex gap-2">
                       {(['전체', '대기', '진행중', '완료'] as StatusFilter[]).map((f) => (
@@ -686,10 +604,11 @@ export default function ManagementPage() {
                         </label>
                         <button
                           type="button"
-                          onClick={handleSubmitReply}
-                          className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-sm hover:bg-blue-700 transition"
+                          onClick={() => void handleSubmitReply()}
+                          disabled={replySubmitting}
+                          className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-sm hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          답변 등록
+                          {replySubmitting ? '등록 중…' : '답변 등록'}
                         </button>
                       </div>
                     )}
@@ -700,11 +619,20 @@ export default function ManagementPage() {
 
             {activeTab === 'defect' && (
               <div className="h-full flex flex-col gap-4 overflow-y-auto pr-1">
+                {defectError && (
+                  <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700 shrink-0">
+                    {defectError}
+                  </div>
+                )}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 shrink-0">
                   <h2 className="text-lg font-bold text-gray-800">
                     생산라인 불량률 모니터링 및 알림 설정 (MEM03_DEFECT_ALERT01)
                   </h2>
-                  <p className="text-sm text-gray-500 mt-1">최근 3일 연속 임계값 초과 라인만 알림 대상으로 표시합니다.</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {defectsLoading
+                      ? '불량률 데이터를 불러오는 중…'
+                      : '최근 3일 연속 임계값 초과 라인만 알림 대상으로 표시합니다.'}
+                  </p>
                   <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
                     <div className="flex items-center gap-3">
                       <label className="text-sm text-gray-600 font-medium">임계값 (%)</label>
@@ -726,7 +654,7 @@ export default function ManagementPage() {
                         type="button"
                         role="switch"
                         aria-checked={n8nEnabled}
-                        onClick={() => setN8nEnabled((v) => !v)}
+                        onClick={() => void handleToggleN8n()}
                         className={`relative h-7 w-12 rounded-full transition-colors ${n8nEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
                       >
                         <span
@@ -775,8 +703,10 @@ export default function ManagementPage() {
                     <h3 className="font-bold text-gray-800">전체 생산 라인 기록</h3>
                   </div>
                   <div className="overflow-auto flex-1">
-                    {DEFECT_RECORDS.length === 0 ? (
-                      <p className="p-6 text-sm text-gray-400">표시할 데이터가 없습니다.</p>
+                    {defectRecords.length === 0 ? (
+                      <p className="p-6 text-sm text-gray-400">
+                        {defectsLoading ? '데이터를 불러오는 중…' : '표시할 데이터가 없습니다.'}
+                      </p>
                     ) : (
                       <table className="min-w-full text-sm text-left">
                         <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500">
@@ -791,7 +721,7 @@ export default function ManagementPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {DEFECT_RECORDS.map((row) => {
+                          {defectRecords.map((row) => {
                             const over = row.defectRate > threshold
                             const delta =
                               row.prevDefectRate !== undefined

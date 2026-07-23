@@ -1,0 +1,214 @@
+﻿SUMMARY PASS=28 FAIL=4 SKIP=2
+{
+  "summary": {
+    "pass": 28,
+    "fail": 4,
+    "skip": 2
+  },
+  "results": [
+    {
+      "page": "Common",
+      "test": "GET /health",
+      "status": "PASS",
+      "detail": "status ok"
+    },
+    {
+      "page": "Login",
+      "test": "GET /auth/check-id",
+      "status": "PASS",
+      "detail": "available=true"
+    },
+    {
+      "page": "Login",
+      "test": "POST /auth/register",
+      "status": "PASS",
+      "detail": "?뚯썝媛???꾨즺"
+    },
+    {
+      "page": "Login",
+      "test": "POST /auth/login",
+      "status": "PASS",
+      "detail": "token received"
+    },
+    {
+      "page": "Login",
+      "test": "GET /auth/profile",
+      "status": "PASS",
+      "detail": "profile ok"
+    },
+    {
+      "page": "Login",
+      "test": "POST /auth/find-id",
+      "status": "PASS",
+      "detail": "ver*****************"
+    },
+    {
+      "page": "Setting",
+      "test": "GET /settings",
+      "status": "PASS",
+      "detail": "fontSize=18"
+    },
+    {
+      "page": "Setting",
+      "test": "PUT /settings",
+      "status": "FAIL",
+      "detail": "save mismatch"
+    },
+    {
+      "page": "Setting",
+      "test": "PUT /auth/profile",
+      "status": "PASS",
+      "detail": "profile updated"
+    },
+    {
+      "page": "Inquiry",
+      "test": "POST /inquiries",
+      "status": "PASS",
+      "detail": "id=INQ-001"
+    },
+    {
+      "page": "Management",
+      "test": "GET /management/mails",
+      "status": "PASS",
+      "detail": "count=7"
+    },
+    {
+      "page": "Management",
+      "test": "PATCH mail read",
+      "status": "PASS",
+      "detail": "MAIL-001"
+    },
+    {
+      "page": "Management",
+      "test": "GET /inquiries",
+      "status": "PASS",
+      "detail": "count=1 cross=true"
+    },
+    {
+      "page": "Management",
+      "test": "PUT inquiry reply",
+      "status": "PASS",
+      "detail": "status=?꾨즺"
+    },
+    {
+      "page": "Management",
+      "test": "GET /management/defects",
+      "status": "PASS",
+      "detail": "count=15"
+    },
+    {
+      "page": "Management",
+      "test": "GET defect-settings",
+      "status": "PASS",
+      "detail": "threshold=3"
+    },
+    {
+      "page": "Management",
+      "test": "PUT defect-settings",
+      "status": "PASS",
+      "detail": "threshold=2.5"
+    },
+    {
+      "page": "Main",
+      "test": "GET /main/overview",
+      "status": "FAIL",
+      "detail": "status 200"
+    },
+    {
+      "page": "Dashboard",
+      "test": "GET /dashboard/summary",
+      "status": "PASS",
+      "detail": "records=646"
+    },
+    {
+      "page": "Dashboard",
+      "test": "GET summary filtered",
+      "status": "PASS",
+      "detail": "records=129"
+    },
+    {
+      "page": "Dashboard",
+      "test": "STAFF/auto-send/report",
+      "status": "SKIP",
+      "detail": "UI mock - no API"
+    },
+    {
+      "page": "Issue",
+      "test": "GET /issues",
+      "status": "PASS",
+      "detail": "count=8"
+    },
+    {
+      "page": "Issue",
+      "test": "GET handover/summary",
+      "status": "PASS",
+      "detail": "2026-07-21 08:00 ~ 16:00"
+    },
+    {
+      "page": "Issue",
+      "test": "PUT /issues/:id",
+      "status": "PASS",
+      "detail": "assignee updated"
+    },
+    {
+      "page": "Issue",
+      "test": "handoverNotes/PDF/CSV",
+      "status": "SKIP",
+      "detail": "UI local - no API"
+    },
+    {
+      "page": "Knowledge",
+      "test": "GET /knowledge/documents",
+      "status": "PASS",
+      "detail": "count=9"
+    },
+    {
+      "page": "Knowledge",
+      "test": "GET document detail",
+      "status": "PASS",
+      "detail": "DOC-2026-041"
+    },
+    {
+      "page": "Knowledge",
+      "test": "GET /knowledge/actions",
+      "status": "PASS",
+      "detail": "count=5"
+    },
+    {
+      "page": "Knowledge",
+      "test": "POST /knowledge/actions",
+      "status": "PASS",
+      "detail": 1
+    },
+    {
+      "page": "Knowledge",
+      "test": "PUT /knowledge/actions/:id",
+      "status": "PASS",
+      "detail": "updated"
+    },
+    {
+      "page": "Knowledge",
+      "test": "DELETE /knowledge/actions/:id",
+      "status": "PASS",
+      "detail": "deleted"
+    },
+    {
+      "page": "Knowledge",
+      "test": "GET /knowledge/report",
+      "status": "FAIL",
+      "detail": "status 200"
+    },
+    {
+      "page": "Knowledge",
+      "test": "POST report/refresh",
+      "status": "PASS",
+      "detail": "refreshed"
+    },
+    {
+      "page": "Frontend",
+      "test": "proxy /api -> 3001",
+      "status": "FAIL",
+      "detail": "fetch failed"
+    }
+  ]
+}

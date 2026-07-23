@@ -1,0 +1,67 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.updateSettings = exports.getSettings = void 0;
+const settingsService = __importStar(require("../services/settings.service"));
+const errorHandler_1 = require("../middleware/errorHandler");
+function asyncHandler(fn) {
+    return (req, res, next) => {
+        fn(req, res, next).catch(next);
+    };
+}
+exports.getSettings = asyncHandler(async (req, res) => {
+    if (!req.auth)
+        throw new errorHandler_1.AppError(401, '인증이 필요합니다.');
+    const settings = await settingsService.getUserSettings(req.auth.userId);
+    res.status(200).json({ settings });
+});
+exports.updateSettings = asyncHandler(async (req, res) => {
+    if (!req.auth)
+        throw new errorHandler_1.AppError(401, '인증이 필요합니다.');
+    const { fontSize, themeMode, language, refreshInterval } = req.body;
+    if (fontSize === undefined ||
+        themeMode === undefined ||
+        language === undefined ||
+        refreshInterval === undefined) {
+        throw new errorHandler_1.AppError(400, '설정 값이 누락되었습니다.');
+    }
+    const settings = await settingsService.saveUserSettings(req.auth.userId, {
+        fontSize: Number(fontSize),
+        themeMode: Number(themeMode),
+        language: String(language),
+        refreshInterval: Number(refreshInterval),
+    });
+    res.status(200).json({ settings, message: '설정이 저장되었습니다.' });
+});

@@ -10,6 +10,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
+import { dashboardApi } from '@/api/dashboardApi';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -119,6 +120,9 @@ const EXPAND_STEP_OPTIONS: Array<{ value: ExpandStep; label: string }> = [
 
 const INITIAL_VISIBLE_COUNT = 10;
 
+const DEFAULT_MIN_DATE = '2026-05-01';
+const DEFAULT_MAX_DATE = '2026-06-14';
+
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -142,79 +146,6 @@ function daysBetweenInclusive(start: string, end: string): number {
   const ms = parseDate(end).getTime() - parseDate(start).getTime();
   return Math.floor(ms / 86400000) + 1;
 }
-
-function seededRandom(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 16807 + 0) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
-
-function buildMockRecords(): ProductionRecord[] {
-  const rand = seededRandom(42);
-  const records: ProductionRecord[] = [];
-  const start = parseDate('2026-05-01');
-
-  for (let dayOffset = 0; dayOffset < 45; dayOffset += 1) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + dayOffset);
-    const date = formatDate(d);
-
-    for (let pi = 0; pi < PRODUCTS.length; pi += 1) {
-      for (let li = 0; li < LINES.length; li += 1) {
-        if (rand() > 0.55) continue;
-
-        const base = 180 + Math.floor(rand() * 220) + pi * 12 + li * 8;
-        const wave = Math.sin((dayOffset + pi + li) / 4) * 30;
-        const production = Math.max(80, Math.round(base + wave + rand() * 40));
-        const targetProduction = Math.round(production * (0.92 + rand() * 0.2));
-
-        const defects: DefectBreakdown = {
-          '기계 결함': Math.floor(rand() * 8),
-          '원자재 불량': Math.floor(rand() * 6),
-          '작업자 실수': Math.floor(rand() * 5),
-          '온도 이상': Math.floor(rand() * 4),
-        };
-
-        // Slight improvement trend in later days
-        if (dayOffset > 25) {
-          defects['기계 결함'] = Math.max(0, defects['기계 결함'] - 2);
-          defects['온도 이상'] = Math.max(0, defects['온도 이상'] - 1);
-        }
-
-        const defectCount = DEFECT_TYPES.reduce((sum, t) => sum + defects[t], 0);
-
-        records.push({
-          date,
-          product: PRODUCTS[pi],
-          line: LINES[li],
-          production,
-          defectCount,
-          targetProduction,
-          defects,
-        });
-      }
-    }
-  }
-
-  return records;
-}
-
-const MOCK_RECORDS: ProductionRecord[] = buildMockRecords();
-
-const DATA_MIN_DATE = MOCK_RECORDS.reduce(
-  (min, r) => (r.date < min ? r.date : min),
-  MOCK_RECORDS[0].date,
-);
-const DATA_MAX_DATE = MOCK_RECORDS.reduce(
-  (max, r) => (r.date > max ? r.date : max),
-  MOCK_RECORDS[0].date,
-);
-
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
 
 function safeRate(numerator: number, denominator: number): number | null {
   if (denominator === 0) return null;
@@ -742,10 +673,17 @@ function DefectTrendChart({ dailyRates }: { dailyRates: Array<{ date: string; ra
 /* -------------------------------------------------------------------------- */
 
 export default function DashBoardPage() {
-  const [startDate, setStartDate] = useState(DATA_MIN_DATE);
-  const [endDate, setEndDate] = useState(DATA_MAX_DATE);
+  const [dataMinDate, setDataMinDate] = useState(DEFAULT_MIN_DATE);
+  const [dataMaxDate, setDataMaxDate] = useState(DEFAULT_MAX_DATE);
+  const [startDate, setStartDate] = useState(DEFAULT_MIN_DATE);
+  const [endDate, setEndDate] = useState(DEFAULT_MAX_DATE);
   const [productFilter, setProductFilter] = useState('전체');
   const [lineFilter, setLineFilter] = useState('전체');
+  const [records, setRecords] = useState<ProductionRecord[]>([]);
+  const [prevRecords, setPrevRecords] = useState<ProductionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [metaInitialized, setMetaInitialized] = useState(false);
   const [chartType, setChartType] = useState<ChartType>('bar');
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
@@ -785,18 +723,63 @@ export default function DashBoardPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const loadSummary = useCallback(async () => {
+    if (startDate > endDate) {
+      setRecords([]);
+      setPrevRecords([]);
+      return;
+    }
+
+    setLoading(true);
+    setLoadError('');
+    try {
+      const { data } = await dashboardApi.getSummary({
+        startDate,
+        endDate,
+        product: productFilter,
+        line: lineFilter,
+      });
+
+      setRecords(data.records);
+
+      if (!metaInitialized) {
+        setDataMinDate(data.meta.minDate);
+        setDataMaxDate(data.meta.maxDate);
+        setMetaInitialized(true);
+      }
+
+      const prevRange = getPreviousPeriodRange(startDate, endDate);
+      if (prevRange) {
+        const prevResponse = await dashboardApi.getSummary({
+          startDate: prevRange.start,
+          endDate: prevRange.end,
+          product: productFilter,
+          line: lineFilter,
+        });
+        setPrevRecords(prevResponse.data.records);
+      } else {
+        setPrevRecords([]);
+      }
+    } catch {
+      setLoadError('대시보드 데이터를 불러오지 못했습니다. 로그인 상태와 백엔드 연결을 확인해주세요.');
+      setRecords([]);
+      setPrevRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [startDate, endDate, productFilter, lineFilter, metaInitialized]);
+
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
+
   const productOptions = useMemo(() => ['전체', ...PRODUCTS], []);
   const lineOptions = useMemo(() => ['전체', ...LINES], []);
 
   const filteredRecords = useMemo(() => {
     if (startDate > endDate) return [];
-    return MOCK_RECORDS.filter((r) => {
-      if (r.date < startDate || r.date > endDate) return false;
-      if (productFilter !== '전체' && r.product !== productFilter) return false;
-      if (lineFilter !== '전체' && r.line !== lineFilter) return false;
-      return true;
-    });
-  }, [startDate, endDate, productFilter, lineFilter]);
+    return records;
+  }, [records, startDate, endDate]);
 
   const hasData = filteredRecords.length > 0;
 
@@ -1000,12 +983,6 @@ export default function DashBoardPage() {
 
     if (prevRange && startDate <= endDate) {
       previousPeriodLabel = `${prevRange.start} ~ ${prevRange.end}`;
-      const prevRecords = MOCK_RECORDS.filter((r) => {
-        if (r.date < prevRange.start || r.date > prevRange.end) return false;
-        if (productFilter !== '전체' && r.product !== productFilter) return false;
-        if (lineFilter !== '전체' && r.line !== lineFilter) return false;
-        return true;
-      });
 
       if (prevRecords.length > 0) {
         hasComparison = true;
@@ -1075,10 +1052,9 @@ export default function DashBoardPage() {
   }, [
     dailyAggregates,
     filteredRecords,
+    prevRecords,
     startDate,
     endDate,
-    productFilter,
-    lineFilter,
     hasData,
   ]);
 
@@ -1134,8 +1110,8 @@ export default function DashBoardPage() {
   };
 
   const handleResetFilters = () => {
-    setStartDate(DATA_MIN_DATE);
-    setEndDate(DATA_MAX_DATE);
+    setStartDate(dataMinDate);
+    setEndDate(dataMaxDate);
     setProductFilter('전체');
     setLineFilter('전체');
     pushToast('필터가 초기화되었습니다.', 'info');
@@ -1233,6 +1209,16 @@ export default function DashBoardPage() {
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50">
       <div className="mx-auto max-w-[1600px] px-8 py-8">
+        {loadError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
+        {loading && (
+          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            대시보드 데이터를 불러오는 중…
+          </div>
+        )}
         <header className="mb-8 flex items-start justify-between gap-6">
           <div>
             <p className="text-sm font-medium text-blue-700">Production Operations</p>

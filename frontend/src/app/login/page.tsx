@@ -19,14 +19,15 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { authApi } from '@/api/authApi'
+import { saveAuthSession } from '@/lib/authStorage'
 
 type AuthView = 'login' | 'signup' | 'findId' | 'resetPassword'
+type ResetStep = 'verify' | 'newPassword'
 type PolicyModal = 'terms' | 'privacy' | null
 type IdCheckStatus = 'idle' | 'checking' | 'available' | 'duplicate' | 'error'
 
 const PHONE_REGEX = /^01[016789]-?\d{3,4}-?\d{4}$/
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$/
-const REGISTERED_IDS_KEY = 'kdt-registered-user-ids'
 
 const TERMS_OF_SERVICE = `제1조 (목적)
 본 약관은 양극재 품질 AI 예측 시스템(이하 "서비스")의 이용 조건 및 절차, 이용자와 운영자의 권리·의무 및 책임사항을 규정함을 목적으로 합니다.
@@ -63,32 +64,20 @@ const PRIVACY_POLICY = `1. 수집하는 개인정보 항목
 5. 이용자의 권리
 이용자는 언제든지 개인정보 열람, 수정, 삭제, 처리 정지를 요청할 수 있습니다.`
 
-function getRegisteredIds(): string[] {
-  if (typeof window === 'undefined') return []
-  try {
-    return JSON.parse(localStorage.getItem(REGISTERED_IDS_KEY) || '[]') as string[]
-  } catch {
-    return []
-  }
-}
-
-function isIdRegisteredLocally(userId: string) {
-  return getRegisteredIds().includes(userId.trim())
-}
-
-function addRegisteredId(userId: string) {
-  const ids = getRegisteredIds()
-  if (!ids.includes(userId.trim())) {
-    localStorage.setItem(REGISTERED_IDS_KEY, JSON.stringify([...ids, userId.trim()]))
-  }
-}
-
 function validatePhone(phone: string) {
   return PHONE_REGEX.test(phone.replace(/\s/g, ''))
 }
 
 function validatePassword(password: string) {
   return PASSWORD_REGEX.test(password)
+}
+
+function getApiErrorMessage(err: unknown, fallback: string) {
+  if (axios.isAxiosError(err)) {
+    const message = err.response?.data as { message?: string } | undefined
+    if (message?.message) return message.message
+  }
+  return fallback
 }
 
 function FieldLabel({
@@ -233,6 +222,10 @@ export default function LoginPage() {
   const [findName, setFindName] = useState('')
   const [findPhone, setFindPhone] = useState('')
   const [resetId, setResetId] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('')
+  const [showResetPw, setShowResetPw] = useState(false)
+  const [resetStep, setResetStep] = useState<ResetStep>('verify')
 
   const resetMessages = () => {
     setErrorMessage('')
@@ -241,6 +234,18 @@ export default function LoginPage() {
 
   const switchView = (nextView: AuthView) => {
     resetMessages()
+    if (nextView === 'resetPassword') {
+      setResetStep('verify')
+      setResetPassword('')
+      setResetPasswordConfirm('')
+    } else if (view === 'resetPassword') {
+      setResetStep('verify')
+      setFindName('')
+      setFindPhone('')
+      setResetId('')
+      setResetPassword('')
+      setResetPasswordConfirm('')
+    }
     setView(nextView)
   }
 
@@ -271,11 +276,8 @@ export default function LoginPage() {
 
     try {
       const { data } = await authApi.checkDuplicateUserId(userId.trim())
-      const response = data as { available?: boolean; duplicate?: boolean; exists?: boolean }
       const isDuplicate =
-        response.duplicate === true ||
-        response.exists === true ||
-        response.available === false
+        data.duplicate === true || data.exists === true || data.available === false
 
       applyIdCheckResult(!isDuplicate)
     } catch (err) {
@@ -284,25 +286,18 @@ export default function LoginPage() {
         return
       }
 
-      // 백엔드 미연동 또는 서버 오류 시 로컬 저장 목록으로 대체 확인
-      if (
-        !axios.isAxiosError(err) ||
-        !err.response ||
-        err.response.status === 404 ||
-        err.response.status >= 500
-      ) {
-        applyIdCheckResult(!isIdRegisteredLocally(userId.trim()))
-        return
-      }
-
       setIdChecked(false)
       setIdCheckStatus('error')
-      setIdCheckMessage('아이디 중복 확인에 실패했습니다. 잠시 후 다시 시도해주세요.')
+      setIdCheckMessage(getApiErrorMessage(err, '아이디 중복 확인에 실패했습니다. 잠시 후 다시 시도해주세요.'))
     }
   }
 
   const passwordsMatch = passwordConfirm.length > 0 && password === passwordConfirm
   const passwordsMismatch = passwordConfirm.length > 0 && password !== passwordConfirm
+  const resetPasswordsMatch =
+    resetPasswordConfirm.length > 0 && resetPassword === resetPasswordConfirm
+  const resetPasswordsMismatch =
+    resetPasswordConfirm.length > 0 && resetPassword !== resetPasswordConfirm
 
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -319,10 +314,11 @@ export default function LoginPage() {
 
     setIsSubmitting(true)
     try {
-      await authApi.login({ userId: loginId.trim(), password: loginPassword })
+      const { data } = await authApi.login({ userId: loginId.trim(), password: loginPassword })
+      saveAuthSession(data.token, data.user)
       router.push('/main')
-    } catch {
-      setErrorMessage('아이디 또는 비밀번호가 올바르지 않습니다.')
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '아이디 또는 비밀번호가 올바르지 않습니다.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -374,18 +370,10 @@ export default function LoginPage() {
         userId: userId.trim(),
         password,
       })
-      addRegisteredId(userId.trim())
       setSuccessMessage('회원가입이 완료되었습니다. 로그인해주세요.')
       switchView('login')
     } catch (err) {
-      // 백엔드 미연동 시 로컬 가입 처리
-      if (!axios.isAxiosError(err) || !err.response) {
-        addRegisteredId(userId.trim())
-        setSuccessMessage('회원가입이 완료되었습니다. 로그인해주세요.')
-        switchView('login')
-        return
-      }
-      setErrorMessage('회원가입에 실패했습니다. 입력 정보를 확인해주세요.')
+      setErrorMessage(getApiErrorMessage(err, '회원가입에 실패했습니다. 입력 정보를 확인해주세요.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -410,16 +398,15 @@ export default function LoginPage() {
         name: findName.trim(),
         phone: findPhone.trim(),
       })
-      const foundId = (data as { userId?: string })?.userId ?? '알 수 없음'
-      setSuccessMessage(`회원님의 아이디는 ${foundId} 입니다.`)
-    } catch {
-      setErrorMessage('일치하는 회원 정보를 찾을 수 없습니다.')
+      setSuccessMessage(`회원님의 아이디는 ${data.userId} 입니다.`)
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '일치하는 회원 정보를 찾을 수 없습니다.'))
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleResetPassword = async (e: FormEvent<HTMLFormElement>) => {
+  const handleVerifyReset = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     resetMessages()
 
@@ -438,14 +425,53 @@ export default function LoginPage() {
 
     setIsSubmitting(true)
     try {
-      await authApi.resetPassword({
+      await authApi.verifyResetIdentity({
         name: findName.trim(),
         phone: findPhone.trim(),
         userId: resetId.trim(),
       })
-      setSuccessMessage('임시 비밀번호가 등록된 연락처로 발송되었습니다.')
-    } catch {
-      setErrorMessage('일치하는 회원 정보를 찾을 수 없습니다.')
+      setResetPassword('')
+      setResetPasswordConfirm('')
+      setResetStep('newPassword')
+      setSuccessMessage('본인 확인이 완료되었습니다. 새 비밀번호를 설정해주세요.')
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '일치하는 회원 정보를 찾을 수 없습니다.'))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleResetPassword = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    resetMessages()
+
+    if (!validatePassword(resetPassword)) {
+      setErrorMessage('비밀번호는 8자 이상, 대·소문자, 숫자, 특수문자를 포함해야 합니다.')
+      return
+    }
+    if (resetPassword !== resetPasswordConfirm) {
+      setErrorMessage('비밀번호가 일치하지 않습니다.')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await authApi.resetPassword({
+        name: findName.trim(),
+        phone: findPhone.trim(),
+        userId: resetId.trim(),
+        newPassword: resetPassword,
+      })
+      setFindName('')
+      setFindPhone('')
+      setResetId('')
+      setResetPassword('')
+      setResetPasswordConfirm('')
+      setResetStep('verify')
+      setView('login')
+      setSuccessMessage('비밀번호가 변경되었습니다. 로그인해주세요.')
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '비밀번호 변경에 실패했습니다. 다시 시도해주세요.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -813,11 +839,11 @@ export default function LoginPage() {
             </form>
           )}
 
-          {view === 'resetPassword' && (
-            <form onSubmit={handleResetPassword} noValidate className="flex flex-col gap-4">
+          {view === 'resetPassword' && resetStep === 'verify' && (
+            <form onSubmit={handleVerifyReset} noValidate className="flex flex-col gap-4">
               <h2 className="text-lg font-bold text-gray-800">비밀번호 재설정</h2>
               <p className="text-sm text-gray-500 -mt-2">
-                본인 확인 후 임시 비밀번호를 연락처로 발송합니다.
+                본인 확인을 위해 회원가입 시 입력한 정보를 입력해주세요.
               </p>
               <div>
                 <FieldLabel htmlFor="reset-name" required>
@@ -863,7 +889,7 @@ export default function LoginPage() {
                 disabled={isSubmitting}
                 className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-60"
               >
-                {isSubmitting ? '처리 중...' : '비밀번호 재설정'}
+                {isSubmitting ? '확인 중...' : '본인 확인'}
               </button>
               <button
                 type="button"
@@ -871,6 +897,81 @@ export default function LoginPage() {
                 className="text-sm text-gray-500 hover:text-blue-600 text-center transition-colors"
               >
                 ← 로그인으로 돌아가기
+              </button>
+            </form>
+          )}
+
+          {view === 'resetPassword' && resetStep === 'newPassword' && (
+            <form onSubmit={handleResetPassword} noValidate className="flex flex-col gap-4">
+              <h2 className="text-lg font-bold text-gray-800">새 비밀번호 설정</h2>
+              <p className="text-sm text-gray-500 -mt-2">
+                새 비밀번호를 입력해주세요.
+              </p>
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
+                <p>
+                  <span className="font-medium text-gray-700">아이디</span> {resetId}
+                </p>
+              </div>
+              <div>
+                <FieldLabel htmlFor="reset-pw" required>
+                  새 비밀번호
+                </FieldLabel>
+                <IconInput
+                  id="reset-pw"
+                  type={showResetPw ? 'text' : 'password'}
+                  value={resetPassword}
+                  onChange={setResetPassword}
+                  placeholder="8자 이상, 대·소문자·숫자·특수문자"
+                  icon={Lock}
+                  rightSlot={
+                    <PasswordToggle
+                      show={showResetPw}
+                      onToggle={() => setShowResetPw((v) => !v)}
+                    />
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="reset-pw2" required>
+                  비밀번호 확인
+                </FieldLabel>
+                <IconInput
+                  id="reset-pw2"
+                  type="password"
+                  value={resetPasswordConfirm}
+                  onChange={setResetPasswordConfirm}
+                  placeholder="비밀번호 재입력"
+                  icon={Lock}
+                />
+                {resetPasswordsMatch && (
+                  <p className="mt-2 text-sm font-medium text-blue-600 inline-flex items-center gap-1">
+                    <CheckCircle size={14} /> 비밀번호가 동일합니다.
+                  </p>
+                )}
+                {resetPasswordsMismatch && (
+                  <p className="mt-2 text-sm font-medium text-red-600 inline-flex items-center gap-1">
+                    <AlertCircle size={14} /> 비밀번호가 일치하지 않습니다.
+                  </p>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-60"
+              >
+                {isSubmitting ? '처리 중...' : '비밀번호 변경'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetMessages()
+                  setResetPassword('')
+                  setResetPasswordConfirm('')
+                  setResetStep('verify')
+                }}
+                className="text-sm text-gray-500 hover:text-blue-600 text-center transition-colors"
+              >
+                ← 본인 확인으로 돌아가기
               </button>
             </form>
           )}

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
+import { issueApi } from '@/api/issueApi';
 
 interface ProcessData {
   time: string;
@@ -175,177 +176,14 @@ const badgeBase: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const createProcessData = (
-  temperatures: number[],
-  pressures: number[],
-  before: number[],
-  after: number[],
-): ProcessData[] =>
-  temperatures.map((temperature, index) => ({
-    time: `${index * 2}h`,
-    temperature,
-    pressure: pressures[index],
-    speed: 34 + (index % 3),
-    riskBefore: before[index],
-    riskAfter: after[index],
-  }));
+const EMPTY_FORM: ManagementForm = {
+  assignee: '',
+  status: '접수',
+  action: '',
+  completed: false,
+};
 
-const INITIAL_ISSUES: Issue[] = [
-  {
-    id: 'ISS-260721-018',
-    occurredAt: '2026-07-21 15:42',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-08',
-    risk: '높음',
-    status: '조치 중',
-    title: '소성로 2호기 온도 상한 지속 초과',
-    assignee: '김현수',
-    action: '소성 온도를 742°C로 하향 조정하고 냉각 계통을 점검 중입니다.',
-    completed: false,
-    anomaly: '14시 이후 온도가 관리 상한 750°C를 3회 초과했으며 AI 위험 점수가 91점까지 상승했습니다.',
-    processData: createProcessData(
-      [738, 742, 748, 754, 752, 746],
-      [1.8, 1.9, 2.1, 2.4, 2.3, 2.0],
-      [42, 51, 68, 91, 86, 72],
-      [38, 43, 52, 61, 48, 35],
-    ),
-  },
-  {
-    id: 'ISS-260721-017',
-    occurredAt: '2026-07-21 14:18',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-07',
-    risk: '중간',
-    status: '분석 중',
-    title: '리튬 투입 속도 편차 증가',
-    assignee: '박서연',
-    action: '공급기 센서 로그와 계량기 교정 이력을 비교 분석하고 있습니다.',
-    completed: false,
-    anomaly: '리튬 투입 속도의 표준편차가 기준 대비 32% 증가하여 조성 불균일 가능성이 감지되었습니다.',
-    processData: createProcessData(
-      [736, 739, 741, 743, 740, 738],
-      [1.7, 1.8, 2.0, 2.1, 1.9, 1.8],
-      [31, 39, 55, 66, 58, 47],
-      [28, 32, 41, 46, 39, 31],
-    ),
-  },
-  {
-    id: 'ISS-260721-016',
-    occurredAt: '2026-07-21 11:05',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-05',
-    risk: '낮음',
-    status: '완료',
-    title: '혼합기 진동 센서 일시 이상',
-    assignee: '이도윤',
-    action: '센서 커넥터를 재체결하고 정상 신호 수신을 확인했습니다.',
-    completed: true,
-    anomaly: '진동 센서 신호가 4분간 단절되었으나 설비 실측 진동값은 정상 범위였습니다.',
-    processData: createProcessData(
-      [735, 736, 737, 738, 737, 736],
-      [1.7, 1.7, 1.8, 1.8, 1.7, 1.7],
-      [24, 28, 36, 33, 27, 22],
-      [20, 22, 25, 23, 20, 18],
-    ),
-  },
-  {
-    id: 'ISS-260720-015',
-    occurredAt: '2026-07-20 23:36',
-    date: '2026-07-20',
-    lot: 'LOT-CA-260720-12',
-    risk: '높음',
-    status: '접수',
-    title: '냉각 구간 압력 급상승',
-    assignee: '미배정',
-    action: '',
-    completed: false,
-    anomaly: '냉각수 압력이 2.7bar까지 급상승하고 배출 온도 안정화 시간이 평소보다 18분 지연되었습니다.',
-    processData: createProcessData(
-      [741, 744, 747, 749, 746, 742],
-      [1.9, 2.0, 2.3, 2.7, 2.5, 2.2],
-      [45, 53, 71, 94, 83, 67],
-      [41, 47, 58, 69, 54, 42],
-    ),
-  },
-  {
-    id: 'ISS-260720-014',
-    occurredAt: '2026-07-20 18:12',
-    date: '2026-07-20',
-    lot: 'LOT-CA-260720-09',
-    risk: '중간',
-    status: '완료',
-    title: '입도 분포 D50 기준치 접근',
-    assignee: '최유진',
-    action: '분쇄기 회전수를 3% 낮추고 재측정하여 정상 범위를 확인했습니다.',
-    completed: true,
-    anomaly: 'D50 측정값이 관리 상한에 근접했으나 공정 조정 후 정상 중앙값으로 회복되었습니다.',
-    processData: createProcessData(
-      [737, 738, 740, 741, 739, 738],
-      [1.8, 1.9, 2.0, 2.0, 1.9, 1.8],
-      [34, 42, 57, 63, 48, 37],
-      [29, 34, 40, 43, 33, 26],
-    ),
-  },
-  {
-    id: 'ISS-260719-013',
-    occurredAt: '2026-07-19 16:48',
-    date: '2026-07-19',
-    lot: 'LOT-CA-260719-06',
-    risk: '낮음',
-    status: '완료',
-    title: '검사 장비 이미지 수집 지연',
-    assignee: '정민재',
-    action: '카메라 캐시를 초기화하고 네트워크 지연 상태를 점검했습니다.',
-    completed: true,
-    anomaly: '표면 검사 이미지 수집이 평균 1.2초 지연되었으나 검사 결과 누락은 없었습니다.',
-    processData: createProcessData(
-      [734, 735, 736, 736, 735, 734],
-      [1.6, 1.7, 1.7, 1.8, 1.7, 1.6],
-      [18, 22, 29, 31, 25, 20],
-      [16, 18, 21, 22, 19, 15],
-    ),
-  },
-  {
-    id: 'ISS-260719-012',
-    occurredAt: '2026-07-19 09:22',
-    date: '2026-07-19',
-    lot: 'LOT-CA-260719-02',
-    risk: '중간',
-    status: '조치 중',
-    title: '전구체 수분 함량 변동 감지',
-    assignee: '한지우',
-    action: '원료 보관 습도와 건조 공정 시간을 재조정하고 있습니다.',
-    completed: false,
-    anomaly: '수분 함량이 0.03%p 상승하여 소성 후 잔류 리튬 증가 가능성이 확인되었습니다.',
-    processData: createProcessData(
-      [736, 738, 742, 744, 742, 739],
-      [1.7, 1.8, 2.0, 2.2, 2.1, 1.9],
-      [30, 38, 54, 69, 61, 49],
-      [27, 33, 42, 49, 41, 34],
-    ),
-  },
-  {
-    id: 'ISS-260718-011',
-    occurredAt: '2026-07-18 21:10',
-    date: '2026-07-18',
-    lot: 'LOT-CA-260718-11',
-    risk: '높음',
-    status: '분석 중',
-    title: '예측 불량률 2.5% 초과',
-    assignee: '김현수',
-    action: '동일 조건 과거 LOT와 공정 파라미터를 교차 분석 중입니다.',
-    completed: false,
-    anomaly: '온도와 투입량 복합 영향으로 AI 예측 불량률이 2.73%까지 상승했습니다.',
-    processData: createProcessData(
-      [739, 743, 749, 753, 751, 747],
-      [1.8, 2.0, 2.2, 2.5, 2.4, 2.1],
-      [44, 56, 74, 92, 87, 73],
-      [39, 46, 58, 65, 55, 43],
-    ),
-  },
-];
-
-const HANDOVER_DATA: HandoverData = {
+const DEFAULT_HANDOVER: HandoverData = {
   period: '2026-07-21 08:00 ~ 16:00',
   averageTemperature: 742.6,
   averagePressure: 1.94,
@@ -1471,15 +1309,12 @@ const ManagementSection = ({
   </section>
 );
 
-const EMPTY_FORM: ManagementForm = {
-  assignee: '',
-  status: '접수',
-  action: '',
-  completed: false,
-};
-
 export default function IssuePage() {
-  const [issues, setIssues] = useState<Issue[]>(INITIAL_ISSUES);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [handoverData, setHandoverData] = useState<HandoverData>(DEFAULT_HANDOVER);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -1494,6 +1329,28 @@ export default function IssuePage() {
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
+
+  const loadIssueData = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [issuesRes, summaryRes] = await Promise.all([
+        issueApi.getIssues(),
+        issueApi.getHandoverSummary(),
+      ]);
+      setIssues(issuesRes.data.issues);
+      setHandoverData(summaryRes.data.summary);
+    } catch {
+      setLoadError('이슈 데이터를 불러오지 못했습니다. 로그인 상태와 백엔드 연결을 확인해주세요.');
+      setIssues([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadIssueData();
+  }, [loadIssueData]);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,
@@ -1570,7 +1427,7 @@ export default function IssuePage() {
 
   const handleGenerateReport = () => {
     console.log('인수인계 보고서 생성 데이터:', {
-      ...HANDOVER_DATA,
+      ...handoverData,
       openIssues: issues.filter((issue) => !issue.completed),
       handoverNotes,
     });
@@ -1579,7 +1436,7 @@ export default function IssuePage() {
   };
 
   const handleDownloadPdf = () => {
-    const data = HANDOVER_DATA;
+    const data = handoverData;
     const openIssues = issues.filter((issue) => !issue.completed);
     const riskColor = (risk: Issue['risk']) =>
       risk === '높음' ? colors.red : risk === '중간' ? colors.amber : colors.green;
@@ -1662,7 +1519,7 @@ ${issues
   };
 
   const handleDownloadCsv = () => {
-    const data = HANDOVER_DATA;
+    const data = handoverData;
     const COLUMN_COUNT = 9;
     const escapeCsv = (value: string | number) => {
       const text = String(value).replace(/"/g, '""').replace(/\r?\n/g, ' ');
@@ -1733,29 +1590,29 @@ ${issues
     });
   };
 
-  const handleSave = (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedIssue) return;
-    const savedData = {
-      issueId: selectedIssue.id,
-      ...managementForm,
-      status: managementForm.completed ? ('완료' as const) : managementForm.status,
-    };
-    console.log('이슈 처리 저장 데이터:', savedData);
-    setIssues((current) =>
-      current.map((issue) =>
-        issue.id === selectedIssue.id
-          ? {
-            ...issue,
-            assignee: savedData.assignee,
-            status: savedData.status,
-            action: savedData.action,
-            completed: savedData.completed,
-          }
-          : issue,
-      ),
-    );
-    setSaveMessage('이슈 처리 정보가 저장되었습니다.');
+
+    const savedStatus = managementForm.completed ? ('완료' as const) : managementForm.status;
+    setSaving(true);
+    setSaveMessage('');
+    try {
+      const { data } = await issueApi.updateIssue(selectedIssue.id, {
+        assignee: managementForm.assignee,
+        status: savedStatus,
+        action: managementForm.action,
+        completed: managementForm.completed || savedStatus === '완료',
+      });
+      setIssues((current) =>
+        current.map((issue) => (issue.id === selectedIssue.id ? data.issue : issue)),
+      );
+      setSaveMessage(data.message);
+    } catch {
+      setSaveMessage('저장에 실패했습니다. 서버 연결을 확인해주세요.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1771,8 +1628,36 @@ ${issues
       }}
     >
       <div style={{ width: '100%', maxWidth: 1440, margin: '0 auto' }}>
+        {loadError && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: '12px 16px',
+              borderRadius: 12,
+              background: colors.redSoft,
+              color: colors.red,
+              fontSize: 14,
+            }}
+          >
+            {loadError}
+          </div>
+        )}
+        {loading && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: '12px 16px',
+              borderRadius: 12,
+              background: colors.blueSoft,
+              color: colors.blue,
+              fontSize: 14,
+            }}
+          >
+            이슈 데이터를 불러오는 중…
+          </div>
+        )}
         <HeaderHandoverSection
-          data={HANDOVER_DATA}
+          data={handoverData}
           notice={reportNotice}
           onGenerate={handleGenerateReport}
           onWrite={() => setIsNoteOpen(true)}
@@ -1816,7 +1701,7 @@ ${issues
       )}
       {isReportOpen && (
         <HandoverReportModal
-          data={HANDOVER_DATA}
+          data={handoverData}
           issues={issues}
           notes={handoverNotes}
           onClose={() => setIsReportOpen(false)}
