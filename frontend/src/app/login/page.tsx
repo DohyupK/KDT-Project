@@ -276,8 +276,7 @@ export default function LoginPage() {
 
     try {
       const { data } = await authApi.checkDuplicateUserId(userId.trim())
-      const isDuplicate =
-        data.duplicate === true || data.exists === true || data.available === false
+      const isDuplicate = data.duplicate === true || data.available === false
 
       applyIdCheckResult(!isDuplicate)
     } catch (err) {

@@ -45,7 +45,6 @@ export interface LoginResponse {
 export interface CheckIdResponse {
   available: boolean
   duplicate?: boolean
-  exists?: boolean
 }
 
 export interface FindUserIdResponse {

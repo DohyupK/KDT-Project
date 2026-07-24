@@ -8,11 +8,6 @@ export function saveAuthSession(token: string, user: AuthUser) {
   localStorage.setItem(USER_KEY, JSON.stringify(user))
 }
 
-export function updateAuthUser(user: AuthUser) {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(USER_KEY, JSON.stringify(user))
-}
-
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem(TOKEN_KEY)
