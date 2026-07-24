@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -311,15 +309,12 @@ function Modal({
   onClose,
   children,
   wide,
-  elevated,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
-  /** Stack above another open modal (e.g. detail over list). */
-  elevated?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -332,11 +327,7 @@ function Modal({
 
   if (!open) return null;
   return (
-    <div
-      className={`fixed inset-0 flex items-center justify-center bg-slate-900/45 p-4 ${
-        elevated ? 'z-[90]' : 'z-[80]'
-      }`}
-    >
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4">
       <button type="button" className="absolute inset-0 cursor-default" aria-label="닫기" onClick={onClose} />
       <div
         className={`relative max-h-[85vh] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ${
@@ -576,6 +567,7 @@ export default function MainPage() {
   const [trendInterval, setTrendInterval] = useState<TrendInterval>('2h');
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
+  const [allRiskOpen, setAllRiskOpen] = useState(false);
   const [isNotifyOpen, setIsNotifyOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([
     {
@@ -734,6 +726,10 @@ export default function MainPage() {
     setAppliedFilter(DEFAULT_FILTER);
     setSeed(7);
     pushToast('필터가 초기화되었습니다.', 'info');
+  };
+
+  const handleLotAction = (lot: RiskLotView) => {
+    pushToast(`${lot.id} 조치/알림이 접수되었습니다.`, 'success');
   };
 
   return (
@@ -979,30 +975,14 @@ export default function MainPage() {
                   <option value="2h">2시간 단위</option>
                   <option value="shift">Shift (주간·야간)</option>
                 </select>
-                <Link
-                  href="/dashboard"
-                  className="ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-blue-600 md:text-sm"
-                >
-                  상세보기 →
-                </Link>
               </div>
             </div>
             <TrendChart data={trendData} chartType={chartType} />
           </div>
 
-          <div className="rounded-xl border border-slate-200/70 bg-white p-4 shadow-sm md:p-5 xl:col-span-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
-                <p className="mt-0.5 text-xs text-slate-400">위험도 내림차순 · 행 클릭 시 상세</p>
-              </div>
-              <Link
-                href="/issue"
-                className="flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-blue-600 md:text-sm"
-              >
-                상세보기 ({riskLots.length}) →
-              </Link>
-            </div>
+          <div className="rounded-xl border border-slate-200/70 bg-white p-4 pb-16 shadow-sm md:p-5 xl:col-span-5 xl:pb-5">
+            <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
+            <p className="mt-0.5 text-xs text-slate-400">위험도 내림차순 · 행 클릭 시 상세</p>
             <div className="mt-3 -mx-1 overflow-x-auto px-1">
               <table className="w-full min-w-[520px] border-collapse text-left text-sm">
                 <thead>
@@ -1018,7 +998,7 @@ export default function MainPage() {
                   {topRiskLots.map((lot) => (
                     <tr
                       key={lot.id}
-                      className="group cursor-pointer transition-colors hover:bg-slate-50/80"
+                      className="cursor-pointer hover:bg-slate-50/80"
                       onClick={() => setSelectedLot(lot)}
                     >
                       <td className="whitespace-nowrap border-b border-slate-50 py-2.5 pr-3 text-xs font-semibold text-slate-800">
@@ -1034,21 +1014,19 @@ export default function MainPage() {
                         {lot.riskScore.toFixed(2)}
                       </td>
                       <td className="border-b border-slate-50 py-2.5 pr-3">
-                        <span
-                          className={
-                            lot.status === '위험'
-                              ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-rose-100 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600'
-                              : toneClass(lot.status)
-                          }
-                        >
-                          {lot.status}
-                        </span>
+                        <span className={toneClass(lot.status)}>{lot.status}</span>
                       </td>
-                      <td className="border-b border-slate-50 py-2.5 pr-2 text-right">
-                        <ChevronRight
-                          className="ml-auto size-4 text-slate-400 transition-colors group-hover:text-slate-600"
-                          aria-hidden
-                        />
+                      <td className="border-b border-slate-50 py-2.5 pr-2 xl:pr-14">
+                        <button
+                          type="button"
+                          className="whitespace-nowrap rounded-md border border-slate-200/80 bg-transparent px-2 py-1 text-[11px] font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLotAction(lot);
+                          }}
+                        >
+                          조치
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -1062,6 +1040,13 @@ export default function MainPage() {
                 </tbody>
               </table>
             </div>
+            <button
+              type="button"
+              onClick={() => setAllRiskOpen(true)}
+              className="mt-3 w-full rounded-lg border border-slate-200/80 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 xl:max-w-[calc(100%-3.5rem)]"
+            >
+              전체 위험 LOT 조회 ({riskLots.length})
+            </button>
           </div>
         </section>
       </div>
@@ -1112,8 +1097,64 @@ export default function MainPage() {
                 </div>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleLotAction(selectedLot);
+                setSelectedLot(null);
+              }}
+              className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+            >
+              조치/알림 실행
+            </button>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal open={allRiskOpen} title={`전체 위험 LOT (${riskLots.length})`} onClose={() => setAllRiskOpen(false)} wide>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <thead>
+              <tr className="text-xs text-slate-400">
+                {['LOT', '위험 원인', '위험도', '상태', ''].map((h) => (
+                  <th key={h || 'action'} className="border-b border-slate-100 pb-2.5 pr-3 font-medium">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {riskLots.map((lot) => (
+                <tr key={lot.id} className="hover:bg-slate-50/80">
+                  <td className="whitespace-nowrap border-b border-slate-50 py-2.5 pr-3 text-xs font-semibold">
+                    {lot.id}
+                  </td>
+                  <td
+                    className="max-w-[220px] truncate border-b border-slate-50 py-2.5 pr-3 text-xs text-slate-500"
+                    title={lot.riskReason}
+                  >
+                    {lot.riskReason}
+                  </td>
+                  <td className="whitespace-nowrap border-b border-slate-50 py-2.5 pr-3 text-xs font-semibold tabular-nums">
+                    {lot.riskScore.toFixed(2)}
+                  </td>
+                  <td className="border-b border-slate-50 py-2.5 pr-3">
+                    <span className={toneClass(lot.status)}>{lot.status}</span>
+                  </td>
+                  <td className="border-b border-slate-50 py-2.5">
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-200/80 px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                      onClick={() => setSelectedLot(lot)}
+                    >
+                      상세
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Modal>
 
     </div>
