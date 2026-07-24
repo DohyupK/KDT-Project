@@ -51,6 +51,130 @@ type InquiryItem = {
   reply?: InquiryReply
 }
 
+const INQUIRY_STORAGE_KEY = 'inquiry_records_db'
+
+type StoredInquiryRecord = {
+  id: string
+  category: string
+  title: string
+  author: string
+  date: string
+  status: '접수' | '답변완료'
+  content: string
+  answer: string
+  visibility: '공개' | '비공개'
+  answeredAt?: string
+}
+
+function readInquiryRecords(): StoredInquiryRecord[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(INQUIRY_STORAGE_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+
+    const result: StoredInquiryRecord[] = []
+    const seen = new Set<string>()
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      if (typeof row.id !== 'string' || !row.id) continue
+      if (seen.has(row.id)) continue
+      seen.add(row.id)
+      result.push({
+        id: row.id,
+        category: typeof row.category === 'string' ? row.category : '',
+        title: typeof row.title === 'string' ? row.title : '',
+        author: typeof row.author === 'string' ? row.author : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        status: row.status === '답변완료' ? '답변완료' : '접수',
+        content: typeof row.content === 'string' ? row.content : '',
+        answer: typeof row.answer === 'string' ? row.answer : '',
+        visibility: row.visibility === '비공개' ? '비공개' : '공개',
+        ...(typeof row.answeredAt === 'string' && row.answeredAt
+          ? { answeredAt: row.answeredAt }
+          : {}),
+      })
+    }
+    return result
+  } catch {
+    return []
+  }
+}
+
+function writeInquiryRecords(records: StoredInquiryRecord[]): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    window.localStorage.setItem(INQUIRY_STORAGE_KEY, JSON.stringify(records))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function updateStoredInquiryAnswer(
+  inquiryId: string,
+  answer: string,
+  answeredAt: string,
+): boolean {
+  const current = readInquiryRecords()
+  const index = current.findIndex((item) => item.id === inquiryId)
+  if (index < 0) return false
+  const next = [...current]
+  next[index] = {
+    ...next[index],
+    answer,
+    answeredAt,
+    status: '답변완료',
+  }
+  return writeInquiryRecords(next)
+}
+
+function mapStoredInquiryToManagement(item: StoredInquiryRecord): InquiryItem {
+  const hasAnswer = item.answer.trim().length > 0 || item.status === '답변완료'
+  return {
+    id: item.id,
+    authorName: item.author,
+    email: '',
+    phone: '',
+    title: item.title,
+    content: item.content,
+    createdAt: item.date,
+    type: item.category,
+    priority: '보통',
+    updatedAt: item.answeredAt || item.date,
+    status: hasAnswer ? '완료' : '대기',
+    reply: hasAnswer
+      ? {
+          inquiryId: item.id,
+          content: item.answer,
+          assignee: '',
+          replyStatus: '완료',
+          ...(item.answeredAt ? { repliedAt: item.answeredAt } : {}),
+        }
+      : undefined,
+  }
+}
+
+function mergeManagementInquiries(
+  current: InquiryItem[],
+  stored: StoredInquiryRecord[],
+): InquiryItem[] {
+  const staticIds = new Set(INITIAL_INQUIRIES.map((item) => item.id))
+  const staticById = new Map<string, InquiryItem>()
+  for (const item of INITIAL_INQUIRIES) staticById.set(item.id, item)
+  for (const item of current) {
+    if (staticIds.has(item.id)) staticById.set(item.id, item)
+  }
+
+  const mappedStored = stored
+    .filter((item) => !staticIds.has(item.id))
+    .map(mapStoredInquiryToManagement)
+
+  return [...mappedStored, ...Array.from(staticById.values())]
+}
+
 type DefectRecord = {
   lineId: string
   lineName: string
@@ -362,7 +486,14 @@ export default function ManagementPage() {
   const [activeTab, setActiveTab] = useState<TabId>('mail')
   const [mails, setMails] = useState<MailItem[]>(INITIAL_MAILS)
   const [selectedMailId, setSelectedMailId] = useState<string | null>(null)
+  const [mailReplyDraft, setMailReplyDraft] = useState('')
+  const [mailReplyError, setMailReplyError] = useState('')
+  const [isSendingMailReply, setIsSendingMailReply] = useState(false)
+  const [sentMailReplies, setSentMailReplies] = useState<
+    Record<string, { content: string; sentAt: string }>
+  >({})
   const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES)
+  const [storedInquiryIds, setStoredInquiryIds] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('전체')
   const [selectedInquiryId, setSelectedInquiryId] = useState<string | null>(null)
   const [replyForm, setReplyForm] = useState<ReplyFormState>(EMPTY_REPLY_FORM)
@@ -373,10 +504,12 @@ export default function ManagementPage() {
   const toastTimerRef = useRef<number | null>(null)
 
   const selectedMail = mails.find((m) => m.id === selectedMailId) ?? null
+  const selectedMailReply = selectedMailId ? sentMailReplies[selectedMailId] ?? null : null
   const selectedInquiry = inquiries.find((i) => i.id === selectedInquiryId) ?? null
   const filteredInquiries =
     statusFilter === '전체' ? inquiries : inquiries.filter((i) => i.status === statusFilter)
   const alertLines = getAlertLines(DEFECT_RECORDS, threshold)
+  const storedInquiryIdSet = new Set(storedInquiryIds)
 
   const clearToastTimer = () => {
     if (toastTimerRef.current !== null) {
@@ -394,13 +527,57 @@ export default function ManagementPage() {
     }, 2500)
   }
 
+  const refreshStoredInquiries = () => {
+    const stored = readInquiryRecords()
+    setStoredInquiryIds(stored.map((item) => item.id))
+    setInquiries((prev) => mergeManagementInquiries(prev, stored))
+  }
+
   useEffect(() => {
     return () => clearToastTimer()
   }, [])
 
+  useEffect(() => {
+    if (activeTab === 'inquiry') {
+      refreshStoredInquiries()
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== INQUIRY_STORAGE_KEY) return
+      if (activeTab === 'inquiry') refreshStoredInquiries()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [activeTab])
+
   const handleSelectMail = (id: string) => {
     setSelectedMailId(id)
     setMails((prev) => prev.map((m) => (m.id === id ? { ...m, isRead: true } : m)))
+    setMailReplyDraft('')
+    setMailReplyError('')
+  }
+
+  const handleSendMailReply = () => {
+    if (isSendingMailReply || !selectedMail) return
+    const content = mailReplyDraft.trim()
+    if (!content) {
+      setMailReplyError('답장 내용을 입력해주세요.')
+      return
+    }
+    setIsSendingMailReply(true)
+    try {
+      setSentMailReplies((prev) => ({
+        ...prev,
+        [selectedMail.id]: { content, sentAt: formatNow() },
+      }))
+      setMailReplyDraft('')
+      setMailReplyError('')
+      showSuccessToast('✓ 답장이 전송되었습니다.')
+    } finally {
+      setIsSendingMailReply(false)
+    }
   }
 
   const handleSelectInquiry = (id: string) => {
@@ -436,6 +613,26 @@ export default function ManagementPage() {
         priority: replyForm.priority,
         adminConfirmed: replyForm.adminConfirmed,
       }
+      const isStoredInquiry = storedInquiryIdSet.has(selectedInquiryId)
+
+      if (isStoredInquiry) {
+        const saved = updateStoredInquiryAnswer(
+          selectedInquiryId,
+          reply.content,
+          now,
+        )
+        if (!saved) return
+        setInquiries((prev) =>
+          prev.map((item) =>
+            item.id === selectedInquiryId
+              ? { ...item, status: '완료', updatedAt: now, reply }
+              : item,
+          ),
+        )
+        showSuccessToast('✓ 문의 답변이 저장 및 전송되었습니다.')
+        return
+      }
+
       setInquiries((prev) =>
         prev.map((item) =>
           item.id === selectedInquiryId ? { ...item, status: '완료', updatedAt: now, reply } : item,
@@ -632,6 +829,58 @@ export default function ManagementPage() {
                         <p className="text-sm text-slate-400">첨부파일 없음</p>
                       )}
                     </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <h4 className="m-0 text-sm font-bold text-slate-800">답장 작성</h4>
+                      {selectedMailReply ? (
+                        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3.5">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                              전송됨
+                            </span>
+                            <span className="text-[11px] font-medium text-emerald-700">
+                              {selectedMailReply.sentAt}
+                            </span>
+                          </div>
+                          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                            {selectedMailReply.content}
+                          </p>
+                        </div>
+                      ) : null}
+                      <label htmlFor="mail-reply-content" className="sr-only">
+                        답장 내용
+                      </label>
+                      <textarea
+                        id="mail-reply-content"
+                        value={mailReplyDraft}
+                        onChange={(event) => {
+                          setMailReplyDraft(event.target.value)
+                          if (mailReplyError) setMailReplyError('')
+                        }}
+                        rows={5}
+                        placeholder={
+                          selectedMailReply
+                            ? '추가 답장을 작성하려면 내용을 입력하세요.'
+                            : '답장 내용을 입력하세요.'
+                        }
+                        className="mt-3 min-h-[120px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                      />
+                      {mailReplyError ? (
+                        <p className="mt-2 text-xs font-semibold text-rose-600" role="alert">
+                          {mailReplyError}
+                        </p>
+                      ) : null}
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSendMailReply}
+                          disabled={isSendingMailReply}
+                          className="inline-flex h-10 items-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isSendingMailReply ? '전송 중...' : '답장 전송'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -700,8 +949,15 @@ export default function ManagementPage() {
                           }`}
                         >
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{item.id}</td>
-                          <td className="max-w-[220px] truncate px-4 py-2.5 font-medium text-slate-800">
-                            {item.title}
+                          <td className="max-w-[220px] px-4 py-2.5 font-medium text-slate-800">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              {storedInquiryIdSet.has(item.id) ? (
+                                <span className="inline-flex shrink-0 items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                  신규
+                                </span>
+                              ) : null}
+                              <span className="truncate">{item.title}</span>
+                            </div>
                           </td>
                           <td className="px-4 py-2.5 text-slate-600">{item.authorName}</td>
                           <td className="px-4 py-2.5">

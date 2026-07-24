@@ -25,7 +25,101 @@ type InquiryItem = {
   content: string;
   answer: string;
   visibility: Visibility;
+  answeredAt?: string;
 };
+
+const INQUIRY_STORAGE_KEY = 'inquiry_records_db';
+
+function parseInquirySeq(id: string): number {
+  const matched = /^INQ-(\d+)$/.exec(id);
+  if (!matched) return 0;
+  const value = Number(matched[1]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function readInquiryRecords(): InquiryItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(INQUIRY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const result: InquiryItem[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== 'string' || !row.id) continue;
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      const status = row.status === '답변완료' ? '답변완료' : '접수';
+      const visibility = row.visibility === '비공개' ? '비공개' : '공개';
+      result.push({
+        id: row.id,
+        category: typeof row.category === 'string' ? row.category : '',
+        title: typeof row.title === 'string' ? row.title : '',
+        author: typeof row.author === 'string' ? row.author : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        status,
+        content: typeof row.content === 'string' ? row.content : '',
+        answer: typeof row.answer === 'string' ? row.answer : '',
+        visibility,
+        ...(typeof row.answeredAt === 'string' && row.answeredAt
+          ? { answeredAt: row.answeredAt }
+          : {}),
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+function writeInquiryRecords(records: InquiryItem[]): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    window.localStorage.setItem(INQUIRY_STORAGE_KEY, JSON.stringify(records));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function appendInquiryRecord(item: InquiryItem): boolean {
+  const current = readInquiryRecords();
+  if (current.some((row) => row.id === item.id)) return true;
+  return writeInquiryRecords([item, ...current]);
+}
+
+function allocateInquiryId(existingIds: string[]): string {
+  const maxSeq = existingIds.reduce((max, id) => Math.max(max, parseInquirySeq(id)), 0);
+  return `INQ-${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+function mergeInquiryBoardList(
+  baseList: InquiryItem[],
+  storedList: InquiryItem[],
+  staticIds: Set<string>,
+): InquiryItem[] {
+  const byId = new Map<string, InquiryItem>();
+
+  for (const item of baseList) {
+    byId.set(item.id, item);
+  }
+
+  const storedOnly: InquiryItem[] = [];
+  for (const item of storedList) {
+    if (staticIds.has(item.id)) continue;
+    byId.set(item.id, item);
+    storedOnly.push(item);
+  }
+
+  const rest = [...byId.values()].filter(
+    (item) => !storedOnly.some((stored) => stored.id === item.id),
+  );
+  return [...storedOnly, ...rest];
+}
 
 const CATEGORIES = [
   '시스템 오류 제보',
@@ -380,14 +474,44 @@ export default function InquiryPage() {
     }
   };
 
-  const showSuccessToast = () => {
+  const showSuccessToast = (message?: string) => {
     clearToastTimer();
-    setToastMessage('✓ 문의가 성공적으로 접수되었습니다.');
+    setToastMessage(
+      message ?? '✓ 문의가 정상 접수되었습니다. 관리자 확인 후 답변드릴 예정입니다.',
+    );
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage('');
       toastTimerRef.current = null;
     }, 2500);
   };
+
+  const staticInquiryIds = useMemo(
+    () => new Set(INITIAL_INQUIRIES.map((item) => item.id)),
+    [],
+  );
+
+  const refreshStoredInquiries = () => {
+    const stored = readInquiryRecords();
+    setInquiries((prev) => mergeInquiryBoardList(prev, stored, staticInquiryIds));
+    setDetailItem((current) => {
+      if (!current) return current;
+      const latest = stored.find((item) => item.id === current.id);
+      return latest ?? current;
+    });
+  };
+
+  useEffect(() => {
+    refreshStoredInquiries();
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== INQUIRY_STORAGE_KEY) return;
+      refreshStoredInquiries();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   useEffect(() => {
     return () => clearToastTimer();
@@ -502,7 +626,12 @@ export default function InquiryPage() {
       window.alert('작성자 본인만 확인 가능한 비공개 문의입니다.');
       return;
     }
-    setDetailItem(item);
+    refreshStoredInquiries();
+    const latest =
+      readInquiryRecords().find((row) => row.id === item.id) ??
+      inquiries.find((row) => row.id === item.id) ??
+      item;
+    setDetailItem(latest);
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -538,8 +667,12 @@ export default function InquiryPage() {
 
     setErrorMessage('');
 
-    const newId = `INQ-${String(nextIdRef.current).padStart(3, '0')}`;
-    nextIdRef.current += 1;
+    const existingIds = [
+      ...inquiries.map((item) => item.id),
+      ...readInquiryRecords().map((item) => item.id),
+    ];
+    const newId = allocateInquiryId(existingIds);
+    nextIdRef.current = Math.max(nextIdRef.current, parseInquirySeq(newId) + 1);
 
     const payload = {
       id: newId,
@@ -569,11 +702,14 @@ export default function InquiryPage() {
       visibility: payload.visibility,
     };
 
-    setInquiries((prev) => [newItem, ...prev]);
+    setInquiries((prev) => [newItem, ...prev.filter((item) => item.id !== newItem.id)]);
+    const saved = appendInquiryRecord(newItem);
     setCurrentPage(1);
     resetForm();
     setIsModalOpen(false);
-    showSuccessToast();
+    if (saved) {
+      showSuccessToast();
+    }
   };
 
   const page: CSSProperties = {
@@ -896,6 +1032,11 @@ export default function InquiryPage() {
                     <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
                       관리자
                     </span>
+                    {detailItem.answeredAt ? (
+                      <span className="text-[11px] font-medium text-blue-600">
+                        {detailItem.answeredAt}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
                     {detailItem.answer}

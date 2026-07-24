@@ -22,6 +22,10 @@ interface ActionHistoryItem {
   cause: string;
   manager: string;
   date: string;
+  /** 인수인계 이관 항목의 분류(특이사항/전달사항/주의사항). 정적 목업에는 없음 */
+  category?: string;
+  handoverFrom?: string;
+  handoverTo?: string;
 }
 
 interface ReportData {
@@ -139,6 +143,81 @@ const headCellStyle: CSSProperties = {
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
+const COMPLETED_KNOWLEDGE_STORAGE_KEY = 'completed_knowledge_logs';
+const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
+
+function readTransferredKnowledgeDocuments(): DocumentItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COMPLETED_KNOWLEDGE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const result: DocumentItem[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== 'string' || !row.id) continue;
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      result.push({
+        id: row.id,
+        manager: typeof row.manager === 'string' ? row.manager : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        title: typeof row.title === 'string' ? row.title : '',
+        summary: typeof row.summary === 'string' ? row.summary : '',
+        process: typeof row.process === 'string' ? row.process : '',
+        lot: typeof row.lot === 'string' ? row.lot : '',
+        detail: typeof row.detail === 'string' ? row.detail : '',
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+function readHandoverActionItems(): ActionHistoryItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HANDOVER_ACTION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const result: ActionHistoryItem[] = [];
+    const seen = new Set<number>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== 'number' || !Number.isFinite(row.id)) continue;
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      result.push({
+        id: row.id,
+        situation: typeof row.situation === 'string' ? row.situation : '',
+        action: typeof row.action === 'string' ? row.action : '',
+        cause: typeof row.cause === 'string' ? row.cause : '',
+        manager: typeof row.manager === 'string' ? row.manager : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        ...(typeof row.category === 'string' && row.category
+          ? { category: row.category }
+          : {}),
+        ...(typeof row.handoverFrom === 'string' && row.handoverFrom
+          ? { handoverFrom: row.handoverFrom }
+          : {}),
+        ...(typeof row.handoverTo === 'string' && row.handoverTo
+          ? { handoverTo: row.handoverTo }
+          : {}),
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
 
 const DOCUMENTS: DocumentItem[] = [
   {
@@ -303,7 +382,7 @@ const EMPTY_ACTION_FORM: ActionFormState = {
 };
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'knowledge', label: '지식 DB & 대처 이력' },
+  { key: 'knowledge', label: '라이브러리 & 대처 이력' },
   { key: 'report', label: 'AI 맞춤 분석' },
 ];
 
@@ -394,6 +473,9 @@ function CategoryBadge({ label }: { label: string }) {
     if (label === '원료 보관') return 'border-amber-200 bg-amber-50 text-amber-700';
     if (label === '설비 관리') return 'border-slate-300 bg-slate-100 text-slate-700';
     if (label === '대처 이력') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+    if (label === '특이사항') return 'border-amber-200 bg-amber-50 text-amber-700';
+    if (label === '전달사항') return 'border-blue-200 bg-blue-50 text-blue-700';
+    if (label === '주의사항') return 'border-rose-200 bg-rose-50 text-rose-700';
     if (label === '분쇄') return 'border-orange-200 bg-orange-50 text-orange-700';
     return 'border-slate-200 bg-slate-50 text-slate-600';
   })();
@@ -515,13 +597,52 @@ export default function KnowledgePage() {
   const [hasRunAnalysis, setHasRunAnalysis] = useState(false);
   const [docPage, setDocPage] = useState(1);
   const [actionPage, setActionPage] = useState(1);
+  const [transferredDocuments, setTransferredDocuments] = useState<DocumentItem[]>([]);
+  const [handoverActions, setHandoverActions] = useState<ActionHistoryItem[]>([]);
   const analysisTimerRef = useRef<number | null>(null);
 
-  const libraryTotalCount = DOCUMENTS.length + actions.length;
+  const refreshTransferredDocuments = () => {
+    setTransferredDocuments(readTransferredKnowledgeDocuments());
+  };
+
+  const refreshHandoverActions = () => {
+    setHandoverActions(readHandoverActionItems());
+  };
+
+  useEffect(() => {
+    refreshTransferredDocuments();
+    refreshHandoverActions();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'knowledge') {
+      refreshTransferredDocuments();
+      refreshHandoverActions();
+    }
+  }, [activeTab]);
+
+  const transferredIdSet = useMemo(
+    () => new Set(transferredDocuments.map((doc) => doc.id)),
+    [transferredDocuments],
+  );
+
+  const allDocuments = useMemo(() => {
+    const staticIds = new Set(DOCUMENTS.map((doc) => doc.id));
+    const uniqueTransferred = transferredDocuments.filter((doc) => !staticIds.has(doc.id));
+    return [...uniqueTransferred, ...DOCUMENTS];
+  }, [transferredDocuments]);
+
+  const allActions = useMemo(() => {
+    const staticIds = new Set(actions.map((item) => item.id));
+    const uniqueHandover = handoverActions.filter((item) => !staticIds.has(item.id));
+    return [...uniqueHandover, ...actions];
+  }, [actions, handoverActions]);
+
+  const libraryTotalCount = allDocuments.length + allActions.length;
 
   const filteredDocuments = useMemo(() => {
     const keyword = appliedFilters.keyword.trim().toLowerCase();
-    return DOCUMENTS.filter((doc) => {
+    return allDocuments.filter((doc) => {
       const matchesDate = !appliedFilters.date || doc.date === appliedFilters.date;
       const matchesKeyword =
         !keyword ||
@@ -531,44 +652,47 @@ export default function KnowledgePage() {
         doc.lot.toLowerCase().includes(keyword);
       return matchesDate && matchesKeyword;
     });
-  }, [appliedFilters]);
+  }, [appliedFilters, allDocuments]);
 
   const selectedDoc = useMemo(
-    () => DOCUMENTS.find((doc) => doc.id === selectedDocId) ?? null,
-    [selectedDocId],
+    () => allDocuments.find((doc) => doc.id === selectedDocId) ?? null,
+    [selectedDocId, allDocuments],
   );
 
   const filteredActions = useMemo(() => {
     const keyword = appliedActionSearch.trim().toLowerCase();
-    if (!keyword) return actions;
-    return actions.filter(
+    if (!keyword) return allActions;
+    return allActions.filter(
       (item) =>
         item.situation.toLowerCase().includes(keyword) ||
         item.action.toLowerCase().includes(keyword) ||
         item.cause.toLowerCase().includes(keyword) ||
         item.manager.toLowerCase().includes(keyword) ||
+        (item.category ?? '').toLowerCase().includes(keyword) ||
+        (item.handoverFrom ?? '').toLowerCase().includes(keyword) ||
+        (item.handoverTo ?? '').toLowerCase().includes(keyword) ||
         item.date.includes(keyword),
     );
-  }, [actions, appliedActionSearch]);
+  }, [allActions, appliedActionSearch]);
 
   const validSelectedDocIds = useMemo(
-    () => selectedDocIds.filter((id) => DOCUMENTS.some((doc) => doc.id === id)),
-    [selectedDocIds],
+    () => selectedDocIds.filter((id) => allDocuments.some((doc) => doc.id === id)),
+    [selectedDocIds, allDocuments],
   );
   const validSelectedActionIds = useMemo(
-    () => selectedActionIds.filter((id) => actions.some((item) => item.id === id)),
-    [selectedActionIds, actions],
+    () => selectedActionIds.filter((id) => allActions.some((item) => item.id === id)),
+    [selectedActionIds, allActions],
   );
 
   const selectedCount = validSelectedDocIds.length + validSelectedActionIds.length;
 
   const selectedDocs = useMemo(
-    () => DOCUMENTS.filter((doc) => validSelectedDocIds.includes(doc.id)),
-    [validSelectedDocIds],
+    () => allDocuments.filter((doc) => validSelectedDocIds.includes(doc.id)),
+    [validSelectedDocIds, allDocuments],
   );
   const selectedActions = useMemo(
-    () => actions.filter((item) => validSelectedActionIds.includes(item.id)),
-    [validSelectedActionIds, actions],
+    () => allActions.filter((item) => validSelectedActionIds.includes(item.id)),
+    [validSelectedActionIds, allActions],
   );
 
   const selectedListItems = useMemo(() => {
@@ -591,12 +715,12 @@ export default function KnowledgePage() {
     : selectedListItems.slice(0, DEFAULT_VISIBLE_COUNT);
 
   const analysisDocs = useMemo(
-    () => DOCUMENTS.filter((doc) => analysisDocIds.includes(doc.id)),
-    [analysisDocIds],
+    () => allDocuments.filter((doc) => analysisDocIds.includes(doc.id)),
+    [analysisDocIds, allDocuments],
   );
   const analysisActions = useMemo(
-    () => actions.filter((item) => analysisActionIds.includes(item.id)),
-    [analysisActionIds, actions],
+    () => allActions.filter((item) => analysisActionIds.includes(item.id)),
+    [analysisActionIds, allActions],
   );
   const analysisCount = analysisDocs.length + analysisActions.length;
 
@@ -739,7 +863,7 @@ export default function KnowledgePage() {
   };
 
   const handleDelete = (id: number) => {
-    console.log('상황 대처 이력 삭제 요청(읽기 전용 무시):', { id });
+    console.log('인수인계 이력 삭제 요청(읽기 전용 무시):', { id });
   };
 
   const handleGenerateReport = () => {
@@ -864,7 +988,7 @@ export default function KnowledgePage() {
       nodes.push(<span key={`t-${index}`}>{part}</span>);
       const docId = ids[index];
       if (!docId) return;
-      const matched = DOCUMENTS.find((doc) => doc.id === docId);
+      const matched = allDocuments.find((doc) => doc.id === docId);
       if (matched) {
         nodes.push(
           <button
@@ -932,7 +1056,7 @@ export default function KnowledgePage() {
 
         <div style={{ marginBottom: 22 }}>
           <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
-            지식 관리
+            라이브러리
           </h1>
           <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
             이슈 조치 이력 아카이브 · 지식 라이브러리
@@ -941,7 +1065,7 @@ export default function KnowledgePage() {
 
         <div
           role="tablist"
-          aria-label="지식 관리 섹션"
+          aria-label="라이브러리 섹션"
           className="mb-5 flex w-fit max-w-full flex-wrap gap-1.5 rounded-xl bg-slate-200/80 p-1.5"
         >
           {TABS.map((tab) => {
@@ -971,7 +1095,7 @@ export default function KnowledgePage() {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>
-                  지식 DB & 대처 이력
+                  라이브러리 & 대처 이력
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
                   누적 지식 라이브러리 (총 {libraryTotalCount}건)
@@ -1146,14 +1270,29 @@ export default function KnowledgePage() {
                                 </button>
                               </td>
                               <td className="w-[104px] whitespace-nowrap px-3 py-3.5">
-                                <CategoryBadge label={doc.process} />
+                                {doc.process ? (
+                                  <CategoryBadge label={doc.process} />
+                                ) : transferredIdSet.has(doc.id) ? (
+                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    이슈완료
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-400">-</span>
+                                )}
                               </td>
                               <td className="min-w-[280px] px-3 py-3.5">
-                                <div
-                                  className="line-clamp-2 text-sm font-semibold text-slate-800"
-                                  title={doc.title}
-                                >
-                                  {doc.title}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div
+                                    className="line-clamp-2 text-sm font-semibold text-slate-800"
+                                    title={doc.title}
+                                  >
+                                    {doc.title}
+                                  </div>
+                                  {transferredIdSet.has(doc.id) && doc.process ? (
+                                    <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                      이슈완료
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <div
                                   className="mt-1 line-clamp-1 text-xs text-slate-500"
@@ -1225,17 +1364,17 @@ export default function KnowledgePage() {
                 ) : null}
               </div>
 
-              {/* 상황 대처 이력 */}
+              {/* 인수인계 이력 */}
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <h3 className="m-0 text-base font-semibold text-slate-800">상황 대처 이력</h3>
+                    <h3 className="m-0 text-base font-semibold text-slate-800">인수인계 이력</h3>
                     <span className="text-sm font-semibold tabular-nums text-slate-500">
                       {filteredActions.length}건
                     </span>
                   </div>
                   <p className="mb-0 mt-1 text-xs text-slate-500">
-                    저장된 이슈의 발생 상황, 원인 및 대응 내역입니다.
+                    저장된 이슈의 발생 상황과 인수인계·대응 내역입니다.
                   </p>
                 </div>
                 <div id="action-history-list" className="overflow-x-auto">
@@ -1255,22 +1394,23 @@ export default function KnowledgePage() {
                         </th>
                         <th className="w-[96px] whitespace-nowrap px-3 py-3">분류</th>
                         <th className="min-w-[220px] px-3 py-3">발생 상황</th>
-                        <th className="min-w-[220px] px-3 py-3">대처 방안</th>
-                        <th className="min-w-[160px] px-3 py-3">원인</th>
-                        <th className="w-[88px] whitespace-nowrap px-3 py-3">담당자</th>
+                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인계자</th>
+                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인수자</th>
                         <th className="w-[108px] whitespace-nowrap px-3 py-3">날짜</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredActions.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
+                          <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
                             검색 조건에 맞는 이력이 없습니다.
                           </td>
                         </tr>
                       ) : (
                         renderedActions.map((item) => {
                           const checked = validSelectedActionIds.includes(item.id);
+                          const fromName = item.handoverFrom?.trim() || item.manager || '-';
+                          const toName = item.handoverTo?.trim() || '-';
                           return (
                             <tr
                               key={item.id}
@@ -1298,7 +1438,7 @@ export default function KnowledgePage() {
                                 />
                               </td>
                               <td className="w-[96px] whitespace-nowrap px-3 py-3.5">
-                                <CategoryBadge label="대처 이력" />
+                                <CategoryBadge label={item.category?.trim() || '대처 이력'} />
                               </td>
                               <td
                                 className="min-w-[220px] px-3 py-3.5 text-sm font-semibold text-slate-800"
@@ -1306,20 +1446,11 @@ export default function KnowledgePage() {
                               >
                                 <div className="line-clamp-2">{item.situation}</div>
                               </td>
-                              <td
-                                className="min-w-[220px] px-3 py-3.5 text-sm text-slate-700"
-                                title={item.action}
-                              >
-                                <div className="line-clamp-2">{item.action}</div>
+                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {fromName}
                               </td>
-                              <td
-                                className="min-w-[160px] px-3 py-3.5 text-sm text-slate-600"
-                                title={item.cause}
-                              >
-                                <div className="line-clamp-2">{item.cause}</div>
-                              </td>
-                              <td className="w-[88px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
-                                {item.manager}
+                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {toName}
                               </td>
                               <td className="w-[108px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
                                 {item.date}
@@ -1339,7 +1470,7 @@ export default function KnowledgePage() {
                       {filteredActions.length}건
                     </span>
                     <nav
-                      aria-label="상황 대처 이력 페이지"
+                      aria-label="인수인계 이력 페이지"
                       className="flex flex-wrap items-center justify-center gap-1.5"
                     >
                       <button
@@ -1394,10 +1525,10 @@ export default function KnowledgePage() {
                   <ReportTabIcon />
                 </div>
                 <h2 className="m-0 text-lg font-bold text-slate-800">
-                  AI 분석을 진행할 지식 항목을 선택해 주세요.
+                  AI 분석을 진행할 라이브러리 항목을 선택해 주세요.
                 </h2>
                 <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
-                  지식 DB & 대처 이력 탭에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
+                  라이브러리 & 대처 이력 탭에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
                 </p>
                 <button
                   type="button"
@@ -1405,7 +1536,7 @@ export default function KnowledgePage() {
                   style={primaryButtonStyle}
                   className="mt-5"
                 >
-                  지식 목록에서 선택하러 가기
+                  라이브러리 목록에서 선택하러 가기
                 </button>
               </div>
             ) : (
@@ -1443,7 +1574,12 @@ export default function KnowledgePage() {
                                 <span className="text-[11px] font-semibold text-blue-600">
                                   {doc.id}
                                 </span>
-                                <CategoryBadge label={doc.process} />
+                                {doc.process ? <CategoryBadge label={doc.process} /> : null}
+                                {transferredIdSet.has(doc.id) ? (
+                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    이슈완료
+                                  </span>
+                                ) : null}
                               </div>
                               <div className="line-clamp-2 text-sm font-semibold text-slate-900">
                                 {doc.title}
@@ -1480,7 +1616,7 @@ export default function KnowledgePage() {
                               <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
                                 {entry.order}
                               </span>
-                              <CategoryBadge label="대처 이력" />
+                              <CategoryBadge label={item.category?.trim() || '대처 이력'} />
                             </div>
                             <div className="line-clamp-2 text-sm font-semibold text-slate-900">
                               {item.situation}
@@ -1734,7 +1870,7 @@ export default function KnowledgePage() {
 
       <ModalShell
         open={!!detailTarget}
-        title="지식 상세 보기"
+        title="라이브러리 상세 보기"
         titleId="knowledge-detail-title"
         onClose={closeDetailModal}
         wide
@@ -1743,14 +1879,22 @@ export default function KnowledgePage() {
           <div className="space-y-4 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-blue-600">{detailTarget.item.id}</span>
-              <CategoryBadge label={detailTarget.item.process} />
+              {detailTarget.item.process ? (
+                <CategoryBadge label={detailTarget.item.process} />
+              ) : null}
+              {transferredIdSet.has(detailTarget.item.id) ? (
+                <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                  이슈완료
+                </span>
+              ) : null}
             </div>
             <h4 className="m-0 text-lg font-bold text-slate-900">{detailTarget.item.title}</h4>
             <div className="text-xs text-slate-500">
-              {detailTarget.item.manager} · {detailTarget.item.date} · {detailTarget.item.lot}
+              {detailTarget.item.manager} · {detailTarget.item.date}
+              {detailTarget.item.lot ? ` · ${detailTarget.item.lot}` : ''}
             </div>
             <p className="m-0 leading-relaxed text-slate-600">{detailTarget.item.summary}</p>
-            <div className="rounded-xl bg-slate-50 p-4 leading-relaxed text-slate-800">
+            <div className="rounded-xl bg-slate-50 p-4 leading-relaxed whitespace-pre-wrap text-slate-800">
               {detailTarget.item.detail}
             </div>
           </div>
@@ -1758,21 +1902,50 @@ export default function KnowledgePage() {
 
         {detailTarget?.kind === 'action' && (
           <div className="space-y-4 text-sm">
-            <CategoryBadge label="대처 이력" />
+            <div className="flex flex-wrap items-center gap-2">
+              <CategoryBadge label={detailTarget.item.category?.trim() || '대처 이력'} />
+            </div>
             <div>
               <div className="text-xs font-semibold text-slate-500">발생 상황</div>
-              <div className="mt-1 font-semibold text-slate-900">{detailTarget.item.situation}</div>
+              <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
+                {detailTarget.item.situation}
+              </div>
             </div>
-            <div>
-              <div className="text-xs font-semibold text-slate-500">대처 방안</div>
-              <div className="mt-1 text-slate-800">{detailTarget.item.action}</div>
-            </div>
-            <div>
-              <div className="text-xs font-semibold text-slate-500">원인</div>
-              <div className="mt-1 text-slate-800">{detailTarget.item.cause}</div>
-            </div>
+            {(detailTarget.item.handoverFrom || detailTarget.item.handoverTo) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">인계자</div>
+                  <div className="mt-1 text-slate-800">
+                    {detailTarget.item.handoverFrom?.trim() || '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">인수자</div>
+                  <div className="mt-1 text-slate-800">
+                    {detailTarget.item.handoverTo?.trim() || '-'}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {detailTarget.item.action ? (
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">대처 방안</div>
+                    <div className="mt-1 whitespace-pre-wrap text-slate-800">
+                      {detailTarget.item.action}
+                    </div>
+                  </div>
+                ) : null}
+                {detailTarget.item.cause ? (
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">원인</div>
+                    <div className="mt-1 text-slate-800">{detailTarget.item.cause}</div>
+                  </div>
+                ) : null}
+              </>
+            )}
             <div className="text-xs text-slate-500">
-              {detailTarget.item.manager} · {detailTarget.item.date}
+              {[detailTarget.item.manager, detailTarget.item.date].filter(Boolean).join(' · ')}
             </div>
           </div>
         )}

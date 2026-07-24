@@ -107,9 +107,13 @@ interface HandoverReportModalProps {
   data: HandoverData;
   issues: Issue[];
   notes: HandoverNote[];
+  completedNoteIds: number[];
   onClose: () => void;
   onDownloadPdf: () => void;
   onDownloadCsv: () => void;
+  onCompleteOne: (noteId: number, party: { from: string; to: string }) => void;
+  onCompleteAll: (party: { from: string; to: string }) => void;
+  isCompleting?: boolean;
 }
 
 const colors = {
@@ -564,10 +568,18 @@ const HandoverReportModal = ({
   data,
   issues,
   notes,
+  completedNoteIds,
   onClose,
   onDownloadPdf,
   onDownloadCsv,
+  onCompleteOne,
+  onCompleteAll,
+  isCompleting = false,
 }: HandoverReportModalProps) => {
+  const [handoverFrom, setHandoverFrom] = useState('김현수');
+  const [handoverTo, setHandoverTo] = useState('박서연');
+  const [partyError, setPartyError] = useState('');
+
   const totalCount = issues.length;
   const completedCount = issues.filter((issue) => issue.completed || issue.status === '완료').length;
   const openIssues = issues.filter((issue) => !issue.completed && issue.status !== '완료');
@@ -577,9 +589,38 @@ const HandoverReportModal = ({
     .slice(0, 2);
 
   const shiftLabel = '2026-07-21 주간 조 (08:00 ~ 16:00)';
-  const handoverPair = '김현수 (주간) ➔ 박서연 (야간)';
   const writtenAt = '2026-07-21 15:55';
   const defaultBriefing = '소성로 2호기 온도 트렌드 30분 간격 추적 필요';
+  const completedIdSet = useMemo(() => new Set(completedNoteIds), [completedNoteIds]);
+  const pendingNotes = useMemo(
+    () => notes.filter((note) => !completedIdSet.has(note.id)),
+    [notes, completedIdSet],
+  );
+  const transferredCount = notes.length - pendingNotes.length;
+  const canCompleteAll = pendingNotes.length > 0 && !isCompleting;
+
+  const resolveParty = (): { from: string; to: string } | null => {
+    const from = handoverFrom.trim();
+    const to = handoverTo.trim();
+    if (!from || !to) {
+      setPartyError('인계자와 인수자를 모두 입력해주세요.');
+      return null;
+    }
+    setPartyError('');
+    return { from, to };
+  };
+
+  const handleCompleteAllClick = () => {
+    const party = resolveParty();
+    if (!party) return;
+    onCompleteAll(party);
+  };
+
+  const handleCompleteOneClick = (noteId: number) => {
+    const party = resolveParty();
+    if (!party) return;
+    onCompleteOne(noteId, party);
+  };
 
   return (
     <div
@@ -642,10 +683,43 @@ const HandoverReportModal = ({
                 <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">교대 구분</dt>
                 <dd className="font-semibold text-slate-900">{shiftLabel}</dd>
               </div>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">인계자 / 인수자</dt>
-                <dd className="font-semibold text-slate-900">{handoverPair}</dd>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="handover-from" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                    인계자
+                  </label>
+                  <input
+                    id="handover-from"
+                    value={handoverFrom}
+                    onChange={(event) => {
+                      setHandoverFrom(event.target.value);
+                      if (partyError) setPartyError('');
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                    placeholder="인계자 이름"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="handover-to" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                    인수자
+                  </label>
+                  <input
+                    id="handover-to"
+                    value={handoverTo}
+                    onChange={(event) => {
+                      setHandoverTo(event.target.value);
+                      if (partyError) setPartyError('');
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                    placeholder="인수자 이름"
+                  />
+                </div>
               </div>
+              {partyError ? (
+                <p className="m-0 text-xs font-semibold text-rose-600" role="alert">
+                  {partyError}
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">작성 일시</dt>
                 <dd className="font-medium text-slate-700">{writtenAt}</dd>
@@ -658,9 +732,19 @@ const HandoverReportModal = ({
           <section className="mb-5 rounded-xl border border-amber-200/80 bg-amber-50/80 p-4">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h3 className="m-0 text-sm font-bold text-amber-900">3. 교대 전달 및 주의사항</h3>
-              <span className="rounded-md border border-amber-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                다음 조 전달 {notes.length}건
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-md border border-amber-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                  전체 {notes.length}건 · 완료 {transferredCount}건 · 대기 {pendingNotes.length}건
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCompleteAllClick}
+                  disabled={!canCompleteAll}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {isCompleting ? '저장 중…' : '전체 완료'}
+                </button>
+              </div>
             </div>
             {notes.length === 0 ? (
               <p className="m-0 text-sm font-semibold leading-relaxed text-amber-950">
@@ -668,29 +752,49 @@ const HandoverReportModal = ({
               </p>
             ) : (
               <ul className="m-0 list-none space-y-2.5 p-0">
-                {notes.map((note) => (
-                  <li
-                    key={note.id}
-                    className="rounded-lg border border-amber-100/80 bg-white/70 px-3 py-2.5"
-                  >
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <span
-                        className="rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-                        style={noteCategoryStyle(note.category)}
-                      >
-                        {note.category}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-700">{note.author}</span>
-                      <span className="text-[11px] font-semibold text-blue-700">
-                        {formatShiftRange(note.shiftStart, note.shiftEnd)}
-                      </span>
-                      <span className="text-[11px] text-slate-400">{note.createdAt}</span>
-                    </div>
-                    <p className="m-0 text-sm font-medium leading-relaxed text-slate-900">
-                      {note.content}
-                    </p>
-                  </li>
-                ))}
+                {notes.map((note) => {
+                  const isDone = completedIdSet.has(note.id);
+                  return (
+                    <li
+                      key={note.id}
+                      className={`rounded-lg border px-3 py-2.5 ${
+                        isDone
+                          ? 'border-emerald-100 bg-emerald-50/70'
+                          : 'border-amber-100/80 bg-white/70'
+                      }`}
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <span
+                          className="rounded-md px-1.5 py-0.5 text-[10px] font-bold"
+                          style={noteCategoryStyle(note.category)}
+                        >
+                          {note.category}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-700">{note.author}</span>
+                        <span className="text-[11px] font-semibold text-blue-700">
+                          {formatShiftRange(note.shiftStart, note.shiftEnd)}
+                        </span>
+                        <span className="text-[11px] text-slate-400">{note.createdAt}</span>
+                        {isDone ? (
+                          <span className="rounded-md border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                            완료됨
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteOneClick(note.id)}
+                          disabled={isDone || isCompleting}
+                          className="ml-auto inline-flex h-7 items-center rounded-md bg-emerald-600 px-2.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-200 disabled:text-emerald-700"
+                        >
+                          {isDone ? '완료됨' : '완료'}
+                        </button>
+                      </div>
+                      <p className="m-0 text-sm font-medium leading-relaxed text-slate-900">
+                        {note.content}
+                      </p>
+                    </li>
+                  );
+                })}
                 {!notes.some((note) => note.content.includes('소성로')) ? (
                   <li className="rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 text-sm font-semibold text-rose-800">
                     ⚠ {defaultBriefing}
@@ -1625,6 +1729,181 @@ const EMPTY_FILTERS: FilterState = {
   status: '',
 };
 
+const COMPLETED_KNOWLEDGE_STORAGE_KEY = 'completed_knowledge_logs';
+const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
+
+type TransferredKnowledgeLog = {
+  id: string;
+  sourceIssueId: string;
+  manager: string;
+  date: string;
+  title: string;
+  summary: string;
+  process: string;
+  lot: string;
+  detail: string;
+};
+
+type HandoverActionLog = {
+  id: number;
+  sourceNoteId: number;
+  situation: string;
+  action: string;
+  cause: string;
+  manager: string;
+  date: string;
+  category: HandoverNote['category'];
+  handoverFrom: string;
+  handoverTo: string;
+};
+
+function formatKnowledgeDate() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toTransferredKnowledgeId(issueId: string) {
+  return `DOC-${issueId}`;
+}
+
+function readCompletedKnowledgeLogs(): TransferredKnowledgeLog[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COMPLETED_KNOWLEDGE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is TransferredKnowledgeLog => {
+      if (!item || typeof item !== 'object') return false;
+      const row = item as Record<string, unknown>;
+      return typeof row.id === 'string' && row.id.length > 0;
+    });
+  } catch {
+    return [];
+  }
+}
+
+function mapIssueToKnowledgeLog(issue: Issue): TransferredKnowledgeLog {
+  const actionText = issue.action.trim();
+  const anomalyText = issue.anomaly.trim();
+  const detailParts = [
+    `원본 이슈: ${issue.id}`,
+    `제목: ${issue.title}`,
+    issue.lot ? `LOT: ${issue.lot}` : '',
+    issue.assignee ? `담당자: ${issue.assignee}` : '',
+    anomalyText ? `이상 징후: ${anomalyText}` : '',
+    actionText ? `조치 내용: ${actionText}` : '',
+  ].filter(Boolean);
+
+  return {
+    id: toTransferredKnowledgeId(issue.id),
+    sourceIssueId: issue.id,
+    manager: issue.assignee,
+    date: formatKnowledgeDate(),
+    title: issue.title,
+    summary: actionText || anomalyText || issue.title,
+    process: '',
+    lot: issue.lot,
+    detail: detailParts.join('\n'),
+  };
+}
+
+/** @returns 'added' | 'exists' | 'failed' */
+function appendCompletedKnowledgeLog(issue: Issue): 'added' | 'exists' | 'failed' {
+  if (typeof window === 'undefined') return 'failed';
+  try {
+    const current = readCompletedKnowledgeLogs();
+    const nextId = toTransferredKnowledgeId(issue.id);
+    const alreadyExists = current.some(
+      (item) =>
+        item.id === nextId ||
+        (typeof item.sourceIssueId === 'string' && item.sourceIssueId === issue.id),
+    );
+    if (alreadyExists) return 'exists';
+    const next = [mapIssueToKnowledgeLog(issue), ...current];
+    window.localStorage.setItem(COMPLETED_KNOWLEDGE_STORAGE_KEY, JSON.stringify(next));
+    return 'added';
+  } catch {
+    return 'failed';
+  }
+}
+
+function readHandoverActionLogs(): HandoverActionLog[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HANDOVER_ACTION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is HandoverActionLog => {
+      if (!item || typeof item !== 'object') return false;
+      const row = item as Record<string, unknown>;
+      return typeof row.id === 'number' && Number.isFinite(row.id);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function mapHandoverNoteToActionLog(
+  note: HandoverNote,
+  _relatedIssue: Issue | null,
+  party: { from: string; to: string },
+): HandoverActionLog {
+  const datePart = note.createdAt.slice(0, 10);
+  return {
+    id: note.id,
+    sourceNoteId: note.id,
+    situation: note.content.trim(),
+    action: '',
+    cause: '',
+    manager: party.from,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : formatKnowledgeDate(),
+    category: note.category,
+    handoverFrom: party.from,
+    handoverTo: party.to,
+  };
+}
+
+function getTransferredHandoverNoteIds(): number[] {
+  const logs = readHandoverActionLogs();
+  const ids = new Set<number>();
+  for (const item of logs) {
+    if (typeof item.sourceNoteId === 'number' && Number.isFinite(item.sourceNoteId)) {
+      ids.add(item.sourceNoteId);
+    } else if (typeof item.id === 'number' && Number.isFinite(item.id)) {
+      ids.add(item.id);
+    }
+  }
+  return Array.from(ids);
+}
+
+/** @returns 'added' | 'exists' | 'failed' | 'empty' */
+function appendHandoverActionLogs(
+  notes: HandoverNote[],
+  relatedIssue: Issue | null,
+  party: { from: string; to: string },
+): 'added' | 'exists' | 'failed' | 'empty' {
+  if (typeof window === 'undefined') return 'failed';
+  if (notes.length === 0) return 'empty';
+  try {
+    const current = readHandoverActionLogs();
+    const existingIds = new Set(
+      current.flatMap((item) => [item.id, item.sourceNoteId].filter((id) => typeof id === 'number')),
+    );
+    const toAdd = notes
+      .filter((note) => !existingIds.has(note.id))
+      .map((note) => mapHandoverNoteToActionLog(note, relatedIssue, party));
+    if (toAdd.length === 0) return 'exists';
+    const next = [...toAdd, ...current];
+    window.localStorage.setItem(HANDOVER_ACTION_STORAGE_KEY, JSON.stringify(next));
+    return 'added';
+  } catch {
+    return 'failed';
+  }
+}
+
 export default function IssuePage() {
   const [issues, setIssues] = useState<Issue[]>(INITIAL_ISSUES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1634,10 +1913,24 @@ export default function IssuePage() {
   const [reportNotice, setReportNotice] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
+  const [completedHandoverNoteIds, setCompletedHandoverNoteIds] = useState<number[]>([]);
   const prevSelectedIdRef = useRef<string | null>(null);
+
+  const refreshCompletedHandoverNoteIds = () => {
+    setCompletedHandoverNoteIds(getTransferredHandoverNoteIds());
+  };
+
+  useEffect(() => {
+    refreshCompletedHandoverNoteIds();
+  }, []);
+
+  useEffect(() => {
+    if (isReportOpen) refreshCompletedHandoverNoteIds();
+  }, [isReportOpen]);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,
@@ -1753,7 +2046,37 @@ export default function IssuePage() {
     const now = new Date();
     const pad = (value: number) => String(value).padStart(2, '0');
     const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    setHandoverNotes((current) => [{ ...note, id: Date.now(), createdAt }, ...current]);
+    const newNote: HandoverNote = { ...note, id: Date.now(), createdAt };
+    setHandoverNotes((current) => [newNote, ...current]);
+  };
+
+  const handleCompleteOneHandover = (noteId: number, party: { from: string; to: string }) => {
+    const target = handoverNotes.find((note) => note.id === noteId);
+    if (!target) return;
+    const transferResult = appendHandoverActionLogs([target], selectedIssue, party);
+    if (transferResult === 'added') {
+      refreshCompletedHandoverNoteIds();
+      setToastMessage(
+        '✓ 선택한 인수인계 사항이 라이브러리의 인수인계 이력으로 저장되었습니다.',
+      );
+      setShowToast(true);
+    }
+  };
+
+  const handleCompleteAllHandover = (party: { from: string; to: string }) => {
+    const pending = handoverNotes.filter((note) => !completedHandoverNoteIds.includes(note.id));
+    const transferResult = appendHandoverActionLogs(pending, selectedIssue, party);
+    if (transferResult === 'added') {
+      refreshCompletedHandoverNoteIds();
+      setToastMessage(
+        '✓ 인수인계 사항이 등록되어 라이브러리의 인수인계 이력으로 저장되었습니다.',
+      );
+      setShowToast(true);
+      return;
+    }
+    if (transferResult === 'exists') {
+      refreshCompletedHandoverNoteIds();
+    }
   };
 
   const handleRemoveNote = (id: number) => {
@@ -1968,7 +2291,33 @@ ${issues
       completed: savedData.completed,
     });
     setSaveMessage('이슈 처리 내역이 저장되었습니다.');
-    setShowToast(true);
+
+    const isCompleted = savedData.completed || savedData.status === '완료';
+    if (isCompleted) {
+      const transferredIssue: Issue = {
+        ...selectedIssue,
+        assignee: savedData.assignee,
+        status: savedData.status,
+        action: savedData.action,
+        completed: savedData.completed,
+      };
+      const transferResult = appendCompletedKnowledgeLog(transferredIssue);
+      if (transferResult === 'added') {
+        setToastMessage('✓ 조치가 완료되어 지식 관리 라이브러리로 자동 이관되었습니다.');
+        setShowToast(true);
+      } else if (transferResult === 'failed') {
+        setToastMessage(
+          '이슈는 저장되었지만 지식 라이브러리 이관에 실패했습니다. 브라우저 저장소 권한을 확인해 주세요.',
+        );
+        setShowToast(true);
+      } else {
+        setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
+        setShowToast(true);
+      }
+    } else {
+      setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
+      setShowToast(true);
+    }
   };
 
   return (
@@ -2036,19 +2385,22 @@ ${issues
           data={HANDOVER_DATA}
           issues={issues}
           notes={handoverNotes}
+          completedNoteIds={completedHandoverNoteIds}
           onClose={() => setIsReportOpen(false)}
           onDownloadPdf={handleDownloadPdf}
           onDownloadCsv={handleDownloadCsv}
+          onCompleteOne={handleCompleteOneHandover}
+          onCompleteAll={handleCompleteAllHandover}
         />
       )}
       {showToast ? (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed bottom-6 right-6 z-[120] rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-medium text-white shadow-lg"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[120] max-w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-medium text-white shadow-lg sm:left-auto sm:right-6 sm:translate-x-0"
           style={{ animation: 'issue-toast-fade-in 0.25s ease-out' }}
         >
-          ✓ 이슈 처리 내역이 성공적으로 저장되었습니다.
+          {toastMessage}
         </div>
       ) : null}
       <style>{`
