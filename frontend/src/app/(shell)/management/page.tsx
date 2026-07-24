@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 
 type MailImportance = '높음' | '보통' | '낮음'
@@ -314,10 +314,13 @@ function badgeStatus(v?: InquiryStatus) {
   return 'bg-green-100 text-green-600'
 }
 
-function badgePriority(v?: InquiryPriority) {
-  if (v === '높음') return 'bg-red-100 text-red-600'
-  if (v === '낮음') return 'bg-gray-100 text-gray-500'
-  return 'bg-yellow-100 text-yellow-600'
+function badgePriority(v?: InquiryPriority | string) {
+  const base =
+    'inline-flex items-center rounded-full px-2 py-0.5 text-xs whitespace-nowrap border font-bold'
+  if (v === '높음') return `${base} bg-rose-50 text-rose-700 border-rose-200`
+  if (v === '보통') return `${base} bg-amber-50 text-amber-700 border-amber-200`
+  if (v === '낮음') return `${base} bg-slate-100 text-slate-600 border-slate-200 font-medium`
+  return `${base} bg-slate-100 text-slate-600 border-slate-200 font-medium`
 }
 
 function formatNow() {
@@ -352,6 +355,9 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'defect', label: '불량률 모니터링' },
 ]
 
+const controlClass =
+  'h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-800 outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30'
+
 export default function ManagementPage() {
   const [activeTab, setActiveTab] = useState<TabId>('mail')
   const [mails, setMails] = useState<MailItem[]>(INITIAL_MAILS)
@@ -362,12 +368,35 @@ export default function ManagementPage() {
   const [replyForm, setReplyForm] = useState<ReplyFormState>(EMPTY_REPLY_FORM)
   const [threshold, setThreshold] = useState(3)
   const [n8nEnabled, setN8nEnabled] = useState(true)
+  const [toastMessage, setToastMessage] = useState('')
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false)
+  const toastTimerRef = useRef<number | null>(null)
 
   const selectedMail = mails.find((m) => m.id === selectedMailId) ?? null
   const selectedInquiry = inquiries.find((i) => i.id === selectedInquiryId) ?? null
   const filteredInquiries =
     statusFilter === '전체' ? inquiries : inquiries.filter((i) => i.status === statusFilter)
   const alertLines = getAlertLines(DEFECT_RECORDS, threshold)
+
+  const clearToastTimer = () => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = null
+    }
+  }
+
+  const showSuccessToast = (message: string) => {
+    clearToastTimer()
+    setToastMessage(message)
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage('')
+      toastTimerRef.current = null
+    }, 2500)
+  }
+
+  useEffect(() => {
+    return () => clearToastTimer()
+  }, [])
 
   const handleSelectMail = (id: string) => {
     setSelectedMailId(id)
@@ -391,442 +420,625 @@ export default function ManagementPage() {
   }
 
   const handleSubmitReply = () => {
+    if (isSubmittingReply) return
     if (!selectedInquiryId || !replyForm.content.trim() || !replyForm.assignee.trim()) return
-    const now = formatNow()
-    const reply: InquiryReply = {
-      inquiryId: selectedInquiryId,
-      content: replyForm.content.trim(),
-      assignee: replyForm.assignee.trim(),
-      replyStatus: '완료',
-      repliedAt: now,
-      internalMemo: replyForm.internalMemo.trim() || undefined,
-      priority: replyForm.priority,
-      adminConfirmed: replyForm.adminConfirmed,
+
+    setIsSubmittingReply(true)
+    try {
+      const now = formatNow()
+      const reply: InquiryReply = {
+        inquiryId: selectedInquiryId,
+        content: replyForm.content.trim(),
+        assignee: replyForm.assignee.trim(),
+        replyStatus: '완료',
+        repliedAt: now,
+        internalMemo: replyForm.internalMemo.trim() || undefined,
+        priority: replyForm.priority,
+        adminConfirmed: replyForm.adminConfirmed,
+      }
+      setInquiries((prev) =>
+        prev.map((item) =>
+          item.id === selectedInquiryId ? { ...item, status: '완료', updatedAt: now, reply } : item,
+        ),
+      )
+      showSuccessToast('✓ 문의 답변이 성공적으로 등록되었습니다.')
+    } finally {
+      setIsSubmittingReply(false)
     }
-    setInquiries((prev) =>
-      prev.map((item) =>
-        item.id === selectedInquiryId ? { ...item, status: '완료', updatedAt: now, reply } : item,
-      ),
-    )
   }
 
   return (
-    <div className="h-full w-full flex flex-col p-6 gap-4 overflow-hidden text-gray-800">
-          <div className="flex items-center justify-between gap-4 shrink-0">
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">Management</h1>
-              <p className="text-sm text-gray-500 mt-0.5">메일 · 문의/답변 · 불량률 모니터링</p>
-            </div>
-            <div className="flex gap-2">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="relative flex h-full w-full flex-col gap-4 overflow-hidden p-6 text-slate-800">
+      {toastMessage ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 left-1/2 z-[120] max-w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg"
+        >
+          {toastMessage}
+        </div>
+      ) : null}
 
-          <div className="flex-1 min-h-0 overflow-hidden">
-            {activeTab === 'mail' && (
-              <div className="h-full bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 shrink-0">
-                  <h2 className="text-lg font-bold text-gray-800">메일 조회 및 확인 (MEMO01_MAIL_VIEW01)</h2>
-                  <p className="text-sm text-gray-500 mt-1">수신 메일을 선택하면 상세를 확인하고 읽음 처리됩니다.</p>
-                </div>
-                <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5">
-                  <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-gray-100 overflow-y-auto">
-                    {mails.length === 0 ? (
-                      <p className="p-6 text-sm text-gray-500">표시할 메일이 없습니다.</p>
-                    ) : (
-                      mails.map((mail) => {
-                        const selected = mail.id === selectedMailId
-                        return (
-                          <button
-                            key={mail.id}
-                            type="button"
-                            onClick={() => handleSelectMail(mail.id)}
-                            className={`w-full text-left px-4 py-3 border-b border-gray-50 transition-colors ${
-                              selected ? 'bg-blue-50' : 'hover:bg-gray-50'
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">Management</h1>
+          <p className="mt-0.5 text-sm text-slate-500">메일 · 문의/답변 · 불량률 모니터링</p>
+        </div>
+        <div
+          role="tablist"
+          aria-label="관리 섹션"
+          className="flex max-w-full flex-wrap gap-1 rounded-xl bg-slate-100/80 p-1"
+        >
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`panel-${tab.id}`}
+                id={`tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`rounded-lg px-4 py-2 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-white font-bold text-blue-600 shadow-sm'
+                    : 'font-medium text-slate-600 hover:bg-white/60 hover:text-slate-900'
+                }`}
+              >
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeTab === 'mail' && (
+          <div
+            role="tabpanel"
+            id="panel-mail"
+            aria-labelledby="tab-mail"
+            className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h2 className="text-lg font-bold text-slate-800">메일 조회 및 확인</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                수신 메일을 선택하면 상세를 확인하고 읽음 처리됩니다.
+              </p>
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-5">
+              <div className="overflow-y-auto border-b border-slate-100 lg:col-span-2 lg:border-b-0 lg:border-r">
+                {mails.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-500">표시할 메일이 없습니다.</p>
+                ) : (
+                  mails.map((mail) => {
+                    const selected = mail.id === selectedMailId
+                    const unread = mail.isRead === false
+                    return (
+                      <button
+                        key={mail.id}
+                        type="button"
+                        onClick={() => handleSelectMail(mail.id)}
+                        className={`w-full cursor-pointer border-b border-slate-50 px-4 py-3 text-left transition-colors ${
+                          selected
+                            ? 'border-l-4 border-l-blue-600 bg-blue-50/80 hover:bg-blue-50/80'
+                            : unread
+                              ? 'border-l-4 border-l-transparent bg-blue-50/30 hover:bg-slate-50/80'
+                              : 'border-l-4 border-l-transparent hover:bg-slate-50/80'
+                        }`}
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          {mail.hasAttachment && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                              첨부
+                            </span>
+                          )}
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-xs font-bold ${
+                              unread
+                                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 bg-slate-100 text-slate-500'
                             }`}
                           >
-                            <div className="flex items-center gap-2 mb-1">
-                              {mail.hasAttachment && (
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">첨부</span>
-                              )}
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                  mail.isRead ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-blue-600'
-                                }`}
-                              >
-                                {mail.isRead ? '읽음' : '안읽음'}
-                              </span>
-                            </div>
-                            <p className={`text-sm truncate ${mail.isRead ? 'text-gray-700' : 'font-bold text-gray-900'}`}>
-                              {mail.subject}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1 truncate">{mail.sender} · {mail.receivedAt}</p>
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                  <div className="lg:col-span-3 overflow-y-auto p-5">
-                    {!selectedMail ? (
-                      <div className="h-full min-h-[200px] flex items-center justify-center text-sm text-gray-400">
-                        좌측에서 메일을 선택하세요.
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {selectedMail.tags && selectedMail.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {selectedMail.tags.map((t) => (
-                              <span key={t} className="px-3 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
-                                #{t}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <h3 className="text-xl font-bold text-gray-800">{selectedMail.subject}</h3>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div><p className="text-gray-400 text-xs">메일ID</p><p className="font-medium">{selectedMail.id}</p></div>
-                          <div><p className="text-gray-400 text-xs">수신일시</p><p className="font-medium">{selectedMail.receivedAt}</p></div>
-                          <div><p className="text-gray-400 text-xs">발신자</p><p className="font-medium">{selectedMail.sender}</p></div>
-                          <div><p className="text-gray-400 text-xs">참조(CC)</p><p className="font-medium">{selectedMail.cc?.join(', ') || '-'}</p></div>
-                        </div>
-                        <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">
-                          {selectedMail.body}
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400 mb-2">첨부파일</p>
-                          {selectedMail.attachments?.length ? (
-                            <div className="flex flex-col gap-2">
-                              {selectedMail.attachments.map((f) => (
-                                <div key={f} className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm">
-                                  {f}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-400">첨부파일 없음</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'inquiry' && (
-              <div className="h-full flex flex-col gap-4 overflow-hidden">
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden shrink-0 max-h-[42%]">
-                  <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-bold text-gray-800">문의 내역 조회 (MEMO02_INQUIRY_VIEW01)</h2>
-                      <p className="text-sm text-gray-500">행을 선택하면 상세와 답변 패널이 연동됩니다.</p>
-                    </div>
-                    <div className="flex gap-2">
-                      {(['전체', '대기', '진행중', '완료'] as StatusFilter[]).map((f) => (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => setStatusFilter(f)}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
-                            statusFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          {f}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="overflow-auto">
-                    <table className="min-w-full text-sm text-left">
-                      <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="px-4 py-2.5 font-medium">문의ID</th>
-                          <th className="px-4 py-2.5 font-medium">제목</th>
-                          <th className="px-4 py-2.5 font-medium">작성자</th>
-                          <th className="px-4 py-2.5 font-medium">상태</th>
-                          <th className="px-4 py-2.5 font-medium">우선순위</th>
-                          <th className="px-4 py-2.5 font-medium">작성일</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredInquiries.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                              해당 조건의 문의가 없습니다.
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredInquiries.map((item) => (
-                            <tr
-                              key={item.id}
-                              onClick={() => handleSelectInquiry(item.id)}
-                              className={`border-t border-gray-50 cursor-pointer transition-colors ${
-                                item.id === selectedInquiryId ? 'bg-blue-50' : 'hover:bg-gray-50'
-                              }`}
-                            >
-                              <td className="px-4 py-2.5 text-xs text-gray-500 font-mono">{item.id}</td>
-                              <td className="px-4 py-2.5 font-medium text-gray-800 max-w-[220px] truncate">{item.title}</td>
-                              <td className="px-4 py-2.5 text-gray-600">{item.authorName}</td>
-                              <td className="px-4 py-2.5"><span className={`px-2.5 py-1 rounded-full text-xs font-bold ${badgeStatus(item.status)}`}>{item.status ?? '대기'}</span></td>
-                              <td className="px-4 py-2.5"><span className={`px-2.5 py-1 rounded-full text-xs font-bold ${badgePriority(item.priority)}`}>{item.priority ?? '보통'}</span></td>
-                              <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{item.createdAt}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-hidden">
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 overflow-y-auto">
-                    <h3 className="font-bold text-gray-800 mb-3">문의 상세</h3>
-                    {!selectedInquiry ? (
-                      <p className="text-sm text-gray-400 py-8 text-center">문의를 선택하세요.</p>
-                    ) : (
-                      <div className="space-y-3 text-sm">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><p className="text-xs text-gray-400">문의ID</p><p className="font-medium">{selectedInquiry.id}</p></div>
-                          <div><p className="text-xs text-gray-400">유형</p><p className="font-medium">{selectedInquiry.type ?? '-'}</p></div>
-                          <div><p className="text-xs text-gray-400">작성자</p><p className="font-medium">{selectedInquiry.authorName}</p></div>
-                          <div><p className="text-xs text-gray-400">연락처</p><p className="font-medium">{selectedInquiry.phone}</p></div>
-                          <div className="col-span-2"><p className="text-xs text-gray-400">이메일</p><p className="font-medium break-all">{selectedInquiry.email}</p></div>
-                          <div><p className="text-xs text-gray-400">처리 부서</p><p className="font-medium">{selectedInquiry.department ?? '-'}</p></div>
-                          <div><p className="text-xs text-gray-400">작성일 / 수정일</p><p className="font-medium">{selectedInquiry.createdAt}{selectedInquiry.updatedAt ? ` / ${selectedInquiry.updatedAt}` : ''}</p></div>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400">제목</p>
-                          <p className="font-bold text-gray-800">{selectedInquiry.title}</p>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 leading-relaxed whitespace-pre-wrap">
-                          {selectedInquiry.content}
-                        </div>
-                        {selectedInquiry.attachments?.length ? (
-                          <div className="flex flex-wrap gap-2">
-                            {selectedInquiry.attachments.map((f) => (
-                              <span key={f} className="px-3 py-1 bg-gray-100 rounded-full text-xs text-gray-600">
-                                {f}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {selectedInquiry.reply && (
-                          <div className="p-3 bg-green-50 border border-green-100 rounded-xl">
-                            <p className="text-xs font-bold text-green-700 mb-1">등록된 답변</p>
-                            <p className="text-sm text-green-900 whitespace-pre-wrap">{selectedInquiry.reply.content}</p>
-                            <p className="text-xs text-green-600 mt-2">
-                              {selectedInquiry.reply.assignee} · {selectedInquiry.reply.repliedAt}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 overflow-y-auto">
-                    <h3 className="font-bold text-gray-800">문의 답변 관리 (MEMO02_REPLY_MANAGE02)</h3>
-                    <p className="text-sm text-gray-500 mt-1 mb-4">답변 등록 시 문의 상태가 완료로 변경됩니다.</p>
-                    {!selectedInquiry ? (
-                      <p className="text-sm text-gray-400 py-8 text-center">문의를 선택하면 답변 폼이 표시됩니다.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        <textarea
-                          value={replyForm.content}
-                          onChange={(e) => setReplyForm((p) => ({ ...p, content: e.target.value }))}
-                          rows={4}
-                          placeholder="답변 내용"
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <input
-                          type="text"
-                          value={replyForm.assignee}
-                          onChange={(e) => setReplyForm((p) => ({ ...p, assignee: e.target.value }))}
-                          placeholder="담당자"
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <select
-                          value={replyForm.priority}
-                          onChange={(e) =>
-                            setReplyForm((p) => ({ ...p, priority: e.target.value as InquiryPriority }))
-                          }
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="높음">우선순위: 높음</option>
-                          <option value="보통">우선순위: 보통</option>
-                          <option value="낮음">우선순위: 낮음</option>
-                        </select>
-                        <input
-                          type="text"
-                          value={replyForm.internalMemo}
-                          onChange={(e) => setReplyForm((p) => ({ ...p, internalMemo: e.target.value }))}
-                          placeholder="내부 메모"
-                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <label className="flex items-center gap-2 text-sm text-gray-700">
-                          <input
-                            type="checkbox"
-                            checked={replyForm.adminConfirmed}
-                            onChange={(e) => setReplyForm((p) => ({ ...p, adminConfirmed: e.target.checked }))}
-                            className="rounded border-gray-300"
-                          />
-                          관리자 확인
-                        </label>
-                        <button
-                          type="button"
-                          onClick={handleSubmitReply}
-                          className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-sm hover:bg-blue-700 transition"
-                        >
-                          답변 등록
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'defect' && (
-              <div className="h-full flex flex-col gap-4 overflow-y-auto pr-1">
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 shrink-0">
-                  <h2 className="text-lg font-bold text-gray-800">
-                    생산라인 불량률 모니터링 및 알림 설정 (MEM03_DEFECT_ALERT01)
-                  </h2>
-                  <p className="text-sm text-gray-500 mt-1">최근 3일 연속 임계값 초과 라인만 알림 대상으로 표시합니다.</p>
-                  <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
-                    <div className="flex items-center gap-3">
-                      <label className="text-sm text-gray-600 font-medium">임계값 (%)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={threshold}
-                        onChange={(e) => setThreshold(Number(e.target.value) || 0)}
-                        className="w-24 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-4 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100 min-w-[260px]">
-                      <div>
-                        <p className="text-sm font-medium text-gray-800">n8n 일일 모니터링</p>
-                        <p className="text-xs text-gray-500">{n8nEnabled ? '활성화' : '비활성화'}</p>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={n8nEnabled}
-                        onClick={() => setN8nEnabled((v) => !v)}
-                        className={`relative h-7 w-12 rounded-full transition-colors ${n8nEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
-                      >
-                        <span
-                          className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-                            n8nEnabled ? 'translate-x-5' : ''
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 shrink-0">
-                  <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-3">
-                    <AlertCircle className="text-red-500" size={20} />
-                    알림 대상 라인
-                  </h3>
-                  {alertLines.length === 0 ? (
-                    <p className="text-sm text-gray-400">현재 알림 대상 라인이 없습니다.</p>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {alertLines.map((alert) => (
-                        <div
-                          key={alert.lineId}
-                          className="flex justify-between items-center p-4 bg-red-50 border border-red-100 rounded-xl"
-                        >
-                          <div>
-                            <span className="font-bold text-red-700">
-                              {alert.lineName} ({alert.lineId})
-                            </span>
-                            <p className="text-sm text-red-500 mt-1">
-                              {alert.recent.map((r) => `${r.baseDate} ${r.defectRate}%`).join(' → ')}
-                            </p>
-                          </div>
-                          <span className="px-3 py-1 bg-red-100 text-red-600 rounded-full text-xs font-bold whitespace-nowrap">
-                            3일 연속 초과
+                            {unread ? '안읽음' : '읽음'}
                           </span>
+                          {unread && !selected ? (
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full bg-blue-600"
+                              aria-hidden
+                            />
+                          ) : null}
                         </div>
-                      ))}
+                        <p
+                          className={`truncate text-sm ${
+                            unread ? 'font-bold text-slate-900' : 'font-medium text-slate-700'
+                          }`}
+                        >
+                          {mail.subject}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-slate-400">
+                          {mail.sender} · {mail.receivedAt}
+                        </p>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+              <div className="overflow-y-auto p-5 lg:col-span-3">
+                {mails.length === 0 ? null : !selectedMail ? (
+                  <div className="flex h-full min-h-[220px] flex-col items-center justify-center px-4 text-center">
+                    <div
+                      className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-lg text-slate-400"
+                      aria-hidden
+                    >
+                      ✉
+                    </div>
+                    <h3 className="m-0 text-base font-bold text-slate-800">선택된 메일이 없습니다</h3>
+                    <p className="mt-2 max-w-sm text-sm text-slate-500">
+                      좌측 목록에서 상세 내용을 확인할 메일을 선택하세요.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {selectedMail.tags && selectedMail.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedMail.tags.map((t) => (
+                          <span
+                            key={t}
+                            className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
+                          >
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <h3 className="text-xl font-bold text-slate-800">{selectedMail.subject}</h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-slate-400">메일ID</p>
+                        <p className="font-medium">{selectedMail.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">수신일시</p>
+                        <p className="font-medium">{selectedMail.receivedAt}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">발신자</p>
+                        <p className="font-medium">{selectedMail.sender}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">참조(CC)</p>
+                        <p className="font-medium">{selectedMail.cc?.join(', ') || '-'}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm leading-relaxed whitespace-pre-wrap text-slate-700">
+                      {selectedMail.body}
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs text-slate-400">첨부파일</p>
+                      {selectedMail.attachments?.length ? (
+                        <div className="flex flex-col gap-2">
+                          {selectedMail.attachments.map((f) => (
+                            <div
+                              key={f}
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                            >
+                              {f}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-400">첨부파일 없음</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'inquiry' && (
+          <div
+            role="tabpanel"
+            id="panel-inquiry"
+            aria-labelledby="tab-inquiry"
+            className="flex h-full flex-col gap-4 overflow-hidden"
+          >
+            <div className="flex max-h-[42%] shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">문의 내역 조회</h2>
+                  <p className="text-sm text-slate-500">행을 선택하면 상세와 답변 패널이 연동됩니다.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(['전체', '대기', '진행중', '완료'] as StatusFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setStatusFilter(f)}
+                      className={`rounded-full px-3 py-1 text-xs font-bold transition-colors ${
+                        statusFilter === f
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2.5 font-medium">문의ID</th>
+                      <th className="px-4 py-2.5 font-medium">제목</th>
+                      <th className="px-4 py-2.5 font-medium">작성자</th>
+                      <th className="px-4 py-2.5 font-medium">상태</th>
+                      <th className="px-4 py-2.5 font-medium">우선순위</th>
+                      <th className="px-4 py-2.5 font-medium">작성일</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInquiries.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                          해당 조건의 문의가 없습니다.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredInquiries.map((item) => (
+                        <tr
+                          key={item.id}
+                          onClick={() => handleSelectInquiry(item.id)}
+                          className={`cursor-pointer border-t border-slate-50 transition-colors ${
+                            item.id === selectedInquiryId
+                              ? 'bg-blue-50/80 hover:bg-blue-50/80'
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{item.id}</td>
+                          <td className="max-w-[220px] truncate px-4 py-2.5 font-medium text-slate-800">
+                            {item.title}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{item.authorName}</td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-bold ${badgeStatus(item.status)}`}
+                            >
+                              {item.status ?? '대기'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={badgePriority(item.priority)}>
+                              {item.priority ?? '보통'}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
+                            {item.createdAt}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-4 overflow-auto lg:grid-cols-2 lg:overflow-hidden">
+              <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-3 shrink-0 font-bold text-slate-800">문의 상세</h3>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {!selectedInquiry ? (
+                    <p className="py-8 text-center text-sm text-slate-400">문의를 선택하세요.</p>
+                  ) : (
+                    <div className="space-y-3 text-sm">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-xs text-slate-400">문의ID</p>
+                          <p className="font-medium">{selectedInquiry.id}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">유형</p>
+                          <p className="font-medium">{selectedInquiry.type ?? '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">작성자</p>
+                          <p className="font-medium">{selectedInquiry.authorName}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">연락처</p>
+                          <p className="font-medium">{selectedInquiry.phone}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-xs text-slate-400">이메일</p>
+                          <p className="break-all font-medium">{selectedInquiry.email}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">처리 부서</p>
+                          <p className="font-medium">{selectedInquiry.department ?? '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">작성일 / 수정일</p>
+                          <p className="font-medium">
+                            {selectedInquiry.createdAt}
+                            {selectedInquiry.updatedAt ? ` / ${selectedInquiry.updatedAt}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">제목</p>
+                        <p className="font-bold text-slate-800">{selectedInquiry.title}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 leading-relaxed whitespace-pre-wrap">
+                        {selectedInquiry.content}
+                      </div>
+                      {selectedInquiry.attachments?.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {selectedInquiry.attachments.map((f) => (
+                            <span
+                              key={f}
+                              className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
+                            >
+                              {f}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {selectedInquiry.reply && (
+                        <div className="rounded-xl border border-green-100 bg-green-50 p-3">
+                          <p className="mb-1 text-xs font-bold text-green-700">등록된 답변</p>
+                          <p className="whitespace-pre-wrap text-sm text-green-900">
+                            {selectedInquiry.reply.content}
+                          </p>
+                          <p className="mt-2 text-xs text-green-600">
+                            {selectedInquiry.reply.assignee} · {selectedInquiry.reply.repliedAt}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
+              </div>
 
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex-1 min-h-[280px] flex flex-col">
-                  <div className="px-5 py-3 border-b border-gray-100">
-                    <h3 className="font-bold text-gray-800">전체 생산 라인 기록</h3>
-                  </div>
-                  <div className="overflow-auto flex-1">
-                    {DEFECT_RECORDS.length === 0 ? (
-                      <p className="p-6 text-sm text-gray-400">표시할 데이터가 없습니다.</p>
-                    ) : (
-                      <table className="min-w-full text-sm text-left">
-                        <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500">
-                          <tr>
-                            <th className="px-4 py-2.5 font-medium">라인</th>
-                            <th className="px-4 py-2.5 font-medium">기준일</th>
-                            <th className="px-4 py-2.5 font-medium">불량률</th>
-                            <th className="px-4 py-2.5 font-medium">불량/총생산</th>
-                            <th className="px-4 py-2.5 font-medium">원인</th>
-                            <th className="px-4 py-2.5 font-medium">부서</th>
-                            <th className="px-4 py-2.5 font-medium">전기간</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {DEFECT_RECORDS.map((row) => {
-                            const over = row.defectRate > threshold
-                            const delta =
-                              row.prevDefectRate !== undefined
-                                ? Number((row.defectRate - row.prevDefectRate).toFixed(1))
-                                : null
-                            return (
-                              <tr
-                                key={`${row.lineId}-${row.baseDate}`}
-                                className={`border-t border-gray-50 ${over ? 'bg-red-50/70' : ''}`}
-                              >
-                                <td className="px-4 py-2.5 font-medium text-gray-800">
-                                  {row.lineName}
-                                  <span className="text-xs text-gray-400 ml-1">{row.lineId}</span>
-                                </td>
-                                <td className="px-4 py-2.5 text-gray-600">{row.baseDate}</td>
-                                <td className={`px-4 py-2.5 font-bold ${over ? 'text-red-600' : 'text-gray-800'}`}>
-                                  {row.defectRate}%
-                                </td>
-                                <td className="px-4 py-2.5 text-gray-600">{row.defectCount}/{row.totalCount}</td>
-                                <td className="px-4 py-2.5 text-gray-600">{row.causeCategory ?? '-'}</td>
-                                <td className="px-4 py-2.5 text-gray-600">{row.department ?? '-'}</td>
-                                <td className="px-4 py-2.5 text-gray-600">
-                                  {delta === null ? '-' : delta > 0 ? `+${delta}%p` : `${delta}%p`}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
+              <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="shrink-0">
+                  <h3 className="font-bold text-slate-800">문의 답변 관리</h3>
+                  <p className="mt-1 mb-4 text-sm text-slate-500">
+                    답변 등록 시 문의 상태가 완료로 변경됩니다.
+                  </p>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  {!selectedInquiry ? (
+                    <p className="py-8 text-center text-sm text-slate-400">
+                      문의를 선택하면 답변 폼이 표시됩니다.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      <textarea
+                        value={replyForm.content}
+                        onChange={(e) => setReplyForm((p) => ({ ...p, content: e.target.value }))}
+                        rows={4}
+                        placeholder="답변 내용"
+                        className="min-h-[120px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                      />
+                      <input
+                        type="text"
+                        value={replyForm.assignee}
+                        onChange={(e) => setReplyForm((p) => ({ ...p, assignee: e.target.value }))}
+                        placeholder="담당자"
+                        className={controlClass}
+                      />
+                      <select
+                        value={replyForm.priority}
+                        onChange={(e) =>
+                          setReplyForm((p) => ({
+                            ...p,
+                            priority: e.target.value as InquiryPriority,
+                          }))
+                        }
+                        className={controlClass}
+                      >
+                        <option value="높음">우선순위: 높음</option>
+                        <option value="보통">우선순위: 보통</option>
+                        <option value="낮음">우선순위: 낮음</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={replyForm.internalMemo}
+                        onChange={(e) =>
+                          setReplyForm((p) => ({ ...p, internalMemo: e.target.value }))
+                        }
+                        placeholder="내부 메모"
+                        className={controlClass}
+                      />
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={replyForm.adminConfirmed}
+                          onChange={(e) =>
+                            setReplyForm((p) => ({ ...p, adminConfirmed: e.target.checked }))
+                          }
+                          className="rounded border-slate-300"
+                        />
+                        관리자 확인
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleSubmitReply}
+                        disabled={isSubmittingReply}
+                        className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSubmittingReply ? '등록 중...' : '답변 등록'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
           </div>
+        )}
+
+        {activeTab === 'defect' && (
+          <div
+            role="tabpanel"
+            id="panel-defect"
+            aria-labelledby="tab-defect"
+            className="flex h-full flex-col gap-4 overflow-y-auto pr-1"
+          >
+            <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-800">
+                생산라인 불량률 모니터링 및 알림 설정
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                최근 3일 연속 임계값 초과 라인만 알림 대상으로 표시합니다.
+              </p>
+              <div className="mt-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium text-slate-600" htmlFor="defect-threshold">
+                    임계값 (%)
+                  </label>
+                  <input
+                    id="defect-threshold"
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={threshold}
+                    onChange={(e) => setThreshold(Number(e.target.value) || 0)}
+                    className="h-10 w-24 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                  />
+                </div>
+                <div className="flex min-w-[260px] items-center justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">n8n 일일 모니터링</p>
+                    <p className="text-xs text-slate-500">{n8nEnabled ? '활성화' : '비활성화'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={n8nEnabled}
+                    onClick={() => setN8nEnabled((v) => !v)}
+                    className={`relative h-7 w-12 rounded-full transition-colors ${
+                      n8nEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
+                        n8nEnabled ? 'translate-x-5' : ''
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-800">
+                <AlertCircle className="text-red-500" size={20} aria-hidden />
+                알림 대상 라인
+              </h3>
+              {alertLines.length === 0 ? (
+                <p className="text-sm text-slate-400">현재 알림 대상 라인이 없습니다.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {alertLines.map((alert) => (
+                    <div
+                      key={alert.lineId}
+                      className="flex flex-col gap-3 rounded-xl border border-red-100 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-bold text-red-700">
+                          {alert.lineName} ({alert.lineId})
+                        </span>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {alert.recent.map((r, index) => (
+                            <span key={`${alert.lineId}-${r.baseDate}`} className="contents">
+                              {index > 0 ? (
+                                <span className="text-xs text-red-300" aria-hidden>
+                                  →
+                                </span>
+                              ) : null}
+                              <span className="inline-flex items-center whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs tabular-nums text-slate-700">
+                                {r.baseDate}: {r.defectRate}%
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-red-100 px-3 py-1 text-xs font-bold whitespace-nowrap text-red-600">
+                        3일 연속 초과
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 px-5 py-3">
+                <h3 className="font-bold text-slate-800">전체 생산 라인 기록</h3>
+              </div>
+              <div className="flex-1 overflow-auto">
+                {DEFECT_RECORDS.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-400">표시할 데이터가 없습니다.</p>
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2.5 font-medium">라인</th>
+                        <th className="px-4 py-2.5 font-medium">기준일</th>
+                        <th className="px-4 py-2.5 text-right font-medium">불량률</th>
+                        <th className="px-4 py-2.5 text-right font-medium">불량/총생산</th>
+                        <th className="px-4 py-2.5 font-medium">원인</th>
+                        <th className="px-4 py-2.5 font-medium">부서</th>
+                        <th className="px-4 py-2.5 text-right font-medium">전기간</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {DEFECT_RECORDS.map((row) => {
+                        const over = row.defectRate > threshold
+                        const delta =
+                          row.prevDefectRate !== undefined
+                            ? Number((row.defectRate - row.prevDefectRate).toFixed(1))
+                            : null
+                        return (
+                          <tr
+                            key={`${row.lineId}-${row.baseDate}`}
+                            className={`border-t border-slate-50 ${over ? 'bg-red-50/70' : ''}`}
+                          >
+                            <td className="px-4 py-2.5 font-medium text-slate-800">
+                              {row.lineName}
+                              <span className="ml-1 text-xs text-slate-400">{row.lineId}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-600">{row.baseDate}</td>
+                            <td
+                              className={`px-4 py-2.5 text-right font-semibold whitespace-nowrap tabular-nums ${
+                                over ? 'text-red-600' : 'text-slate-800'
+                              }`}
+                            >
+                              {row.defectRate}%
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap tabular-nums text-slate-600">
+                              {row.defectCount}/{row.totalCount}
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-600">{row.causeCategory ?? '-'}</td>
+                            <td className="px-4 py-2.5 text-slate-600">{row.department ?? '-'}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold whitespace-nowrap tabular-nums text-slate-600">
+                              {delta === null ? '-' : delta > 0 ? `+${delta}%p` : `${delta}%p`}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

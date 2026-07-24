@@ -1,11 +1,19 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, CSSProperties, FormEvent, MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  ChangeEvent,
+  CSSProperties,
+  DragEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+} from 'react';
 
 type InquiryStatus = '접수' | '답변완료';
 type Visibility = '공개' | '비공개';
-type PageSizeOption = 10 | 50 | 100 | 'all';
+type CategoryFilterKey = 'all' | 'system' | 'feature' | 'business' | 'etc';
+type StatusFilterKey = 'all' | InquiryStatus;
 
 type InquiryItem = {
   id: string;
@@ -27,16 +35,23 @@ const CATEGORIES = [
   '기타',
 ] as const;
 
+const CATEGORY_FILTERS: { key: CategoryFilterKey; label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: 'system', label: '시스템 오류' },
+  { key: 'feature', label: '기능 개선' },
+  { key: 'business', label: '비즈니스' },
+  { key: 'etc', label: '기타' },
+];
+
+const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: '접수', label: '접수' },
+  { key: '답변완료', label: '답변완료' },
+];
+
 const USER_NAME = '홍길동';
 const USER_EMAIL = 'hong@example.com';
-const COLLAPSED_COUNT = 5;
-
-const PAGE_SIZE_OPTIONS: { value: PageSizeOption; label: string }[] = [
-  { value: 10, label: '10개씩 보기' },
-  { value: 50, label: '50개씩 보기' },
-  { value: 100, label: '100개씩 보기' },
-  { value: 'all', label: '전체 보기' },
-];
+const PAGE_SIZE = 10;
 
 const INITIAL_INQUIRIES: InquiryItem[] = [
   {
@@ -195,6 +210,42 @@ function formatToday() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function matchesCategoryFilter(category: string, filter: CategoryFilterKey) {
+  if (filter === 'all') return true;
+  if (filter === 'system') return category === '시스템 오류 제보';
+  if (filter === 'feature') return category === '기능 개선 제안';
+  if (filter === 'business') return category === '비즈니스 협업 문의';
+  // 기타: 명시적 기타 + 필터 라벨에 직접 대응되지 않는 기존 카테고리
+  return category === '기타' || category === '불량 검사 문의';
+}
+
+/**
+ * 기존 코드는 비공개 문의의 제목·본문·답변을 일괄 마스킹합니다.
+ * 작성자 ID / 권한 판별 함수가 없어 이름만으로 열람을 허용하지 않습니다.
+ */
+function canViewInquiry(item: InquiryItem) {
+  return item.visibility !== '비공개';
+}
+
+function getDisplayFields(item: InquiryItem) {
+  if (!canViewInquiry(item)) {
+    return {
+      title: '비공개 문의입니다.',
+      author: '비공개',
+      content: '',
+      answer: '',
+      showBody: false,
+    };
+  }
+  return {
+    title: item.title,
+    author: item.author,
+    content: item.content,
+    answer: item.answer,
+    showBody: true,
+  };
+}
+
 function statusBadgeStyle(status: InquiryStatus): CSSProperties {
   if (status === '답변완료') {
     return {
@@ -225,6 +276,7 @@ function visibilityBadgeStyle(visibility: Visibility): CSSProperties {
     return {
       display: 'inline-flex',
       alignItems: 'center',
+      gap: 4,
       borderRadius: 999,
       padding: '4px 10px',
       fontSize: 12,
@@ -245,31 +297,16 @@ function visibilityBadgeStyle(visibility: Visibility): CSSProperties {
   };
 }
 
-function getDisplayFields(item: InquiryItem) {
-  if (item.visibility === '비공개') {
-    return {
-      title: '비공개 문의입니다.',
-      author: '비공개',
-      content: '비공개 문의 내용입니다.',
-      answer: '비공개 문의 내용입니다.',
-    };
-  }
-  return {
-    title: item.title,
-    author: item.author,
-    content: item.content,
-    answer: item.answer || '아직 등록된 답변이 없습니다.',
-  };
-}
-
 export default function InquiryPage() {
   const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState<PageSizeOption>(10);
-  const [isPageSizeOpen, setIsPageSizeOpen] = useState(false);
-  const [isExpandedList, setIsExpandedList] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterKey>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<InquiryItem | null>(null);
   const [category, setCategory] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>('공개');
   const [subject, setSubject] = useState('');
@@ -282,29 +319,79 @@ export default function InquiryPage() {
     content: string;
   }>({ category: '', subject: '', content: '' });
   const [toastMessage, setToastMessage] = useState('');
+  const [isDragActive, setIsDragActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const categoryFieldRef = useRef<HTMLDivElement | null>(null);
+  const subjectInputRef = useRef<HTMLInputElement | null>(null);
+  const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const nextIdRef = useRef(13);
+  const toastTimerRef = useRef<number | null>(null);
+  const dragDepthRef = useRef(0);
 
-  const limitedInquiries = useMemo(() => {
-    if (pageSize === 'all') return inquiries;
-    return inquiries.slice(0, pageSize);
-  }, [inquiries, pageSize]);
+  const filteredInquiries = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
+    return inquiries.filter((item) => {
+      if (!matchesCategoryFilter(item.category, categoryFilter)) return false;
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+
+      if (!keyword) return true;
+
+      if (!canViewInquiry(item)) {
+        // 권한 없는 비공개: 실제 제목·본문으로 검색 매칭하지 않음
+        return false;
+      }
+
+      return (
+        item.title.toLowerCase().includes(keyword) || item.content.toLowerCase().includes(keyword)
+      );
+    });
+  }, [inquiries, categoryFilter, statusFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInquiries.length / PAGE_SIZE));
+
+  const safePage = Math.min(currentPage, totalPages);
 
   const visibleInquiries = useMemo(() => {
-    if (isExpandedList) return limitedInquiries;
-    return limitedInquiries.slice(0, COLLAPSED_COUNT);
-  }, [limitedInquiries, isExpandedList]);
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredInquiries.slice(start, start + PAGE_SIZE);
+  }, [filteredInquiries, safePage]);
 
-  const showExpandToggle = limitedInquiries.length > COLLAPSED_COUNT;
+  const pageNumbers = useMemo(
+    () => Array.from({ length: totalPages }, (_, index) => index + 1),
+    [totalPages],
+  );
 
   const displayCountLabel = useMemo(() => {
-    if (inquiries.length === 0) return '표시할 문의가 없습니다.';
-    return `최근 ${visibleInquiries.length}개 표시 중...`;
-  }, [inquiries.length, visibleInquiries.length]);
+    if (filteredInquiries.length === 0) return '조건에 맞는 문의가 없습니다.';
+    const start = (safePage - 1) * PAGE_SIZE + 1;
+    const end = Math.min(safePage * PAGE_SIZE, filteredInquiries.length);
+    return `검색 결과 ${filteredInquiries.length}건 · ${start}-${end} 표시 중`;
+  }, [filteredInquiries.length, safePage]);
 
-  const selectedPageSizeLabel =
-    PAGE_SIZE_OPTIONS.find((opt) => opt.value === pageSize)?.label ?? '10개씩 보기';
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const clearToastTimer = () => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+  };
+
+  const showSuccessToast = () => {
+    clearToastTimer();
+    setToastMessage('✓ 문의가 성공적으로 접수되었습니다.');
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage('');
+      toastTimerRef.current = null;
+    }, 2500);
+  };
+
+  useEffect(() => {
+    return () => clearToastTimer();
+  }, []);
 
   const resetForm = () => {
     setCategory(null);
@@ -314,6 +401,8 @@ export default function InquiryPage() {
     setFiles([]);
     setErrorMessage('');
     setFieldErrors({ category: '', subject: '', content: '' });
+    setIsDragActive(false);
+    dragDepthRef.current = 0;
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -322,14 +411,31 @@ export default function InquiryPage() {
     setIsModalOpen(false);
   };
 
+  useEffect(() => {
+    if (!isModalOpen && !detailItem) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (isModalOpen) {
+        resetForm();
+        setIsModalOpen(false);
+      } else {
+        setDetailItem(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isModalOpen, detailItem]);
+
   const openModal = () => {
     resetForm();
-    setToastMessage('');
     setIsModalOpen(true);
   };
 
-  const handleToggleExpand = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
+  const resetFilters = () => {
+    setCategoryFilter('all');
+    setStatusFilter('all');
+    setSearchQuery('');
+    setCurrentPage(1);
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -343,12 +449,60 @@ export default function InquiryPage() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleDropzoneKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openFilePicker();
+    }
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    const dropped = event.dataTransfer.files;
+    if (!dropped || dropped.length === 0) return;
+    setFiles((prev) => [...prev, ...Array.from(dropped)]);
+  };
+
   const handleOverlayClick = () => {
     closeModal();
   };
 
   const handleModalClick = (e: MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
+  };
+
+  const handleRowClick = (item: InquiryItem) => {
+    if (!canViewInquiry(item)) {
+      window.alert('작성자 본인만 확인 가능한 비공개 문의입니다.');
+      return;
+    }
+    setDetailItem(item);
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -370,6 +524,13 @@ export default function InquiryPage() {
           ? messages[0]
           : `입력하지 않은 항목이 ${messages.length}개 있습니다. 아래 표시된 항목을 확인해 주세요.`,
       );
+      if (nextErrors.category) {
+        categoryFieldRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+      } else if (nextErrors.subject) {
+        subjectInputRef.current?.focus();
+      } else if (nextErrors.content) {
+        contentInputRef.current?.focus();
+      }
       return;
     }
 
@@ -409,11 +570,10 @@ export default function InquiryPage() {
     };
 
     setInquiries((prev) => [newItem, ...prev]);
-    setExpandedId(null);
-    setIsExpandedList(false);
-    setToastMessage('문의가 정상적으로 접수되었습니다. 빠른 시일 내에 답변드리겠습니다.');
+    setCurrentPage(1);
     resetForm();
     setIsModalOpen(false);
+    showSuccessToast();
   };
 
   const page: CSSProperties = {
@@ -476,6 +636,13 @@ export default function InquiryPage() {
     outline: 'none',
   };
 
+  const filterChipClass = (active: boolean) =>
+    `rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+      active
+        ? 'bg-blue-600 text-white'
+        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+    }`;
+
   return (
     <div style={page}>
       <div style={{ maxWidth: 980, margin: '0 auto' }}>
@@ -503,292 +670,252 @@ export default function InquiryPage() {
         {toastMessage ? (
           <div
             role="status"
-            style={{
-              marginBottom: 16,
-              border: '1px solid #bbf7d0',
-              background: colors.greenSoft,
-              color: colors.green,
-              borderRadius: 12,
-              padding: '12px 14px',
-              fontSize: 14,
-              fontWeight: 700,
-            }}
+            aria-live="polite"
+            className="fixed bottom-5 left-1/2 z-[120] max-w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg"
           >
             {toastMessage}
           </div>
         ) : null}
 
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-semibold text-slate-500">카테고리</span>
+              {CATEGORY_FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setCategoryFilter(item.key);
+                    setCurrentPage(1);
+                  }}
+                  className={filterChipClass(categoryFilter === item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-semibold text-slate-500">상태</span>
+              {STATUS_FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(item.key);
+                    setCurrentPage(1);
+                  }}
+                  className={filterChipClass(statusFilter === item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[200px] flex-1">
+                <label htmlFor="inquiry-search" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                  검색
+                </label>
+                <input
+                  id="inquiry-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="제목 또는 내용 검색..."
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              >
+                초기화
+              </button>
+            </div>
+            <div className="text-xs font-medium text-slate-500">
+              검색 결과 {filteredInquiries.length}건
+            </div>
+          </div>
+        </div>
+
         <section style={{ ...card, padding: 0, overflow: 'hidden' }}>
           {visibleInquiries.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: colors.slate, fontSize: 14 }}>
-              등록된 문의가 없습니다.
+              {inquiries.length === 0
+                ? '등록된 문의가 없습니다.'
+                : '조건에 맞는 문의가 없습니다.'}
             </div>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {visibleInquiries.map((item) => {
-                const open = expandedId === item.id;
                 const display = getDisplayFields(item);
+                const isPrivate = item.visibility === '비공개';
                 return (
                   <li key={item.id} style={{ borderBottom: `1px solid ${colors.line}` }}>
                     <button
                       type="button"
-                      onClick={() => handleToggleExpand(item.id)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        border: 0,
-                        background: open ? colors.blueSoft : '#fff',
-                        padding: '16px 18px',
-                        cursor: 'pointer',
-                      }}
+                      onClick={() => handleRowClick(item)}
+                      className="w-full cursor-pointer border-0 bg-white px-[18px] py-4 text-left transition-colors hover:bg-slate-50/80"
                     >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          alignItems: 'flex-start',
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 8,
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              marginBottom: 6,
-                            }}
-                          >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1.5 flex flex-wrap items-center gap-2">
                             <span style={statusBadgeStyle(item.status)}>{item.status}</span>
                             <span style={visibilityBadgeStyle(item.visibility)}>
-                              {item.visibility}
+                              {isPrivate ? '🔒 비공개' : item.visibility}
                             </span>
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: colors.slate,
-                                background: '#f1f5f9',
-                                borderRadius: 999,
-                                padding: '3px 8px',
-                                fontWeight: 700,
-                              }}
-                            >
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
                               {item.category}
                             </span>
-                            <span style={{ fontSize: 12, color: colors.slate }}>{item.id}</span>
+                            <span className="text-xs text-slate-400">{item.id}</span>
                           </div>
-                          <div
-                            style={{
-                              fontSize: 15,
-                              fontWeight: 800,
-                              color: colors.navy,
-                              lineHeight: 1.45,
-                            }}
-                          >
+                          <div className="line-clamp-2 text-[15px] font-extrabold leading-snug text-slate-900">
                             {display.title}
                           </div>
-                          <div style={{ marginTop: 6, fontSize: 12, color: colors.slate }}>
+                          {display.showBody ? (
+                            <div className="mt-1.5 line-clamp-1 text-xs text-slate-500">
+                              {display.content}
+                            </div>
+                          ) : null}
+                          <div className="mt-1.5 text-xs text-slate-500">
                             {display.author} · {item.date}
                           </div>
                         </div>
-                        <span style={{ color: colors.slate, fontSize: 18, fontWeight: 700 }}>
-                          {open ? '▾' : '▸'}
+                        <span className="shrink-0 text-sm text-slate-400" aria-hidden>
+                          →
                         </span>
                       </div>
                     </button>
-
-                    {open ? (
-                      <div
-                        style={{
-                          padding: '0 18px 18px',
-                          background: colors.blueSoft,
-                        }}
-                      >
-                        <div
-                          style={{
-                            background: '#fff',
-                            border: `1px solid ${colors.line}`,
-                            borderRadius: 12,
-                            padding: 14,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 800,
-                              color: colors.slate,
-                              marginBottom: 6,
-                            }}
-                          >
-                            문의 내용
-                          </div>
-                          <p
-                            style={{
-                              margin: 0,
-                              fontSize: 14,
-                              lineHeight: 1.7,
-                              color: colors.navy,
-                              whiteSpace: 'pre-wrap',
-                            }}
-                          >
-                            {display.content}
-                          </p>
-                          <div
-                            style={{
-                              marginTop: 14,
-                              paddingTop: 14,
-                              borderTop: `1px solid ${colors.line}`,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: 12,
-                                fontWeight: 800,
-                                color: colors.slate,
-                                marginBottom: 6,
-                              }}
-                            >
-                              답변
-                            </div>
-                            <p
-                              style={{
-                                margin: 0,
-                                fontSize: 14,
-                                lineHeight: 1.7,
-                                color:
-                                  item.visibility === '비공개' || item.answer
-                                    ? colors.navy
-                                    : colors.slate,
-                                whiteSpace: 'pre-wrap',
-                              }}
-                            >
-                              {display.answer}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
                   </li>
                 );
               })}
             </ul>
           )}
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr auto 1fr',
-              alignItems: 'center',
-              gap: 12,
-              padding: '14px 18px',
-              background: '#f8fafc',
-            }}
-          >
-            <span style={{ fontSize: 13, color: colors.slate, fontWeight: 700 }}>
-              {displayCountLabel}
-            </span>
+          <div className="flex flex-col items-center gap-3 border-t border-slate-100 bg-slate-50 px-4 py-4 sm:flex-row sm:justify-between">
+            <span className="text-xs font-semibold text-slate-500 sm:text-sm">{displayCountLabel}</span>
 
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              {showExpandToggle ? (
+            {filteredInquiries.length > 0 ? (
+              <nav
+                aria-label="문의 목록 페이지"
+                className="flex flex-wrap items-center justify-center gap-1.5"
+              >
                 <button
                   type="button"
-                  onClick={() => setIsExpandedList((prev) => !prev)}
-                  style={{
-                    ...primaryBtn,
-                    borderRadius: 999,
-                    padding: '9px 20px',
-                  }}
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={safePage <= 1}
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {isExpandedList
-                    ? '접기'
-                    : `펼치기 (+${pageSize === 'all' ? inquiries.length : pageSize})`}
+                  이전
                 </button>
-              ) : null}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <div style={{ position: 'relative' }}>
+                {pageNumbers.map((page) => {
+                  const active = page === safePage;
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      aria-current={active ? 'page' : undefined}
+                      onClick={() => setCurrentPage(page)}
+                      className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                        active
+                          ? 'bg-blue-600 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
                 <button
                   type="button"
-                  onClick={() => setIsPageSizeOpen((prev) => !prev)}
-                  aria-haspopup="listbox"
-                  aria-expanded={isPageSizeOpen}
-                  style={{
-                    ...secondaryBtn,
-                    minWidth: 140,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 10,
-                  }}
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={safePage >= totalPages}
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <span>{selectedPageSizeLabel}</span>
-                  <span>{isPageSizeOpen ? '▴' : '▾'}</span>
+                  다음
                 </button>
-
-                {isPageSizeOpen ? (
-                  <ul
-                    role="listbox"
-                    aria-label="목록 개수 선택"
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      bottom: 'calc(100% + 8px)',
-                      margin: 0,
-                      padding: 6,
-                      listStyle: 'none',
-                      background: '#fff',
-                      border: `1px solid ${colors.line}`,
-                      borderRadius: 12,
-                      boxShadow: '0 12px 28px rgba(15, 23, 42, 0.12)',
-                      minWidth: 160,
-                      zIndex: 20,
-                    }}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((opt) => {
-                      const active = pageSize === opt.value;
-                      return (
-                        <li key={opt.label} role="option" aria-selected={active}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPageSize(opt.value);
-                              setIsPageSizeOpen(false);
-                              setIsExpandedList(false);
-                            }}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              border: 0,
-                              borderRadius: 8,
-                              background: active ? colors.blueSoft : 'transparent',
-                              color: active ? colors.blue : colors.navy,
-                              padding: '10px 12px',
-                              fontSize: 13,
-                              fontWeight: active ? 800 : 600,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-              </div>
-            </div>
+              </nav>
+            ) : null}
           </div>
         </section>
       </div>
+
+      {detailItem && canViewInquiry(detailItem) ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inquiry-detail-title"
+          onClick={() => setDetailItem(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4"
+        >
+          <div
+            onClick={handleModalClick}
+            className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+          >
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <h2 id="inquiry-detail-title" className="m-0 text-base font-semibold text-slate-900">
+                문의 상세
+              </h2>
+              <button
+                type="button"
+                aria-label="상세 모달 닫기"
+                onClick={() => setDetailItem(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                ×
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4">
+              <div className="mb-3 flex flex-wrap gap-2">
+                <span style={statusBadgeStyle(detailItem.status)}>{detailItem.status}</span>
+                <span style={visibilityBadgeStyle(detailItem.visibility)}>
+                  {detailItem.visibility}
+                </span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+                  {detailItem.category}
+                </span>
+              </div>
+              <h3 className="m-0 text-lg font-bold text-slate-900">{detailItem.title}</h3>
+              <div className="mt-2 text-xs text-slate-500">
+                {detailItem.author} · {detailItem.date} · {detailItem.id}
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="mb-2 text-xs font-bold text-slate-500">문의 내용</div>
+                <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                  {detailItem.content}
+                </p>
+              </div>
+              {detailItem.answer ? (
+                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-blue-700">관리자 답변</span>
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                      관리자
+                    </span>
+                  </div>
+                  <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                    {detailItem.answer}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                  아직 등록된 답변이 없습니다.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isModalOpen ? (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="문의하기"
+          aria-labelledby="inquiry-write-title"
           onClick={handleOverlayClick}
           style={{
             position: 'fixed',
@@ -826,7 +953,9 @@ export default function InquiryPage() {
                 zIndex: 1,
               }}
             >
-              <strong style={{ fontSize: 17, color: colors.navy }}>문의하기</strong>
+              <strong id="inquiry-write-title" style={{ fontSize: 17, color: colors.navy }}>
+                문의하기
+              </strong>
               <button
                 type="button"
                 aria-label="문의 모달 닫기"
@@ -873,11 +1002,17 @@ export default function InquiryPage() {
                 </div>
               ) : null}
 
-              <div style={{ marginBottom: 18 }}>
-                <div style={labelStyle}>
+              <div style={{ marginBottom: 18 }} ref={categoryFieldRef}>
+                <div style={labelStyle} id="inquiry-category-label">
                   문의 카테고리 <span style={{ color: colors.red }}>*</span>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div
+                  role="group"
+                  aria-labelledby="inquiry-category-label"
+                  aria-invalid={fieldErrors.category ? true : undefined}
+                  aria-describedby={fieldErrors.category ? 'inquiry-category-error' : undefined}
+                  style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
+                >
                   {CATEGORIES.map((item) => {
                     const active = category === item;
                     return (
@@ -909,7 +1044,10 @@ export default function InquiryPage() {
                   })}
                 </div>
                 {fieldErrors.category ? (
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
+                  <div
+                    id="inquiry-category-error"
+                    style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}
+                  >
                     {fieldErrors.category}
                   </div>
                 ) : null}
@@ -985,6 +1123,7 @@ export default function InquiryPage() {
                 </label>
                 <input
                   id="inquiry-subject"
+                  ref={subjectInputRef}
                   type="text"
                   value={subject}
                   onChange={(e) => {
@@ -994,6 +1133,8 @@ export default function InquiryPage() {
                     }
                   }}
                   placeholder="문의 제목을 입력해주세요"
+                  aria-invalid={fieldErrors.subject ? true : undefined}
+                  aria-describedby={fieldErrors.subject ? 'inquiry-subject-error' : undefined}
                   style={{
                     ...inputStyle,
                     border: fieldErrors.subject
@@ -1003,7 +1144,10 @@ export default function InquiryPage() {
                   }}
                 />
                 {fieldErrors.subject ? (
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
+                  <div
+                    id="inquiry-subject-error"
+                    style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}
+                  >
                     {fieldErrors.subject}
                   </div>
                 ) : null}
@@ -1015,6 +1159,7 @@ export default function InquiryPage() {
                 </label>
                 <textarea
                   id="inquiry-content"
+                  ref={contentInputRef}
                   value={content}
                   onChange={(e) => {
                     setContent(e.target.value);
@@ -1023,6 +1168,8 @@ export default function InquiryPage() {
                     }
                   }}
                   placeholder="문의 내용을 상세히 작성해주세요."
+                  aria-invalid={fieldErrors.content ? true : undefined}
+                  aria-describedby={fieldErrors.content ? 'inquiry-content-error' : undefined}
                   style={{
                     ...inputStyle,
                     minHeight: 140,
@@ -1036,93 +1183,69 @@ export default function InquiryPage() {
                   }}
                 />
                 {fieldErrors.content ? (
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
+                  <div
+                    id="inquiry-content-error"
+                    style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}
+                  >
                     {fieldErrors.content}
                   </div>
                 ) : null}
               </div>
 
               <div style={{ marginBottom: 22 }}>
-                <label htmlFor="inquiry-files" style={labelStyle}>
+                <div style={labelStyle} id="inquiry-files-label">
                   첨부 파일
-                </label>
-                <label
-                  htmlFor="inquiry-files"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    borderRadius: 10,
-                    background: colors.blueSoft,
-                    color: colors.blue,
-                    padding: '9px 12px',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-labelledby="inquiry-files-label"
+                  onClick={openFilePicker}
+                  onKeyDown={handleDropzoneKeyDown}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  className={`cursor-pointer rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
+                    isDragActive
+                      ? 'border-blue-400 bg-blue-50/60'
+                      : 'border-slate-200 bg-slate-50/50 hover:border-blue-400'
+                  }`}
                 >
-                  파일 선택 (여러 개 가능)
-                </label>
+                  <div className="text-sm font-medium text-slate-600">
+                    스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">여러 파일 선택 가능</div>
+                </div>
                 <input
                   id="inquiry-files"
                   ref={fileInputRef}
                   type="file"
                   multiple
                   onChange={handleFileChange}
-                  style={{ display: 'none' }}
+                  className="sr-only"
+                  tabIndex={-1}
                 />
                 {files.length > 0 ? (
-                  <ul
-                    style={{
-                      listStyle: 'none',
-                      margin: '12px 0 0',
-                      padding: 0,
-                      display: 'grid',
-                      gap: 8,
-                    }}
-                  >
+                  <ul className="mt-3 flex list-none flex-wrap gap-2 p-0">
                     {files.map((file, index) => (
                       <li
                         key={`${file.name}-${index}`}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: 10,
-                          border: `1px solid ${colors.line}`,
-                          borderRadius: 10,
-                          background: '#f8fafc',
-                          padding: '8px 10px',
-                        }}
+                        className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-3 pr-1"
                       >
-                        <span
-                          style={{
-                            fontSize: 13,
-                            color: colors.navy,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
+                        <span className="max-w-[180px] truncate text-xs font-medium text-slate-700 sm:max-w-[240px]">
                           {file.name}
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleFileRemove(index)}
-                          aria-label={`${file.name} 삭제`}
-                          style={{
-                            border: 0,
-                            background: '#e2e8f0',
-                            width: 28,
-                            height: 28,
-                            borderRadius: 999,
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            color: colors.slate,
-                            flexShrink: 0,
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleFileRemove(index);
                           }}
+                          aria-label={`${file.name} 삭제`}
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500 hover:bg-slate-200"
                         >
-                          X
+                          ×
                         </button>
                       </li>
                     ))}
