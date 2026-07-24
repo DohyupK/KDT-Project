@@ -37,6 +37,7 @@ class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None
     models_dir: str
+    chat_requests: int = 0
 
 
 class ChatFeatures(BaseModel):
@@ -66,10 +67,18 @@ class ChatRequest(BaseModel):
         default=None,
         description="Passed to predict. If omitted, ensemble_config.default_threshold.",
     )
+    need_guideline: bool = Field(
+        default=False,
+        description="If true, append usage guideline (similar questions ≥ 3).",
+    )
 
 
 class ChatResponse(BaseModel):
     reply: str
-    mode: str = Field(description="'template' or 'llm'")
+    mode: str = Field(description="'template' | 'llm' | 'security_redirect'")
+    provider: str = Field(
+        default="template",
+        description="'groq' | 'gemini_flash' | 'gemini_pro' | 'template' | 'security_redirect'",
+    )
     predict: PredictResponse | None = None
     error: str | None = None

@@ -184,10 +184,12 @@ ai-service/
 ## 7. 챗봇 구현 시 체크리스트
 
 - [x] 진단은 `predict` Tool 결과만 인용 (임의 불량 확률 생성 금지) — `agent/tools.py` + template/LLM compose  
+- [x] LLM 길이 라우팅 (≤300 Groq/Llama · ≤500 Gemini Flash · >500 Gemini Pro · Gemini 실패 시 Groq+안내) — `agent/llm.py` · 키는 `.env`의 `GROQ_API_KEY`/`GOOGLE_API_KEY`만
 - [ ] 문서 답은 RAG/backend 검색 결과 인용  
 - [ ] “조절해서 실행”은 권한 확인 후에만 Tool 호출  
 - [x] 1단계 `top_risk_factors`는 전역 중요도임을 사용자 문구에서 과장하지 않기  
-- [x] 시크릿·API 키는 저장소에 넣지 않기 (`OPENAI_API_KEY`는 환경변수만)
+- [x] 시크릿·API 키는 저장소에 넣지 않기 (환경변수만; `.env.example` 참고)  
+- [ ] 보안 탭 vLLM 실연동
 
 ---
 

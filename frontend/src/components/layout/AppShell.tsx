@@ -11,6 +11,7 @@ import {
   HelpCircle,
   Briefcase,
   Settings,
+  Shield,
   PanelLeftClose,
   PanelLeft,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ export const NAV_MENUS = [
   { name: 'Knowledge', icon: BookOpen, path: '/knowledge' },
   { name: 'Inquiry', icon: HelpCircle, path: '/inquiry' },
   { name: 'Management', icon: Briefcase, path: '/management' },
+  { name: 'Security', icon: Shield, path: '/security' },
   { name: 'Setting', icon: Settings, path: '/setting' },
 ] as const
 
