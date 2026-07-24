@@ -1,12 +1,17 @@
 import cors from 'cors'
 import express from 'express'
+import authRoutes from './routes/auth.routes.js'
 import { chatRouter } from './routes/chat.js'
-import { controlRouter } from './routes/control.js'
+import { errorHandler } from './middleware/errorHandler.js'
 
 export function createApp() {
   const app = express()
 
-  const origins = (process.env.CORS_ORIGINS || 'http://localhost:3000')
+  const origins = (
+    process.env.CORS_ORIGINS ||
+    process.env.CORS_ORIGIN ||
+    'http://localhost:3000'
+  )
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -23,13 +28,15 @@ export function createApp() {
     res.json({
       service: 'backend',
       health: '/api/health',
+      auth: '/api/auth',
       chat: 'POST /api/chat',
       control_approve: 'POST /api/control/approve',
     })
   })
 
+  app.use('/api/auth', authRoutes)
   app.use('/api', chatRouter)
-  app.use('/api', controlRouter)
+  app.use(errorHandler)
 
   return app
 }
