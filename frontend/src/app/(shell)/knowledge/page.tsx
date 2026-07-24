@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react';
-import type { CSSProperties, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import type React from 'react';
 
 interface DocumentItem {
   id: string;
@@ -21,6 +22,10 @@ interface ActionHistoryItem {
   cause: string;
   manager: string;
   date: string;
+  /** 인수인계 이관 항목의 분류(특이사항/전달사항/주의사항). 정적 목업에는 없음 */
+  category?: string;
+  handoverFrom?: string;
+  handoverTo?: string;
 }
 
 interface ReportData {
@@ -38,7 +43,7 @@ interface FilterState {
   keyword: string;
 }
 
-type TabKey = 'documents' | 'actions' | 'report';
+type TabKey = 'knowledge' | 'report';
 
 interface ActionFormState {
   situation: string;
@@ -47,6 +52,10 @@ interface ActionFormState {
   manager: string;
   date: string;
 }
+
+type DetailTarget =
+  | { kind: 'document'; item: DocumentItem }
+  | { kind: 'action'; item: ActionHistoryItem };
 
 const colors = {
   background: '#f1f5f9',
@@ -131,6 +140,84 @@ const headCellStyle: CSSProperties = {
   fontWeight: 800,
   whiteSpace: 'nowrap',
 };
+
+const DEFAULT_VISIBLE_COUNT = 5;
+const LIST_PAGE_SIZE = 5;
+const COMPLETED_KNOWLEDGE_STORAGE_KEY = 'completed_knowledge_logs';
+const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
+
+function readTransferredKnowledgeDocuments(): DocumentItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COMPLETED_KNOWLEDGE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const result: DocumentItem[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== 'string' || !row.id) continue;
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      result.push({
+        id: row.id,
+        manager: typeof row.manager === 'string' ? row.manager : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        title: typeof row.title === 'string' ? row.title : '',
+        summary: typeof row.summary === 'string' ? row.summary : '',
+        process: typeof row.process === 'string' ? row.process : '',
+        lot: typeof row.lot === 'string' ? row.lot : '',
+        detail: typeof row.detail === 'string' ? row.detail : '',
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+function readHandoverActionItems(): ActionHistoryItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HANDOVER_ACTION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const result: ActionHistoryItem[] = [];
+    const seen = new Set<number>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      if (typeof row.id !== 'number' || !Number.isFinite(row.id)) continue;
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      result.push({
+        id: row.id,
+        situation: typeof row.situation === 'string' ? row.situation : '',
+        action: typeof row.action === 'string' ? row.action : '',
+        cause: typeof row.cause === 'string' ? row.cause : '',
+        manager: typeof row.manager === 'string' ? row.manager : '',
+        date: typeof row.date === 'string' ? row.date : '',
+        ...(typeof row.category === 'string' && row.category
+          ? { category: row.category }
+          : {}),
+        ...(typeof row.handoverFrom === 'string' && row.handoverFrom
+          ? { handoverFrom: row.handoverFrom }
+          : {}),
+        ...(typeof row.handoverTo === 'string' && row.handoverTo
+          ? { handoverTo: row.handoverTo }
+          : {}),
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
 
 const DOCUMENTS: DocumentItem[] = [
   {
@@ -295,72 +382,443 @@ const EMPTY_ACTION_FORM: ActionFormState = {
 };
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'documents', label: '과거 자료 조회' },
-  { key: 'actions', label: '상황 대처 및 원인 분석' },
-  { key: 'report', label: 'AI 데일리 레포트' },
+  { key: 'knowledge', label: '라이브러리 & 대처 이력' },
+  { key: 'report', label: 'AI 맞춤 분석' },
 ];
 
+function KnowledgeTabIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path
+        d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 7h8M8 11h6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ReportTabIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <rect x="4" y="5" width="16" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="11" r="1.3" fill="currentColor" />
+      <circle cx="15" cy="11" r="1.3" fill="currentColor" />
+      <path
+        d="M9 15c1.1 1.2 4.9 1.2 6 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 5V3.8M16 5V3.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+const DOC_ID_PATTERN = /DOC-\d{4}-\d+/g;
+
+function extractDocIds(text: string): string[] {
+  return Array.from(new Set(text.match(DOC_ID_PATTERN) ?? []));
+}
+
+function extractRiskPercent(riskSummary: string): number | null {
+  const match = riskSummary.match(/(\d+)\s*%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (Number.isNaN(value)) return null;
+  return Math.min(100, Math.max(0, value));
+}
+
+function CategoryBadge({ label }: { label: string }) {
+  const toneClass = (() => {
+    if (label === '소성') return 'border-rose-200 bg-rose-50 text-rose-700';
+    if (label === '원료 투입') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    if (label === '혼합') return 'border-violet-200 bg-violet-50 text-violet-700';
+    if (label === '검사' || label === '분석') return 'border-blue-200 bg-blue-50 text-blue-700';
+    if (label === '냉각') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+    if (label === '원료 보관') return 'border-amber-200 bg-amber-50 text-amber-700';
+    if (label === '설비 관리') return 'border-slate-300 bg-slate-100 text-slate-700';
+    if (label === '대처 이력') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+    if (label === '특이사항') return 'border-amber-200 bg-amber-50 text-amber-700';
+    if (label === '전달사항') return 'border-blue-200 bg-blue-50 text-blue-700';
+    if (label === '주의사항') return 'border-rose-200 bg-rose-50 text-rose-700';
+    if (label === '분쇄') return 'border-orange-200 bg-orange-50 text-orange-700';
+    return 'border-slate-200 bg-slate-50 text-slate-600';
+  })();
+
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${toneClass}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ModalShell({
+  open,
+  title,
+  titleId,
+  onClose,
+  children,
+  wide,
+}: {
+  open: boolean;
+  title: string;
+  titleId: string;
+  onClose: () => void;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={onClose}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4"
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ${
+          wide ? 'max-w-3xl' : 'max-w-2xl'
+        }`}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <h3 id={titleId} className="m-0 text-base font-semibold text-slate-900">
+            {title}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="모달 닫기"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            ×
+          </button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function useMasterCheckbox(
+  visibleIds: Array<string | number>,
+  selectedIds: Array<string | number>,
+) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const allSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const someSelected = visibleIds.some((id) => selectedIds.includes(id));
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
+  return { ref, allSelected, someSelected, disabled: visibleIds.length === 0 };
+}
+
 export default function KnowledgePage() {
-  const [activeTab, setActiveTab] = useState<TabKey>('documents');
+  const [activeTab, setActiveTab] = useState<TabKey>('knowledge');
   const [toast, setToast] = useState('');
 
   const [filters, setFilters] = useState<FilterState>({ manager: '', date: '', keyword: '' });
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>({
+    manager: '',
+    date: '',
+    keyword: '',
+  });
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
-  const [actions, setActions] = useState<ActionHistoryItem[]>(INITIAL_ACTIONS);
+  const [actions] = useState<ActionHistoryItem[]>(INITIAL_ACTIONS);
   const [actionSearch, setActionSearch] = useState('');
-  const [actionForm, setActionForm] = useState<ActionFormState>(EMPTY_ACTION_FORM);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [formError, setFormError] = useState('');
+  const [appliedActionSearch, setAppliedActionSearch] = useState('');
+  const [, setActionForm] = useState<ActionFormState>(EMPTY_ACTION_FORM);
+  const [, setEditingId] = useState<number | null>(null);
+  const [, setFormError] = useState('');
 
   const [report, setReport] = useState<ReportData>(INITIAL_REPORT);
 
-  const managers = useMemo(
-    () => Array.from(new Set(DOCUMENTS.map((doc) => doc.manager))).sort(),
-    [],
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [selectedActionIds, setSelectedActionIds] = useState<number[]>([]);
+  const [analysisDocIds, setAnalysisDocIds] = useState<string[]>([]);
+  const [analysisActionIds, setAnalysisActionIds] = useState<number[]>([]);
+  const [isSelectionListExpanded, setIsSelectionListExpanded] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hasRunAnalysis, setHasRunAnalysis] = useState(false);
+  const [docPage, setDocPage] = useState(1);
+  const [actionPage, setActionPage] = useState(1);
+  const [transferredDocuments, setTransferredDocuments] = useState<DocumentItem[]>([]);
+  const [handoverActions, setHandoverActions] = useState<ActionHistoryItem[]>([]);
+  const analysisTimerRef = useRef<number | null>(null);
+
+  const refreshTransferredDocuments = () => {
+    setTransferredDocuments(readTransferredKnowledgeDocuments());
+  };
+
+  const refreshHandoverActions = () => {
+    setHandoverActions(readHandoverActionItems());
+  };
+
+  useEffect(() => {
+    refreshTransferredDocuments();
+    refreshHandoverActions();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'knowledge') {
+      refreshTransferredDocuments();
+      refreshHandoverActions();
+    }
+  }, [activeTab]);
+
+  const transferredIdSet = useMemo(
+    () => new Set(transferredDocuments.map((doc) => doc.id)),
+    [transferredDocuments],
   );
 
+  const allDocuments = useMemo(() => {
+    const staticIds = new Set(DOCUMENTS.map((doc) => doc.id));
+    const uniqueTransferred = transferredDocuments.filter((doc) => !staticIds.has(doc.id));
+    return [...uniqueTransferred, ...DOCUMENTS];
+  }, [transferredDocuments]);
+
+  const allActions = useMemo(() => {
+    const staticIds = new Set(actions.map((item) => item.id));
+    const uniqueHandover = handoverActions.filter((item) => !staticIds.has(item.id));
+    return [...uniqueHandover, ...actions];
+  }, [actions, handoverActions]);
+
+  const libraryTotalCount = allDocuments.length + allActions.length;
+
   const filteredDocuments = useMemo(() => {
-    const keyword = filters.keyword.trim().toLowerCase();
-    return DOCUMENTS.filter((doc) => {
-      const matchesManager = !filters.manager || doc.manager === filters.manager;
-      const matchesDate = !filters.date || doc.date === filters.date;
+    const keyword = appliedFilters.keyword.trim().toLowerCase();
+    return allDocuments.filter((doc) => {
+      const matchesDate = !appliedFilters.date || doc.date === appliedFilters.date;
       const matchesKeyword =
         !keyword ||
         doc.title.toLowerCase().includes(keyword) ||
         doc.summary.toLowerCase().includes(keyword) ||
         doc.process.toLowerCase().includes(keyword) ||
         doc.lot.toLowerCase().includes(keyword);
-      return matchesManager && matchesDate && matchesKeyword;
+      return matchesDate && matchesKeyword;
     });
-  }, [filters]);
+  }, [appliedFilters, allDocuments]);
 
   const selectedDoc = useMemo(
-    () => DOCUMENTS.find((doc) => doc.id === selectedDocId) ?? null,
-    [selectedDocId],
+    () => allDocuments.find((doc) => doc.id === selectedDocId) ?? null,
+    [selectedDocId, allDocuments],
   );
 
   const filteredActions = useMemo(() => {
-    const keyword = actionSearch.trim().toLowerCase();
-    if (!keyword) return actions;
-    return actions.filter(
+    const keyword = appliedActionSearch.trim().toLowerCase();
+    if (!keyword) return allActions;
+    return allActions.filter(
       (item) =>
         item.situation.toLowerCase().includes(keyword) ||
         item.action.toLowerCase().includes(keyword) ||
         item.cause.toLowerCase().includes(keyword) ||
         item.manager.toLowerCase().includes(keyword) ||
+        (item.category ?? '').toLowerCase().includes(keyword) ||
+        (item.handoverFrom ?? '').toLowerCase().includes(keyword) ||
+        (item.handoverTo ?? '').toLowerCase().includes(keyword) ||
         item.date.includes(keyword),
     );
-  }, [actions, actionSearch]);
+  }, [allActions, appliedActionSearch]);
+
+  const validSelectedDocIds = useMemo(
+    () => selectedDocIds.filter((id) => allDocuments.some((doc) => doc.id === id)),
+    [selectedDocIds, allDocuments],
+  );
+  const validSelectedActionIds = useMemo(
+    () => selectedActionIds.filter((id) => allActions.some((item) => item.id === id)),
+    [selectedActionIds, allActions],
+  );
+
+  const selectedCount = validSelectedDocIds.length + validSelectedActionIds.length;
+
+  const selectedDocs = useMemo(
+    () => allDocuments.filter((doc) => validSelectedDocIds.includes(doc.id)),
+    [validSelectedDocIds, allDocuments],
+  );
+  const selectedActions = useMemo(
+    () => allActions.filter((item) => validSelectedActionIds.includes(item.id)),
+    [validSelectedActionIds, allActions],
+  );
+
+  const selectedListItems = useMemo(() => {
+    const docs = selectedDocs.map((item, index) => ({
+      kind: 'document' as const,
+      item,
+      order: index + 1,
+    }));
+    const actionItems = selectedActions.map((item, index) => ({
+      kind: 'action' as const,
+      item,
+      order: selectedDocs.length + index + 1,
+    }));
+    return [...docs, ...actionItems];
+  }, [selectedDocs, selectedActions]);
+
+  const remainingSelectionCount = Math.max(0, selectedCount - DEFAULT_VISIBLE_COUNT);
+  const visibleSelectionItems = isSelectionListExpanded
+    ? selectedListItems
+    : selectedListItems.slice(0, DEFAULT_VISIBLE_COUNT);
+
+  const analysisDocs = useMemo(
+    () => allDocuments.filter((doc) => analysisDocIds.includes(doc.id)),
+    [analysisDocIds, allDocuments],
+  );
+  const analysisActions = useMemo(
+    () => allActions.filter((item) => analysisActionIds.includes(item.id)),
+    [analysisActionIds, allActions],
+  );
+  const analysisCount = analysisDocs.length + analysisActions.length;
+
+  const selectionMatchesAnalysis = useMemo(() => {
+    if (!hasRunAnalysis) return false;
+    if (validSelectedDocIds.length !== analysisDocIds.length) return false;
+    if (validSelectedActionIds.length !== analysisActionIds.length) return false;
+    const docsMatch = validSelectedDocIds.every((id) => analysisDocIds.includes(id));
+    const actionsMatch = validSelectedActionIds.every((id) => analysisActionIds.includes(id));
+    return docsMatch && actionsMatch;
+  }, [
+    hasRunAnalysis,
+    validSelectedDocIds,
+    validSelectedActionIds,
+    analysisDocIds,
+    analysisActionIds,
+  ]);
+
+  const analysisInsights = useMemo(() => {
+    const summaries = analysisDocs.map((doc) => doc.summary).filter(Boolean);
+    const causes = analysisActions.map((item) => item.cause).filter(Boolean);
+    const actionsTaken = analysisActions.map((item) => item.action).filter(Boolean);
+    return {
+      summaries,
+      causes,
+      actionsTaken,
+      titles: [
+        ...analysisDocs.map((doc) => `${doc.id} · ${doc.title}`),
+        ...analysisActions.map((item) => item.situation),
+      ],
+    };
+  }, [analysisDocs, analysisActions]);
+
+  const docTotalPages = Math.max(1, Math.ceil(filteredDocuments.length / LIST_PAGE_SIZE));
+  const actionTotalPages = Math.max(1, Math.ceil(filteredActions.length / LIST_PAGE_SIZE));
+  const safeDocPage = Math.min(docPage, docTotalPages);
+  const safeActionPage = Math.min(actionPage, actionTotalPages);
+
+  const renderedDocuments = useMemo(() => {
+    const start = (safeDocPage - 1) * LIST_PAGE_SIZE;
+    return filteredDocuments.slice(start, start + LIST_PAGE_SIZE);
+  }, [filteredDocuments, safeDocPage]);
+
+  const renderedActions = useMemo(() => {
+    const start = (safeActionPage - 1) * LIST_PAGE_SIZE;
+    return filteredActions.slice(start, start + LIST_PAGE_SIZE);
+  }, [filteredActions, safeActionPage]);
+
+  const docPageNumbers = useMemo(
+    () => Array.from({ length: docTotalPages }, (_, index) => index + 1),
+    [docTotalPages],
+  );
+  const actionPageNumbers = useMemo(
+    () => Array.from({ length: actionTotalPages }, (_, index) => index + 1),
+    [actionTotalPages],
+  );
+
+  const riskPercent = useMemo(() => extractRiskPercent(report.riskSummary), [report.riskSummary]);
+  const similarDocIds = useMemo(() => extractDocIds(report.similarCase), [report.similarCase]);
+
+  const visibleDocIds = useMemo(() => filteredDocuments.map((doc) => doc.id), [filteredDocuments]);
+  const visibleActionIds = useMemo(
+    () => filteredActions.map((item) => item.id),
+    [filteredActions],
+  );
+
+  const docMaster = useMasterCheckbox(visibleDocIds, validSelectedDocIds);
+  const actionMaster = useMasterCheckbox(visibleActionIds, validSelectedActionIds);
+
+  useEffect(() => {
+    if (docPage > docTotalPages) setDocPage(docTotalPages);
+  }, [docPage, docTotalPages]);
+
+  useEffect(() => {
+    if (actionPage > actionTotalPages) setActionPage(actionTotalPages);
+  }, [actionPage, actionTotalPages]);
 
   const showToast = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 3000);
   };
 
-  const resetFilters = () => {
-    setFilters({ manager: '', date: '', keyword: '' });
+  const applyKnowledgeFilters = () => {
+    setAppliedFilters({ ...filters, manager: '' });
+    setAppliedActionSearch(actionSearch);
+    setDocPage(1);
+    setActionPage(1);
+    showToast('필터가 적용되었습니다.');
+  };
+
+  const resetKnowledgeFilters = () => {
+    const empty = { manager: '', date: '', keyword: '' };
+    setFilters(empty);
+    setAppliedFilters(empty);
     setActionSearch('');
+    setAppliedActionSearch('');
+    setDocPage(1);
+    setActionPage(1);
     showToast('필터가 초기화되었습니다.');
   };
 
@@ -386,42 +844,26 @@ export default function KnowledgePage() {
     setFormError('');
   };
 
-  const handleActionSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed: ActionFormState = {
-      situation: actionForm.situation.trim(),
-      action: actionForm.action.trim(),
-      cause: actionForm.cause.trim(),
-      manager: actionForm.manager.trim(),
-      date: actionForm.date,
-    };
-    if (!trimmed.situation || !trimmed.action || !trimmed.cause || !trimmed.manager || !trimmed.date) {
-      setFormError('모든 항목(발생 상황, 대처 방안, 원인, 담당자, 날짜)을 입력해주세요.');
-      return;
-    }
-    setFormError('');
+  const openDocumentDetail = (doc: DocumentItem) => {
+    setSelectedDocId(doc.id);
+    setDetailTarget({ kind: 'document', item: doc });
+  };
 
-    if (editingId !== null) {
-      setActions((current) =>
-        current.map((item) => (item.id === editingId ? { ...item, ...trimmed } : item)),
-      );
-      console.log('상황 대처 이력 수정:', { id: editingId, ...trimmed });
-      showToast('상황 대처 이력이 수정되었습니다.');
-    } else {
-      const newItem: ActionHistoryItem = { id: Date.now(), ...trimmed };
-      setActions((current) => [newItem, ...current]);
-      console.log('상황 대처 이력 등록:', newItem);
-      showToast('상황 대처 이력이 등록되었습니다.');
-    }
-    setEditingId(null);
-    setActionForm(EMPTY_ACTION_FORM);
+  const openActionDetail = (item: ActionHistoryItem) => {
+    setDetailTarget({ kind: 'action', item });
+  };
+
+  const closeDetailModal = () => {
+    setDetailTarget(null);
+  };
+
+  const handleActionSubmit = () => {
+    // 읽기 전용 화면에서는 UI를 제공하지 않으며, 기존 핸들러 시그니처·흐름은 보존합니다.
+    setFormError('읽기 전용 라이브러리에서는 등록·수정이 비활성화되어 있습니다.');
   };
 
   const handleDelete = (id: number) => {
-    setActions((current) => current.filter((item) => item.id !== id));
-    if (editingId === id) cancelEdit();
-    console.log('상황 대처 이력 삭제:', { id });
-    showToast('상황 대처 이력이 삭제되었습니다.');
+    console.log('인수인계 이력 삭제 요청(읽기 전용 무시):', { id });
   };
 
   const handleGenerateReport = () => {
@@ -434,6 +876,147 @@ export default function KnowledgePage() {
     console.log('AI 데일리 레포트 생성:', refreshed);
     showToast('데일리 레포트가 최신 과거 데이터 기준으로 재갱신되었습니다.');
   };
+
+  const toggleDocSelection = (id: string) => {
+    setSelectedDocIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  };
+
+  const toggleActionSelection = (id: number) => {
+    setSelectedActionIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    );
+  };
+
+  const toggleVisibleDocs = (checked: boolean) => {
+    setSelectedDocIds((current) => {
+      if (checked) {
+        return Array.from(new Set([...current, ...visibleDocIds]));
+      }
+      return current.filter((id) => !visibleDocIds.includes(id));
+    });
+  };
+
+  const toggleVisibleActions = (checked: boolean) => {
+    setSelectedActionIds((current) => {
+      if (checked) {
+        return Array.from(new Set([...current, ...visibleActionIds]));
+      }
+      return current.filter((id) => !visibleActionIds.includes(id));
+    });
+  };
+
+  const clearAnalysisTimer = () => {
+    if (analysisTimerRef.current !== null) {
+      window.clearTimeout(analysisTimerRef.current);
+      analysisTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearAnalysisTimer();
+  }, []);
+
+  useEffect(() => {
+    if (selectedCount <= DEFAULT_VISIBLE_COUNT) {
+      setIsSelectionListExpanded(false);
+    }
+  }, [selectedCount]);
+
+  const clearSelection = () => {
+    if (isAnalyzing) return;
+    clearAnalysisTimer();
+    setIsAnalyzing(false);
+    setSelectedDocIds([]);
+    setSelectedActionIds([]);
+    setAnalysisDocIds([]);
+    setAnalysisActionIds([]);
+    setHasRunAnalysis(false);
+    setIsSelectionListExpanded(false);
+  };
+
+  const removeDocFromSelection = (id: string) => {
+    if (isAnalyzing) return;
+    setSelectedDocIds((current) => current.filter((item) => item !== id));
+  };
+
+  const removeActionFromSelection = (id: number) => {
+    if (isAnalyzing) return;
+    setSelectedActionIds((current) => current.filter((item) => item !== id));
+  };
+
+  /** 지식 탭 액션바: 분석 탭으로 이동 (분석은 아직 실행하지 않음) */
+  const runSelectedAnalysis = () => {
+    if (selectedCount === 0) return;
+    setIsSelectionListExpanded(false);
+    setActiveTab('report');
+  };
+
+  /** AI 탭: 현재 선택 스냅샷으로 분석 실행 */
+  const executeAnalysis = () => {
+    if (selectedCount === 0 || isAnalyzing) return;
+    const docSnapshot = [...validSelectedDocIds];
+    const actionSnapshot = [...validSelectedActionIds];
+    clearAnalysisTimer();
+    setIsAnalyzing(true);
+    analysisTimerRef.current = window.setTimeout(() => {
+      setAnalysisDocIds(docSnapshot);
+      setAnalysisActionIds(actionSnapshot);
+      setHasRunAnalysis(true);
+      setIsAnalyzing(false);
+      analysisTimerRef.current = null;
+      showToast(`선택한 ${docSnapshot.length + actionSnapshot.length}개 항목 분석을 완료했습니다.`);
+    }, 1000);
+  };
+
+  const onRowKeyOpen = (
+    event: React.KeyboardEvent<HTMLTableRowElement>,
+    open: () => void,
+  ) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      open();
+    }
+  };
+
+  const renderSimilarCaseText = (text: string) => {
+    const parts = text.split(DOC_ID_PATTERN);
+    const ids = text.match(DOC_ID_PATTERN) ?? [];
+    const nodes: ReactNode[] = [];
+    parts.forEach((part, index) => {
+      nodes.push(<span key={`t-${index}`}>{part}</span>);
+      const docId = ids[index];
+      if (!docId) return;
+      const matched = allDocuments.find((doc) => doc.id === docId);
+      if (matched) {
+        nodes.push(
+          <button
+            key={`d-${docId}-${index}`}
+            type="button"
+            onClick={() => openDocumentDetail(matched)}
+            className="cursor-pointer font-semibold text-blue-600 hover:underline"
+          >
+            {docId}
+          </button>,
+        );
+      } else {
+        nodes.push(
+          <span key={`u-${docId}-${index}`} className="text-slate-700">
+            {docId}
+          </span>,
+        );
+      }
+    });
+    return nodes;
+  };
+
+  // 기존 핸들러 참조 유지 (트리셰이킹/린트 대비)
+  void handleFormChange;
+  void startEdit;
+  void cancelEdit;
+  void handleActionSubmit;
+  void handleDelete;
 
   return (
     <div
@@ -448,7 +1031,7 @@ export default function KnowledgePage() {
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
       }}
     >
-      <div style={{ width: '100%', maxWidth: 1280, margin: '0 auto' }}>
+      <div style={{ width: '100%', maxWidth: 1280, margin: '0 auto', paddingBottom: selectedCount > 0 ? 88 : 0 }}>
         {toast && (
           <div
             role="status"
@@ -457,7 +1040,7 @@ export default function KnowledgePage() {
               top: 24,
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 100,
+              zIndex: 110,
               background: colors.navy,
               color: '#fff',
               borderRadius: 12,
@@ -471,43 +1054,19 @@ export default function KnowledgePage() {
           </div>
         )}
 
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 20,
-            flexWrap: 'wrap',
-            marginBottom: 22,
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
-              지식 관리
-            </h1>
-            <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
-              과거 담당 자료, 상황 대처 이력, AI 분석 레포트를 통합 관리합니다.
-            </p>
-          </div>
-          <button type="button" onClick={resetFilters} style={ghostButtonStyle}>
-            필터 초기화
-          </button>
+        <div style={{ marginBottom: 22 }}>
+          <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
+            라이브러리
+          </h1>
+          <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
+            이슈 조치 이력 아카이브 · 지식 라이브러리
+          </p>
         </div>
 
         <div
           role="tablist"
-          aria-label="지식 관리 섹션"
-          style={{
-            display: 'flex',
-            gap: 8,
-            marginBottom: 22,
-            background: '#e8edf5',
-            borderRadius: 14,
-            padding: 6,
-            width: 'fit-content',
-            maxWidth: '100%',
-            flexWrap: 'wrap',
-          }}
+          aria-label="라이브러리 섹션"
+          className="mb-5 flex w-fit max-w-full flex-wrap gap-1.5 rounded-xl bg-slate-200/80 p-1.5"
         >
           {TABS.map((tab) => {
             const isActive = activeTab === tab.key;
@@ -518,55 +1077,41 @@ export default function KnowledgePage() {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab.key)}
-                style={{
-                  border: 0,
-                  borderRadius: 10,
-                  padding: '10px 18px',
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  background: isActive ? '#fff' : 'transparent',
-                  color: isActive ? colors.blue : colors.slate,
-                  boxShadow: isActive ? '0 4px 12px rgba(15, 23, 42, 0.1)' : 'none',
-                }}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-white font-semibold text-blue-600 shadow-sm'
+                    : 'bg-transparent font-medium text-slate-500 hover:text-slate-700'
+                }`}
               >
+                {tab.key === 'knowledge' ? <KnowledgeTabIcon /> : <ReportTabIcon />}
                 {tab.label}
               </button>
             );
           })}
         </div>
 
-        {activeTab === 'documents' && (
+        {activeTab === 'knowledge' && (
           <section style={panelStyle}>
-            <h2 style={{ margin: '0 0 18px', color: colors.navy, fontSize: 19 }}>
-              과거 담당자 자료 조회
-            </h2>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 12,
-                marginBottom: 20,
-              }}
-            >
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <label htmlFor="doc-manager" style={labelStyle}>담당자</label>
-                <select
-                  id="doc-manager"
-                  value={filters.manager}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, manager: event.target.value }))
-                  }
-                  style={inputStyle}
-                >
-                  <option value="">전체 담당자</option>
-                  {managers.map((manager) => (
-                    <option key={manager} value={manager}>{manager}</option>
-                  ))}
-                </select>
+                <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>
+                  라이브러리 & 대처 이력
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  누적 지식 라이브러리 (총 {libraryTotalCount}건)
+                  {selectedDoc ? ` · 최근 조회 ${selectedDoc.id}` : ''}
+                </p>
+                <div aria-live="polite" className="sr-only">
+                  선택된 항목 {selectedCount}개
+                </div>
               </div>
-              <div>
-                <label htmlFor="doc-date" style={labelStyle}>날짜</label>
+            </div>
+
+            <div className="mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 p-3">
+              <div className="w-[150px]">
+                <label htmlFor="doc-date" style={labelStyle}>
+                  날짜 (YYYY. MM. DD.)
+                </label>
                 <input
                   id="doc-date"
                   type="date"
@@ -577,8 +1122,10 @@ export default function KnowledgePage() {
                   style={inputStyle}
                 />
               </div>
-              <div style={{ gridColumn: 'span 2' }}>
-                <label htmlFor="doc-keyword" style={labelStyle}>키워드 검색</label>
+              <div className="min-w-[180px] flex-[1.4]">
+                <label htmlFor="doc-keyword" style={labelStyle}>
+                  문서 검색
+                </label>
                 <input
                   id="doc-keyword"
                   value={filters.keyword}
@@ -589,401 +1136,820 @@ export default function KnowledgePage() {
                   style={inputStyle}
                 />
               </div>
+              <div className="min-w-[180px] flex-1">
+                <label htmlFor="action-search" style={labelStyle}>
+                  대처 이력 검색
+                </label>
+                <input
+                  id="action-search"
+                  value={actionSearch}
+                  onChange={(event) => setActionSearch(event.target.value)}
+                  placeholder="제목, 요약, 공정, LOT 통합 검색"
+                  style={inputStyle}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={applyKnowledgeFilters}
+                className="inline-flex h-10 items-center rounded-lg bg-blue-600 px-3.5 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                적용하기
+              </button>
+              <button
+                type="button"
+                onClick={resetKnowledgeFilters}
+                className="inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              >
+                초기화
+              </button>
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1.2fr) minmax(280px, 1fr)',
-                gap: 18,
-                alignItems: 'start',
-              }}
-            >
-              <div style={{ display: 'grid', gap: 10 }}>
-                {filteredDocuments.length === 0 ? (
-                  <div
-                    style={{
-                      padding: '54px 20px',
-                      borderRadius: 14,
-                      background: '#f8fafc',
-                      color: colors.slate,
-                      textAlign: 'center',
-                      fontWeight: 700,
-                    }}
-                  >
-                    검색 조건에 맞는 자료가 없습니다.
+            {selectedCount > 0 && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200/80 bg-blue-50 px-4 py-3 shadow-sm">
+                <div>
+                  <div className="text-sm font-semibold text-blue-800" aria-live="polite">
+                    {selectedCount}개 항목 선택됨
                   </div>
-                ) : (
-                  filteredDocuments.map((doc) => {
-                    const selected = doc.id === selectedDocId;
-                    return (
-                      <button
-                        key={doc.id}
-                        type="button"
-                        onClick={() => setSelectedDocId(doc.id)}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          border: selected ? `2px solid ${colors.blue}` : `1px solid ${colors.line}`,
-                          borderRadius: 13,
-                          background: selected ? colors.blueSoft : '#fff',
-                          padding: 15,
-                          cursor: 'pointer',
-                          boxShadow: selected ? '0 0 0 3px rgba(37, 99, 235, 0.08)' : 'none',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            gap: 10,
-                            flexWrap: 'wrap',
-                            marginBottom: 6,
-                          }}
-                        >
-                          <strong style={{ color: colors.blue, fontSize: 13 }}>{doc.id}</strong>
-                          <span style={{ color: colors.muted, fontSize: 12 }}>
-                            {doc.manager} · {doc.date}
-                          </span>
-                        </div>
-                        <div style={{ color: colors.navy, fontSize: 15, fontWeight: 800 }}>
-                          {doc.title}
-                        </div>
-                        <p style={{ margin: '6px 0 8px', color: colors.slate, fontSize: 13, lineHeight: 1.6 }}>
-                          {doc.summary}
-                        </p>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            borderRadius: 999,
-                            background: '#f1f5f9',
-                            color: colors.slate,
-                            fontSize: 12,
-                            fontWeight: 700,
-                            padding: '4px 10px',
-                          }}
-                        >
-                          {doc.process} · {doc.lot}
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-
-              <div
-                style={{
-                  border: `1px solid ${colors.line}`,
-                  borderRadius: 14,
-                  background: '#f8fafc',
-                  padding: 20,
-                  position: 'sticky',
-                  top: 20,
-                }}
-              >
-                <h3 style={{ margin: '0 0 12px', color: colors.navy, fontSize: 15 }}>자료 상세</h3>
-                {selectedDoc ? (
-                  <div>
-                    <div style={{ color: colors.blue, fontSize: 13, fontWeight: 800 }}>
-                      {selectedDoc.id}
-                    </div>
-                    <h4 style={{ margin: '6px 0 8px', color: colors.navy, fontSize: 17 }}>
-                      {selectedDoc.title}
-                    </h4>
-                    <div style={{ color: colors.muted, fontSize: 12, marginBottom: 14 }}>
-                      {selectedDoc.manager} · {selectedDoc.date} · {selectedDoc.process} · {selectedDoc.lot}
-                    </div>
-                    <p style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.75 }}>
-                      {selectedDoc.detail}
-                    </p>
+                  <div className="mt-0.5 text-[11px] text-blue-700/80">
+                    선택한 항목을 AI 데일리 레포트 분석 범위로 보낼 수 있습니다.
                   </div>
-                ) : (
-                  <p style={{ margin: 0, color: colors.slate, fontSize: 13, lineHeight: 1.7 }}>
-                    왼쪽 목록에서 자료를 선택하면 상세 내용이 표시됩니다.
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {activeTab === 'actions' && (
-          <section style={panelStyle}>
-            <h2 style={{ margin: '0 0 6px', color: colors.navy, fontSize: 19 }}>
-              상황 대처 및 원인 분석 관리
-            </h2>
-            <p style={{ margin: '0 0 18px', color: colors.slate, fontSize: 13 }}>
-              {editingId !== null
-                ? `ID ${editingId} 항목을 수정하고 있습니다.`
-                : '새로운 상황 대처 이력을 등록하거나 기존 이력을 수정/삭제할 수 있습니다.'}
-            </p>
-
-            {formError && (
-              <div
-                role="alert"
-                style={{
-                  border: '1px solid #fca5a5',
-                  borderRadius: 10,
-                  background: colors.redSoft,
-                  color: colors.red,
-                  padding: '11px 13px',
-                  marginBottom: 16,
-                  fontSize: 13,
-                  fontWeight: 800,
-                }}
-              >
-                {formError}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={clearSelection} style={ghostButtonStyle}>
+                    선택 해제
+                  </button>
+                  <button type="button" onClick={runSelectedAnalysis} style={primaryButtonStyle}>
+                    선택한 {selectedCount}개 항목 AI 분석하기 ✨
+                  </button>
+                </div>
               </div>
             )}
 
-            <form
-              onSubmit={handleActionSubmit}
-              style={{
-                border: `1px solid ${editingId !== null ? colors.blue : colors.line}`,
-                borderRadius: 14,
-                background: editingId !== null ? colors.blueSoft : '#f8fafc',
-                padding: 18,
-                marginBottom: 22,
-              }}
-            >
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: 12,
-                  marginBottom: 12,
-                }}
-              >
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label htmlFor="action-situation" style={labelStyle}>발생 상황</label>
-                  <input
-                    id="action-situation"
-                    value={actionForm.situation}
-                    onChange={(event) => handleFormChange('situation', event.target.value)}
-                    placeholder="예) 소성로 온도 상한 초과"
-                    style={inputStyle}
-                  />
+            <div className="space-y-6">
+              {/* 과거 자료 */}
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <h3 className="m-0 text-base font-semibold text-slate-800">과거 자료</h3>
+                    <span className="text-sm font-semibold tabular-nums text-slate-500">
+                      {filteredDocuments.length}건
+                    </span>
+                  </div>
+                  <p className="mb-0 mt-1 text-xs text-slate-500">
+                    등록된 보고서와 공정 관련 문서를 조회합니다.
+                  </p>
                 </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label htmlFor="action-action" style={labelStyle}>대처 방안</label>
-                  <input
-                    id="action-action"
-                    value={actionForm.action}
-                    onChange={(event) => handleFormChange('action', event.target.value)}
-                    placeholder="예) 목표 온도 하향 및 냉각 계통 점검"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="action-cause" style={labelStyle}>원인</label>
-                  <input
-                    id="action-cause"
-                    value={actionForm.cause}
-                    onChange={(event) => handleFormChange('cause', event.target.value)}
-                    placeholder="예) 온도 센서 열화"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="action-manager" style={labelStyle}>담당자</label>
-                  <input
-                    id="action-manager"
-                    value={actionForm.manager}
-                    onChange={(event) => handleFormChange('manager', event.target.value)}
-                    placeholder="담당자 이름"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="action-date" style={labelStyle}>날짜</label>
-                  <input
-                    id="action-date"
-                    type="date"
-                    value={actionForm.date}
-                    onChange={(event) => handleFormChange('date', event.target.value)}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button type="submit" style={primaryButtonStyle}>
-                  {editingId !== null ? '수정 완료' : '추가'}
-                </button>
-                {editingId !== null && (
-                  <button type="button" onClick={cancelEdit} style={ghostButtonStyle}>
-                    수정 취소
-                  </button>
-                )}
-              </div>
-            </form>
-
-            <div style={{ marginBottom: 14, maxWidth: 360 }}>
-              <label htmlFor="action-search" style={labelStyle}>키워드 검색</label>
-              <input
-                id="action-search"
-                value={actionSearch}
-                onChange={(event) => setActionSearch(event.target.value)}
-                placeholder="상황, 대처, 원인, 담당자 검색"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
-                <thead>
-                  <tr>
-                    <th style={headCellStyle}>발생 상황</th>
-                    <th style={headCellStyle}>대처 방안</th>
-                    <th style={headCellStyle}>원인</th>
-                    <th style={headCellStyle}>담당자</th>
-                    <th style={headCellStyle}>날짜</th>
-                    <th style={headCellStyle}>관리</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredActions.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ ...cellStyle, textAlign: 'center', color: colors.slate, padding: 30 }}>
-                        검색 조건에 맞는 이력이 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredActions.map((item) => (
-                      <tr key={item.id} style={{ background: editingId === item.id ? colors.blueSoft : '#fff' }}>
-                        <td style={cellStyle}>{item.situation}</td>
-                        <td style={cellStyle}>{item.action}</td>
-                        <td style={cellStyle}>{item.cause}</td>
-                        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>{item.manager}</td>
-                        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>{item.date}</td>
-                        <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
-                          <button
-                            type="button"
-                            onClick={() => startEdit(item)}
-                            style={{
-                              ...ghostButtonStyle,
-                              padding: '6px 12px',
-                              fontSize: 12,
-                              color: colors.blue,
-                              borderColor: '#bfdbfe',
-                              marginRight: 6,
-                            }}
-                          >
-                            수정
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(item.id)}
-                            style={{
-                              ...ghostButtonStyle,
-                              padding: '6px 12px',
-                              fontSize: 12,
-                              color: colors.red,
-                              borderColor: '#fca5a5',
-                            }}
-                          >
-                            삭제
-                          </button>
-                        </td>
+                <div id="past-documents-list" className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] border-collapse text-left">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                        <th className="w-12 px-3 py-3">
+                          <input
+                            ref={docMaster.ref}
+                            type="checkbox"
+                            checked={docMaster.allSelected}
+                            disabled={docMaster.disabled}
+                            onChange={(event) => toggleVisibleDocs(event.target.checked)}
+                            aria-label="표시된 문서 전체 선택"
+                            className="h-4 w-4 accent-blue-600"
+                          />
+                        </th>
+                        <th className="w-[118px] whitespace-nowrap px-3 py-3">문서 ID</th>
+                        <th className="w-[104px] whitespace-nowrap px-3 py-3">분류</th>
+                        <th className="min-w-[280px] px-3 py-3">제목</th>
+                        <th className="w-[88px] whitespace-nowrap px-3 py-3">담당자</th>
+                        <th className="w-[108px] whitespace-nowrap px-3 py-3">날짜</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {filteredDocuments.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                            검색 조건에 맞는 자료가 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        renderedDocuments.map((doc) => {
+                          const checked = validSelectedDocIds.includes(doc.id);
+                          return (
+                            <tr
+                              key={doc.id}
+                              tabIndex={0}
+                              onClick={() => openDocumentDetail(doc)}
+                              onKeyDown={(event) =>
+                                onRowKeyOpen(event, () => openDocumentDetail(doc))
+                              }
+                              className={`cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
+                                checked
+                                  ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
+                                  : 'border-l-4 border-l-transparent bg-white'
+                              }`}
+                            >
+                              <td
+                                className="w-12 px-3 py-3.5"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleDocSelection(doc.id)}
+                                  aria-label={`${doc.title} 선택`}
+                                  className="h-4 w-4 accent-blue-600"
+                                />
+                              </td>
+                              <td className="w-[118px] whitespace-nowrap px-3 py-3.5">
+                                <button
+                                  type="button"
+                                  className="cursor-pointer text-xs font-medium text-blue-600 hover:underline"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openDocumentDetail(doc);
+                                  }}
+                                >
+                                  {doc.id}
+                                </button>
+                              </td>
+                              <td className="w-[104px] whitespace-nowrap px-3 py-3.5">
+                                {doc.process ? (
+                                  <CategoryBadge label={doc.process} />
+                                ) : transferredIdSet.has(doc.id) ? (
+                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    이슈완료
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-400">-</span>
+                                )}
+                              </td>
+                              <td className="min-w-[280px] px-3 py-3.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div
+                                    className="line-clamp-2 text-sm font-semibold text-slate-800"
+                                    title={doc.title}
+                                  >
+                                    {doc.title}
+                                  </div>
+                                  {transferredIdSet.has(doc.id) && doc.process ? (
+                                    <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                      이슈완료
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div
+                                  className="mt-1 line-clamp-1 text-xs text-slate-500"
+                                  title={doc.summary}
+                                >
+                                  {doc.summary}
+                                </div>
+                              </td>
+                              <td className="w-[88px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {doc.manager}
+                              </td>
+                              <td className="w-[108px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {doc.date}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {filteredDocuments.length > 0 ? (
+                  <div className="flex flex-col items-center gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:justify-between">
+                    <span className="text-xs font-medium text-slate-500">
+                      {(safeDocPage - 1) * LIST_PAGE_SIZE + 1}-
+                      {Math.min(safeDocPage * LIST_PAGE_SIZE, filteredDocuments.length)} /{' '}
+                      {filteredDocuments.length}건
+                    </span>
+                    <nav
+                      aria-label="과거 자료 페이지"
+                      className="flex flex-wrap items-center justify-center gap-1.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setDocPage((page) => Math.max(1, page - 1))}
+                        disabled={safeDocPage <= 1}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        이전
+                      </button>
+                      {docPageNumbers.map((page) => {
+                        const active = page === safeDocPage;
+                        return (
+                          <button
+                            key={page}
+                            type="button"
+                            aria-current={active ? 'page' : undefined}
+                            onClick={() => setDocPage(page)}
+                            className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                              active
+                                ? 'bg-blue-600 text-white'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => setDocPage((page) => Math.min(docTotalPages, page + 1))}
+                        disabled={safeDocPage >= docTotalPages}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        다음
+                      </button>
+                    </nav>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* 인수인계 이력 */}
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <h3 className="m-0 text-base font-semibold text-slate-800">인수인계 이력</h3>
+                    <span className="text-sm font-semibold tabular-nums text-slate-500">
+                      {filteredActions.length}건
+                    </span>
+                  </div>
+                  <p className="mb-0 mt-1 text-xs text-slate-500">
+                    저장된 이슈의 발생 상황과 인수인계·대응 내역입니다.
+                  </p>
+                </div>
+                <div id="action-history-list" className="overflow-x-auto">
+                  <table className="w-full min-w-[900px] border-collapse text-left">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                        <th className="w-12 px-3 py-3">
+                          <input
+                            ref={actionMaster.ref}
+                            type="checkbox"
+                            checked={actionMaster.allSelected}
+                            disabled={actionMaster.disabled}
+                            onChange={(event) => toggleVisibleActions(event.target.checked)}
+                            aria-label="표시된 대처 이력 전체 선택"
+                            className="h-4 w-4 accent-blue-600"
+                          />
+                        </th>
+                        <th className="w-[96px] whitespace-nowrap px-3 py-3">분류</th>
+                        <th className="min-w-[220px] px-3 py-3">발생 상황</th>
+                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인계자</th>
+                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인수자</th>
+                        <th className="w-[108px] whitespace-nowrap px-3 py-3">날짜</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredActions.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                            검색 조건에 맞는 이력이 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        renderedActions.map((item) => {
+                          const checked = validSelectedActionIds.includes(item.id);
+                          const fromName = item.handoverFrom?.trim() || item.manager || '-';
+                          const toName = item.handoverTo?.trim() || '-';
+                          return (
+                            <tr
+                              key={item.id}
+                              tabIndex={0}
+                              onClick={() => openActionDetail(item)}
+                              onKeyDown={(event) =>
+                                onRowKeyOpen(event, () => openActionDetail(item))
+                              }
+                              className={`cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
+                                checked
+                                  ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
+                                  : 'border-l-4 border-l-transparent bg-white'
+                              }`}
+                            >
+                              <td
+                                className="w-12 px-3 py-3.5"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleActionSelection(item.id)}
+                                  aria-label={`${item.situation} 선택`}
+                                  className="h-4 w-4 accent-blue-600"
+                                />
+                              </td>
+                              <td className="w-[96px] whitespace-nowrap px-3 py-3.5">
+                                <CategoryBadge label={item.category?.trim() || '대처 이력'} />
+                              </td>
+                              <td
+                                className="min-w-[220px] px-3 py-3.5 text-sm font-semibold text-slate-800"
+                                title={item.situation}
+                              >
+                                <div className="line-clamp-2">{item.situation}</div>
+                              </td>
+                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {fromName}
+                              </td>
+                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {toName}
+                              </td>
+                              <td className="w-[108px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                                {item.date}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {filteredActions.length > 0 ? (
+                  <div className="flex flex-col items-center gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:justify-between">
+                    <span className="text-xs font-medium text-slate-500">
+                      {(safeActionPage - 1) * LIST_PAGE_SIZE + 1}-
+                      {Math.min(safeActionPage * LIST_PAGE_SIZE, filteredActions.length)} /{' '}
+                      {filteredActions.length}건
+                    </span>
+                    <nav
+                      aria-label="인수인계 이력 페이지"
+                      className="flex flex-wrap items-center justify-center gap-1.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActionPage((page) => Math.max(1, page - 1))}
+                        disabled={safeActionPage <= 1}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        이전
+                      </button>
+                      {actionPageNumbers.map((page) => {
+                        const active = page === safeActionPage;
+                        return (
+                          <button
+                            key={page}
+                            type="button"
+                            aria-current={active ? 'page' : undefined}
+                            onClick={() => setActionPage(page)}
+                            className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                              active
+                                ? 'bg-blue-600 text-white'
+                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActionPage((page) => Math.min(actionTotalPages, page + 1))
+                        }
+                        disabled={safeActionPage >= actionTotalPages}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        다음
+                      </button>
+                    </nav>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </section>
         )}
 
         {activeTab === 'report' && (
           <section style={panelStyle}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 12,
-                flexWrap: 'wrap',
-                marginBottom: 18,
-              }}
-            >
-              <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>
-                AI 기반 불량률 원인 분석 데일리 레포트
-              </h2>
-              <button type="button" onClick={handleGenerateReport} style={primaryButtonStyle}>
-                데일리 레포트 생성
-              </button>
-            </div>
-
-            <div
-              style={{
-                border: '1px solid #fcd34d',
-                borderLeft: `4px solid ${colors.amber}`,
-                borderRadius: 12,
-                background: colors.amberSoft,
-                color: '#92400e',
-                padding: '14px 16px',
-                fontSize: 14,
-                fontWeight: 700,
-                lineHeight: 1.65,
-                marginBottom: 20,
-              }}
-            >
-              ⚠️ 본 분석은 과거 기록만을 기반으로 하며, 아직 생성되지 않은 파일이나 미래 데이터에는 접근하지 않습니다.
-            </div>
-
-            <div
-              style={{
-                border: `1px solid ${colors.line}`,
-                borderRadius: 16,
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  background: colors.navy,
-                  color: '#fff',
-                  padding: '16px 20px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 12,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <strong style={{ fontSize: 15 }}>당일 AI 분석 레포트</strong>
-                <span style={{ fontSize: 13, color: '#cbd5e1' }}>
-                  분석 기준일: {report.baseDate} · 참고 기록 {report.referenceCount}건
-                </span>
+            {selectedCount === 0 ? (
+              <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                  <ReportTabIcon />
+                </div>
+                <h2 className="m-0 text-lg font-bold text-slate-800">
+                  AI 분석을 진행할 라이브러리 항목을 선택해 주세요.
+                </h2>
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+                  라이브러리 & 대처 이력 탭에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('knowledge')}
+                  style={primaryButtonStyle}
+                  className="mt-5"
+                >
+                  라이브러리 목록에서 선택하러 가기
+                </button>
               </div>
-              <div style={{ padding: 20, display: 'grid', gap: 14 }}>
-                {[
-                  { label: '주요 불량률 상승 원인', value: report.mainCause, color: colors.red, soft: colors.redSoft },
-                  { label: '과거 유사 사례', value: report.similarCase, color: colors.blue, soft: colors.blueSoft },
-                  { label: 'AI 권장 조치', value: report.recommendation, color: colors.green, soft: colors.greenSoft },
-                  { label: '위험도 요약', value: report.riskSummary, color: colors.amber, soft: colors.amberSoft },
-                ].map((row) => (
-                  <div
-                    key={row.label}
-                    style={{
-                      border: `1px solid ${colors.line}`,
-                      borderLeft: `4px solid ${row.color}`,
-                      borderRadius: 12,
-                      background: row.soft,
-                      padding: '14px 16px',
-                    }}
-                  >
-                    <div style={{ color: row.color, fontSize: 13, fontWeight: 800, marginBottom: 6 }}>
-                      {row.label}
-                    </div>
-                    <p style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}>
-                      {row.value}
-                    </p>
+            ) : (
+              <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(260px,0.75fr)_minmax(0,1.6fr)]">
+                <aside className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="m-0 text-sm font-bold text-slate-800">분석 대상 지식 항목</h3>
+                    <span className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
+                      {selectedCount}개
+                    </span>
                   </div>
-                ))}
+                  <div
+                    id="analysis-selection-list"
+                    className={`space-y-2 ${
+                      isSelectionListExpanded ? 'max-h-[520px] overflow-y-auto pr-1' : ''
+                    }`}
+                  >
+                    {visibleSelectionItems.map((entry) => {
+                      if (entry.kind === 'document') {
+                        const doc = entry.item;
+                        return (
+                          <div
+                            key={`doc-${doc.id}`}
+                            className="flex gap-2 rounded-lg border border-slate-200 bg-white p-3"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => openDocumentDetail(doc)}
+                              className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left"
+                            >
+                              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
+                                  {entry.order}
+                                </span>
+                                <span className="text-[11px] font-semibold text-blue-600">
+                                  {doc.id}
+                                </span>
+                                {doc.process ? <CategoryBadge label={doc.process} /> : null}
+                                {transferredIdSet.has(doc.id) ? (
+                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    이슈완료
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                                {doc.title}
+                              </div>
+                              <div className="mt-1 text-[11px] text-slate-400">{doc.date}</div>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isAnalyzing}
+                              aria-label={`${doc.title} 분석 대상에서 제외`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeDocFromSelection(doc.id);
+                              }}
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      }
+                      const item = entry.item;
+                      return (
+                        <div
+                          key={`action-${item.id}`}
+                          className="flex gap-2 rounded-lg border border-slate-200 bg-white p-3"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => openActionDetail(item)}
+                            className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left"
+                          >
+                            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
+                                {entry.order}
+                              </span>
+                              <CategoryBadge label={item.category?.trim() || '대처 이력'} />
+                            </div>
+                            <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                              {item.situation}
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-400">{item.date}</div>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isAnalyzing}
+                            aria-label={`${item.situation} 분석 대상에서 제외`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeActionFromSelection(item.id);
+                            }}
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {remainingSelectionCount > 0 && (
+                    <button
+                      type="button"
+                      className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      aria-expanded={isSelectionListExpanded}
+                      aria-controls="analysis-selection-list"
+                      onClick={() => setIsSelectionListExpanded((current) => !current)}
+                    >
+                      {isSelectionListExpanded
+                        ? '접기'
+                        : `${remainingSelectionCount}개 더 보기`}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={isAnalyzing}
+                    onClick={clearSelection}
+                    className="mt-2 inline-flex min-h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    전체 선택 해제
+                  </button>
+                </aside>
+
+                <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
+                  {isAnalyzing ? (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="flex min-h-[280px] flex-col items-center justify-center gap-3 px-6 py-12 text-center"
+                    >
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                      <p className="m-0 text-sm font-semibold text-slate-700">
+                        AI가 선택된 지식 항목을 분석 중입니다...
+                      </p>
+                      <button type="button" disabled style={primaryButtonStyle} className="opacity-60">
+                        분석 실행
+                      </button>
+                    </div>
+                  ) : !hasRunAnalysis || !selectionMatchesAnalysis ? (
+                    <div className="flex min-h-[280px] flex-col items-start justify-center gap-4 px-5 py-8 sm:px-6">
+                      {hasRunAnalysis && !selectionMatchesAnalysis ? (
+                        <>
+                          <h2 className="m-0 text-base font-bold text-slate-800">
+                            분석 대상 항목이 변경되었습니다. 최신 선택 항목으로 다시 분석해 주세요.
+                          </h2>
+                          <p className="m-0 text-sm leading-relaxed text-slate-500">
+                            현재 선택된 {selectedCount}개 항목 기준으로 다시 분석을 실행할 수 있습니다.
+                          </p>
+                          <button type="button" onClick={executeAnalysis} style={primaryButtonStyle}>
+                            다시 분석
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <h2 className="m-0 text-base font-bold text-slate-800">
+                            선택된 {selectedCount}개 지식 항목을 분석할 준비가 되었습니다.
+                          </h2>
+                          <p className="m-0 text-sm leading-relaxed text-slate-500">
+                            분석 실행 버튼을 눌러 선택된 항목 기반의 맞춤 분석을 시작하세요.
+                          </p>
+                          <button type="button" onClick={executeAnalysis} style={primaryButtonStyle}>
+                            분석 실행
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
+                        <strong className="text-sm">
+                          선택된 {analysisCount}개 지식 항목 기반 AI 맞춤 분석 결과
+                        </strong>
+                        <button
+                          type="button"
+                          onClick={executeAnalysis}
+                          className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
+                        >
+                          다시 분석
+                        </button>
+                      </div>
+                      <div className="grid gap-3 p-4">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
+                          <div className="mb-1.5 text-xs font-bold text-slate-500">선택 항목 요약</div>
+                          <p className="m-0 text-sm leading-relaxed text-slate-800">
+                            문서 {analysisDocs.length}건 · 대처 이력 {analysisActions.length}건 · 총{' '}
+                            {analysisCount}개 항목을 분석 참고 범위로 사용합니다.
+                          </p>
+                        </div>
+
+                        <div
+                          style={{
+                            border: `1px solid ${colors.line}`,
+                            borderLeft: `4px solid ${colors.blue}`,
+                            borderRadius: 12,
+                            background: colors.blueSoft,
+                            padding: '14px 16px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: colors.blue,
+                              fontSize: 13,
+                              fontWeight: 800,
+                              marginBottom: 6,
+                            }}
+                          >
+                            주요 인사이트
+                          </div>
+                          <p style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}>
+                            {analysisInsights.summaries.length > 0
+                              ? analysisInsights.summaries.join(' / ')
+                              : '선택된 지식 항목을 AI 분석 참고 범위로 설정했습니다.'}
+                          </p>
+                        </div>
+
+                        {analysisInsights.causes.length > 0 && (
+                          <div
+                            style={{
+                              border: `1px solid ${colors.line}`,
+                              borderLeft: `4px solid ${colors.red}`,
+                              borderRadius: 12,
+                              background: colors.redSoft,
+                              padding: '14px 16px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: colors.red,
+                                fontSize: 13,
+                                fontWeight: 800,
+                                marginBottom: 6,
+                              }}
+                            >
+                              공통 원인 또는 기록된 원인
+                            </div>
+                            <p
+                              style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}
+                            >
+                              {analysisInsights.causes.join(' / ')}
+                            </p>
+                          </div>
+                        )}
+
+                        {analysisInsights.actionsTaken.length > 0 && (
+                          <div
+                            style={{
+                              border: `1px solid ${colors.line}`,
+                              borderLeft: `4px solid ${colors.green}`,
+                              borderRadius: 12,
+                              background: colors.greenSoft,
+                              padding: '14px 16px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: colors.green,
+                                fontSize: 13,
+                                fontWeight: 800,
+                                marginBottom: 6,
+                              }}
+                            >
+                              추천 대응 조치 또는 기록된 대응 조치
+                            </div>
+                            <p
+                              style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}
+                            >
+                              {analysisInsights.actionsTaken.join(' / ')}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                          <div className="mb-2 text-xs font-bold text-slate-500">참고 지식 항목</div>
+                          <div className="flex flex-wrap gap-2">
+                            {analysisDocs.map((doc) => (
+                              <button
+                                key={doc.id}
+                                type="button"
+                                onClick={() => openDocumentDetail(doc)}
+                                className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                              >
+                                <span className="truncate">{doc.id}</span>
+                              </button>
+                            ))}
+                            {analysisActions.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => openActionDetail(item)}
+                                className="inline-flex max-w-full items-center rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                              >
+                                <span className="truncate">{item.situation}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+
+            <p className="mb-0 mt-4 text-center text-[11px] leading-relaxed text-slate-400">
+              AI 분석은 등록된 과거 기록을 기반으로 한 참고 정보이며, 최종 판단은 현장 검토가
+              필요합니다.
+            </p>
           </section>
         )}
       </div>
+
+      {selectedCount > 0 && activeTab === 'knowledge' && (
+        <div className="fixed bottom-4 left-1/2 z-[90] w-[min(920px,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-slate-700" aria-live="polite">
+              선택한 {selectedCount}개 항목
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={runSelectedAnalysis} style={primaryButtonStyle}>
+                선택한 {selectedCount}개 항목 AI 분석하기 ✨
+              </button>
+              <button type="button" onClick={clearSelection} style={ghostButtonStyle}>
+                선택 해제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ModalShell
+        open={!!detailTarget}
+        title="라이브러리 상세 보기"
+        titleId="knowledge-detail-title"
+        onClose={closeDetailModal}
+        wide
+      >
+        {detailTarget?.kind === 'document' && (
+          <div className="space-y-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-blue-600">{detailTarget.item.id}</span>
+              {detailTarget.item.process ? (
+                <CategoryBadge label={detailTarget.item.process} />
+              ) : null}
+              {transferredIdSet.has(detailTarget.item.id) ? (
+                <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                  이슈완료
+                </span>
+              ) : null}
+            </div>
+            <h4 className="m-0 text-lg font-bold text-slate-900">{detailTarget.item.title}</h4>
+            <div className="text-xs text-slate-500">
+              {detailTarget.item.manager} · {detailTarget.item.date}
+              {detailTarget.item.lot ? ` · ${detailTarget.item.lot}` : ''}
+            </div>
+            <p className="m-0 leading-relaxed text-slate-600">{detailTarget.item.summary}</p>
+            <div className="rounded-xl bg-slate-50 p-4 leading-relaxed whitespace-pre-wrap text-slate-800">
+              {detailTarget.item.detail}
+            </div>
+          </div>
+        )}
+
+        {detailTarget?.kind === 'action' && (
+          <div className="space-y-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <CategoryBadge label={detailTarget.item.category?.trim() || '대처 이력'} />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">발생 상황</div>
+              <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
+                {detailTarget.item.situation}
+              </div>
+            </div>
+            {(detailTarget.item.handoverFrom || detailTarget.item.handoverTo) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">인계자</div>
+                  <div className="mt-1 text-slate-800">
+                    {detailTarget.item.handoverFrom?.trim() || '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-500">인수자</div>
+                  <div className="mt-1 text-slate-800">
+                    {detailTarget.item.handoverTo?.trim() || '-'}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {detailTarget.item.action ? (
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">대처 방안</div>
+                    <div className="mt-1 whitespace-pre-wrap text-slate-800">
+                      {detailTarget.item.action}
+                    </div>
+                  </div>
+                ) : null}
+                {detailTarget.item.cause ? (
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">원인</div>
+                    <div className="mt-1 text-slate-800">{detailTarget.item.cause}</div>
+                  </div>
+                ) : null}
+              </>
+            )}
+            <div className="text-xs text-slate-500">
+              {[detailTarget.item.manager, detailTarget.item.date].filter(Boolean).join(' · ')}
+            </div>
+          </div>
+        )}
+      </ModalShell>
     </div>
   );
-};
+}
