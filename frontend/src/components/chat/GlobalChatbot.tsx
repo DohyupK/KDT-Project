@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import Link from 'next/link'
 import { MessageCircle, X } from 'lucide-react'
 import {
   postChat,
@@ -15,6 +16,7 @@ type ChatMessage = {
   id: number
   role: ChatRole
   text: string
+  mode?: string
 }
 
 const SUGGESTED = [
@@ -34,7 +36,7 @@ export default function GlobalChatbot() {
     {
       id: 1,
       role: 'ai',
-      text: '안녕하세요. AI 공정 지원 챗봇입니다. 메시지를 보내거나 「샘플 LOT 진단」으로 predict Tool 연동을 확인할 수 있습니다.',
+      text: '안녕하세요. AI 공정 지원 챗봇입니다. 메시지를 보내거나 「샘플 LOT 진단」으로 predict Tool 연동을 확인할 수 있습니다. 보안·기밀 내용은 /security 탭을 이용해 주세요.',
     },
   ])
   const idRef = useRef(2)
@@ -73,12 +75,15 @@ export default function GlobalChatbot() {
       })
       if (ac.signal.aborted) return
       idRef.current += 1
+      const replyText =
+        res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.')
       setMessages((prev) => [
         ...prev,
         {
           id: idRef.current,
           role: 'ai',
-          text: res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.'),
+          text: replyText,
+          mode: res.mode,
         },
       ])
     } catch (err) {
@@ -87,9 +92,9 @@ export default function GlobalChatbot() {
       if (err && typeof err === 'object') {
         const ax = err as {
           message?: string
-          response?: { data?: { detail?: unknown }; status?: number }
+          response?: { data?: { detail?: unknown; error?: unknown }; status?: number }
         }
-        const serverDetail = ax.response?.data?.detail
+        const serverDetail = ax.response?.data?.detail ?? ax.response?.data?.error
         if (typeof serverDetail === 'string') detail = serverDetail
         else if (ax.message) detail = ax.message
         if (ax.response?.status) detail = `[${ax.response.status}] ${detail}`
@@ -100,7 +105,8 @@ export default function GlobalChatbot() {
         {
           id: idRef.current,
           role: 'ai',
-          text: `ai-service 연결에 실패했습니다. uvicorn(:8800)과 /ai rewrite를 확인해 주세요.\n(${detail})`,
+          text:
+            `챗봇 연결에 실패했습니다. backend(:3001) · ai-service(:8800) · MariaDB를 확인해 주세요.\n(${detail})`,
         },
       ])
     } finally {
@@ -143,10 +149,26 @@ export default function GlobalChatbot() {
                 className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                   m.role === 'user'
                     ? 'ml-auto rounded-br-md bg-blue-600 text-white'
-                    : 'mr-auto rounded-bl-md border border-slate-200 bg-white text-slate-800'
+                    : m.mode === 'security_redirect'
+                      ? 'mr-auto rounded-bl-md border border-amber-200 bg-amber-50 text-amber-950'
+                      : 'mr-auto rounded-bl-md border border-slate-200 bg-white text-slate-800'
                 }`}
               >
                 {m.text}
+                {m.mode === 'security_redirect' ? (
+                  <div className="mt-2">
+                    <Link
+                      href="/security"
+                      className="text-xs font-semibold text-amber-800 underline"
+                      onClick={() => setOpen(false)}
+                    >
+                      보안 탭(/security)으로 이동
+                    </Link>
+                  </div>
+                ) : null}
+                {m.mode && m.mode !== 'security_redirect' && m.role === 'ai' ? (
+                  <div className="mt-1 text-[10px] text-slate-400">mode={m.mode}</div>
+                ) : null}
               </div>
             ))}
             {pending ? (

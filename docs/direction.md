@@ -1,10 +1,12 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-07-23 (PC 재시작 전 체크포인트)
+최종 갱신: 2026-07-24 (100-trial 복구 · Groq/Gemini 라우팅)
 
 모노레포 기준입니다. `frontend` / `backend` / `ai-service`를 모두 포함합니다.
 
-**이어하기:** [`docs/plans/2026-07-23-session-handoff.md`](./plans/2026-07-23-session-handoff.md)
+**연동 계획:** [`docs/plans/2026-07-23-llm-formal-integration.md`](./plans/2026-07-23-llm-formal-integration.md)  
+**보안 골격:** [`docs/references/security-chat-skeleton.md`](./references/security-chat-skeleton.md)  
+**일지:** [`docs/work-log/2026-07-23.md`](./work-log/2026-07-23.md) · [`docs/work-log/2026-07-24.md`](./work-log/2026-07-24.md)
 
 ---
 
@@ -22,7 +24,8 @@
 5. 사용자가 방안을 선택하면, 웹사이트에서 해당 방안 실행 (**제어 + 권한**)
 
 **LLM + RAG + Tool Calling** Agent.  
-당분간 RAG/제어용 **backend는 후순위**, 챗봇은 **ai-service + Main UI**로 먼저 연동한다.
+일반 챗봇: **frontend → backend(세션·보안 게이트) → ai-service(predict + LLM compose)**.  
+보안·기밀: 키워드 시 redirect → `/security` (vLLM은 외부 모델 반입 후).
 
 챗봇·연동 경로 지도: [`docs/plans/2026-07-23-chatbot-integration.md`](./plans/2026-07-23-chatbot-integration.md)
 
@@ -32,24 +35,27 @@
 
 | 패키지 | 역할 | 상태 |
 |--------|------|------|
-| `frontend/` | Next.js App Router UI | AppShell + **전역 GlobalChatbot** (`/ai` rewrite) |
-| `backend/` | Express + MariaDB API | 스캐폴드만 (후순위) |
-| `ai-service/` | ML 진단 + FastAPI/챗봇 | `train_pipeline` + models + `/predict` + LangGraph `/chat` |
+| `frontend/` | Next.js App Router UI | AppShell + GlobalChatbot(`/api/chat`) + `/security` placeholder |
+| `backend/` | Express + 세션 스토어 | 보안 게이트 · 연속 유사 3회 · ai-service 프록시 (`CHAT_STORE=sqlite` 기본, mariadb 가능) |
+| `ai-service/` | ML + FastAPI/챗봇 | `/predict` + LangGraph `/chat` + **Groq/Gemini** 길이 라우팅 |
 
-## 완료
+## 완료 (7/23 기준)
 
 - React(Vite) → Next.js 마이그레이션, docs·룰·스킬 정리 (2026-07-22)
 - Issue / Knowledge / Inquiry / Dashboard / AppShell /login 진입 (2026-07-22)
-- ai-service O/X: 스키마·프롬프트·`train_pipeline` v1.2.0·도메인 피처·Top-4 (2026-07-23)
-- Optuna **100 trial** 정식 학습, ROC-AUC 0.940 (2026-07-23)
-- 챗봇 연동 작업서 작성 (2026-07-23)
+- ai-service O/X · Optuna · 챗봇 `/ai` 실연동 (2026-07-23)
+- LLM 정식 연동 코드 · 보안 게이트 · 세션 가이드 (2026-07-23)
+- 시나리오 API 스모크: 보안 미프록시 · 유사 3회 가이드 · predict template (2026-07-23 오후)
+- LLM 길이 라우팅 + `.env` 안전 주입 (2026-07-24)
+- Groq(`GROQ_API_KEY`) + Gemini Flash/Pro 라우팅 · GPT 제거 · Optuna **100-trial** 재학습 (2026-07-24)
 
-## 다음 우선순위
+## 다음 우선순위 (할 일)
 
-1. **frontend:** Login UI  
-2. **ai-service:** (선택) `CHAT_USE_LLM=1` + API 키로 LLM 문장화  
-3. **frontend:** LOT 선택 → chat `features` 자동 주입  
-4. **backend:** Express·DB·RAG (후순위)
+1. **시나리오 테스트 보강** — 브라우저 채팅 · Gemini 쿼터 확인 후 장문 `mode=llm`
+2. **보안 탭 vLLM — 외부 모델 반입**
+3. **frontend:** Login UI  
+4. **frontend:** LOT 선택 → chat `features` 자동 주입  
+5. **backend:** RAG / 자주 쓰는 명령  
 
 ## 제약
 
@@ -57,3 +63,4 @@
 - README에는 상세 변경을 쓰지 않고, 기록은 `docs/work-log/`에 남긴다  
 - 설치·학습·테스트는 [ask-before-run](../.cursor/rules/ask-before-run.mdc) 승인 후  
 - **전체** 룰·스킬 = 프로젝트 전체, **개별** 룰·스킬 = 중요 페이지·모듈에만 적용  
+- API 키는 `.env`만 (저장소 커밋 금지)

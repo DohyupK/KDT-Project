@@ -1,10 +1,23 @@
 import axios from 'axios'
+import { apiClient } from '@/api/axios'
 
-/** Proxied to ai-service via next.config rewrite (`/ai` → :8800). */
+/** Direct ai-service via next.config rewrite (`/ai` → :8800). Health / smoke only. */
 export const aiClient = axios.create({
   baseURL: '/ai',
   timeout: 60_000,
 })
+
+const SESSION_KEY = 'kdt_chat_session_id'
+
+export function getChatSessionId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(SESSION_KEY)
+}
+
+export function setChatSessionId(id: string): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SESSION_KEY, id)
+}
 
 export type ChatFeatures = {
   d50: number
@@ -32,22 +45,44 @@ export type ChatRequest = {
   message: string
   features?: ChatFeatures | null
   fillThreshold?: number | null
+  session_id?: string | null
 }
 
 export type ChatResponse = {
+  session_id: string
   reply: string
   mode: string
+  provider: string
   predict: ChatPredictResult | null
   error: string | null
+  need_guideline?: boolean
+  ai_proxied?: boolean
+  security_matched?: string | null
+  similar_streak?: number
+  chat_store?: string
+  stored_user_messages?: number
 }
 
+/** Proxied through Express backend: security gate + session + ai-service. */
 export async function postChat(body: ChatRequest): Promise<ChatResponse> {
-  const { data } = await aiClient.post<ChatResponse>('/chat', body)
+  const session_id = body.session_id ?? getChatSessionId()
+  const { data } = await apiClient.post<ChatResponse>('/chat', {
+    message: body.message,
+    features: body.features ?? undefined,
+    fillThreshold: body.fillThreshold ?? undefined,
+    session_id: session_id ?? undefined,
+  })
+  if (data.session_id) setChatSessionId(data.session_id)
   return data
 }
 
 export async function getAiHealth(): Promise<{ status: string; model_version?: string }> {
   const { data } = await aiClient.get<{ status: string; model_version?: string }>('/health')
+  return data
+}
+
+export async function getBackendHealth(): Promise<{ status: string; service?: string }> {
+  const { data } = await apiClient.get<{ status: string; service?: string }>('/health')
   return data
 }
 

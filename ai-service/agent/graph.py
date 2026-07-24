@@ -4,18 +4,17 @@ Minimal LangGraph chatbot.
 Flow: START → predict_node → compose_node → END
 
 - predict Tool: train_pipeline.predict (features 있을 때만)
-- compose: 기본은 템플릿 답변; OPENAI_API_KEY(+CHAT_USE_LLM=1)면 LLM 문장화
+- compose: template by default; CHAT_USE_LLM=1 + keys → Groq/Gemini length routing
 """
 
 from __future__ import annotations
 
-import json
-import os
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from agent.prompts import SYSTEM_COMPOSE
+from agent.llm import compose_with_failover, llm_enabled
+from agent.prompts import USAGE_GUIDELINE
 from agent.tools import run_predict_tool
 
 
@@ -23,10 +22,20 @@ class ChatState(TypedDict, total=False):
     message: str
     features: dict[str, Any] | None
     fillThreshold: float | None
+    need_guideline: bool
     predict_result: dict[str, Any] | None
     error: str | None
     reply: str
     mode: Literal["template", "llm"]
+    provider: str
+
+
+def _append_guideline(reply: str, need_guideline: bool) -> str:
+    if not need_guideline:
+        return reply
+    if "[사용 가이드]" in reply:
+        return reply
+    return reply.rstrip() + "\n\n" + USAGE_GUIDELINE
 
 
 def _template_reply(
@@ -36,15 +45,15 @@ def _template_reply(
 ) -> str:
     if error:
         return (
-            "진단을 수행하지 못했습니다. "
+            "진단을 완료하지 못했습니다. "
             f"사유: {error}\n"
-            "공정 피처(d50, d90, metal_impurity, …, operator_id)를 확인해 주세요."
+            "공정 피처(d50, d90, metal_impurity, …, operator_id)를 확인한 뒤 다시 요청해 주세요."
         )
     if predict_result is None:
         return (
-            "안녕하세요. O/X 진단을 하려면 현재 LOT의 공정 피처가 필요합니다. "
-            "features를 함께 보내 주시면 predict Tool로 진단한 뒤 결과를 말씀드립니다. "
-            f"(요청: {message[:120]})"
+            "O/X 진단을 하려면 LOT의 공정 피처가 필요합니다. "
+            "UI의 「샘플 LOT 진단」을 사용하거나, d50·sintering_temp·humidity 등 값을 함께 보내 주세요. "
+            f"(요청 요약: {message[:120]})"
         )
 
     status = predict_result["defect_status"]
@@ -53,62 +62,16 @@ def _template_reply(
     thr = float(predict_result["applied_threshold"])
     factors = predict_result.get("top_risk_factors") or []
     factors_txt = ", ".join(str(f) for f in factors)
+    pct = prob * 100.0
 
     return (
-        f"진단 결과입니다 (predict Tool).\n"
-        f"- 판정: {label} (defect_status={status})\n"
-        f"- 불량 확률: {prob:.4f} (임계값 applied_threshold={thr})\n"
-        f"- 전역 Top-4 위험 요인: {factors_txt}\n"
-        "위 수치는 모델 추론 결과이며, 임의로 생성한 값이 아닙니다. "
-        "Top-4는 전역 SHAP 중요도입니다."
+        f"predict Tool 기준 진단 결과입니다.\n\n"
+        f"판정은 **{label}**(defect_status={status})이며, "
+        f"불량 확률은 {prob:.4f}({pct:.1f}%, 임계값 {thr})입니다.\n"
+        f"전역 Top-4 위험 요인은 {factors_txt} 입니다. "
+        "이 수치는 모델 추론 결과만 인용한 것이며, Top-4는 전역 SHAP 중요도입니다 "
+        "(이번 LOT 샘플별 원인이라고 단정하지 않습니다)."
     )
-
-
-def _llm_available() -> bool:
-    if os.environ.get("CHAT_USE_LLM", "0").strip() not in ("1", "true", "True", "yes"):
-        return False
-    return bool(os.environ.get("OPENAI_API_KEY", "").strip())
-
-
-def _llm_compose(
-    message: str,
-    predict_result: dict[str, Any] | None,
-    error: str | None,
-) -> str:
-    from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain_openai import ChatOpenAI
-
-    payload = {
-        "user_message": message,
-        "predict": predict_result,
-        "error": error,
-    }
-    llm = ChatOpenAI(
-        model=os.environ.get("CHAT_LLM_MODEL", "gpt-4o-mini"),
-        temperature=0,
-    )
-    out = llm.invoke(
-        [
-            SystemMessage(content=SYSTEM_COMPOSE),
-            HumanMessage(
-                content=(
-                    "다음 JSON만 근거로 한국어 답변을 작성하세요.\n"
-                    + json.dumps(payload, ensure_ascii=False)
-                )
-            ),
-        ]
-    )
-    content = out.content
-    if isinstance(content, list):
-        # content blocks → plain text
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and "text" in block:
-                parts.append(str(block["text"]))
-        return "".join(parts).strip() or _template_reply(message, predict_result, error)
-    return str(content).strip() or _template_reply(message, predict_result, error)
 
 
 def predict_node(state: ChatState) -> dict[str, Any]:
@@ -130,17 +93,29 @@ def compose_node(state: ChatState) -> dict[str, Any]:
     message = state.get("message") or ""
     predict_result = state.get("predict_result")
     error = state.get("error")
+    need_guideline = bool(state.get("need_guideline"))
 
-    if _llm_available():
-        try:
-            reply = _llm_compose(message, predict_result, error)
-            return {"reply": reply, "mode": "llm"}
-        except Exception:  # noqa: BLE001 — fall back to template
-            pass
+    if llm_enabled():
+        reply, provider = compose_with_failover(
+            message,
+            predict_result,
+            error,
+            need_guideline=need_guideline,
+        )
+        if reply:
+            return {
+                "reply": reply,
+                "mode": "llm",
+                "provider": provider or "llm",
+            }
 
     return {
-        "reply": _template_reply(message, predict_result, error),
+        "reply": _append_guideline(
+            _template_reply(message, predict_result, error),
+            need_guideline,
+        ),
         "mode": "template",
+        "provider": "template",
     }
 
 
@@ -168,6 +143,7 @@ def run_chat(
     message: str,
     features: dict[str, Any] | None = None,
     fillThreshold: float | None = None,
+    need_guideline: bool = False,
 ) -> dict[str, Any]:
     """Run the minimal chat graph. Returns reply + optional predict JSON."""
     graph = get_graph()
@@ -176,11 +152,13 @@ def run_chat(
             "message": message,
             "features": features,
             "fillThreshold": fillThreshold,
+            "need_guideline": need_guideline,
         }
     )
     return {
         "reply": out.get("reply") or "",
         "mode": out.get("mode") or "template",
+        "provider": out.get("provider") or "template",
         "predict": out.get("predict_result"),
         "error": out.get("error"),
     }

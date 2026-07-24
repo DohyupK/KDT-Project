@@ -2,7 +2,9 @@
 ai-service FastAPI entrypoint.
 
 Run from ai-service/ (CWD must be ai-service so models/ resolves):
-  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  uvicorn app.main:app --host 0.0.0.0 --port 8800 --reload
+
+API keys: load from ai-service/.env (never commit). See .env.example.
 """
 
 from __future__ import annotations
@@ -10,6 +12,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load ai-service/.env before reading os.environ in this module / agent.
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ENV_PATH, override=False)
 
 import polars as pl
 from fastapi import FastAPI, HTTPException
@@ -30,6 +38,9 @@ app = FastAPI(
     description="O/X diagnosis predict API (chatbot Tool backend).",
     version="1.2.0",
 )
+
+# Incremented on POST /chat — used to verify Express security gate does not proxy.
+_chat_request_count = 0
 
 # Dev: allow Next.js origin; tighten later
 app.add_middleware(
@@ -77,6 +88,7 @@ def health() -> HealthResponse:
         status="ok",
         model_version=_model_version(),
         models_dir=str(MODELS_DIR.resolve()),
+        chat_requests=_chat_request_count,
     )
 
 
@@ -118,14 +130,19 @@ def predict_endpoint(body: PredictRequest) -> PredictResponse:
 def chat_endpoint(body: ChatRequest) -> ChatResponse:
     """
     Minimal LangGraph chatbot.
-    features가 있으면 predict Tool → 답변(기본 템플릿; CHAT_USE_LLM=1 + OPENAI_API_KEY면 LLM).
+    features가 있으면 predict Tool → 답변.
+    CHAT_USE_LLM=1 + provider keys → Groq/Gemini length-based compose.
     """
+    global _chat_request_count
+    _chat_request_count += 1
+
     features = body.features.model_dump(exclude_none=True) if body.features else None
     try:
         out = run_chat(
             message=body.message,
             features=features,
             fillThreshold=body.fillThreshold,
+            need_guideline=body.need_guideline,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"chat failed: {exc}") from exc
@@ -134,6 +151,7 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
     return ChatResponse(
         reply=out["reply"],
         mode=out.get("mode") or "template",
+        provider=out.get("provider") or "template",
         predict=PredictResponse(**predict_payload) if predict_payload else None,
         error=out.get("error"),
     )

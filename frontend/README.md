@@ -43,13 +43,14 @@ npm run dev
 | `npm run build` | 프로덕션 빌드 |
 | `npm run lint` | 린트 |
 
-### 챗봇 실연동 (ai-service와 함께)
+### 챗봇 실연동 (backend + ai-service)
 
-전역 챗봇(`AppShell` → `GlobalChatbot`)은 **ai-service(:8800)** 가 켜져 있어야 합니다.  
-루트 README의 **[로컬 실행 — 챗봇 (터미널 2개)](../README.md#로컬-실행--챗봇-터미널-2개)** 를 따릅니다.
+전역 챗봇(`AppShell` → `GlobalChatbot`)은 **backend(:3001)** 와 **ai-service(:8800)** 가 켜져 있어야 합니다.  
+루트 README의 **[로컬 실행 — 챗봇 (터미널 3개)](../README.md#로컬-실행--챗봇-터미널-3개)** 를 따릅니다.
 
-- rewrite: `next.config.ts` — `/ai` → `127.0.0.1:8800` (변경 후 Next 재시작)
-- 클라이언트: `src/api/aiApi.ts` → `POST /ai/chat`
+- rewrite: `next.config.ts` — `/api` → `:3001`, `/ai` → `:8800`
+- 클라이언트: `src/api/aiApi.ts` → `POST /api/chat` (`session_id`)
+- 보안 탭 placeholder: `/security`
 
 ---
 
@@ -133,13 +134,15 @@ frontend/
 - [2026-07-15 프로젝트 생성 및 초기 구성](../docs/work-log/2026-07-15.md)
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
-- [2026-07-23 ai-service ML·챗봇 연동 작업서](../docs/work-log/2026-07-23.md)
+- [2026-07-23 ai-service ML·챗봇 연동·LLM·시나리오 스모크](../docs/work-log/2026-07-23.md)
+- [2026-07-24 LLM 길이 라우팅 · .env 키 안전 주입](../docs/work-log/2026-07-24.md)
 
 ---
 
 ## 다음에 할 일 (Frontend)
 
 - [x] 챗봇 전역 UI + `/ai` rewrite 실연동 (2026-07-23)
+- [x] `/api/chat` 세션 · 보안 게이트 · `/security` 골격 (2026-07-23)
 - LoginPage UI
 - Express backend 연동
 - LOT → chat features 자동 주입
