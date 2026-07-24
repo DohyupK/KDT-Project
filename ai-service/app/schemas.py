@@ -73,6 +73,28 @@ class ChatRequest(BaseModel):
     )
 
 
+class WhatIfSuggestion(BaseModel):
+    deltas: dict[str, float]
+    after_features: ChatFeatures
+    probability: float
+    defect_status: int
+    applied_threshold: float
+
+
+class RecommendationBaseline(BaseModel):
+    probability: float
+    defect_status: int
+    applied_threshold: float
+    features: ChatFeatures
+
+
+class ChatRecommendation(BaseModel):
+    method: str = Field(description="e.g. whatif_grid")
+    baseline: RecommendationBaseline
+    suggestion: WhatIfSuggestion | None = None
+    note: str | None = None
+
+
 class ChatResponse(BaseModel):
     reply: str
     mode: str = Field(description="'template' | 'llm' | 'security_redirect'")
@@ -81,4 +103,5 @@ class ChatResponse(BaseModel):
         description="'groq' | 'gemini_flash' | 'gemini_pro' | 'template' | 'security_redirect'",
     )
     predict: PredictResponse | None = None
+    recommendation: ChatRecommendation | None = None
     error: str | None = None

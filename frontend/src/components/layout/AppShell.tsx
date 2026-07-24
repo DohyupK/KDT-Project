@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
+import { SelectedLotProvider } from '@/context/SelectedLotContext'
 
 export const NAV_MENUS = [
   { name: 'Main', icon: Home, path: '/main' },
@@ -34,7 +35,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   return (
-    <>
+    <SelectedLotProvider>
       <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
@@ -113,6 +114,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* flex 레이아웃 밖 — 전역 플로팅 챗봇 */}
       <GlobalChatbot />
-    </>
+    </SelectedLotProvider>
   )
 }

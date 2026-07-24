@@ -14,11 +14,19 @@ export type AiPredictResult = {
   top_risk_factors: string[]
 }
 
+export type AiRecommendation = {
+  method: string
+  baseline: Record<string, unknown>
+  suggestion: Record<string, unknown> | null
+  note?: string | null
+}
+
 export type AiChatResponse = {
   reply: string
   mode: string
   provider?: string
   predict: AiPredictResult | null
+  recommendation?: AiRecommendation | null
   error: string | null
 }
 

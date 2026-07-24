@@ -59,9 +59,10 @@ Polars
 
 Tool 후보(후속 설계):
 
-- `predict` / 진단 결과 조회  
-- 지식·문서 검색 (backend)  
-- (권한 후) 제어 API 호출  
+- `predict` — O/X 진단 (구현됨)
+- `whatif_grid` — 기존 predict 격자 탐색 Cold start (구현됨; `reg.csv` 전)
+- knowledge / RAG 검색  
+- (권한 후) 제어 API 호출 — backend `POST /api/control/approve`는 **로그 스텁**만 (하드웨어 미연동)
 
 ---
 
