@@ -1,6 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import { chatRouter } from './routes/chat.js'
+import { controlRouter } from './routes/control.js'
 
 export function createApp() {
   const app = express()
@@ -23,10 +24,12 @@ export function createApp() {
       service: 'backend',
       health: '/api/health',
       chat: 'POST /api/chat',
+      control_approve: 'POST /api/control/approve',
     })
   })
 
   app.use('/api', chatRouter)
+  app.use('/api', controlRouter)
 
   return app
 }

@@ -24,6 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas import (
+    ChatRecommendation,
     ChatRequest,
     ChatResponse,
     HealthResponse,
@@ -148,11 +149,16 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=f"chat failed: {exc}") from exc
 
     predict_payload = out.get("predict")
+    rec_payload = out.get("recommendation")
+    recommendation = (
+        ChatRecommendation.model_validate(rec_payload) if rec_payload else None
+    )
     return ChatResponse(
         reply=out["reply"],
         mode=out.get("mode") or "template",
         provider=out.get("provider") or "template",
         predict=PredictResponse(**predict_payload) if predict_payload else None,
+        recommendation=recommendation,
         error=out.get("error"),
     )
 

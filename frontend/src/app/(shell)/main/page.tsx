@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSelectedLot } from '@/context/SelectedLotContext';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -734,6 +735,13 @@ export default function MainPage() {
     pushToast(`${lot.id} 조치/알림이 접수되었습니다.`, 'success');
   };
 
+  const { connectLot } = useSelectedLot();
+
+  const handleConnectChat = (lot: RiskLotView) => {
+    connectLot(lot.record, { openChat: true });
+    pushToast(`${lot.id} 공정 데이터를 챗봇에 연결했습니다.`, 'info');
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-slate-50">
       <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-6 pb-40 sm:px-6 lg:px-8">
@@ -1099,16 +1107,28 @@ export default function MainPage() {
                 </div>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                handleLotAction(selectedLot);
-                setSelectedLot(null);
-              }}
-              className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
-            >
-              조치/알림 실행
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => {
+                  handleConnectChat(selectedLot);
+                  setSelectedLot(null);
+                }}
+                className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+              >
+                챗봇에 연결
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleLotAction(selectedLot);
+                  setSelectedLot(null);
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                조치/알림 실행
+              </button>
+            </div>
           </div>
         ) : null}
       </Modal>
