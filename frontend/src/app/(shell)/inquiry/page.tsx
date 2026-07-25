@@ -9,6 +9,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
 } from 'react';
+import { useUiSettings } from '@/components/layout/AppShell';
 
 type InquiryStatus = '접수' | '답변완료';
 type Visibility = '공개' | '비공개';
@@ -340,7 +341,7 @@ function getDisplayFields(item: InquiryItem) {
   };
 }
 
-function statusBadgeStyle(status: InquiryStatus): CSSProperties {
+function statusBadgeStyle(status: InquiryStatus, isDark: boolean): CSSProperties {
   if (status === '답변완료') {
     return {
       display: 'inline-flex',
@@ -349,8 +350,8 @@ function statusBadgeStyle(status: InquiryStatus): CSSProperties {
       padding: '4px 10px',
       fontSize: 12,
       fontWeight: 800,
-      background: colors.greenSoft,
-      color: colors.green,
+      background: isDark ? 'rgba(22, 163, 74, 0.2)' : colors.greenSoft,
+      color: isDark ? '#4ade80' : colors.green,
     };
   }
   return {
@@ -360,12 +361,12 @@ function statusBadgeStyle(status: InquiryStatus): CSSProperties {
     padding: '4px 10px',
     fontSize: 12,
     fontWeight: 800,
-    background: colors.amberSoft,
-    color: colors.amber,
+    background: isDark ? 'rgba(217, 119, 6, 0.2)' : colors.amberSoft,
+    color: isDark ? '#fbbf24' : colors.amber,
   };
 }
 
-function visibilityBadgeStyle(visibility: Visibility): CSSProperties {
+function visibilityBadgeStyle(visibility: Visibility, isDark: boolean): CSSProperties {
   if (visibility === '비공개') {
     return {
       display: 'inline-flex',
@@ -375,8 +376,8 @@ function visibilityBadgeStyle(visibility: Visibility): CSSProperties {
       padding: '4px 10px',
       fontSize: 12,
       fontWeight: 800,
-      background: '#f1f5f9',
-      color: colors.slate,
+      background: isDark ? '#334155' : '#f1f5f9',
+      color: isDark ? '#94a3b8' : colors.slate,
     };
   }
   return {
@@ -386,12 +387,13 @@ function visibilityBadgeStyle(visibility: Visibility): CSSProperties {
     padding: '4px 10px',
     fontSize: 12,
     fontWeight: 800,
-    background: colors.blueSoft,
-    color: colors.blue,
+    background: isDark ? 'rgba(37, 99, 235, 0.25)' : colors.blueSoft,
+    color: isDark ? '#60a5fa' : colors.blue,
   };
 }
 
 export default function InquiryPage() {
+  const { isDark, language } = useUiSettings();
   const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -716,16 +718,16 @@ export default function InquiryPage() {
     height: '100%',
     overflowY: 'auto',
     boxSizing: 'border-box',
-    background: colors.bg,
-    color: colors.navy,
+    background: isDark ? '#0f172a' : colors.bg,
+    color: isDark ? '#f8fafc' : colors.navy,
     padding: '28px 24px 48px',
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
   };
 
   const card: CSSProperties = {
-    background: colors.card,
-    border: `1px solid ${colors.line}`,
+    background: isDark ? '#1e293b' : colors.card,
+    border: `1px solid ${isDark ? '#334155' : colors.line}`,
     borderRadius: 16,
     boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
   };
@@ -742,10 +744,10 @@ export default function InquiryPage() {
   };
 
   const secondaryBtn: CSSProperties = {
-    border: `1px solid ${colors.line}`,
+    border: `1px solid ${isDark ? '#334155' : colors.line}`,
     borderRadius: 10,
-    background: '#fff',
-    color: colors.navy,
+    background: isDark ? '#1e293b' : '#fff',
+    color: isDark ? '#f1f5f9' : colors.navy,
     padding: '10px 16px',
     fontSize: 14,
     fontWeight: 700,
@@ -757,18 +759,18 @@ export default function InquiryPage() {
     marginBottom: 8,
     fontSize: 13,
     fontWeight: 700,
-    color: colors.slate,
+    color: isDark ? '#94a3b8' : colors.slate,
   };
 
   const inputStyle: CSSProperties = {
     width: '100%',
     boxSizing: 'border-box',
-    border: `1px solid ${colors.line}`,
+    border: `1px solid ${isDark ? '#334155' : colors.line}`,
     borderRadius: 10,
-    background: '#f8fafc',
+    background: isDark ? '#0f172a' : '#f8fafc',
     padding: '10px 12px',
     fontSize: 14,
-    color: colors.navy,
+    color: isDark ? '#f1f5f9' : colors.navy,
     outline: 'none',
   };
 
@@ -776,8 +778,22 @@ export default function InquiryPage() {
     `rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
       active
         ? 'bg-blue-600 text-white'
-        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+        : isDark
+          ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
     }`;
+
+  const pageBtnClass = isDark
+    ? 'rounded-lg border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40'
+    : 'rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40';
+
+  const mutedText = isDark ? '#94a3b8' : colors.slate;
+  const lineColor = isDark ? '#334155' : colors.line;
+  const chipInactiveBg = isDark ? '#0f172a' : '#f8fafc';
+  const chipInactiveColor = isDark ? '#f1f5f9' : colors.navy;
+  const chipActiveBg = isDark ? 'rgba(37, 99, 235, 0.25)' : colors.blueSoft;
+  const chipActiveColor = isDark ? '#60a5fa' : colors.blue;
+  const readonlyFieldBg = isDark ? '#0f172a' : '#f1f5f9';
 
   return (
     <div style={page}>
@@ -793,13 +809,17 @@ export default function InquiryPage() {
           }}
         >
           <div>
-            <h1 style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>문의 게시판</h1>
-            <p style={{ margin: '8px 0 0', color: colors.slate, fontSize: 14, lineHeight: 1.6 }}>
-              서비스 이용 중 궁금한 점이나 요청 사항을 확인하고 문의를 남겨주세요.
+            <h1 style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
+              {language === 'en' ? 'Inquiry Board' : '문의 게시판'}
+            </h1>
+            <p style={{ margin: '8px 0 0', color: isDark ? '#94a3b8' : colors.slate, fontSize: 14, lineHeight: 1.6 }}>
+              {language === 'en'
+                ? 'Review questions and leave requests about the service.'
+                : '서비스 이용 중 궁금한 점이나 요청 사항을 확인하고 문의를 남겨주세요.'}
             </p>
           </div>
           <button type="button" onClick={openModal} style={primaryBtn}>
-            문의하기
+            {language === 'en' ? 'New Inquiry' : '문의하기'}
           </button>
         </div>
 
@@ -813,10 +833,16 @@ export default function InquiryPage() {
           </div>
         ) : null}
 
-        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div
+          className={`mb-4 rounded-xl border p-3 shadow-sm sm:p-4 ${
+            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+          }`}
+        >
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-xs font-semibold text-slate-500">카테고리</span>
+              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                카테고리
+              </span>
               {CATEGORY_FILTERS.map((item) => (
                 <button
                   key={item.key}
@@ -832,7 +858,9 @@ export default function InquiryPage() {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-xs font-semibold text-slate-500">상태</span>
+              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                상태
+              </span>
               {STATUS_FILTERS.map((item) => (
                 <button
                   key={item.key}
@@ -849,7 +877,10 @@ export default function InquiryPage() {
             </div>
             <div className="flex flex-wrap items-end gap-2">
               <div className="min-w-[200px] flex-1">
-                <label htmlFor="inquiry-search" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                <label
+                  htmlFor="inquiry-search"
+                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                >
                   검색
                 </label>
                 <input
@@ -861,18 +892,26 @@ export default function InquiryPage() {
                     setCurrentPage(1);
                   }}
                   placeholder="제목 또는 내용 검색..."
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400"
+                  className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:border-blue-400 ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
+                      : 'border-slate-200 bg-slate-50 text-slate-800'
+                  }`}
                 />
               </div>
               <button
                 type="button"
                 onClick={resetFilters}
-                className="inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                className={`inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold ${
+                  isDark
+                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                }`}
               >
                 초기화
               </button>
             </div>
-            <div className="text-xs font-medium text-slate-500">
+            <div className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               검색 결과 {filteredInquiries.length}건
             </div>
           </div>
@@ -880,7 +919,7 @@ export default function InquiryPage() {
 
         <section style={{ ...card, padding: 0, overflow: 'hidden' }}>
           {visibleInquiries.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: colors.slate, fontSize: 14 }}>
+            <div style={{ padding: 40, textAlign: 'center', color: mutedText, fontSize: 14 }}>
               {inquiries.length === 0
                 ? '등록된 문의가 없습니다.'
                 : '조건에 맞는 문의가 없습니다.'}
@@ -891,37 +930,58 @@ export default function InquiryPage() {
                 const display = getDisplayFields(item);
                 const isPrivate = item.visibility === '비공개';
                 return (
-                  <li key={item.id} style={{ borderBottom: `1px solid ${colors.line}` }}>
+                  <li key={item.id} style={{ borderBottom: `1px solid ${lineColor}` }}>
                     <button
                       type="button"
                       onClick={() => handleRowClick(item)}
-                      className="w-full cursor-pointer border-0 bg-white px-[18px] py-4 text-left transition-colors hover:bg-slate-50/80"
+                      className={`w-full cursor-pointer border-0 px-[18px] py-4 text-left transition-colors ${
+                        isDark
+                          ? 'bg-slate-800 hover:bg-slate-700/80'
+                          : 'bg-white hover:bg-slate-50/80'
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                            <span style={statusBadgeStyle(item.status)}>{item.status}</span>
-                            <span style={visibilityBadgeStyle(item.visibility)}>
+                            <span style={statusBadgeStyle(item.status, isDark)}>{item.status}</span>
+                            <span style={visibilityBadgeStyle(item.visibility, isDark)}>
                               {isPrivate ? '🔒 비공개' : item.visibility}
                             </span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
                               {item.category}
                             </span>
-                            <span className="text-xs text-slate-400">{item.id}</span>
+                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                              {item.id}
+                            </span>
                           </div>
-                          <div className="line-clamp-2 text-[15px] font-extrabold leading-snug text-slate-900">
+                          <div
+                            className={`line-clamp-2 text-[15px] font-extrabold leading-snug ${
+                              isDark ? 'text-slate-100' : 'text-slate-900'
+                            }`}
+                          >
                             {display.title}
                           </div>
                           {display.showBody ? (
-                            <div className="mt-1.5 line-clamp-1 text-xs text-slate-500">
+                            <div
+                              className={`mt-1.5 line-clamp-1 text-xs ${
+                                isDark ? 'text-slate-400' : 'text-slate-500'
+                              }`}
+                            >
                               {display.content}
                             </div>
                           ) : null}
-                          <div className="mt-1.5 text-xs text-slate-500">
+                          <div className={`mt-1.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                             {display.author} · {item.date}
                           </div>
                         </div>
-                        <span className="shrink-0 text-sm text-slate-400" aria-hidden>
+                        <span
+                          className={`shrink-0 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                          aria-hidden
+                        >
                           →
                         </span>
                       </div>
@@ -932,8 +992,16 @@ export default function InquiryPage() {
             </ul>
           )}
 
-          <div className="flex flex-col items-center gap-3 border-t border-slate-100 bg-slate-50 px-4 py-4 sm:flex-row sm:justify-between">
-            <span className="text-xs font-semibold text-slate-500 sm:text-sm">{displayCountLabel}</span>
+          <div
+            className={`flex flex-col items-center gap-3 border-t px-4 py-4 sm:flex-row sm:justify-between ${
+              isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50'
+            }`}
+          >
+            <span
+              className={`text-xs font-semibold sm:text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+            >
+              {displayCountLabel}
+            </span>
 
             {filteredInquiries.length > 0 ? (
               <nav
@@ -944,7 +1012,7 @@ export default function InquiryPage() {
                   type="button"
                   onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                   disabled={safePage <= 1}
-                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className={pageBtnClass}
                 >
                   이전
                 </button>
@@ -959,7 +1027,9 @@ export default function InquiryPage() {
                       className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                         active
                           ? 'bg-blue-600 text-white'
-                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          : isDark
+                            ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                       }`}
                     >
                       {page}
@@ -970,7 +1040,7 @@ export default function InquiryPage() {
                   type="button"
                   onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                   disabled={safePage >= totalPages}
-                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className={pageBtnClass}
                 >
                   다음
                 </button>
@@ -990,60 +1060,113 @@ export default function InquiryPage() {
         >
           <div
             onClick={handleModalClick}
-            className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            className={`flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border shadow-2xl ${
+              isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+            }`}
           >
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
-              <h2 id="inquiry-detail-title" className="m-0 text-base font-semibold text-slate-900">
+            <div
+              className={`flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4 ${
+                isDark ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <h2
+                id="inquiry-detail-title"
+                className={`m-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+              >
                 문의 상세
               </h2>
               <button
                 type="button"
                 aria-label="상세 모달 닫기"
                 onClick={() => setDetailItem(null)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl ${
+                  isDark
+                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+                }`}
               >
                 ×
               </button>
             </div>
             <div className="overflow-y-auto px-5 py-4">
               <div className="mb-3 flex flex-wrap gap-2">
-                <span style={statusBadgeStyle(detailItem.status)}>{detailItem.status}</span>
-                <span style={visibilityBadgeStyle(detailItem.visibility)}>
+                <span style={statusBadgeStyle(detailItem.status, isDark)}>{detailItem.status}</span>
+                <span style={visibilityBadgeStyle(detailItem.visibility, isDark)}>
                   {detailItem.visibility}
                 </span>
-                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
                   {detailItem.category}
                 </span>
               </div>
-              <h3 className="m-0 text-lg font-bold text-slate-900">{detailItem.title}</h3>
-              <div className="mt-2 text-xs text-slate-500">
+              <h3 className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {detailItem.title}
+              </h3>
+              <div className={`mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {detailItem.author} · {detailItem.date} · {detailItem.id}
               </div>
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <div className="mb-2 text-xs font-bold text-slate-500">문의 내용</div>
-                <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+              <div
+                className={`mt-4 rounded-xl border p-4 ${
+                  isDark ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50/80'
+                }`}
+              >
+                <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  문의 내용
+                </div>
+                <p
+                  className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
+                    isDark ? 'text-slate-200' : 'text-slate-800'
+                  }`}
+                >
                   {detailItem.content}
                 </p>
               </div>
               {detailItem.answer ? (
-                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+                <div
+                  className={`mt-4 rounded-xl border p-4 ${
+                    isDark
+                      ? 'border-blue-800/60 bg-blue-950/40'
+                      : 'border-blue-200 bg-blue-50/70'
+                  }`}
+                >
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-blue-700">관리자 답변</span>
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                    <span className={`text-xs font-bold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                      관리자 답변
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        isDark ? 'bg-blue-900/60 text-blue-300' : 'bg-blue-100 text-blue-700'
+                      }`}
+                    >
                       관리자
                     </span>
                     {detailItem.answeredAt ? (
-                      <span className="text-[11px] font-medium text-blue-600">
+                      <span
+                        className={`text-[11px] font-medium ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
+                      >
                         {detailItem.answeredAt}
                       </span>
                     ) : null}
                   </div>
-                  <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                  <p
+                    className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
+                      isDark ? 'text-slate-200' : 'text-slate-800'
+                    }`}
+                  >
                     {detailItem.answer}
                   </p>
                 </div>
               ) : (
-                <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                <div
+                  className={`mt-4 rounded-xl border border-dashed px-4 py-3 text-sm ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-900/40 text-slate-400'
+                      : 'border-slate-200 bg-white text-slate-500'
+                  }`}
+                >
                   아직 등록된 답변이 없습니다.
                 </div>
               )}
@@ -1075,8 +1198,9 @@ export default function InquiryPage() {
               width: 'min(720px, 100%)',
               maxHeight: '90vh',
               overflowY: 'auto',
-              background: '#fff',
+              background: isDark ? '#1e293b' : '#fff',
               borderRadius: 18,
+              border: isDark ? '1px solid #334155' : undefined,
               boxShadow: '0 24px 64px rgba(15, 23, 42, 0.35)',
             }}
           >
@@ -1087,14 +1211,17 @@ export default function InquiryPage() {
                 alignItems: 'center',
                 gap: 12,
                 padding: '16px 20px',
-                borderBottom: `1px solid ${colors.line}`,
+                borderBottom: `1px solid ${lineColor}`,
                 position: 'sticky',
                 top: 0,
-                background: '#fff',
+                background: isDark ? '#1e293b' : '#fff',
                 zIndex: 1,
               }}
             >
-              <strong id="inquiry-write-title" style={{ fontSize: 17, color: colors.navy }}>
+              <strong
+                id="inquiry-write-title"
+                style={{ fontSize: 17, color: isDark ? '#f1f5f9' : colors.navy }}
+              >
                 문의하기
               </strong>
               <button
@@ -1103,14 +1230,14 @@ export default function InquiryPage() {
                 onClick={closeModal}
                 style={{
                   border: 0,
-                  background: '#f1f5f9',
+                  background: isDark ? '#334155' : '#f1f5f9',
                   width: 32,
                   height: 32,
                   borderRadius: 999,
                   cursor: 'pointer',
                   fontSize: 16,
                   fontWeight: 700,
-                  color: colors.slate,
+                  color: mutedText,
                 }}
               >
                 X
@@ -1169,9 +1296,9 @@ export default function InquiryPage() {
                             ? `2px solid ${colors.blue}`
                             : fieldErrors.category
                               ? `2px solid ${colors.red}`
-                              : `1px solid ${colors.line}`,
-                          background: active ? colors.blueSoft : '#f8fafc',
-                          color: active ? colors.blue : colors.navy,
+                              : `1px solid ${lineColor}`,
+                          background: active ? chipActiveBg : chipInactiveBg,
+                          color: active ? chipActiveColor : chipInactiveColor,
                           borderRadius: 999,
                           padding: '8px 12px',
                           fontSize: 13,
@@ -1205,9 +1332,9 @@ export default function InquiryPage() {
                         type="button"
                         onClick={() => setVisibility(option)}
                         style={{
-                          border: active ? `2px solid ${colors.blue}` : `1px solid ${colors.line}`,
-                          background: active ? colors.blueSoft : '#f8fafc',
-                          color: active ? colors.blue : colors.navy,
+                          border: active ? `2px solid ${colors.blue}` : `1px solid ${lineColor}`,
+                          background: active ? chipActiveBg : chipInactiveBg,
+                          color: active ? chipActiveColor : chipInactiveColor,
                           borderRadius: 999,
                           padding: '8px 14px',
                           fontSize: 13,
@@ -1235,8 +1362,8 @@ export default function InquiryPage() {
                   <div
                     style={{
                       ...inputStyle,
-                      background: '#f1f5f9',
-                      color: colors.slate,
+                      background: readonlyFieldBg,
+                      color: mutedText,
                       cursor: 'default',
                     }}
                   >
@@ -1248,8 +1375,8 @@ export default function InquiryPage() {
                   <div
                     style={{
                       ...inputStyle,
-                      background: '#f1f5f9',
-                      color: colors.slate,
+                      background: readonlyFieldBg,
+                      color: mutedText,
                       cursor: 'default',
                     }}
                   >
@@ -1280,8 +1407,12 @@ export default function InquiryPage() {
                     ...inputStyle,
                     border: fieldErrors.subject
                       ? `2px solid ${colors.red}`
-                      : `1px solid ${colors.line}`,
-                    background: fieldErrors.subject ? colors.redSoft : '#f8fafc',
+                      : `1px solid ${lineColor}`,
+                    background: fieldErrors.subject
+                      ? isDark
+                        ? 'rgba(220, 38, 38, 0.15)'
+                        : colors.redSoft
+                      : inputStyle.background,
                   }}
                 />
                 {fieldErrors.subject ? (
@@ -1319,8 +1450,12 @@ export default function InquiryPage() {
                     fontFamily: 'inherit',
                     border: fieldErrors.content
                       ? `2px solid ${colors.red}`
-                      : `1px solid ${colors.line}`,
-                    background: fieldErrors.content ? colors.redSoft : '#f8fafc',
+                      : `1px solid ${lineColor}`,
+                    background: fieldErrors.content
+                      ? isDark
+                        ? 'rgba(220, 38, 38, 0.15)'
+                        : colors.redSoft
+                      : inputStyle.background,
                   }}
                 />
                 {fieldErrors.content ? (
@@ -1349,14 +1484,22 @@ export default function InquiryPage() {
                   onDrop={handleDrop}
                   className={`cursor-pointer rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
                     isDragActive
-                      ? 'border-blue-400 bg-blue-50/60'
-                      : 'border-slate-200 bg-slate-50/50 hover:border-blue-400'
+                      ? isDark
+                        ? 'border-blue-400 bg-blue-950/40'
+                        : 'border-blue-400 bg-blue-50/60'
+                      : isDark
+                        ? 'border-slate-600 bg-slate-900/50 hover:border-blue-400'
+                        : 'border-slate-200 bg-slate-50/50 hover:border-blue-400'
                   }`}
                 >
-                  <div className="text-sm font-medium text-slate-600">
+                  <div
+                    className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
                     스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드
                   </div>
-                  <div className="mt-1 text-xs text-slate-400">여러 파일 선택 가능</div>
+                  <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    여러 파일 선택 가능
+                  </div>
                 </div>
                 <input
                   id="inquiry-files"
@@ -1372,9 +1515,17 @@ export default function InquiryPage() {
                     {files.map((file, index) => (
                       <li
                         key={`${file.name}-${index}`}
-                        className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-3 pr-1"
+                        className={`inline-flex max-w-full items-center gap-2 rounded-full border py-1 pl-3 pr-1 ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900'
+                            : 'border-slate-200 bg-white'
+                        }`}
                       >
-                        <span className="max-w-[180px] truncate text-xs font-medium text-slate-700 sm:max-w-[240px]">
+                        <span
+                          className={`max-w-[180px] truncate text-xs font-medium sm:max-w-[240px] ${
+                            isDark ? 'text-slate-200' : 'text-slate-700'
+                          }`}
+                        >
                           {file.name}
                         </span>
                         <button
@@ -1384,7 +1535,11 @@ export default function InquiryPage() {
                             handleFileRemove(index);
                           }}
                           aria-label={`${file.name} 삭제`}
-                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500 hover:bg-slate-200"
+                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            isDark
+                              ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
                         >
                           ×
                         </button>

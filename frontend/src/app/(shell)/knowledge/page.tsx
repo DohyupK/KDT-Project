@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type React from 'react';
+import { useUiSettings } from '@/components/layout/AppShell';
 
 interface DocumentItem {
   id: string;
@@ -72,35 +73,66 @@ const colors = {
   redSoft: '#fef2f2',
   amber: '#d97706',
   amberSoft: '#fffbeb',
+  input: '#f8fafc',
 };
 
-const panelStyle: CSSProperties = {
-  background: colors.panel,
-  border: `1px solid ${colors.line}`,
-  borderRadius: 18,
-  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
-  padding: 24,
+const darkColors: typeof colors = {
+  background: '#0f172a',
+  panel: '#1e293b',
+  navy: '#f1f5f9',
+  slate: '#94a3b8',
+  muted: '#64748b',
+  line: '#334155',
+  blue: '#60a5fa',
+  blueSoft: 'rgba(30, 58, 138, 0.45)',
+  green: '#4ade80',
+  greenSoft: 'rgba(6, 78, 59, 0.45)',
+  red: '#f87171',
+  redSoft: 'rgba(127, 29, 29, 0.45)',
+  amber: '#fbbf24',
+  amberSoft: 'rgba(120, 53, 15, 0.45)',
+  input: '#0f172a',
 };
 
-const inputStyle: CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  border: `1px solid ${colors.line}`,
-  borderRadius: 10,
-  background: '#f8fafc',
-  color: colors.navy,
-  fontSize: 14,
-  padding: '10px 12px',
-  outlineColor: colors.blue,
-};
+type UiColors = typeof colors;
 
-const labelStyle: CSSProperties = {
-  display: 'block',
-  marginBottom: 7,
-  color: colors.slate,
-  fontSize: 13,
-  fontWeight: 700,
-};
+function getUiColors(isDark: boolean): UiColors {
+  return isDark ? darkColors : colors;
+}
+
+function getPanelStyle(c: UiColors): CSSProperties {
+  return {
+    background: c.panel,
+    border: `1px solid ${c.line}`,
+    borderRadius: 18,
+    boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
+    padding: 24,
+  };
+}
+
+function getInputStyle(c: UiColors): CSSProperties {
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: `1px solid ${c.line}`,
+    borderRadius: 10,
+    background: c.input,
+    color: c.navy,
+    fontSize: 14,
+    padding: '10px 12px',
+    outlineColor: c.blue,
+  };
+}
+
+function getLabelStyle(c: UiColors): CSSProperties {
+  return {
+    display: 'block',
+    marginBottom: 7,
+    color: c.slate,
+    fontSize: 13,
+    fontWeight: 700,
+  };
+}
 
 const primaryButtonStyle: CSSProperties = {
   border: 0,
@@ -113,33 +145,39 @@ const primaryButtonStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
-const ghostButtonStyle: CSSProperties = {
-  border: `1px solid ${colors.line}`,
-  borderRadius: 10,
-  background: '#fff',
-  color: colors.slate,
-  padding: '10px 16px',
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: 'pointer',
-};
+function getGhostButtonStyle(c: UiColors): CSSProperties {
+  return {
+    border: `1px solid ${c.line}`,
+    borderRadius: 10,
+    background: c.panel,
+    color: c.slate,
+    padding: '10px 16px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
+}
 
-const cellStyle: CSSProperties = {
-  border: `1px solid ${colors.line}`,
-  padding: '10px 12px',
-  fontSize: 13,
-  color: colors.navy,
-  textAlign: 'left',
-  verticalAlign: 'top',
-};
+function getCellStyle(c: UiColors): CSSProperties {
+  return {
+    border: `1px solid ${c.line}`,
+    padding: '10px 12px',
+    fontSize: 13,
+    color: c.navy,
+    textAlign: 'left',
+    verticalAlign: 'top',
+  };
+}
 
-const headCellStyle: CSSProperties = {
-  ...cellStyle,
-  background: '#f8fafc',
-  color: colors.slate,
-  fontWeight: 800,
-  whiteSpace: 'nowrap',
-};
+function getHeadCellStyle(c: UiColors): CSSProperties {
+  return {
+    ...getCellStyle(c),
+    background: c.input,
+    color: c.slate,
+    fontWeight: 800,
+    whiteSpace: 'nowrap',
+  };
+}
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
@@ -381,9 +419,9 @@ const EMPTY_ACTION_FORM: ActionFormState = {
   date: '',
 };
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'knowledge', label: '라이브러리 & 대처 이력' },
-  { key: 'report', label: 'AI 맞춤 분석' },
+const TABS: { key: TabKey; labelKo: string; labelEn: string }[] = [
+  { key: 'knowledge', labelKo: '라이브러리 & 대처 이력', labelEn: 'Library & Action History' },
+  { key: 'report', labelKo: 'AI 맞춤 분석', labelEn: 'AI Custom Analysis' },
 ];
 
 function KnowledgeTabIcon() {
@@ -464,20 +502,59 @@ function extractRiskPercent(riskSummary: string): number | null {
 }
 
 function CategoryBadge({ label }: { label: string }) {
+  const { isDark } = useUiSettings();
   const toneClass = (() => {
-    if (label === '소성') return 'border-rose-200 bg-rose-50 text-rose-700';
-    if (label === '원료 투입') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-    if (label === '혼합') return 'border-violet-200 bg-violet-50 text-violet-700';
-    if (label === '검사' || label === '분석') return 'border-blue-200 bg-blue-50 text-blue-700';
-    if (label === '냉각') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
-    if (label === '원료 보관') return 'border-amber-200 bg-amber-50 text-amber-700';
-    if (label === '설비 관리') return 'border-slate-300 bg-slate-100 text-slate-700';
-    if (label === '대처 이력') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
-    if (label === '특이사항') return 'border-amber-200 bg-amber-50 text-amber-700';
-    if (label === '전달사항') return 'border-blue-200 bg-blue-50 text-blue-700';
-    if (label === '주의사항') return 'border-rose-200 bg-rose-50 text-rose-700';
-    if (label === '분쇄') return 'border-orange-200 bg-orange-50 text-orange-700';
-    return 'border-slate-200 bg-slate-50 text-slate-600';
+    if (label === '소성')
+      return isDark
+        ? 'border-rose-800/60 bg-rose-950/40 text-rose-300'
+        : 'border-rose-200 bg-rose-50 text-rose-700';
+    if (label === '원료 투입')
+      return isDark
+        ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    if (label === '혼합')
+      return isDark
+        ? 'border-violet-800/60 bg-violet-950/40 text-violet-300'
+        : 'border-violet-200 bg-violet-50 text-violet-700';
+    if (label === '검사' || label === '분석')
+      return isDark
+        ? 'border-blue-800/60 bg-blue-950/40 text-blue-300'
+        : 'border-blue-200 bg-blue-50 text-blue-700';
+    if (label === '냉각')
+      return isDark
+        ? 'border-cyan-800/60 bg-cyan-950/40 text-cyan-300'
+        : 'border-cyan-200 bg-cyan-50 text-cyan-700';
+    if (label === '원료 보관')
+      return isDark
+        ? 'border-amber-800/60 bg-amber-950/40 text-amber-300'
+        : 'border-amber-200 bg-amber-50 text-amber-700';
+    if (label === '설비 관리')
+      return isDark
+        ? 'border-slate-600 bg-slate-800 text-slate-300'
+        : 'border-slate-300 bg-slate-100 text-slate-700';
+    if (label === '대처 이력')
+      return isDark
+        ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
+        : 'border-indigo-200 bg-indigo-50 text-indigo-700';
+    if (label === '특이사항')
+      return isDark
+        ? 'border-amber-800/60 bg-amber-950/40 text-amber-300'
+        : 'border-amber-200 bg-amber-50 text-amber-700';
+    if (label === '전달사항')
+      return isDark
+        ? 'border-blue-800/60 bg-blue-950/40 text-blue-300'
+        : 'border-blue-200 bg-blue-50 text-blue-700';
+    if (label === '주의사항')
+      return isDark
+        ? 'border-rose-800/60 bg-rose-950/40 text-rose-300'
+        : 'border-rose-200 bg-rose-50 text-rose-700';
+    if (label === '분쇄')
+      return isDark
+        ? 'border-orange-800/60 bg-orange-950/40 text-orange-300'
+        : 'border-orange-200 bg-orange-50 text-orange-700';
+    return isDark
+      ? 'border-slate-600 bg-slate-800 text-slate-300'
+      : 'border-slate-200 bg-slate-50 text-slate-600';
   })();
 
   return (
@@ -504,6 +581,8 @@ function ModalShell({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const { isDark } = useUiSettings();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -525,19 +604,28 @@ function ModalShell({
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ${
-          wide ? 'max-w-3xl' : 'max-w-2xl'
-        }`}
+        className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${
+          isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+        } ${wide ? 'max-w-3xl' : 'max-w-2xl'}`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
-          <h3 id={titleId} className="m-0 text-base font-semibold text-slate-900">
+        <div
+          className={`flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4 ${
+            isDark ? 'border-slate-700' : 'border-slate-200'
+          }`}
+        >
+          <h3
+            id={titleId}
+            className={`m-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+          >
             {title}
           </h3>
           <button
             type="button"
             onClick={onClose}
             aria-label="모달 닫기"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl text-slate-400 ${
+              isDark ? 'hover:bg-slate-700 hover:text-slate-200' : 'hover:bg-slate-100 hover:text-slate-700'
+            }`}
           >
             ×
           </button>
@@ -567,6 +655,16 @@ function useMasterCheckbox(
 }
 
 export default function KnowledgePage() {
+  const { isDark, language } = useUiSettings();
+  const uiColors = getUiColors(isDark);
+  const panelStyle = getPanelStyle(uiColors);
+  const inputStyle = getInputStyle(uiColors);
+  const labelStyle = getLabelStyle(uiColors);
+  const ghostButtonStyle = getGhostButtonStyle(uiColors);
+  const cellStyle = getCellStyle(uiColors);
+  const headCellStyle = getHeadCellStyle(uiColors);
+  void cellStyle;
+  void headCellStyle;
   const [activeTab, setActiveTab] = useState<TabKey>('knowledge');
   const [toast, setToast] = useState('');
 
@@ -1024,8 +1122,8 @@ export default function KnowledgePage() {
         height: '100%',
         overflowY: 'auto',
         boxSizing: 'border-box',
-        background: colors.background,
-        color: colors.navy,
+        background: uiColors.background,
+        color: uiColors.navy,
         padding: '36px clamp(16px, 3vw, 44px) 56px',
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
@@ -1055,18 +1153,22 @@ export default function KnowledgePage() {
         )}
 
         <div style={{ marginBottom: 22 }}>
-          <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
-            라이브러리
+          <h1 style={{ margin: 0, color: uiColors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
+            {language === 'en' ? 'Library' : '라이브러리'}
           </h1>
-          <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
-            이슈 조치 이력 아카이브 · 지식 라이브러리
+          <p style={{ margin: '9px 0 0', color: uiColors.slate, fontSize: 15 }}>
+            {language === 'en'
+              ? 'Issue action archive · Knowledge library'
+              : '이슈 조치 이력 아카이브 · 지식 라이브러리'}
           </p>
         </div>
 
         <div
           role="tablist"
           aria-label="라이브러리 섹션"
-          className="mb-5 flex w-fit max-w-full flex-wrap gap-1.5 rounded-xl bg-slate-200/80 p-1.5"
+          className={`mb-5 flex w-fit max-w-full flex-wrap gap-1.5 rounded-xl p-1.5 ${
+            isDark ? 'bg-slate-950/80' : 'bg-slate-200/80'
+          }`}
         >
           {TABS.map((tab) => {
             const isActive = activeTab === tab.key;
@@ -1079,12 +1181,16 @@ export default function KnowledgePage() {
                 onClick={() => setActiveTab(tab.key)}
                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm transition-colors ${
                   isActive
-                    ? 'bg-white font-semibold text-blue-600 shadow-sm'
-                    : 'bg-transparent font-medium text-slate-500 hover:text-slate-700'
+                    ? isDark
+                      ? 'bg-slate-800 font-semibold text-blue-300 shadow-sm'
+                      : 'bg-white font-semibold text-blue-600 shadow-sm'
+                    : isDark
+                      ? 'bg-transparent font-medium text-slate-400 hover:text-slate-200'
+                      : 'bg-transparent font-medium text-slate-500 hover:text-slate-700'
                 }`}
               >
                 {tab.key === 'knowledge' ? <KnowledgeTabIcon /> : <ReportTabIcon />}
-                {tab.label}
+                {language === 'en' ? tab.labelEn : tab.labelKo}
               </button>
             );
           })}
@@ -1094,20 +1200,34 @@ export default function KnowledgePage() {
           <section style={panelStyle}>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>
-                  라이브러리 & 대처 이력
+                <h2 style={{ margin: 0, color: uiColors.navy, fontSize: 19 }}>
+                  {language === 'en' ? 'Library & Action History' : '라이브러리 & 대처 이력'}
                 </h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  누적 지식 라이브러리 (총 {libraryTotalCount}건)
-                  {selectedDoc ? ` · 최근 조회 ${selectedDoc.id}` : ''}
+                <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {language === 'en'
+                    ? `Knowledge library (total ${libraryTotalCount})`
+                    : `누적 지식 라이브러리 (총 ${libraryTotalCount}건)`}
+                  {selectedDoc
+                    ? language === 'en'
+                      ? ` · Recently viewed ${selectedDoc.id}`
+                      : ` · 최근 조회 ${selectedDoc.id}`
+                    : ''}
                 </p>
                 <div aria-live="polite" className="sr-only">
-                  선택된 항목 {selectedCount}개
+                  {language === 'en'
+                    ? `${selectedCount} items selected`
+                    : `선택된 항목 ${selectedCount}개`}
                 </div>
               </div>
             </div>
 
-            <div className="mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 p-3">
+            <div
+              className={`mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border p-3 ${
+                isDark
+                  ? 'border-slate-700/80 bg-slate-900/60'
+                  : 'border-slate-200/80 bg-slate-50/60'
+              }`}
+            >
               <div className="w-[150px]">
                 <label htmlFor="doc-date" style={labelStyle}>
                   날짜 (YYYY. MM. DD.)
@@ -1158,19 +1278,32 @@ export default function KnowledgePage() {
               <button
                 type="button"
                 onClick={resetKnowledgeFilters}
-                className="inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                className={`inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold ${
+                  isDark
+                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                }`}
               >
                 초기화
               </button>
             </div>
 
             {selectedCount > 0 && (
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200/80 bg-blue-50 px-4 py-3 shadow-sm">
+              <div
+                className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm ${
+                  isDark
+                    ? 'border-blue-800/60 bg-blue-950/40'
+                    : 'border-blue-200/80 bg-blue-50'
+                }`}
+              >
                 <div>
-                  <div className="text-sm font-semibold text-blue-800" aria-live="polite">
+                  <div
+                    className={`text-sm font-semibold ${isDark ? 'text-blue-300' : 'text-blue-800'}`}
+                    aria-live="polite"
+                  >
                     {selectedCount}개 항목 선택됨
                   </div>
-                  <div className="mt-0.5 text-[11px] text-blue-700/80">
+                  <div className={`mt-0.5 text-[11px] ${isDark ? 'text-blue-400/80' : 'text-blue-700/80'}`}>
                     선택한 항목을 AI 데일리 레포트 분석 범위로 보낼 수 있습니다.
                   </div>
                 </div>
@@ -1187,22 +1320,46 @@ export default function KnowledgePage() {
 
             <div className="space-y-6">
               {/* 과거 자료 */}
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
+              <div
+                className={`overflow-hidden rounded-xl border shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                }`}
+              >
+                <div
+                  className={`border-b px-4 py-3.5 sm:px-5 ${
+                    isDark ? 'border-slate-700' : 'border-slate-200'
+                  }`}
+                >
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <h3 className="m-0 text-base font-semibold text-slate-800">과거 자료</h3>
-                    <span className="text-sm font-semibold tabular-nums text-slate-500">
+                    <h3
+                      className={`m-0 text-base font-semibold ${
+                        isDark ? 'text-slate-100' : 'text-slate-800'
+                      }`}
+                    >
+                      과거 자료
+                    </h3>
+                    <span
+                      className={`text-sm font-semibold tabular-nums ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
                       {filteredDocuments.length}건
                     </span>
                   </div>
-                  <p className="mb-0 mt-1 text-xs text-slate-500">
+                  <p className={`mb-0 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     등록된 보고서와 공정 관련 문서를 조회합니다.
                   </p>
                 </div>
                 <div id="past-documents-list" className="overflow-x-auto">
                   <table className="w-full min-w-[760px] border-collapse text-left">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                      <tr
+                        className={`border-b text-xs font-semibold ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-900/60 text-slate-400'
+                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                        }`}
+                      >
                         <th className="w-12 px-3 py-3">
                           <input
                             ref={docMaster.ref}
@@ -1224,7 +1381,12 @@ export default function KnowledgePage() {
                     <tbody>
                       {filteredDocuments.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                          <td
+                            colSpan={6}
+                            className={`px-4 py-12 text-center text-sm ${
+                              isDark ? 'text-slate-500' : 'text-slate-400'
+                            }`}
+                          >
                             검색 조건에 맞는 자료가 없습니다.
                           </td>
                         </tr>
@@ -1239,10 +1401,18 @@ export default function KnowledgePage() {
                               onKeyDown={(event) =>
                                 onRowKeyOpen(event, () => openDocumentDetail(doc))
                               }
-                              className={`cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
-                                checked
-                                  ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
-                                  : 'border-l-4 border-l-transparent bg-white'
+                              className={`cursor-pointer border-b transition-colors ${
+                                isDark
+                                  ? `border-slate-700 hover:bg-slate-700/40 ${
+                                      checked
+                                        ? 'border-l-4 border-l-blue-500 bg-blue-950/30'
+                                        : 'border-l-4 border-l-transparent bg-slate-800'
+                                    }`
+                                  : `border-slate-100 hover:bg-slate-50/80 ${
+                                      checked
+                                        ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
+                                        : 'border-l-4 border-l-transparent bg-white'
+                                    }`
                               }`}
                             >
                               <td
@@ -1260,7 +1430,9 @@ export default function KnowledgePage() {
                               <td className="w-[118px] whitespace-nowrap px-3 py-3.5">
                                 <button
                                   type="button"
-                                  className="cursor-pointer text-xs font-medium text-blue-600 hover:underline"
+                                  className={`cursor-pointer text-xs font-medium hover:underline ${
+                                    isDark ? 'text-blue-300' : 'text-blue-600'
+                                  }`}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     openDocumentDetail(doc);
@@ -1273,7 +1445,13 @@ export default function KnowledgePage() {
                                 {doc.process ? (
                                   <CategoryBadge label={doc.process} />
                                 ) : transferredIdSet.has(doc.id) ? (
-                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                  <span
+                                    className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                      isDark
+                                        ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
+                                        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                    }`}
+                                  >
                                     이슈완료
                                   </span>
                                 ) : (
@@ -1283,28 +1461,46 @@ export default function KnowledgePage() {
                               <td className="min-w-[280px] px-3 py-3.5">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <div
-                                    className="line-clamp-2 text-sm font-semibold text-slate-800"
+                                    className={`line-clamp-2 text-sm font-semibold ${
+                                      isDark ? 'text-slate-100' : 'text-slate-800'
+                                    }`}
                                     title={doc.title}
                                   >
                                     {doc.title}
                                   </div>
                                   {transferredIdSet.has(doc.id) && doc.process ? (
-                                    <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                    <span
+                                      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                        isDark
+                                          ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
+                                          : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                      }`}
+                                    >
                                       이슈완료
                                     </span>
                                   ) : null}
                                 </div>
                                 <div
-                                  className="mt-1 line-clamp-1 text-xs text-slate-500"
+                                  className={`mt-1 line-clamp-1 text-xs ${
+                                    isDark ? 'text-slate-400' : 'text-slate-500'
+                                  }`}
                                   title={doc.summary}
                                 >
                                   {doc.summary}
                                 </div>
                               </td>
-                              <td className="w-[88px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                              <td
+                                className={`w-[88px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                  isDark ? 'text-slate-400' : 'text-slate-600'
+                                }`}
+                              >
                                 {doc.manager}
                               </td>
-                              <td className="w-[108px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                              <td
+                                className={`w-[108px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                  isDark ? 'text-slate-400' : 'text-slate-600'
+                                }`}
+                              >
                                 {doc.date}
                               </td>
                             </tr>
@@ -1315,8 +1511,16 @@ export default function KnowledgePage() {
                   </table>
                 </div>
                 {filteredDocuments.length > 0 ? (
-                  <div className="flex flex-col items-center gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:justify-between">
-                    <span className="text-xs font-medium text-slate-500">
+                  <div
+                    className={`flex flex-col items-center gap-2 border-t px-4 py-3 sm:flex-row sm:justify-between ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-900/60'
+                        : 'border-slate-200 bg-slate-50/80'
+                    }`}
+                  >
+                    <span
+                      className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                    >
                       {(safeDocPage - 1) * LIST_PAGE_SIZE + 1}-
                       {Math.min(safeDocPage * LIST_PAGE_SIZE, filteredDocuments.length)} /{' '}
                       {filteredDocuments.length}건
@@ -1329,7 +1533,11 @@ export default function KnowledgePage() {
                         type="button"
                         onClick={() => setDocPage((page) => Math.max(1, page - 1))}
                         disabled={safeDocPage <= 1}
-                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
                         이전
                       </button>
@@ -1344,7 +1552,9 @@ export default function KnowledgePage() {
                             className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                               active
                                 ? 'bg-blue-600 text-white'
-                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                : isDark
+                                  ? 'border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                             }`}
                           >
                             {page}
@@ -1355,7 +1565,11 @@ export default function KnowledgePage() {
                         type="button"
                         onClick={() => setDocPage((page) => Math.min(docTotalPages, page + 1))}
                         disabled={safeDocPage >= docTotalPages}
-                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
                         다음
                       </button>
@@ -1365,22 +1579,46 @@ export default function KnowledgePage() {
               </div>
 
               {/* 인수인계 이력 */}
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
+              <div
+                className={`overflow-hidden rounded-xl border shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                }`}
+              >
+                <div
+                  className={`border-b px-4 py-3.5 sm:px-5 ${
+                    isDark ? 'border-slate-700' : 'border-slate-200'
+                  }`}
+                >
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <h3 className="m-0 text-base font-semibold text-slate-800">인수인계 이력</h3>
-                    <span className="text-sm font-semibold tabular-nums text-slate-500">
+                    <h3
+                      className={`m-0 text-base font-semibold ${
+                        isDark ? 'text-slate-100' : 'text-slate-800'
+                      }`}
+                    >
+                      인수인계 이력
+                    </h3>
+                    <span
+                      className={`text-sm font-semibold tabular-nums ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
                       {filteredActions.length}건
                     </span>
                   </div>
-                  <p className="mb-0 mt-1 text-xs text-slate-500">
+                  <p className={`mb-0 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     저장된 이슈의 발생 상황과 인수인계·대응 내역입니다.
                   </p>
                 </div>
                 <div id="action-history-list" className="overflow-x-auto">
                   <table className="w-full min-w-[900px] border-collapse text-left">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                      <tr
+                        className={`border-b text-xs font-semibold ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-900/60 text-slate-400'
+                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                        }`}
+                      >
                         <th className="w-12 px-3 py-3">
                           <input
                             ref={actionMaster.ref}
@@ -1402,7 +1640,12 @@ export default function KnowledgePage() {
                     <tbody>
                       {filteredActions.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                          <td
+                            colSpan={6}
+                            className={`px-4 py-12 text-center text-sm ${
+                              isDark ? 'text-slate-500' : 'text-slate-400'
+                            }`}
+                          >
                             검색 조건에 맞는 이력이 없습니다.
                           </td>
                         </tr>
@@ -1419,10 +1662,18 @@ export default function KnowledgePage() {
                               onKeyDown={(event) =>
                                 onRowKeyOpen(event, () => openActionDetail(item))
                               }
-                              className={`cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/80 ${
-                                checked
-                                  ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
-                                  : 'border-l-4 border-l-transparent bg-white'
+                              className={`cursor-pointer border-b transition-colors ${
+                                isDark
+                                  ? `border-slate-700 hover:bg-slate-700/40 ${
+                                      checked
+                                        ? 'border-l-4 border-l-blue-500 bg-blue-950/30'
+                                        : 'border-l-4 border-l-transparent bg-slate-800'
+                                    }`
+                                  : `border-slate-100 hover:bg-slate-50/80 ${
+                                      checked
+                                        ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
+                                        : 'border-l-4 border-l-transparent bg-white'
+                                    }`
                               }`}
                             >
                               <td
@@ -1441,18 +1692,32 @@ export default function KnowledgePage() {
                                 <CategoryBadge label={item.category?.trim() || '대처 이력'} />
                               </td>
                               <td
-                                className="min-w-[220px] px-3 py-3.5 text-sm font-semibold text-slate-800"
+                                className={`min-w-[220px] px-3 py-3.5 text-sm font-semibold ${
+                                  isDark ? 'text-slate-100' : 'text-slate-800'
+                                }`}
                                 title={item.situation}
                               >
                                 <div className="line-clamp-2">{item.situation}</div>
                               </td>
-                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                              <td
+                                className={`w-[100px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                  isDark ? 'text-slate-400' : 'text-slate-600'
+                                }`}
+                              >
                                 {fromName}
                               </td>
-                              <td className="w-[100px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                              <td
+                                className={`w-[100px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                  isDark ? 'text-slate-400' : 'text-slate-600'
+                                }`}
+                              >
                                 {toName}
                               </td>
-                              <td className="w-[108px] whitespace-nowrap px-3 py-3.5 text-sm text-slate-600">
+                              <td
+                                className={`w-[108px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                  isDark ? 'text-slate-400' : 'text-slate-600'
+                                }`}
+                              >
                                 {item.date}
                               </td>
                             </tr>
@@ -1463,8 +1728,16 @@ export default function KnowledgePage() {
                   </table>
                 </div>
                 {filteredActions.length > 0 ? (
-                  <div className="flex flex-col items-center gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-3 sm:flex-row sm:justify-between">
-                    <span className="text-xs font-medium text-slate-500">
+                  <div
+                    className={`flex flex-col items-center gap-2 border-t px-4 py-3 sm:flex-row sm:justify-between ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-900/60'
+                        : 'border-slate-200 bg-slate-50/80'
+                    }`}
+                  >
+                    <span
+                      className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                    >
                       {(safeActionPage - 1) * LIST_PAGE_SIZE + 1}-
                       {Math.min(safeActionPage * LIST_PAGE_SIZE, filteredActions.length)} /{' '}
                       {filteredActions.length}건
@@ -1477,7 +1750,11 @@ export default function KnowledgePage() {
                         type="button"
                         onClick={() => setActionPage((page) => Math.max(1, page - 1))}
                         disabled={safeActionPage <= 1}
-                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
                         이전
                       </button>
@@ -1492,7 +1769,9 @@ export default function KnowledgePage() {
                             className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                               active
                                 ? 'bg-blue-600 text-white'
-                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                : isDark
+                                  ? 'border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                             }`}
                           >
                             {page}
@@ -1505,7 +1784,11 @@ export default function KnowledgePage() {
                           setActionPage((page) => Math.min(actionTotalPages, page + 1))
                         }
                         disabled={safeActionPage >= actionTotalPages}
-                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
                         다음
                       </button>
@@ -1520,14 +1803,30 @@ export default function KnowledgePage() {
         {activeTab === 'report' && (
           <section style={panelStyle}>
             {selectedCount === 0 ? (
-              <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+              <div
+                className={`flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed px-6 py-12 text-center ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/60'
+                    : 'border-slate-200 bg-slate-50/60'
+                }`}
+              >
+                <div
+                  className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
+                    isDark ? 'bg-blue-950/50 text-blue-300' : 'bg-blue-50 text-blue-600'
+                  }`}
+                >
                   <ReportTabIcon />
                 </div>
-                <h2 className="m-0 text-lg font-bold text-slate-800">
+                <h2
+                  className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}
+                >
                   AI 분석을 진행할 라이브러리 항목을 선택해 주세요.
                 </h2>
-                <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+                <p
+                  className={`mt-2 max-w-md text-sm leading-relaxed ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
                   라이브러리 & 대처 이력 탭에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
                 </p>
                 <button
@@ -1541,10 +1840,28 @@ export default function KnowledgePage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(260px,0.75fr)_minmax(0,1.6fr)]">
-                <aside className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <aside
+                  className={`rounded-xl border p-4 ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-900/60'
+                      : 'border-slate-200 bg-slate-50/70'
+                  }`}
+                >
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="m-0 text-sm font-bold text-slate-800">분석 대상 지식 항목</h3>
-                    <span className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
+                    <h3
+                      className={`m-0 text-sm font-bold ${
+                        isDark ? 'text-slate-100' : 'text-slate-800'
+                      }`}
+                    >
+                      분석 대상 지식 항목
+                    </h3>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                        isDark
+                          ? 'border-blue-800/60 bg-blue-950/40 text-blue-300'
+                          : 'border-blue-100 bg-blue-50 text-blue-700'
+                      }`}
+                    >
                       {selectedCount}개
                     </span>
                   </div>
@@ -1560,7 +1877,11 @@ export default function KnowledgePage() {
                         return (
                           <div
                             key={`doc-${doc.id}`}
-                            className="flex gap-2 rounded-lg border border-slate-200 bg-white p-3"
+                            className={`flex gap-2 rounded-lg border p-3 ${
+                              isDark
+                                ? 'border-slate-700 bg-slate-800'
+                                : 'border-slate-200 bg-white'
+                            }`}
                           >
                             <button
                               type="button"
@@ -1571,17 +1892,31 @@ export default function KnowledgePage() {
                                 <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
                                   {entry.order}
                                 </span>
-                                <span className="text-[11px] font-semibold text-blue-600">
+                                <span
+                                  className={`text-[11px] font-semibold ${
+                                    isDark ? 'text-blue-300' : 'text-blue-600'
+                                  }`}
+                                >
                                   {doc.id}
                                 </span>
                                 {doc.process ? <CategoryBadge label={doc.process} /> : null}
                                 {transferredIdSet.has(doc.id) ? (
-                                  <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                                  <span
+                                    className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                      isDark
+                                        ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
+                                        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                    }`}
+                                  >
                                     이슈완료
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                              <div
+                                className={`line-clamp-2 text-sm font-semibold ${
+                                  isDark ? 'text-slate-100' : 'text-slate-900'
+                                }`}
+                              >
                                 {doc.title}
                               </div>
                               <div className="mt-1 text-[11px] text-slate-400">{doc.date}</div>
@@ -1594,7 +1929,11 @@ export default function KnowledgePage() {
                                 event.stopPropagation();
                                 removeDocFromSelection(doc.id);
                               }}
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 disabled:cursor-not-allowed disabled:opacity-40 ${
+                                isDark
+                                  ? 'hover:bg-slate-700 hover:text-slate-200'
+                                  : 'hover:bg-slate-100 hover:text-slate-700'
+                              }`}
                             >
                               ✕
                             </button>
@@ -1605,7 +1944,11 @@ export default function KnowledgePage() {
                       return (
                         <div
                           key={`action-${item.id}`}
-                          className="flex gap-2 rounded-lg border border-slate-200 bg-white p-3"
+                          className={`flex gap-2 rounded-lg border p-3 ${
+                            isDark
+                              ? 'border-slate-700 bg-slate-800'
+                              : 'border-slate-200 bg-white'
+                          }`}
                         >
                           <button
                             type="button"
@@ -1618,7 +1961,11 @@ export default function KnowledgePage() {
                               </span>
                               <CategoryBadge label={item.category?.trim() || '대처 이력'} />
                             </div>
-                            <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+                            <div
+                              className={`line-clamp-2 text-sm font-semibold ${
+                                isDark ? 'text-slate-100' : 'text-slate-900'
+                              }`}
+                            >
                               {item.situation}
                             </div>
                             <div className="mt-1 text-[11px] text-slate-400">{item.date}</div>
@@ -1631,7 +1978,11 @@ export default function KnowledgePage() {
                               event.stopPropagation();
                               removeActionFromSelection(item.id);
                             }}
-                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 disabled:cursor-not-allowed disabled:opacity-40 ${
+                              isDark
+                                ? 'hover:bg-slate-700 hover:text-slate-200'
+                                : 'hover:bg-slate-100 hover:text-slate-700'
+                            }`}
                           >
                             ✕
                           </button>
@@ -1642,7 +1993,11 @@ export default function KnowledgePage() {
                   {remainingSelectionCount > 0 && (
                     <button
                       type="button"
-                      className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      className={`mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-lg border px-3 text-xs font-semibold ${
+                        isDark
+                          ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
                       aria-expanded={isSelectionListExpanded}
                       aria-controls="analysis-selection-list"
                       onClick={() => setIsSelectionListExpanded((current) => !current)}
@@ -1656,13 +2011,21 @@ export default function KnowledgePage() {
                     type="button"
                     disabled={isAnalyzing}
                     onClick={clearSelection}
-                    className="mt-2 inline-flex min-h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    className={`mt-2 inline-flex min-h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? 'text-slate-400 hover:bg-slate-700'
+                        : 'text-slate-500 hover:bg-slate-100'
+                    }`}
                   >
                     전체 선택 해제
                   </button>
                 </aside>
 
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
+                <div
+                  className={`min-w-0 rounded-xl border ${
+                    isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                  }`}
+                >
                   {isAnalyzing ? (
                     <div
                       role="status"
@@ -1670,7 +2033,11 @@ export default function KnowledgePage() {
                       className="flex min-h-[280px] flex-col items-center justify-center gap-3 px-6 py-12 text-center"
                     >
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
-                      <p className="m-0 text-sm font-semibold text-slate-700">
+                      <p
+                        className={`m-0 text-sm font-semibold ${
+                          isDark ? 'text-slate-200' : 'text-slate-700'
+                        }`}
+                      >
                         AI가 선택된 지식 항목을 분석 중입니다...
                       </p>
                       <button type="button" disabled style={primaryButtonStyle} className="opacity-60">
@@ -1681,10 +2048,18 @@ export default function KnowledgePage() {
                     <div className="flex min-h-[280px] flex-col items-start justify-center gap-4 px-5 py-8 sm:px-6">
                       {hasRunAnalysis && !selectionMatchesAnalysis ? (
                         <>
-                          <h2 className="m-0 text-base font-bold text-slate-800">
+                          <h2
+                            className={`m-0 text-base font-bold ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
                             분석 대상 항목이 변경되었습니다. 최신 선택 항목으로 다시 분석해 주세요.
                           </h2>
-                          <p className="m-0 text-sm leading-relaxed text-slate-500">
+                          <p
+                            className={`m-0 text-sm leading-relaxed ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
                             현재 선택된 {selectedCount}개 항목 기준으로 다시 분석을 실행할 수 있습니다.
                           </p>
                           <button type="button" onClick={executeAnalysis} style={primaryButtonStyle}>
@@ -1693,10 +2068,18 @@ export default function KnowledgePage() {
                         </>
                       ) : (
                         <>
-                          <h2 className="m-0 text-base font-bold text-slate-800">
+                          <h2
+                            className={`m-0 text-base font-bold ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
                             선택된 {selectedCount}개 지식 항목을 분석할 준비가 되었습니다.
                           </h2>
-                          <p className="m-0 text-sm leading-relaxed text-slate-500">
+                          <p
+                            className={`m-0 text-sm leading-relaxed ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
                             분석 실행 버튼을 눌러 선택된 항목 기반의 맞춤 분석을 시작하세요.
                           </p>
                           <button type="button" onClick={executeAnalysis} style={primaryButtonStyle}>
@@ -1720,9 +2103,25 @@ export default function KnowledgePage() {
                         </button>
                       </div>
                       <div className="grid gap-3 p-4">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
-                          <div className="mb-1.5 text-xs font-bold text-slate-500">선택 항목 요약</div>
-                          <p className="m-0 text-sm leading-relaxed text-slate-800">
+                        <div
+                          className={`rounded-xl border p-3.5 ${
+                            isDark
+                              ? 'border-slate-700 bg-slate-900/60'
+                              : 'border-slate-200 bg-slate-50/80'
+                          }`}
+                        >
+                          <div
+                            className={`mb-1.5 text-xs font-bold ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
+                            선택 항목 요약
+                          </div>
+                          <p
+                            className={`m-0 text-sm leading-relaxed ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
                             문서 {analysisDocs.length}건 · 대처 이력 {analysisActions.length}건 · 총{' '}
                             {analysisCount}개 항목을 분석 참고 범위로 사용합니다.
                           </p>
@@ -1730,16 +2129,16 @@ export default function KnowledgePage() {
 
                         <div
                           style={{
-                            border: `1px solid ${colors.line}`,
-                            borderLeft: `4px solid ${colors.blue}`,
+                            border: `1px solid ${uiColors.line}`,
+                            borderLeft: `4px solid ${uiColors.blue}`,
                             borderRadius: 12,
-                            background: colors.blueSoft,
+                            background: uiColors.blueSoft,
                             padding: '14px 16px',
                           }}
                         >
                           <div
                             style={{
-                              color: colors.blue,
+                              color: uiColors.blue,
                               fontSize: 13,
                               fontWeight: 800,
                               marginBottom: 6,
@@ -1747,7 +2146,7 @@ export default function KnowledgePage() {
                           >
                             주요 인사이트
                           </div>
-                          <p style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}>
+                          <p style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}>
                             {analysisInsights.summaries.length > 0
                               ? analysisInsights.summaries.join(' / ')
                               : '선택된 지식 항목을 AI 분석 참고 범위로 설정했습니다.'}
@@ -1757,16 +2156,16 @@ export default function KnowledgePage() {
                         {analysisInsights.causes.length > 0 && (
                           <div
                             style={{
-                              border: `1px solid ${colors.line}`,
-                              borderLeft: `4px solid ${colors.red}`,
+                              border: `1px solid ${uiColors.line}`,
+                              borderLeft: `4px solid ${uiColors.red}`,
                               borderRadius: 12,
-                              background: colors.redSoft,
+                              background: uiColors.redSoft,
                               padding: '14px 16px',
                             }}
                           >
                             <div
                               style={{
-                                color: colors.red,
+                                color: uiColors.red,
                                 fontSize: 13,
                                 fontWeight: 800,
                                 marginBottom: 6,
@@ -1775,7 +2174,7 @@ export default function KnowledgePage() {
                               공통 원인 또는 기록된 원인
                             </div>
                             <p
-                              style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}
+                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}
                             >
                               {analysisInsights.causes.join(' / ')}
                             </p>
@@ -1785,16 +2184,16 @@ export default function KnowledgePage() {
                         {analysisInsights.actionsTaken.length > 0 && (
                           <div
                             style={{
-                              border: `1px solid ${colors.line}`,
-                              borderLeft: `4px solid ${colors.green}`,
+                              border: `1px solid ${uiColors.line}`,
+                              borderLeft: `4px solid ${uiColors.green}`,
                               borderRadius: 12,
-                              background: colors.greenSoft,
+                              background: uiColors.greenSoft,
                               padding: '14px 16px',
                             }}
                           >
                             <div
                               style={{
-                                color: colors.green,
+                                color: uiColors.green,
                                 fontSize: 13,
                                 fontWeight: 800,
                                 marginBottom: 6,
@@ -1803,22 +2202,36 @@ export default function KnowledgePage() {
                               추천 대응 조치 또는 기록된 대응 조치
                             </div>
                             <p
-                              style={{ margin: 0, color: colors.navy, fontSize: 14, lineHeight: 1.7 }}
+                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}
                             >
                               {analysisInsights.actionsTaken.join(' / ')}
                             </p>
                           </div>
                         )}
 
-                        <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                          <div className="mb-2 text-xs font-bold text-slate-500">참고 지식 항목</div>
+                        <div
+                          className={`rounded-xl border p-3.5 ${
+                            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div
+                            className={`mb-2 text-xs font-bold ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
+                            참고 지식 항목
+                          </div>
                           <div className="flex flex-wrap gap-2">
                             {analysisDocs.map((doc) => (
                               <button
                                 key={doc.id}
                                 type="button"
                                 onClick={() => openDocumentDetail(doc)}
-                                className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                                className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                                  isDark
+                                    ? 'border-slate-600 bg-slate-900/60 text-slate-300 hover:bg-slate-700'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                                }`}
                               >
                                 <span className="truncate">{doc.id}</span>
                               </button>
@@ -1828,7 +2241,11 @@ export default function KnowledgePage() {
                                 key={item.id}
                                 type="button"
                                 onClick={() => openActionDetail(item)}
-                                className="inline-flex max-w-full items-center rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                                className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                                  isDark
+                                    ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/50'
+                                    : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                                }`}
                               >
                                 <span className="truncate">{item.situation}</span>
                               </button>
@@ -1842,7 +2259,11 @@ export default function KnowledgePage() {
               </div>
             )}
 
-            <p className="mb-0 mt-4 text-center text-[11px] leading-relaxed text-slate-400">
+            <p
+              className={`mb-0 mt-4 text-center text-[11px] leading-relaxed ${
+                isDark ? 'text-slate-500' : 'text-slate-400'
+              }`}
+            >
               AI 분석은 등록된 과거 기록을 기반으로 한 참고 정보이며, 최종 판단은 현장 검토가
               필요합니다.
             </p>
@@ -1851,9 +2272,18 @@ export default function KnowledgePage() {
       </div>
 
       {selectedCount > 0 && activeTab === 'knowledge' && (
-        <div className="fixed bottom-4 left-1/2 z-[90] w-[min(920px,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur">
+        <div
+          className={`fixed bottom-4 left-1/2 z-[90] w-[min(920px,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur ${
+            isDark
+              ? 'border-slate-700 bg-slate-800/95'
+              : 'border-slate-200 bg-white/95'
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-sm font-semibold text-slate-700" aria-live="polite">
+            <span
+              className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}
+              aria-live="polite"
+            >
               선택한 {selectedCount}개 항목
             </span>
             <div className="flex flex-wrap gap-2">
@@ -1878,23 +2308,43 @@ export default function KnowledgePage() {
         {detailTarget?.kind === 'document' && (
           <div className="space-y-4 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-blue-600">{detailTarget.item.id}</span>
+              <span className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
+                {detailTarget.item.id}
+              </span>
               {detailTarget.item.process ? (
                 <CategoryBadge label={detailTarget.item.process} />
               ) : null}
               {transferredIdSet.has(detailTarget.item.id) ? (
-                <span className="inline-flex items-center whitespace-nowrap rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                <span
+                  className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
+                    isDark
+                      ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
+                      : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  }`}
+                >
                   이슈완료
                 </span>
               ) : null}
             </div>
-            <h4 className="m-0 text-lg font-bold text-slate-900">{detailTarget.item.title}</h4>
-            <div className="text-xs text-slate-500">
+            <h4
+              className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+            >
+              {detailTarget.item.title}
+            </h4>
+            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               {detailTarget.item.manager} · {detailTarget.item.date}
               {detailTarget.item.lot ? ` · ${detailTarget.item.lot}` : ''}
             </div>
-            <p className="m-0 leading-relaxed text-slate-600">{detailTarget.item.summary}</p>
-            <div className="rounded-xl bg-slate-50 p-4 leading-relaxed whitespace-pre-wrap text-slate-800">
+            <p className={`m-0 leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+              {detailTarget.item.summary}
+            </p>
+            <div
+              className={`rounded-xl p-4 leading-relaxed whitespace-pre-wrap ${
+                isDark
+                  ? 'bg-slate-900/60 text-slate-100'
+                  : 'bg-slate-50 text-slate-800'
+              }`}
+            >
               {detailTarget.item.detail}
             </div>
           </div>
@@ -1906,22 +2356,36 @@ export default function KnowledgePage() {
               <CategoryBadge label={detailTarget.item.category?.trim() || '대처 이력'} />
             </div>
             <div>
-              <div className="text-xs font-semibold text-slate-500">발생 상황</div>
-              <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
+              <div className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                발생 상황
+              </div>
+              <div
+                className={`mt-1 whitespace-pre-wrap font-semibold ${
+                  isDark ? 'text-slate-100' : 'text-slate-900'
+                }`}
+              >
                 {detailTarget.item.situation}
               </div>
             </div>
             {(detailTarget.item.handoverFrom || detailTarget.item.handoverTo) ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <div className="text-xs font-semibold text-slate-500">인계자</div>
-                  <div className="mt-1 text-slate-800">
+                  <div
+                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    인계자
+                  </div>
+                  <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                     {detailTarget.item.handoverFrom?.trim() || '-'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-slate-500">인수자</div>
-                  <div className="mt-1 text-slate-800">
+                  <div
+                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    인수자
+                  </div>
+                  <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                     {detailTarget.item.handoverTo?.trim() || '-'}
                   </div>
                 </div>
@@ -1930,21 +2394,39 @@ export default function KnowledgePage() {
               <>
                 {detailTarget.item.action ? (
                   <div>
-                    <div className="text-xs font-semibold text-slate-500">대처 방안</div>
-                    <div className="mt-1 whitespace-pre-wrap text-slate-800">
+                    <div
+                      className={`text-xs font-semibold ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      대처 방안
+                    </div>
+                    <div
+                      className={`mt-1 whitespace-pre-wrap ${
+                        isDark ? 'text-slate-100' : 'text-slate-800'
+                      }`}
+                    >
                       {detailTarget.item.action}
                     </div>
                   </div>
                 ) : null}
                 {detailTarget.item.cause ? (
                   <div>
-                    <div className="text-xs font-semibold text-slate-500">원인</div>
-                    <div className="mt-1 text-slate-800">{detailTarget.item.cause}</div>
+                    <div
+                      className={`text-xs font-semibold ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      원인
+                    </div>
+                    <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                      {detailTarget.item.cause}
+                    </div>
                   </div>
                 ) : null}
               </>
             )}
-            <div className="text-xs text-slate-500">
+            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               {[detailTarget.item.manager, detailTarget.item.date].filter(Boolean).join(' · ')}
             </div>
           </div>
