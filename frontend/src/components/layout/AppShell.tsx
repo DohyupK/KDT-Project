@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
+import { SelectedLotProvider } from '@/context/SelectedLotContext'
 
 export type UiThemeMode = 0 | 1
 export type UiLanguage = 'ko' | 'en'
@@ -217,12 +218,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { isDark, copy } = useUiSettings()
 
   return (
-    <>
-      <div
-        className={`flex h-screen w-screen overflow-hidden font-sans ${
-          isDark ? 'bg-slate-950 text-slate-100' : 'bg-white text-gray-800'
-        }`}
-      >
+    <SelectedLotProvider>
+      <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
           className={`flex h-full shrink-0 flex-col overflow-hidden bg-slate-900 text-white transition-[width] duration-300 ease-in-out ${
@@ -306,6 +303,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <GlobalChatbot />
-    </>
+    </SelectedLotProvider>
   )
 }

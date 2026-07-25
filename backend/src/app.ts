@@ -30,6 +30,7 @@ export function createApp() {
       health: '/api/health',
       auth: '/api/auth',
       chat: 'POST /api/chat',
+      control_approve: 'POST /api/control/approve',
     })
   })
 

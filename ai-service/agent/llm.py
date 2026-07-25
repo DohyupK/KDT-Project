@@ -75,6 +75,7 @@ def _build_messages(
     predict_result: dict[str, Any] | None,
     error: str | None,
     need_guideline: bool,
+    recommendation: dict[str, Any] | None = None,
 ) -> list[Any]:
     system = SYSTEM_COMPOSE
     if need_guideline:
@@ -83,6 +84,7 @@ def _build_messages(
     payload = {
         "user_message": message,
         "predict": predict_result,
+        "recommendation": recommendation,
         "error": error,
         "need_guideline": need_guideline,
     }
@@ -172,6 +174,7 @@ def compose_with_failover(
     predict_result: dict[str, Any] | None,
     error: str | None,
     need_guideline: bool = False,
+    recommendation: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
     """
     Invoke length-selected provider.
@@ -182,7 +185,9 @@ def compose_with_failover(
         return None, None
 
     name = select_provider(message)
-    messages = _build_messages(message, predict_result, error, need_guideline)
+    messages = _build_messages(
+        message, predict_result, error, need_guideline, recommendation
+    )
 
     text = _invoke(name, messages)
     if text:
