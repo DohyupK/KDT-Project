@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
 import UserAuthMenu from '@/components/layout/UserAuthMenu';
+import { useSelectedLot } from '@/context/SelectedLotContext';
 import { useUiSettings } from '@/components/layout/AppShell';
 
 /* -------------------------------------------------------------------------- */
@@ -784,6 +784,17 @@ export default function MainPage() {
     pushToast('필터가 초기화되었습니다.', 'info');
   };
 
+  const { connectLot } = useSelectedLot();
+
+  /** Risk LOT 행 선택 → 챗봇 features 주입 + 패널 오픈 + 자동 O/X 진단 */
+  const handleSelectLotForDiagnose = (lot: RiskLotView) => {
+    connectLot(lot.record, { openChat: true, diagnose: true });
+    pushToast(`${lot.id} 연결 · 챗봇 진단 시작`, 'info');
+  };
+
+  const handleOpenLotDetail = (lot: RiskLotView) => {
+    setSelectedLot(lot);
+  };
   const cardClass = isDark
     ? 'rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
     : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
@@ -1144,6 +1155,10 @@ export default function MainPage() {
           <div className={`${cardClass} p-4 md:p-5 xl:col-span-5`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
+                <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  행 클릭 → 챗봇 자동 진단 · 「상세」로 공정 데이터
+                </p>
                 <h2
                   className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
                 >
@@ -1180,10 +1195,8 @@ export default function MainPage() {
                   {topRiskLots.map((lot) => (
                     <tr
                       key={lot.id}
-                      className={`group cursor-pointer transition-colors ${
-                        isDark ? 'hover:bg-slate-800/60' : 'hover:bg-slate-50/80'
-                      }`}
-                      onClick={() => setSelectedLot(lot)}
+                      className="group cursor-pointer transition-colors hover:bg-slate-50/80"
+                      onClick={() => handleSelectLotForDiagnose(lot)}
                     >
                       <td
                         className={`whitespace-nowrap border-b py-2.5 pr-3 text-xs font-semibold ${
@@ -1228,19 +1241,17 @@ export default function MainPage() {
                           {lot.status}
                         </span>
                       </td>
-                      <td
-                        className={`border-b py-2.5 pr-2 text-right ${
-                          isDark ? 'border-slate-700/80' : 'border-slate-50'
-                        }`}
-                      >
-                        <ChevronRight
-                          className={`ml-auto size-4 transition-colors ${
-                            isDark
-                              ? 'text-slate-500 group-hover:text-slate-300'
-                              : 'text-slate-400 group-hover:text-slate-600'
-                          }`}
-                          aria-hidden
-                        />
+                      <td className="border-b border-slate-50 py-2.5 pr-2 text-right">
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200/80 px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenLotDetail(lot);
+                          }}
+                        >
+                          상세
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -1320,6 +1331,16 @@ export default function MainPage() {
                 </div>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleSelectLotForDiagnose(selectedLot);
+                setSelectedLot(null);
+              }}
+              className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+            >
+              챗봇으로 진단
+            </button>
           </div>
         ) : null}
       </Modal>

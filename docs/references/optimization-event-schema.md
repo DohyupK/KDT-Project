@@ -4,7 +4,10 @@
 적용: `backend` 제어 승인 로그 (`CONTROL_STORE=sqlite|mariadb|memory`)
 
 Approve(제안 승인) 시 **하드웨어 미연동** — 로그만 남긴다.  
+5초 내 Undo → `status=reverted` (행 DELETE 금지).  
 실측 양/불이 쌓이면 Step 4에서 export → `reg.csv` → 회귀/최적화 학습으로 What-if를 교체한다.
+
+연결 지도: [`control-bounds-wiring.md`](./control-bounds-wiring.md)
 
 ## 저장
 
@@ -14,7 +17,10 @@ Approve(제안 승인) 시 **하드웨어 미연동** — 로그만 남긴다.
 | mariadb | 테이블 `optimization_events` |
 | memory | 프로세스 메모리 (개발용) |
 
-API: `POST /api/control/approve`
+API:
+
+- `POST /api/control/approve` → `status=approved`
+- `POST /api/control/approve/:id/revert` → `status=reverted`
 
 ## 컬럼
 
@@ -28,7 +34,7 @@ API: `POST /api/control/approve`
 | `after_features` | 제안 적용 후 센서 JSON | 조절값 피처 |
 | `prob_before` / `prob_after` | O/X 모델 불량 확률 | 참고 메타 (학습 타깃 아님 가능) |
 | `method` | `whatif_grid` (Cold start) | — |
-| `status` | `approved_logged` | — |
+| `status` | `approved` \| `reverted` | — |
 | `outcome_quality_defect` | 실측 0/1 (초기 NULL) | **회귀/분류 타깃 후보** |
 | `created_at` | 시각 | `timestamp` |
 

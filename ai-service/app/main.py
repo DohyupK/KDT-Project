@@ -30,8 +30,11 @@ from app.schemas import (
     HealthResponse,
     PredictRequest,
     PredictResponse,
+    SecurityChatRequest,
+    SecurityChatResponse,
 )
 from agent.graph import run_chat
+from agent.secure_llm import compose_secure
 from train_pipeline import MODELS_DIR, predict
 
 app = FastAPI(
@@ -163,6 +166,21 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
     )
 
 
+@app.post("/security-chat", response_model=SecurityChatResponse)
+def security_chat_endpoint(body: SecurityChatRequest) -> SecurityChatResponse:
+    """
+    Security-tab channel: local vLLM only (CHAT_VLLM_BASE_URL).
+    Never routes to Groq/Gemini. Failures return offline template.
+    """
+    out = compose_secure(body.message)
+    return SecurityChatResponse(
+        reply=out["reply"],
+        mode=out.get("mode") or "template",
+        provider=out.get("provider") or "offline",
+        error=out.get("error"),
+    )
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -171,4 +189,5 @@ def root() -> dict[str, str]:
         "health": "/health",
         "predict": "POST /predict",
         "chat": "POST /chat",
+        "security_chat": "POST /security-chat",
     }

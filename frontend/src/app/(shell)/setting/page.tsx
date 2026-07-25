@@ -10,6 +10,13 @@ import {
   Moon,
   Type,
   RefreshCw,
+  Gauge,
+} from 'lucide-react'
+import {
+  getControlBounds,
+  putControlBounds,
+  type ControlBounds,
+} from '@/api/settingsApi'
   Bell,
 } from 'lucide-react'
 import { notifyUiSettingsChange } from '@/components/layout/AppShell'
@@ -233,6 +240,14 @@ export default function SettingPage() {
     return () => clearToastTimer()
   }, [])
 
+  // Process control bounds: Setting UI → Express → ai-service/config/control_bounds.json → whatif
+  const [bounds, setBounds] = useState<ControlBounds>({
+    sintering_temp: { min: 700, max: 850 },
+    humidity: { min: 5, max: 95 },
+  })
+  const [boundsLoading, setBoundsLoading] = useState(false)
+  const [boundsMessage, setBoundsMessage] = useState('')
+
   useEffect(() => {
     const saved = loadSavedSettings()
     const config = readSystemSettingsConfig()
@@ -276,9 +291,21 @@ export default function SettingPage() {
   }, [])
 
   useEffect(() => {
-    applyGlobalThemeMode(themeMode)
-    notifyUiSettingsChange({ themeMode, language: DEFAULT_LANGUAGE })
-  }, [themeMode])
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await getControlBounds()
+        if (!cancelled && data.bounds) setBounds(data.bounds)
+      } catch {
+        if (!cancelled) setBoundsMessage('한계치를 불러오지 못했습니다. backend(:3001)를 확인하세요.')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => { applyGlobalThemeMode(themeMode) }, [themeMode])
 
   const handleThemeModeChange = (mode: ThemeMode) => {
     setThemeMode(mode)
@@ -345,6 +372,30 @@ export default function SettingPage() {
       language: DEFAULT_LANGUAGE,
     })
     showToast('설정이 기본값으로 초기화되었습니다.')
+  }
+
+  /** Save admin equipment limits → Express → control_bounds.json (whatif mtime cache). */
+  const handleSaveBounds = async () => {
+    setBoundsLoading(true)
+    setBoundsMessage('')
+    try {
+      const res = await putControlBounds(bounds)
+      setBounds(res.bounds)
+      setBoundsMessage(
+        '한계치가 저장되었습니다. ai-service whatif가 다음 진단부터 새 값을 사용합니다(파일 mtime 캐시).',
+      )
+      setTimeout(() => setBoundsMessage(''), 5000)
+    } catch (err) {
+      let detail = '한계치 저장에 실패했습니다.'
+      if (err && typeof err === 'object') {
+        const ax = err as { message?: string; response?: { data?: { error?: unknown } } }
+        if (typeof ax.response?.data?.error === 'string') detail = ax.response.data.error
+        else if (ax.message) detail = ax.message
+      }
+      setBoundsMessage(detail)
+    } finally {
+      setBoundsLoading(false)
+    }
   }
 
   const isDarkMode = themeMode === 0
@@ -498,29 +549,108 @@ export default function SettingPage() {
               />
             </div>
 
-            <select
-              value={refreshInterval}
-              disabled={!autoRefreshEnabled}
-              onChange={(e) => {
-                setRefreshInterval(Number(e.target.value) as RefreshInterval)
-                setSaveMessage('')
-              }}
-              aria-label="자동 새로고침 주기"
-              className={`w-full rounded-xl border-2 px-4 py-3 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-60 ${
-                isDarkMode
-                  ? 'border-slate-600 bg-slate-700 text-slate-100 disabled:bg-slate-800'
-                  : 'border-gray-200 bg-white text-gray-800'
-              }`}
-            >
-              {REFRESH_INTERVAL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            {autoRefreshEnabled ? (
-              <p className={`mt-4 text-sm ${textSecondary}`}>
-                현재 주기: <strong className="text-blue-600">{refreshInterval}분</strong>
+            <section className={`p-6 rounded-2xl shadow-sm border ${cardClass}`}>
+              <div className="mb-4 flex items-center gap-2">
+                <Gauge size={20} className="text-orange-500" />
+                <h2 className={`text-lg font-bold ${textPrimary}`}>공정 제어 한계치</h2>
+              </div>
+              <p className={`mb-4 text-sm ${textSecondary}`}>
+                What-if 격자 탐색이 이 상·하한을 벗어나지 않습니다. Setting → Express →
+                ai-service/config/control_bounds.json → whatif 캐시로 연결됩니다.
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className={`text-sm ${textSecondary}`}>
+                  소성 온도 min (℃)
+                  <input
+                    type="number"
+                    value={bounds.sintering_temp.min}
+                    onChange={(e) =>
+                      setBounds((b) => ({
+                        ...b,
+                        sintering_temp: { ...b.sintering_temp, min: Number(e.target.value) },
+                      }))
+                    }
+                    className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
+                      isDarkMode
+                        ? 'border-slate-600 bg-slate-700 text-slate-100'
+                        : 'border-gray-200 bg-white text-gray-800'
+                    }`}
+                  />
+                </label>
+                <label className={`text-sm ${textSecondary}`}>
+                  소성 온도 max (℃)
+                  <input
+                    type="number"
+                    value={bounds.sintering_temp.max}
+                    onChange={(e) =>
+                      setBounds((b) => ({
+                        ...b,
+                        sintering_temp: { ...b.sintering_temp, max: Number(e.target.value) },
+                      }))
+                    }
+                    className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
+                      isDarkMode
+                        ? 'border-slate-600 bg-slate-700 text-slate-100'
+                        : 'border-gray-200 bg-white text-gray-800'
+                    }`}
+                  />
+                </label>
+                <label className={`text-sm ${textSecondary}`}>
+                  습도 min (%)
+                  <input
+                    type="number"
+                    value={bounds.humidity.min}
+                    onChange={(e) =>
+                      setBounds((b) => ({
+                        ...b,
+                        humidity: { ...b.humidity, min: Number(e.target.value) },
+                      }))
+                    }
+                    className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
+                      isDarkMode
+                        ? 'border-slate-600 bg-slate-700 text-slate-100'
+                        : 'border-gray-200 bg-white text-gray-800'
+                    }`}
+                  />
+                </label>
+                <label className={`text-sm ${textSecondary}`}>
+                  습도 max (%)
+                  <input
+                    type="number"
+                    value={bounds.humidity.max}
+                    onChange={(e) =>
+                      setBounds((b) => ({
+                        ...b,
+                        humidity: { ...b.humidity, max: Number(e.target.value) },
+                      }))
+                    }
+                    className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
+                      isDarkMode
+                        ? 'border-slate-600 bg-slate-700 text-slate-100'
+                        : 'border-gray-200 bg-white text-gray-800'
+                    }`}
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={boundsLoading}
+                  onClick={() => void handleSaveBounds()}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
+                >
+                  <Save size={16} />
+                  한계치 저장
+                </button>
+                {boundsMessage ? (
+                  <p className="text-sm font-medium text-orange-500">{boundsMessage}</p>
+                ) : null}
+              </div>
+            </section>
+
+            <div className="flex flex-col items-end gap-2 mt-2">
+              <p className={`text-xs ${textMuted}`}>
+                * 설정 저장 시 모든 항목이 함께 저장됩니다.
               </p>
             ) : (
               <p className={`mt-4 text-sm font-medium ${textSecondary}`}>자동 새로고침 비활성화됨</p>
