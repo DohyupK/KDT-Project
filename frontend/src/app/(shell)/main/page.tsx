@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import UserAuthMenu from '@/components/layout/UserAuthMenu';
 import { useSelectedLot } from '@/context/SelectedLotContext';
+import { useUiSettings } from '@/components/layout/AppShell';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -322,6 +323,7 @@ function Modal({
   /** Stack above another open modal (e.g. detail over list). */
   elevated?: boolean;
 }) {
+  const { isDark } = useUiSettings();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -334,22 +336,32 @@ function Modal({
   if (!open) return null;
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center bg-slate-900/45 p-4 ${
+      className={`fixed inset-0 flex items-center justify-center p-4 ${
         elevated ? 'z-[90]' : 'z-[80]'
-      }`}
+      } ${isDark ? 'bg-slate-950/70' : 'bg-slate-900/45'}`}
     >
       <button type="button" className="absolute inset-0 cursor-default" aria-label="닫기" onClick={onClose} />
       <div
-        className={`relative max-h-[85vh] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ${
+        className={`relative max-h-[85vh] w-full overflow-hidden rounded-2xl border shadow-2xl ${
           wide ? 'max-w-5xl' : 'max-w-2xl'
-        }`}
+        } ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        <div
+          className={`flex items-center justify-between border-b px-5 py-4 ${
+            isDark ? 'border-slate-700' : 'border-slate-200'
+          }`}
+        >
+          <h3 className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+            {title}
+          </h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm font-bold text-slate-500 hover:bg-slate-100"
+            className={`rounded-lg px-2 py-1 text-sm font-bold ${
+              isDark
+                ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-100'
+                : 'text-slate-500 hover:bg-slate-100'
+            }`}
           >
             X
           </button>
@@ -363,9 +375,11 @@ function Modal({
 function TrendChart({
   data,
   chartType,
+  isDark = false,
 }: {
   data: TrendPoint[];
   chartType: ChartType;
+  isDark?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const width = 760;
@@ -384,6 +398,9 @@ function TrendChart({
   const yRisk = (v: number) => pad.top + innerH - Math.min(1, Math.max(0, v)) * innerH;
   const totalPie = data.reduce((s, d) => s + d.production, 0) || 1;
   const colors = ['#2563eb', '#0d9488', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#059669', '#ea580c'];
+  const gridStroke = isDark ? '#334155' : '#f1f5f9';
+  const tickFill = isDark ? '#cbd5e1' : '#94a3b8';
+  const pieHole = isDark ? '#1e293b' : '#fff';
 
   if (chartType === 'pie') {
     let cursor = -Math.PI / 2;
@@ -405,22 +422,40 @@ function TrendChart({
           {arcs.map((a) => (
             <path key={a.d.time} d={a.path} fill={a.color} opacity={0.9} />
           ))}
-          <circle cx="160" cy="140" r="48" fill="#fff" />
-          <text x="160" y="136" textAnchor="middle" className="fill-slate-700 text-[12px] font-bold">
+          <circle cx="160" cy="140" r="48" fill={pieHole} />
+          <text
+            x="160"
+            y="136"
+            textAnchor="middle"
+            className={`text-[12px] font-bold ${isDark ? '' : 'fill-slate-700'}`}
+            fill={isDark ? '#f1f5f9' : undefined}
+          >
             생산량
           </text>
-          <text x="160" y="154" textAnchor="middle" className="fill-slate-500 text-[11px]">
+          <text
+            x="160"
+            y="154"
+            textAnchor="middle"
+            className={`text-[11px] ${isDark ? '' : 'fill-slate-500'}`}
+            fill={isDark ? '#94a3b8' : undefined}
+          >
             {totalPie}건
           </text>
         </svg>
         <ul className="space-y-2 text-sm">
           {arcs.map((a) => (
             <li key={a.d.time} className="flex items-center justify-between gap-3">
-              <span className="inline-flex items-center gap-2 text-slate-700">
+              <span
+                className={`inline-flex items-center gap-2 ${
+                  isDark ? 'text-slate-300' : 'text-slate-700'
+                }`}
+              >
                 <span className="h-3 w-3 rounded-sm" style={{ background: a.color }} />
                 {a.d.time}
               </span>
-              <span className="font-semibold text-slate-900">
+              <span
+                className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+              >
                 {a.d.production}건 ({Math.round((a.d.production / totalPie) * 100)}%)
               </span>
             </li>
@@ -443,7 +478,7 @@ function TrendChart({
         className="h-auto w-full"
         onMouseLeave={() => setHoverIndex(null)}
       >
-        <text x={pad.left} y={14} fill="#94a3b8" fontSize="10" fontWeight="600">
+        <text x={pad.left} y={14} fill={tickFill} fontSize="10" fontWeight="600">
           생산량
         </text>
         <text x={width - pad.right + 10} y={14} fill="#10b981" fontSize="10" fontWeight="600">
@@ -456,8 +491,8 @@ function TrendChart({
           const y = yProd(tick);
           return (
             <g key={tick}>
-              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#f1f5f9" />
-              <text x={pad.left - 8} y={y + 3} textAnchor="end" fill="#94a3b8" fontSize="11">
+              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke={gridStroke} />
+              <text x={pad.left - 8} y={y + 3} textAnchor="end" fill={tickFill} fontSize="11">
                 {tick}
               </text>
             </g>
@@ -504,7 +539,7 @@ function TrendChart({
                 x={pad.left + (i + 0.5) * slotW}
                 y={height - 10}
                 textAnchor="middle"
-                fill="#94a3b8"
+                fill={tickFill}
                 fontSize="10"
               >
                 {d.time}
@@ -540,16 +575,25 @@ function TrendChart({
       </svg>
       {hover ? (
         <div
-          className="pointer-events-none absolute top-8 z-10 w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg"
-          style={{ left: `${Math.min(68, Math.max(2, (hoverX / width) * 100 - 14))}%` }}
+          className={`pointer-events-none absolute top-8 z-10 w-48 rounded-xl border px-3 py-2 text-xs shadow-lg ${
+            isDark
+              ? 'border-slate-700 bg-slate-800 text-slate-200'
+              : 'border-slate-200 bg-white text-slate-700'
+          }`}
+          style={{
+            left: `${Math.min(68, Math.max(2, (hoverX / width) * 100 - 14))}%`,
+            ...(isDark ? { backgroundColor: '#1e293b', color: '#f1f5f9' } : {}),
+          }}
         >
-          <div className="mb-1 font-semibold text-slate-900">{hover.time}</div>
+          <div className={`mb-1 font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+            {hover.time}
+          </div>
           <div>생산량: {hover.production}건</div>
           <div>합격률: {hover.passRate}%</div>
           <div>Risk Index: {hover.riskIndex.toFixed(2)}</div>
         </div>
       ) : null}
-      <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
+      <div className={`mt-4 flex flex-wrap gap-4 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-blue-500" /> 생산량
         </span>
@@ -569,6 +613,7 @@ function TrendChart({
 /* -------------------------------------------------------------------------- */
 
 export default function MainPage() {
+  const { isDark, language } = useUiSettings();
   // Empty on SSR so server/client HTML match; clock starts after mount.
   const [now, setNow] = useState('');
   const [seed, setSeed] = useState(7);
@@ -750,27 +795,49 @@ export default function MainPage() {
   const handleOpenLotDetail = (lot: RiskLotView) => {
     setSelectedLot(lot);
   };
+  const cardClass = isDark
+    ? 'rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
+    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
+  const filterClass = isDark
+    ? 'rounded-xl border border-slate-700 bg-slate-900/70 shadow-sm'
+    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
+  const subpanelClass = isDark
+    ? 'rounded-xl border border-slate-700 bg-slate-900/70'
+    : 'rounded-xl border border-slate-200/70 bg-slate-50/40';
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-50">
+    <div className={`h-full overflow-y-auto ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-6 pb-40 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-              종합 공정 모니터링
+            <h1
+              className={`text-xl font-semibold tracking-tight sm:text-2xl ${
+                isDark ? 'text-slate-100' : 'text-slate-900'
+              }`}
+            >
+              {language === 'en' ? 'Overall Process Monitoring' : '종합 공정 모니터링'}
             </h1>
-            <p className="mt-1 text-xs text-slate-500 sm:text-sm">{now}</p>
+            <p className={`mt-1 text-xs sm:text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {now}
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
                 setSeed((s) => s + 1);
-                pushToast('데이터가 갱신되었습니다.', 'success');
+                pushToast(
+                  language === 'en' ? 'Data has been refreshed.' : '데이터가 갱신되었습니다.',
+                  'success',
+                );
               }}
-              className="inline-flex h-9 items-center rounded-lg border border-slate-200/60 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  : 'border-slate-200/60 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
             >
-              새로고침
+              {language === 'en' ? 'Refresh' : '새로고침'}
             </button>
 
             <div className="relative" ref={notifyRef}>
@@ -778,7 +845,11 @@ export default function MainPage() {
                 type="button"
                 aria-label="알림"
                 onClick={() => setIsNotifyOpen((v) => !v)}
-                className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
+                className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    : 'border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path
@@ -801,12 +872,26 @@ export default function MainPage() {
                 ) : null}
               </button>
               {isNotifyOpen ? (
-                <div className="absolute right-0 top-11 z-40 w-[min(92vw,320px)] overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-lg">
-                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                    <strong className="text-sm text-slate-800">알림</strong>
+                <div
+                  className={`absolute right-0 top-11 z-40 w-[min(92vw,320px)] overflow-hidden rounded-xl border shadow-lg ${
+                    isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/60 bg-white'
+                  }`}
+                >
+                  <div
+                    className={`flex items-center justify-between border-b px-4 py-3 ${
+                      isDark ? 'border-slate-700' : 'border-slate-100'
+                    }`}
+                  >
+                    <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                      알림
+                    </strong>
                     <button
                       type="button"
-                      className="text-xs font-medium text-slate-500 hover:text-slate-700"
+                      className={`text-xs font-medium ${
+                        isDark
+                          ? 'text-slate-400 hover:text-slate-200'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
                       onClick={() =>
                         setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
                       }
@@ -818,8 +903,12 @@ export default function MainPage() {
                     <button
                       key={n.id}
                       type="button"
-                      className={`block w-full border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50 ${
-                        n.unread ? 'bg-blue-50/40' : ''
+                      className={`block w-full border-b px-4 py-3 text-left ${
+                        isDark
+                          ? `border-slate-700/80 hover:bg-slate-800/60 ${
+                              n.unread ? 'bg-blue-950/40' : ''
+                            }`
+                          : `border-slate-50 hover:bg-slate-50 ${n.unread ? 'bg-blue-50/40' : ''}`
                       }`}
                       onClick={() =>
                         setNotifications((prev) =>
@@ -827,11 +916,17 @@ export default function MainPage() {
                         )
                       }
                     >
-                      <div className="flex justify-between gap-2 text-sm font-semibold text-slate-800">
+                      <div
+                        className={`flex justify-between gap-2 text-sm font-semibold ${
+                          isDark ? 'text-slate-100' : 'text-slate-800'
+                        }`}
+                      >
                         <span>{n.title}</span>
                         <span className="text-xs font-normal text-slate-400">{n.time}</span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{n.message}</p>
+                      <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {n.message}
+                      </p>
                     </button>
                   ))}
                 </div>
@@ -842,15 +937,23 @@ export default function MainPage() {
           </div>
         </header>
 
-        <section className="rounded-xl border border-slate-200/70 bg-white px-3 py-2 shadow-sm sm:px-4">
+        <section className={`${filterClass} px-3 py-2 sm:px-4`}>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50/80 sm:w-auto">
+            <div
+              className={`inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border sm:w-auto ${
+                isDark
+                  ? 'border-slate-700 bg-slate-950/40'
+                  : 'border-slate-200 bg-slate-50/80'
+              }`}
+            >
               <input
                 type="date"
                 aria-label="시작일"
                 value={draftFilter.startDate}
                 onChange={(e) => setDraftFilter((p) => ({ ...p, startDate: e.target.value }))}
-                className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-700 outline-none sm:w-[138px] sm:flex-none sm:px-2.5"
+                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
+                  isDark ? 'text-slate-100' : 'text-slate-700'
+                }`}
               />
               <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
               <input
@@ -858,7 +961,9 @@ export default function MainPage() {
                 aria-label="종료일"
                 value={draftFilter.endDate}
                 onChange={(e) => setDraftFilter((p) => ({ ...p, endDate: e.target.value }))}
-                className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm text-slate-700 outline-none sm:w-[138px] sm:flex-none sm:px-2.5"
+                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
+                  isDark ? 'text-slate-100' : 'text-slate-700'
+                }`}
               />
             </div>
             <button
@@ -871,24 +976,39 @@ export default function MainPage() {
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className={`inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium ${
+                isDark
+                  ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+              }`}
             >
               초기화
             </button>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="text-sm font-semibold text-slate-700">종합 공정 현황 요약</h2>
-          <div className="mt-4 border-t border-slate-100 pt-4">
+        <section
+          className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${
+            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+          }`}
+        >
+          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+            종합 공정 현황 요약
+          </h2>
+          <div
+            className={`mt-4 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+          >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 md:grid-cols-3 md:gap-5">
               {topKpis.map((kpi) => (
-                <div
-                  key={kpi.id}
-                  className="rounded-xl border border-slate-200/70 bg-slate-50/40 p-4 md:p-5"
-                >
+                <div key={kpi.id} className={`${subpanelClass} p-4 md:p-5`}>
                   <div className="mb-3 flex items-start justify-between gap-3">
-                    <div className="min-w-0 text-sm font-medium text-slate-500">{kpi.title}</div>
+                    <div
+                      className={`min-w-0 text-sm font-medium ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      {kpi.title}
+                    </div>
                     {kpi.id === 'risk' ? (
                       <span className="inline-flex shrink-0 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-medium text-red-700">
                         {kpi.value}
@@ -897,7 +1017,11 @@ export default function MainPage() {
                       <span className={toneClass(kpi.tone)}>{kpi.tone}</span>
                     )}
                   </div>
-                  <div className="text-xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-2xl lg:text-3xl">
+                  <div
+                    className={`text-xl font-bold tabular-nums tracking-tight sm:text-2xl lg:text-3xl ${
+                      isDark ? 'text-slate-100' : 'text-slate-900'
+                    }`}
+                  >
                     {kpi.value}
                   </div>
                   <div className="mt-2 text-xs text-slate-400">{kpi.description}</div>
@@ -907,25 +1031,36 @@ export default function MainPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
+        <section
+          className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${
+            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+          }`}
+        >
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold text-slate-700">실시간 핵심 공정 파라미터</h2>
+            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+              실시간 핵심 공정 파라미터
+            </h2>
             <p className="text-xs text-slate-400">실시간 평균 상태</p>
           </div>
-          <div className="border-t border-slate-100 pt-4">
+          <div className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
               {params.map((param) => (
-                <div
-                  key={param.id}
-                  className="rounded-xl border border-slate-200/70 bg-slate-50/40 p-4 md:p-5"
-                >
+                <div key={param.id} className={`${subpanelClass} p-4 md:p-5`}>
                   <div className="mb-2.5 flex items-start justify-between gap-2">
-                    <div className="min-w-0 text-xs font-medium leading-tight text-slate-500">
+                    <div
+                      className={`min-w-0 text-xs font-medium leading-tight ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
                       {param.name}
                     </div>
                     <span className={toneClass(param.status)}>{param.status}</span>
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-1 text-xl font-bold tabular-nums tracking-tight text-slate-800 sm:text-2xl lg:text-3xl">
+                  <div
+                    className={`flex flex-wrap items-baseline gap-x-1 text-xl font-bold tabular-nums tracking-tight sm:text-2xl lg:text-3xl ${
+                      isDark ? 'text-slate-100' : 'text-slate-800'
+                    }`}
+                  >
                     <span>{param.value}</span>
                     <span className="ml-1 text-xs font-normal text-slate-500">{param.unit}</span>
                   </div>
@@ -936,14 +1071,24 @@ export default function MainPage() {
         </section>
 
         <section className="grid grid-cols-1 gap-5 pb-8 xl:grid-cols-12">
-          <div className="rounded-xl border border-slate-200/70 bg-white p-4 shadow-sm md:p-5 xl:col-span-7">
+          <div className={`${cardClass} p-4 md:p-5 xl:col-span-7`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-900">생산 추이</h2>
+                <h2
+                  className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                >
+                  생산 추이
+                </h2>
                 <p className="mt-0.5 text-xs text-slate-400">듀얼 Y축 · 집계 주기 선택</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                <div
+                  className={`inline-flex rounded-lg border p-0.5 ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-900/70'
+                      : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
                   {(
                     [
                       ['bar', '막대', 'M4 14h3v6H4zm6-8h3v14h-3zm6 4h3v10h-3z'],
@@ -959,8 +1104,12 @@ export default function MainPage() {
                       onClick={() => setChartType(type)}
                       className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition ${
                         chartType === type
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'text-slate-400 hover:text-slate-600'
+                          ? isDark
+                            ? 'bg-slate-800 text-slate-100 shadow-sm'
+                            : 'bg-white text-slate-900 shadow-sm'
+                          : isDark
+                            ? 'text-slate-500 hover:text-slate-300'
+                            : 'text-slate-400 hover:text-slate-600'
                       }`}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -980,7 +1129,11 @@ export default function MainPage() {
                 <select
                   value={trendInterval}
                   onChange={(e) => setTrendInterval(e.target.value as TrendInterval)}
-                  className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 outline-none hover:bg-slate-50"
+                  className={`h-8 rounded-lg border px-2.5 text-xs font-medium outline-none ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-950/40 text-slate-100 hover:bg-slate-900'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
                 >
                   <option value="1h">1시간 단위</option>
                   <option value="2h">2시간 단위</option>
@@ -988,26 +1141,36 @@ export default function MainPage() {
                 </select>
                 <Link
                   href="/dashboard"
-                  className="ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-blue-600 md:text-sm"
+                  className={`ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
                 >
                   상세보기 →
                 </Link>
               </div>
             </div>
-            <TrendChart data={trendData} chartType={chartType} />
+            <TrendChart data={trendData} chartType={chartType} isDark={isDark} />
           </div>
 
-          <div className="rounded-xl border border-slate-200/70 bg-white p-4 shadow-sm md:p-5 xl:col-span-5">
+          <div className={`${cardClass} p-4 md:p-5 xl:col-span-5`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
                 <p className="mt-0.5 text-xs text-slate-400">
                   행 클릭 → 챗봇 자동 진단 · 「상세」로 공정 데이터
                 </p>
+                <h2
+                  className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                >
+                  위험 LOT Top
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-400">위험도 내림차순 · 행 클릭 시 상세</p>
               </div>
               <Link
                 href="/issue"
-                className="flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-blue-600 md:text-sm"
+                className={`flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}
               >
                 상세보기 ({riskLots.length}) →
               </Link>
@@ -1017,7 +1180,12 @@ export default function MainPage() {
                 <thead>
                   <tr className="text-xs text-slate-400">
                     {['LOT', '위험 원인', '위험도', '상태', ''].map((h) => (
-                      <th key={h || 'action'} className="border-b border-slate-100 pb-2 pr-3 font-medium">
+                      <th
+                        key={h || 'action'}
+                        className={`border-b pb-2 pr-3 font-medium ${
+                          isDark ? 'border-slate-700' : 'border-slate-100'
+                        }`}
+                      >
                         {h}
                       </th>
                     ))}
@@ -1030,19 +1198,39 @@ export default function MainPage() {
                       className="group cursor-pointer transition-colors hover:bg-slate-50/80"
                       onClick={() => handleSelectLotForDiagnose(lot)}
                     >
-                      <td className="whitespace-nowrap border-b border-slate-50 py-2.5 pr-3 text-xs font-semibold text-slate-800">
+                      <td
+                        className={`whitespace-nowrap border-b py-2.5 pr-3 text-xs font-semibold ${
+                          isDark
+                            ? 'border-slate-700/80 text-slate-100'
+                            : 'border-slate-50 text-slate-800'
+                        }`}
+                      >
                         {lot.id}
                       </td>
                       <td
-                        className="max-w-[160px] truncate border-b border-slate-50 py-2.5 pr-3 text-xs text-slate-500"
+                        className={`max-w-[160px] truncate border-b py-2.5 pr-3 text-xs ${
+                          isDark
+                            ? 'border-slate-700/80 text-slate-400'
+                            : 'border-slate-50 text-slate-500'
+                        }`}
                         title={lot.riskReason}
                       >
                         {lot.riskReason}
                       </td>
-                      <td className="whitespace-nowrap border-b border-slate-50 py-2.5 pr-3 text-xs font-semibold tabular-nums text-slate-800">
+                      <td
+                        className={`whitespace-nowrap border-b py-2.5 pr-3 text-xs font-semibold tabular-nums ${
+                          isDark
+                            ? 'border-slate-700/80 text-slate-100'
+                            : 'border-slate-50 text-slate-800'
+                        }`}
+                      >
                         {lot.riskScore.toFixed(2)}
                       </td>
-                      <td className="border-b border-slate-50 py-2.5 pr-3">
+                      <td
+                        className={`border-b py-2.5 pr-3 ${
+                          isDark ? 'border-slate-700/80' : 'border-slate-50'
+                        }`}
+                      >
                         <span
                           className={
                             lot.status === '위험'
@@ -1085,11 +1273,13 @@ export default function MainPage() {
 
       <Modal open={!!selectedLot} title="LOT 상세 공정 데이터" onClose={() => setSelectedLot(null)}>
         {selectedLot ? (
-          <div className="space-y-4 text-sm">
+          <div className={`space-y-4 text-sm ${isDark ? 'text-slate-200' : ''}`}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-slate-500">LOT</div>
-                <div className="font-bold break-all">{selectedLot.id}</div>
+                <div className={`font-bold break-all ${isDark ? 'text-slate-100' : ''}`}>
+                  {selectedLot.id}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">상태</div>
@@ -1097,20 +1287,30 @@ export default function MainPage() {
               </div>
               <div>
                 <div className="text-xs text-slate-500">위험도</div>
-                <div className="font-bold">{selectedLot.riskScore.toFixed(2)}</div>
+                <div className={`font-bold ${isDark ? 'text-slate-100' : ''}`}>
+                  {selectedLot.riskScore.toFixed(2)}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">일시</div>
-                <div className="font-semibold">
+                <div className={`font-semibold ${isDark ? 'text-slate-100' : ''}`}>
                   {selectedLot.record.date} {selectedLot.record.hour}
                 </div>
               </div>
             </div>
             <div>
               <div className="text-xs text-slate-500">위험 원인</div>
-              <div className="mt-1 font-medium text-slate-800">{selectedLot.riskReason}</div>
+              <div
+                className={`mt-1 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
+              >
+                {selectedLot.riskReason}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3">
+            <div
+              className={`grid grid-cols-2 gap-3 rounded-xl p-3 ${
+                isDark ? 'bg-slate-900' : 'bg-slate-50'
+              }`}
+            >
               {[
                 ['소성온도', `${selectedLot.record.sintering_temp} ℃`],
                 ['공정시간', `${selectedLot.record.process_time} min`],
@@ -1123,7 +1323,11 @@ export default function MainPage() {
               ].map(([label, value]) => (
                 <div key={label}>
                   <div className="text-[11px] text-slate-500">{label}</div>
-                  <div className="font-semibold text-slate-900">{value}</div>
+                  <div
+                    className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                  >
+                    {value}
+                  </div>
                 </div>
               ))}
             </div>
