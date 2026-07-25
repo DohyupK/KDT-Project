@@ -47,6 +47,10 @@ export type WhatIfSuggestion = {
   probability: number
   defect_status: number
   applied_threshold: number
+  boundary_hit?: boolean
+  limit_reason?: string | null
+  ideal_values?: Record<string, number> | null
+  clipped_values?: Record<string, number> | null
 }
 
 export type ChatRecommendation = {
@@ -120,6 +124,16 @@ export async function postApproveControl(
     lot_id: body.lot_id ?? undefined,
     recommendation: body.recommendation,
   })
+  return data
+}
+
+/** 5초 Undo: mark event status=reverted (no DELETE). */
+export async function postRevertControl(
+  eventId: number | string,
+): Promise<ApproveControlResponse> {
+  const { data } = await apiClient.post<ApproveControlResponse>(
+    `/control/approve/${encodeURIComponent(String(eventId))}/revert`,
+  )
   return data
 }
 

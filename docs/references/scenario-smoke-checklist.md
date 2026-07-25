@@ -5,8 +5,8 @@
 
 전제: frontend `:3000`, backend `:3001`, ai-service `:8800`, `models/` 학습 산출물 존재.
 
-**API 스모크 (2026-07-24):** backend·ai-service 재기동 후 **14/14 PASS**  
-(`POST /api/chat` · `/api/control/approve` · `control.sqlite` 확인. Main UI 클릭은 브라우저 수동.)
+**API 스모크 (2026-07-24 오전):** backend·ai-service 재기동 후 **14/14 PASS** (당시 `approved_logged`).  
+이후 상태값은 **`approved` / `reverted`** 로 변경됨 — 재스모크 시 아래 7·8항 확인.
 
 ## 1. 보안 게이트
 
@@ -27,14 +27,20 @@
 
 - [x] 고습도/이상 LOT → `recommendation.suggestion` 존재 (reply에 제안 수치)
 - [x] 정상 샘플(`SAMPLE_CHAT_FEATURES`) → suggestion null + “유지” note
+- [ ] 한계치 타협: Setting에서 max 온도를 낮춘 뒤 이상 LOT 진단 → `boundary_hit` / `limit_reason` *(재스모크)*
 
 ## 5. Approve 로그 (Step 3)
 
-- [x] `POST /api/control/approve` 성공, `event_id` 반환
-- [x] `backend/data/control.sqlite`에 `optimization_events` 1행, `status=approved_logged`
-- [x] 미승인 시 insert 없음 *(승인 API만 호출했을 때 insert — UI 미클릭 경로는 수동)*
+- [ ] `POST /api/control/approve` → `status=approved`, `event_id` 반환
+- [ ] `backend/data/control.sqlite` 행 `status=approved`
+- [ ] `POST /api/control/approve/:id/revert` → `status=reverted` (행 유지)
+- [ ] 챗봇 5초 Undo 스낵바 *(브라우저)*
 
-## 6. LLM (선택)
+## 6. Setting 한계치
+
+- [ ] Setting 「공정 제어 한계치」저장 → `GET /api/settings/control-bounds` 반영 · `control_bounds.json` 갱신
+
+## 7. LLM (선택)
 
 - [x] 짧은 메시지 + Groq → `mode=llm` / `provider=groq`
-- [ ] 중문(301+) Gemini 쿼터 없으면 Groq 폴백 + `[안내]` *(이번 스모크에서 생략; 이전 검증 이력 있음)*
+- [ ] 중문(301+) Gemini 쿼터 없으면 Groq 폴백 + `[안내]`

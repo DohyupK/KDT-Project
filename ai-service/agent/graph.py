@@ -69,6 +69,8 @@ def _format_recommendation(recommendation: dict[str, Any] | None) -> str:
         parts.append(f"소성 온도 {after.get('sintering_temp')}℃ (Δ {temp_d:+g})")
     if parts:
         lines.append("조정안: " + ", ".join(parts) + ".")
+    if sug.get("boundary_hit") and sug.get("limit_reason"):
+        lines.append(f"[한계치 타협] {sug['limit_reason']}")
     lines.append("장비 반영은 UI에서 「제안 승인」한 뒤에만 로그됩니다 (하드웨어 미연동).")
     note = recommendation.get("note")
     if note:
@@ -86,13 +88,18 @@ def _template_reply(
         return (
             "진단을 완료하지 못했습니다. "
             f"사유: {error}\n"
-            "공정 피처(d50, d90, metal_impurity, …, operator_id)를 확인한 뒤 다시 요청해 주세요."
+            "공정 피처를 확인한 뒤 다시 요청해 주세요."
         )
     if predict_result is None:
         return (
-            "O/X 진단을 하려면 LOT의 공정 피처가 필요합니다. "
-            "Main에서 LOT을 「챗봇에 연결」하거나 UI의 「샘플 LOT 진단」을 사용하세요. "
-            f"(요청 요약: {message[:120]})"
+            "사용 안내입니다.\n\n"
+            "1. Main 화면 「위험 LOT Top」에서 LOT **행을 클릭**하면 "
+            "챗봇에 센서가 연결되고 O/X 진단이 자동으로 시작됩니다.\n"
+            "2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n"
+            "3. What-if 제안이 나오면 「제안 승인」→ 5초 안 「실행 취소」가능.\n"
+            "4. 공정 한계치(온도·습도)는 Setting에서 바꿉니다.\n"
+            "5. 보안·기밀은 /security 탭을 이용해 주세요.\n"
+            f"(요청 요약: {message[:80]})"
         )
 
     status = predict_result["defect_status"]

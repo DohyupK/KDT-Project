@@ -79,6 +79,10 @@ class WhatIfSuggestion(BaseModel):
     probability: float
     defect_status: int
     applied_threshold: float
+    boundary_hit: bool = False
+    limit_reason: str | None = None
+    ideal_values: dict[str, float] | None = None
+    clipped_values: dict[str, float] | None = None
 
 
 class RecommendationBaseline(BaseModel):
@@ -104,4 +108,18 @@ class ChatResponse(BaseModel):
     )
     predict: PredictResponse | None = None
     recommendation: ChatRecommendation | None = None
+    error: str | None = None
+
+
+class SecurityChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Security-tab user text")
+
+
+class SecurityChatResponse(BaseModel):
+    reply: str
+    mode: str = Field(description="'security_vllm' | 'template'")
+    provider: str = Field(
+        default="offline",
+        description="'vllm' | 'offline'",
+    )
     error: str | None = None

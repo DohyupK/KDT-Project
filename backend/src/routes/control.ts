@@ -2,6 +2,7 @@ import { Router } from 'express'
 import {
   getControlStoreMode,
   insertOptimizationEvent,
+  revertOptimizationEvent,
 } from '../services/controlStore.js'
 import { ensureSession } from '../services/chatStore.js'
 
@@ -31,6 +32,10 @@ type ApproveBody = {
 
 export const controlRouter = Router()
 
+/**
+ * Approve → insert optimization_events with status=approved (not deleted on Undo).
+ * FE: GlobalChatbot 「제안 승인」 → 5s Undo snackbar → POST .../revert → status=reverted.
+ */
 controlRouter.post('/control/approve', async (req, res) => {
   try {
     const body = req.body as ApproveBody
@@ -60,7 +65,7 @@ controlRouter.post('/control/approve', async (req, res) => {
       probBefore: Number(rec.baseline.probability ?? 0),
       probAfter: Number(suggestion.probability ?? 0),
       method: rec.method || 'whatif_grid',
-      status: 'approved_logged',
+      status: 'approved',
     })
 
     console.info(
@@ -76,6 +81,30 @@ controlRouter.post('/control/approve', async (req, res) => {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     console.error('[POST /api/control/approve]', detail)
+    res.status(500).json({ error: detail })
+  }
+})
+
+/** 5초 Undo: UPDATE status=reverted (history preserved). */
+controlRouter.post('/control/approve/:id/revert', async (req, res) => {
+  try {
+    const idParam = req.params.id
+    const eventId = /^\d+$/.test(idParam) ? Number(idParam) : idParam
+    const row = await revertOptimizationEvent(eventId)
+    if (!row) {
+      res.status(404).json({ error: 'optimization event not found' })
+      return
+    }
+    console.info(`[control_revert] event=${row.id} status=${row.status}`)
+    res.json({
+      ok: true,
+      event_id: row.id,
+      status: row.status,
+      control_store: getControlStoreMode(),
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error('[POST /api/control/approve/:id/revert]', detail)
     res.status(500).json({ error: detail })
   }
 })

@@ -104,7 +104,7 @@ async function ensureMariaTable(): Promise<void> {
 export async function insertOptimizationEvent(
   input: OptimizationEventInput,
 ): Promise<OptimizationEventRow> {
-  const status = input.status || 'approved_logged'
+  const status = input.status || 'approved'
   const mode = storeMode()
 
   if (mode === 'memory') {
@@ -166,5 +166,55 @@ export async function insertOptimizationEvent(
         ? Number((result as { insertId: number }).insertId)
         : randomUUID()
     return { id: insertId, status }
+  })
+}
+
+/**
+ * Undo path: never DELETE — mark status=reverted to keep audit history.
+ * Wired from POST /api/control/approve/:id/revert (GlobalChatbot 5s Undo).
+ */
+export async function revertOptimizationEvent(
+  eventId: number | string,
+): Promise<OptimizationEventRow | null> {
+  const mode = storeMode()
+  const idStr = String(eventId)
+
+  if (mode === 'memory') {
+    const row = mem.find((e) => String(e.id) === idStr)
+    if (!row) return null
+    row.status = 'reverted'
+    return { id: row.id, status: row.status }
+  }
+
+  if (mode === 'sqlite') {
+    const db = getSqlite()
+    const existing = db
+      .prepare('SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1')
+      .get(Number(eventId) || eventId) as { id: number; status: string } | undefined
+    if (!existing) return null
+    if (existing.status === 'reverted') {
+      return { id: existing.id, status: 'reverted' }
+    }
+    db.prepare(`UPDATE optimization_events SET status = 'reverted' WHERE id = ?`).run(
+      existing.id,
+    )
+    return { id: existing.id, status: 'reverted' }
+  }
+
+  await ensureMariaTable()
+  return withConn(async (conn) => {
+    const rows = await conn.query(
+      'SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1',
+      [eventId],
+    )
+    if (!Array.isArray(rows) || rows.length === 0) return null
+    const existing = rows[0] as { id: number | string; status: string }
+    if (existing.status === 'reverted') {
+      return { id: existing.id, status: 'reverted' }
+    }
+    await conn.query(`UPDATE optimization_events SET status = 'reverted' WHERE id = ?`, [
+      existing.id,
+    ])
+    return { id: existing.id, status: 'reverted' }
   })
 }
