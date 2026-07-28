@@ -1,6 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import authRoutes from './routes/auth.routes.js'
+import inquiryRoutes from './routes/inquiry.routes.js'
 import { chatRouter } from './routes/chat.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
@@ -29,11 +30,13 @@ export function createApp() {
       service: 'backend',
       health: '/api/health',
       auth: '/api/auth',
+      inquiries: '/api/inquiries',
       chat: 'POST /api/chat',
     })
   })
 
   app.use('/api/auth', authRoutes)
+  app.use('/api/inquiries', inquiryRoutes)
   app.use('/api', chatRouter)
   app.use(errorHandler)
 
