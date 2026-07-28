@@ -24,6 +24,7 @@ copy .env.example .env
 - MariaDB 비밀번호가 없으면 `CHAT_STORE=sqlite`(기본)로 세션·유사질문 카운팅을 영속합니다.
 - MariaDB 사용 시 `CHAT_STORE=mariadb` + `DB_PASSWORD` 설정 후 chat schema 적용.
 - Auth용: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN` 또는 `CORS_ORIGINS` 설정.
+- **팀 공용 DB (Lightsail Ubuntu + MariaDB):** [docs/guides/login-ubuntu-mariadb.md](../docs/guides/login-ubuntu-mariadb.md) · 기술스택 [docs/references/login-auth-tech-stack.md](../docs/references/login-auth-tech-stack.md). `.env`는 Git에 올리지 말고 단톡으로 `DB_*`만 공유.
 
 3. Run:
 
