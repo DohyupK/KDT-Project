@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
@@ -20,6 +20,11 @@ import {
 } from 'lucide-react'
 import { authApi } from '@/api/authApi'
 import { saveAuthSession } from '@/lib/authStorage'
+import {
+  applyDocumentTheme,
+  readStoredUiSettings,
+  useUiSettings,
+} from '@/components/layout/AppShell'
 
 type AuthView = 'login' | 'signup' | 'findId' | 'resetPassword'
 type ResetStep = 'verify' | 'newPassword'
@@ -84,13 +89,18 @@ function FieldLabel({
   htmlFor,
   children,
   required,
+  isDark,
 }: {
   htmlFor: string
   children: React.ReactNode
   required?: boolean
+  isDark: boolean
 }) {
   return (
-    <label htmlFor={htmlFor} className="block text-sm font-medium text-gray-600 mb-2">
+    <label
+      htmlFor={htmlFor}
+      className={`block text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-gray-600'}`}
+    >
       {children} {required && <span className="text-red-500">*</span>}
     </label>
   )
@@ -104,6 +114,7 @@ function IconInput({
   placeholder,
   icon: Icon,
   rightSlot,
+  isDark,
 }: {
   id: string
   type: string
@@ -112,29 +123,42 @@ function IconInput({
   placeholder?: string
   icon: LucideIcon
   rightSlot?: React.ReactNode
+  isDark: boolean
 }) {
   return (
     <div className="relative flex items-center">
-      <Icon className="absolute left-3 text-gray-400" size={18} />
+      <Icon className={`absolute left-3 ${isDark ? 'text-slate-500' : 'text-gray-400'}`} size={18} />
       <input
         id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className={`w-full pl-10 pr-10 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+          isDark
+            ? 'border-slate-600 bg-slate-800 text-slate-100 placeholder:text-slate-500'
+            : 'border-gray-300 bg-gray-50 text-gray-800'
+        }`}
       />
       {rightSlot && <div className="absolute right-3">{rightSlot}</div>}
     </div>
   )
 }
 
-function PasswordToggle({ show, onToggle }: { show: boolean; onToggle: () => void }) {
+function PasswordToggle({
+  show,
+  onToggle,
+  isDark,
+}: {
+  show: boolean
+  onToggle: () => void
+  isDark: boolean
+}) {
   return (
     <button
       type="button"
       onClick={onToggle}
-      className="text-gray-400 hover:text-gray-600"
+      className={isDark ? 'text-slate-500 hover:text-slate-300' : 'text-gray-400 hover:text-gray-600'}
       aria-label={show ? '비밀번호 숨기기' : '비밀번호 표시'}
     >
       {show ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -146,10 +170,12 @@ function PolicyModalDialog({
   title,
   content,
   onClose,
+  isDark,
 }: {
   title: string
   content: string
   onClose: () => void
+  isDark: boolean
 }) {
   return (
     <div
@@ -161,26 +187,45 @@ function PolicyModalDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="policy-modal-title"
-        className="w-full max-w-lg max-h-[80vh] bg-white rounded-2xl shadow-lg border border-gray-200 flex flex-col"
+        className={`w-full max-w-lg max-h-[80vh] rounded-2xl shadow-lg border flex flex-col ${
+          isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
-          <h2 id="policy-modal-title" className="text-lg font-bold text-gray-800">
+        <div
+          className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${
+            isDark ? 'border-slate-700' : 'border-gray-200'
+          }`}
+        >
+          <h2
+            id="policy-modal-title"
+            className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-gray-800'}`}
+          >
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+            className={`p-1 rounded-lg transition-colors ${
+              isDark
+                ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            }`}
             aria-label="닫기"
           >
             <X size={20} />
           </button>
         </div>
-        <div className="px-6 py-4 overflow-y-auto text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+        <div
+          className={`px-6 py-4 overflow-y-auto text-sm leading-relaxed whitespace-pre-line ${
+            isDark ? 'text-slate-300' : 'text-gray-600'
+          }`}
+        >
           {content}
         </div>
-        <div className="px-6 py-4 border-t border-gray-200 shrink-0">
+        <div
+          className={`px-6 py-4 border-t shrink-0 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
+        >
           <button
             type="button"
             onClick={onClose}
@@ -196,6 +241,13 @@ function PolicyModalDialog({
 
 export default function LoginPage() {
   const router = useRouter()
+  const { isDark } = useUiSettings()
+
+  useEffect(() => {
+    const stored = readStoredUiSettings()
+    applyDocumentTheme(stored.themeMode)
+  }, [])
+
   const [view, setView] = useState<AuthView>('login')
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
@@ -488,6 +540,7 @@ export default function LoginPage() {
           title="이용약관"
           content={TERMS_OF_SERVICE}
           onClose={() => setPolicyModal(null)}
+          isDark={isDark}
         />
       )}
       {policyModal === 'privacy' && (
@@ -495,10 +548,13 @@ export default function LoginPage() {
           title="개인정보 처리방침"
           content={PRIVACY_POLICY}
           onClose={() => setPolicyModal(null)}
+          isDark={isDark}
         />
       )}
 
-    <div className="min-h-screen w-full bg-gray-50 text-gray-800 font-sans flex items-center justify-center p-6">
+    <div className={`min-h-screen w-full font-sans flex items-center justify-center p-6 ${
+      isDark ? 'bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-800'
+    }`}>
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <h1 className="font-bold text-xl leading-tight text-blue-400">
@@ -506,18 +562,24 @@ export default function LoginPage() {
             <br />
             예측 시스템
           </h1>
-          <p className="mt-2 text-sm text-gray-500">계정으로 시스템에 접속하세요</p>
+          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>계정으로 시스템에 접속하세요</p>
         </div>
 
         {(view === 'login' || view === 'signup') && (
-          <div className="flex mb-4 bg-white rounded-xl border border-gray-200 p-1">
+          <div className={`flex mb-4 rounded-xl border p-1 ${
+              isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+            }`}>
             {tabs.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => switchView(key)}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${
-                  view === key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700'
+                  view === key
+                    ? 'bg-blue-600 text-white'
+                    : isDark
+                      ? 'text-slate-400 hover:text-slate-200'
+                      : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
                 {label}
@@ -545,11 +607,13 @@ export default function LoginPage() {
           </div>
         )}
 
-        <div className="p-6 bg-white rounded-2xl shadow-sm border border-gray-200">
+        <div className={`p-6 rounded-2xl shadow-sm border ${
+            isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+          }`}>
           {view === 'login' && (
             <form onSubmit={handleLogin} noValidate className="flex flex-col gap-4">
               <div>
-                <FieldLabel htmlFor="login-id" required>
+                <FieldLabel htmlFor="login-id" required isDark={isDark}>
                   아이디
                 </FieldLabel>
                 <IconInput
@@ -559,10 +623,10 @@ export default function LoginPage() {
                   onChange={setLoginId}
                   placeholder="아이디를 입력해주세요"
                   icon={User}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="login-pw" required>
+                <FieldLabel htmlFor="login-pw" required isDark={isDark}>
                   비밀번호
                 </FieldLabel>
                 <IconInput
@@ -573,8 +637,13 @@ export default function LoginPage() {
                   placeholder="비밀번호를 입력해주세요"
                   icon={Lock}
                   rightSlot={
-                    <PasswordToggle show={showLoginPw} onToggle={() => setShowLoginPw((v) => !v)} />
+                    <PasswordToggle
+                      show={showLoginPw}
+                      onToggle={() => setShowLoginPw((v) => !v)}
+                      isDark={isDark}
+                    />
                   }
+                  isDark={isDark}
                 />
               </div>
               <button
@@ -585,7 +654,7 @@ export default function LoginPage() {
                 <LogIn size={18} />
                 {isSubmitting ? '로그인 중...' : '로그인'}
               </button>
-              <div className="flex justify-between text-sm text-gray-500 pt-1">
+              <div className={`flex justify-between text-sm pt-1 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
                 <button
                   type="button"
                   onClick={() => switchView('findId')}
@@ -607,7 +676,7 @@ export default function LoginPage() {
           {view === 'signup' && (
             <form onSubmit={handleSignup} noValidate className="flex flex-col gap-4">
               <div>
-                <FieldLabel htmlFor="signup-name" required>
+                <FieldLabel htmlFor="signup-name" required isDark={isDark}>
                   성명
                 </FieldLabel>
                 <IconInput
@@ -617,10 +686,10 @@ export default function LoginPage() {
                   onChange={setName}
                   placeholder="홍길동"
                   icon={User}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="signup-phone" required>
+                <FieldLabel htmlFor="signup-phone" required isDark={isDark}>
                   연락처
                 </FieldLabel>
                 <IconInput
@@ -630,10 +699,10 @@ export default function LoginPage() {
                   onChange={setPhone}
                   placeholder="010-1234-5678"
                   icon={Phone}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="signup-email" required>
+                <FieldLabel htmlFor="signup-email" required isDark={isDark}>
                   이메일
                 </FieldLabel>
                 <IconInput
@@ -643,10 +712,10 @@ export default function LoginPage() {
                   onChange={setEmail}
                   placeholder="hong@example.com"
                   icon={Mail}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="signup-id" required>
+                <FieldLabel htmlFor="signup-id" required isDark={isDark}>
                   아이디
                 </FieldLabel>
                 <div className="flex gap-2">
@@ -663,13 +732,17 @@ export default function LoginPage() {
                       }}
                       placeholder="아이디"
                       icon={User}
-                    />
+                     isDark={isDark} />
                   </div>
                   <button
                     type="button"
                     onClick={handleCheckDuplicateId}
                     disabled={idCheckStatus === 'checking'}
-                    className="px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-bold hover:bg-gray-100 shrink-0 transition-colors disabled:opacity-60"
+                    className={`px-4 py-2 border-2 rounded-lg text-sm font-bold shrink-0 transition-colors disabled:opacity-60 ${
+                      isDark
+                        ? 'border-slate-600 hover:bg-slate-800 text-slate-200'
+                        : 'border-gray-300 hover:bg-gray-100'
+                    }`}
                   >
                     {idCheckStatus === 'checking' ? '확인 중...' : '중복 확인'}
                   </button>
@@ -699,7 +772,7 @@ export default function LoginPage() {
                 )}
               </div>
               <div>
-                <FieldLabel htmlFor="signup-pw" required>
+                <FieldLabel htmlFor="signup-pw" required isDark={isDark}>
                   비밀번호
                 </FieldLabel>
                 <IconInput
@@ -713,12 +786,14 @@ export default function LoginPage() {
                     <PasswordToggle
                       show={showSignupPw}
                       onToggle={() => setShowSignupPw((v) => !v)}
+                      isDark={isDark}
                     />
                   }
+                  isDark={isDark}
                 />
               </div>
               <div>
-                <FieldLabel htmlFor="signup-pw2" required>
+                <FieldLabel htmlFor="signup-pw2" required isDark={isDark}>
                   비밀번호 확인
                 </FieldLabel>
                 <IconInput
@@ -728,7 +803,7 @@ export default function LoginPage() {
                   onChange={setPasswordConfirm}
                   placeholder="비밀번호 재입력"
                   icon={Lock}
-                />
+                 isDark={isDark} />
                 {passwordsMatch && (
                   <p className="mt-2 text-sm font-medium text-blue-600 inline-flex items-center gap-1">
                     <CheckCircle size={14} /> 비밀번호가 동일합니다.
@@ -740,7 +815,7 @@ export default function LoginPage() {
                   </p>
                 )}
               </div>
-              <div className="flex flex-col gap-2 text-sm text-gray-700">
+              <div className={`flex flex-col gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                 <div className="flex items-center justify-between gap-2">
                   <label className="flex items-center gap-2 cursor-pointer flex-1">
                     <input
@@ -791,12 +866,12 @@ export default function LoginPage() {
 
           {view === 'findId' && (
             <form onSubmit={handleFindId} noValidate className="flex flex-col gap-4">
-              <h2 className="text-lg font-bold text-gray-800">아이디 찾기</h2>
-              <p className="text-sm text-gray-500 -mt-2">
+              <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>아이디 찾기</h2>
+              <p className={`text-sm -mt-2 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
                 가입 시 등록한 성명과 연락처를 입력해주세요.
               </p>
               <div>
-                <FieldLabel htmlFor="find-name" required>
+                <FieldLabel htmlFor="find-name" required isDark={isDark}>
                   성명
                 </FieldLabel>
                 <IconInput
@@ -806,10 +881,10 @@ export default function LoginPage() {
                   onChange={setFindName}
                   placeholder="홍길동"
                   icon={User}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="find-phone" required>
+                <FieldLabel htmlFor="find-phone" required isDark={isDark}>
                   연락처
                 </FieldLabel>
                 <IconInput
@@ -819,7 +894,7 @@ export default function LoginPage() {
                   onChange={setFindPhone}
                   placeholder="010-1234-5678"
                   icon={Phone}
-                />
+                 isDark={isDark} />
               </div>
               <button
                 type="submit"
@@ -831,7 +906,9 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => switchView('login')}
-                className="text-sm text-gray-500 hover:text-blue-600 text-center transition-colors"
+                className={`text-sm hover:text-blue-600 text-center transition-colors ${
+                  isDark ? 'text-slate-400' : 'text-gray-500'
+                }`}
               >
                 ← 로그인으로 돌아가기
               </button>
@@ -840,12 +917,12 @@ export default function LoginPage() {
 
           {view === 'resetPassword' && resetStep === 'verify' && (
             <form onSubmit={handleVerifyReset} noValidate className="flex flex-col gap-4">
-              <h2 className="text-lg font-bold text-gray-800">비밀번호 재설정</h2>
-              <p className="text-sm text-gray-500 -mt-2">
+              <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>비밀번호 재설정</h2>
+              <p className={`text-sm -mt-2 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
                 본인 확인을 위해 회원가입 시 입력한 정보를 입력해주세요.
               </p>
               <div>
-                <FieldLabel htmlFor="reset-name" required>
+                <FieldLabel htmlFor="reset-name" required isDark={isDark}>
                   성명
                 </FieldLabel>
                 <IconInput
@@ -855,10 +932,10 @@ export default function LoginPage() {
                   onChange={setFindName}
                   placeholder="홍길동"
                   icon={User}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="reset-phone" required>
+                <FieldLabel htmlFor="reset-phone" required isDark={isDark}>
                   연락처
                 </FieldLabel>
                 <IconInput
@@ -868,10 +945,10 @@ export default function LoginPage() {
                   onChange={setFindPhone}
                   placeholder="010-1234-5678"
                   icon={Phone}
-                />
+                 isDark={isDark} />
               </div>
               <div>
-                <FieldLabel htmlFor="reset-id" required>
+                <FieldLabel htmlFor="reset-id" required isDark={isDark}>
                   아이디
                 </FieldLabel>
                 <IconInput
@@ -881,7 +958,7 @@ export default function LoginPage() {
                   onChange={setResetId}
                   placeholder="아이디"
                   icon={User}
-                />
+                 isDark={isDark} />
               </div>
               <button
                 type="submit"
@@ -893,7 +970,9 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => switchView('login')}
-                className="text-sm text-gray-500 hover:text-blue-600 text-center transition-colors"
+                className={`text-sm hover:text-blue-600 text-center transition-colors ${
+                  isDark ? 'text-slate-400' : 'text-gray-500'
+                }`}
               >
                 ← 로그인으로 돌아가기
               </button>
@@ -902,17 +981,21 @@ export default function LoginPage() {
 
           {view === 'resetPassword' && resetStep === 'newPassword' && (
             <form onSubmit={handleResetPassword} noValidate className="flex flex-col gap-4">
-              <h2 className="text-lg font-bold text-gray-800">새 비밀번호 설정</h2>
-              <p className="text-sm text-gray-500 -mt-2">
+              <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>새 비밀번호 설정</h2>
+              <p className={`text-sm -mt-2 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
                 새 비밀번호를 입력해주세요.
               </p>
-              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
+              <div className={`rounded-lg border px-4 py-3 text-sm ${
+                isDark
+                  ? 'bg-slate-800 border-slate-700 text-slate-300'
+                  : 'bg-gray-50 border-gray-200 text-gray-600'
+              }`}>
                 <p>
-                  <span className="font-medium text-gray-700">아이디</span> {resetId}
+                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>아이디</span> {resetId}
                 </p>
               </div>
               <div>
-                <FieldLabel htmlFor="reset-pw" required>
+                <FieldLabel htmlFor="reset-pw" required isDark={isDark}>
                   새 비밀번호
                 </FieldLabel>
                 <IconInput
@@ -926,12 +1009,14 @@ export default function LoginPage() {
                     <PasswordToggle
                       show={showResetPw}
                       onToggle={() => setShowResetPw((v) => !v)}
+                      isDark={isDark}
                     />
                   }
+                  isDark={isDark}
                 />
               </div>
               <div>
-                <FieldLabel htmlFor="reset-pw2" required>
+                <FieldLabel htmlFor="reset-pw2" required isDark={isDark}>
                   비밀번호 확인
                 </FieldLabel>
                 <IconInput
@@ -941,7 +1026,7 @@ export default function LoginPage() {
                   onChange={setResetPasswordConfirm}
                   placeholder="비밀번호 재입력"
                   icon={Lock}
-                />
+                 isDark={isDark} />
                 {resetPasswordsMatch && (
                   <p className="mt-2 text-sm font-medium text-blue-600 inline-flex items-center gap-1">
                     <CheckCircle size={14} /> 비밀번호가 동일합니다.
@@ -968,7 +1053,9 @@ export default function LoginPage() {
                   setResetPasswordConfirm('')
                   setResetStep('verify')
                 }}
-                className="text-sm text-gray-500 hover:text-blue-600 text-center transition-colors"
+                className={`text-sm hover:text-blue-600 text-center transition-colors ${
+                  isDark ? 'text-slate-400' : 'text-gray-500'
+                }`}
               >
                 ← 본인 확인으로 돌아가기
               </button>
