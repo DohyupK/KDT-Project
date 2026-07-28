@@ -6,12 +6,17 @@ import Link from 'next/link'
 import { MessageCircle, X } from 'lucide-react'
 import {
   postApproveControl,
+  postOutcomeControl,
   postRevertControl,
   postChat,
   SAMPLE_CHAT_FEATURES,
   type ChatFeatures,
   type ChatRecommendation,
 } from '@/api/aiApi'
+import {
+  readLlmProvidersCache,
+  type LlmKeyPublic,
+} from '@/api/llmKeysApi'
 import { useSelectedLot } from '@/context/SelectedLotContext'
 
 type ChatRole = 'user' | 'ai'
@@ -24,6 +29,10 @@ type ChatMessage = {
   recommendation?: ChatRecommendation | null
   approved?: boolean
   approving?: boolean
+  /** After approve: event id for outcome form */
+  eventId?: number | string | null
+  outcomeSaved?: boolean
+  outcomeSaving?: boolean
 }
 
 type UndoSnack = {
@@ -46,8 +55,12 @@ export default function GlobalChatbot() {
 
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
+  const [llmMode, setLlmMode] = useState('auto')
+  const [llmOptions, setLlmOptions] = useState<LlmKeyPublic[]>([])
   const [undoSnack, setUndoSnack] = useState<UndoSnack | null>(null)
   const [undoBusy, setUndoBusy] = useState(false)
+  const [outcomeDefect, setOutcomeDefect] = useState<'0' | '1' | ''>('')
+  const [outcomeCapacity, setOutcomeCapacity] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -68,6 +81,12 @@ export default function GlobalChatbot() {
     if (!chatOpen) return
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, chatOpen, pending, undoSnack])
+
+  // Provider list: localStorage cache only (refreshed on security-tab Save)
+  useEffect(() => {
+    const cached = readLlmProvidersCache()
+    if (cached?.keys) setLlmOptions(cached.keys)
+  }, [chatOpen])
 
   useEffect(() => {
     return () => {
@@ -121,6 +140,7 @@ export default function GlobalChatbot() {
       const res = await postChat({
         message: text,
         features: attached ?? undefined,
+        llm_mode: llmMode || 'auto',
       })
       if (ac.signal.aborted) return
       idRef.current += 1
@@ -202,6 +222,7 @@ export default function GlobalChatbot() {
                 ...m,
                 approved: true,
                 approving: false,
+                eventId: res.event_id,
               }
             : m,
         ),
@@ -212,9 +233,11 @@ export default function GlobalChatbot() {
         {
           id: idRef.current,
           role: 'ai',
-          text: `승인 내용이 제어 로그에 기록되었습니다. (event_id=${res.event_id}, status=${res.status}) 5초 안에 실행 취소할 수 있습니다.`,
+          text: `승인 내용이 제어 로그에 기록되었습니다. (event_id=${res.event_id}, status=${res.status}) 5초 안에 실행 취소할 수 있습니다. 아래에서 실측 양/불을 입력할 수 있습니다.`,
         },
       ])
+      setOutcomeDefect('')
+      setOutcomeCapacity('')
       startUndoWindow(res.event_id)
     } catch (err) {
       let detail = '승인 기록에 실패했습니다.'
@@ -232,6 +255,61 @@ export default function GlobalChatbot() {
         ...prev,
         { id: idRef.current, role: 'ai', text: detail },
       ])
+    }
+  }
+
+  const submitOutcome = async (msgId: number, eventId: number | string) => {
+    if (outcomeDefect !== '0' && outcomeDefect !== '1') return
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, outcomeSaving: true } : m)),
+    )
+    try {
+      const capRaw = outcomeCapacity.trim()
+      const cap =
+        capRaw === '' ? null : Number(capRaw)
+      if (cap !== null && !Number.isFinite(cap)) {
+        throw new Error('실측 용량은 숫자여야 합니다.')
+      }
+      const res = await postOutcomeControl(eventId, {
+        outcome_quality_defect: Number(outcomeDefect) as 0 | 1,
+        outcome_capacity: cap,
+      })
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? { ...m, outcomeSaved: true, outcomeSaving: false }
+            : m,
+        ),
+      )
+      idRef.current += 1
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: idRef.current,
+          role: 'ai',
+          text:
+            `실측이 기록되었습니다. (event_id=${res.event_id}, ` +
+            `양/불=${res.outcome_quality_defect}` +
+            (res.outcome_capacity != null
+              ? `, 용량=${res.outcome_capacity} mAh/g`
+              : '') +
+            ')',
+        },
+      ])
+      setOutcomeDefect('')
+      setOutcomeCapacity('')
+    } catch (err) {
+      let detail = '실측 기록에 실패했습니다.'
+      if (err && typeof err === 'object') {
+        const ax = err as { message?: string; response?: { data?: { error?: unknown } } }
+        if (typeof ax.response?.data?.error === 'string') detail = ax.response.data.error
+        else if (ax.message) detail = ax.message
+      }
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, outcomeSaving: false } : m)),
+      )
+      idRef.current += 1
+      setMessages((prev) => [...prev, { id: idRef.current, role: 'ai', text: detail }])
     }
   }
 
@@ -381,7 +459,7 @@ export default function GlobalChatbot() {
                   </div>
                 ) : null}
                 {m.recommendation?.suggestion && m.role === 'ai' ? (
-                  <div className="mt-2">
+                  <div className="mt-2 space-y-2">
                     {m.approved ? (
                       <span className="text-[11px] font-medium text-emerald-700">승인됨</span>
                     ) : (
@@ -394,6 +472,57 @@ export default function GlobalChatbot() {
                         {m.approving ? '기록 중…' : '제안 승인'}
                       </button>
                     )}
+                    {m.approved && m.eventId != null && !m.outcomeSaved ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
+                        <div className="font-medium text-slate-800">실측 기록 (선택)</div>
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          작업자 실측만 저장합니다. 값을 만들지 않습니다.
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <label className="flex items-center gap-1">
+                            양/불
+                            <select
+                              value={outcomeDefect}
+                              onChange={(e) =>
+                                setOutcomeDefect(e.target.value as '0' | '1' | '')
+                              }
+                              disabled={m.outcomeSaving}
+                              className="h-7 rounded border border-slate-200 bg-white px-1"
+                            >
+                              <option value="">선택</option>
+                              <option value="0">정상(0)</option>
+                              <option value="1">불량(1)</option>
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-1">
+                            용량
+                            <input
+                              type="number"
+                              step="any"
+                              placeholder="mAh/g"
+                              value={outcomeCapacity}
+                              onChange={(e) => setOutcomeCapacity(e.target.value)}
+                              disabled={m.outcomeSaving}
+                              className="h-7 w-20 rounded border border-slate-200 bg-white px-1"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            disabled={
+                              m.outcomeSaving ||
+                              (outcomeDefect !== '0' && outcomeDefect !== '1')
+                            }
+                            onClick={() => void submitOutcome(m.id, m.eventId!)}
+                            className="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                          >
+                            {m.outcomeSaving ? '저장 중…' : '실측 저장'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {m.outcomeSaved ? (
+                      <span className="block text-[11px] text-slate-500">실측 저장됨</span>
+                    ) : null}
                   </div>
                 ) : null}
                 {m.mode && m.mode !== 'security_redirect' && m.role === 'ai' ? (
@@ -410,6 +539,27 @@ export default function GlobalChatbot() {
           </div>
 
           <div className="border-t border-slate-200 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <label className="shrink-0 text-[10px] font-medium text-slate-500">API</label>
+              <select
+                value={llmMode}
+                onChange={(e) => setLlmMode(e.target.value)}
+                disabled={pending}
+                className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-700"
+              >
+                <option value="auto">Auto (단가·길이)</option>
+                {llmOptions.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.display_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {llmOptions.length === 0 ? (
+              <p className="mb-2 text-[10px] text-slate-400">
+                등록된 API 없음 · /security 에서 키를 저장하세요
+              </p>
+            ) : null}
             <div className="mb-2 flex flex-wrap gap-1.5">
               {chips.map((q) => (
                 <button

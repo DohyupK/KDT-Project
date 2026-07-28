@@ -23,4 +23,4 @@
 
 작업 일지: [work-log/](./work-log/) · [오늘(2026-07-23)](./work-log/2026-07-23.md) · [2026-07-22](./work-log/2026-07-22.md)
 
-관련 계획·프롬프트: [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [O/X 프롬프트 보강](./plans/2026-07-22-ox-classifier-prompt.md) · [train_pipeline 프롬프트](./prompts/train-pipeline-ox-classifier.md) · [CSV 스키마](./references/cathode-clf-schema.md) · [중요 경로](./references/important-paths.md)
+관련 계획·프롬프트: [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [O/X 프롬프트 보강](./plans/2026-07-22-ox-classifier-prompt.md) · [train_pipeline 프롬프트](./prompts/train-pipeline-ox-classifier.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [중요 경로](./references/important-paths.md)

@@ -43,13 +43,16 @@
 |------|------|
 | `ai-service/AGENTS.md` | 챗봇·ML 1차 참고서 |
 | `ai-service/train_pipeline.py` | `train_model` / `predict` |
-| `ai-service/data/cathode_clf_data.csv` | 학습 CSV |
-| `ai-service/models/` | **최종 모델** (xgb/cat/encoder/imputer/metadata/SHAP) |
-| `ai-service/app/` | FastAPI (`/health`, `/predict`, `/chat`) |
-| `ai-service/agent/` | LangGraph + `llm.py` priority failover |
-| `ai-service/.env.example` | LLM · vLLM env 이름만 |
-| `docs/references/cathode-clf-schema.md` | CSV 스키마 |
-| `docs/prompts/train-pipeline-ox-classifier.md` | 학습 프롬프트 |
+| `ai-service/data/cathode_clf_data.csv` | clf 학습 CSV (O/X) |
+| `ai-service/data/cathode_reg_data.csv` | reg 학습 CSV (capacity mAh/g) |
+| `ai-service/models/` | clf 산출 + `reg/` + `registry.json` (ready 헤드) |
+| `ai-service/app/` | FastAPI (`/health`, `/predict`, `/predict-capacity`, `/chat`) |
+| `ai-service/agent/` | LangGraph · `model_registry` · tools · LLM |
+| `ai-service/agent/model_registry.py` | registry ready 헤드 일괄 실행 (확장 포인트) |
+| `ai-service/.env.example` | CHAT_USE_LLM · vLLM (회사 API 키 없음) |
+| `docs/references/cathode-clf-schema.md` | clf CSV 스키마 |
+| `docs/references/cathode-reg-schema.md` | reg CSV 스키마 |
+| `docs/prompts/train-pipeline-ox-classifier.md` | clf 학습 프롬프트 |
 
 ## 문서
 

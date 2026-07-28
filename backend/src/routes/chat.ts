@@ -13,12 +13,14 @@ import {
   matchedSecurityKeyword,
 } from '../services/securityGate.js'
 import { countConsecutiveSimilar, needsGuideline } from '../services/similarity.js'
+import { listLlmKeysWithSecrets } from '../services/llmKeyStore.js'
 
 type ChatBody = {
   message?: string
   session_id?: string | null
   features?: Record<string, string | number | undefined> | null
   fillThreshold?: number | null
+  llm_mode?: string | null
 }
 
 export const chatRouter = Router()
@@ -49,6 +51,8 @@ chatRouter.post('/chat', async (req, res) => {
         mode: 'security_redirect',
         provider: 'security_redirect',
         predict: null,
+        capacity: null,
+        heads: null,
         recommendation: null,
         error: null,
         ai_proxied: false,
@@ -60,11 +64,34 @@ chatRouter.post('/chat', async (req, res) => {
 
     const similarStreak = countConsecutiveSimilar(message, previousUser)
     const guideline = needsGuideline(message, previousUser)
+
+    let llm_credentials: Awaited<ReturnType<typeof listLlmKeysWithSecrets>> = []
+    try {
+      llm_credentials = listLlmKeysWithSecrets()
+    } catch (err) {
+      // Encryption key missing / empty DB — chat uses template (no .env API fallback)
+      console.warn(
+        '[POST /api/chat] llm keys unavailable:',
+        err instanceof Error ? err.message : err,
+      )
+    }
+
     const ai = await proxyChat({
       message,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: guideline,
+      llm_mode: body.llm_mode ?? 'auto',
+      llm_credentials: llm_credentials.map((k) => ({
+        id: k.id,
+        display_name: k.display_name,
+        provider_kind: k.provider_kind,
+        company: k.company,
+        model: k.model,
+        base_url: k.base_url,
+        api_key: k.api_key,
+        cost_score: k.cost_score,
+      })),
     })
 
     await insertMessage(
@@ -81,6 +108,8 @@ chatRouter.post('/chat', async (req, res) => {
       mode: ai.mode,
       provider: ai.provider ?? ai.mode,
       predict: ai.predict,
+      capacity: ai.capacity ?? null,
+      heads: ai.heads ?? null,
       recommendation: ai.recommendation ?? null,
       error: ai.error,
       need_guideline: guideline,

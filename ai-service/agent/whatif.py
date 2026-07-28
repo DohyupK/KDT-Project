@@ -1,8 +1,10 @@
 """
-What-if grid search on existing O/X predict (Cold start; no reg.csv).
+What-if grid search on O/X predict + capacity regression.
 
 Clips candidates to admin control bounds (Setting → Express → control_bounds.json).
 If unconstrained ideal exceeds bounds, sets boundary_hit + limit_reason (compromise).
+
+Selection: minimize defect probability first; on ties prefer higher predicted capacity.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import os
 from typing import Any
 
 from agent.bounds_cache import clip_value, get_control_bounds
-from agent.tools import RAW_FEATURE_KEYS, run_predict_tool
+from agent.tools import RAW_FEATURE_KEYS, run_capacity_tool, run_predict_tool
 
 METHOD = "whatif_grid"
 
@@ -60,6 +62,32 @@ def _limit_reason(
     return ". ".join(parts) + ("." if parts else "") if parts else None
 
 
+def _try_capacity(features: dict[str, Any]) -> float | None:
+    try:
+        out = run_capacity_tool(features)
+        return float(out["capacity"])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _is_better(
+    prob: float,
+    capacity: float | None,
+    best_prob: float,
+    best_capacity: float | None,
+) -> bool:
+    """True if (prob, capacity) beats current best: lower prob, then higher capacity."""
+    if prob < best_prob - 1e-9:
+        return True
+    if abs(prob - best_prob) <= 1e-9:
+        if capacity is None:
+            return False
+        if best_capacity is None:
+            return True
+        return capacity > best_capacity + 1e-9
+    return False
+
+
 def run_whatif(
     features: dict[str, Any],
     baseline: dict[str, Any],
@@ -75,6 +103,7 @@ def run_whatif(
     base_status = int(baseline["defect_status"])
     thr = float(baseline.get("applied_threshold", fillThreshold or 0.5))
     bounds = get_control_bounds()
+    capacity_before = _try_capacity(baseline_features)
 
     payload: dict[str, Any] = {
         "method": METHOD,
@@ -83,6 +112,7 @@ def run_whatif(
             "defect_status": base_status,
             "applied_threshold": thr,
             "features": baseline_features,
+            "capacity": capacity_before,
         },
         "suggestion": None,
         "note": None,
@@ -101,9 +131,11 @@ def run_whatif(
     # Best within admin bounds (clipped candidates)
     best_clipped: dict[str, Any] | None = None
     best_clipped_prob = base_prob
+    best_clipped_cap: float | None = capacity_before
     # Unconstrained ideal (no admin clip) — for boundary_hit messaging
     best_ideal: dict[str, Any] | None = None
     best_ideal_prob = base_prob
+    best_ideal_cap: float | None = capacity_before
 
     for dh in hum_deltas:
         for dt in temp_deltas:
@@ -125,12 +157,15 @@ def run_whatif(
 
             if ideal_pred is not None:
                 ip = float(ideal_pred["probability"])
-                if ip < best_ideal_prob - 1e-9:
+                icap = _try_capacity(ideal_row)
+                if _is_better(ip, icap, best_ideal_prob, best_ideal_cap):
                     best_ideal_prob = ip
+                    best_ideal_cap = icap
                     best_ideal = {
                         "humidity": float(ideal_row["humidity"]),
                         "sintering_temp": float(ideal_row["sintering_temp"]),
                         "probability": ip,
+                        "capacity": icap,
                     }
 
             clipped_hum = clip_value("humidity", ideal_hum, bounds)
@@ -145,11 +180,14 @@ def run_whatif(
                 continue
 
             p = float(pred["probability"])
-            if p < best_clipped_prob - 1e-9:
+            cap = _try_capacity(cand)
+            if _is_better(p, cap, best_clipped_prob, best_clipped_cap):
                 best_clipped_prob = p
+                best_clipped_cap = cap
                 best_clipped = {
                     "cand": cand,
                     "pred": pred,
+                    "capacity": cap,
                     "ideal_hum": float(ideal_row["humidity"]),
                     "ideal_temp": float(ideal_row["sintering_temp"]),
                 }
@@ -160,6 +198,7 @@ def run_whatif(
 
     cand = best_clipped["cand"]
     pred = best_clipped["pred"]
+    capacity_after = best_clipped.get("capacity")
 
     # Prefer ideal point's values for boundary messaging when ideal beat clipped path
     if best_ideal is not None:
@@ -186,9 +225,11 @@ def run_whatif(
         cand["sintering_temp"] = round(clipped_from_ideal_temp, 4)
         try:
             pred = run_predict_tool(cand, fillThreshold=fillThreshold)
+            capacity_after = _try_capacity(cand)
         except Exception:  # noqa: BLE001
             pred = best_clipped["pred"]
             cand = best_clipped["cand"]
+            capacity_after = best_clipped.get("capacity")
             clipped_from_ideal_hum = float(cand["humidity"])
             clipped_from_ideal_temp = float(cand["sintering_temp"])
         clipped_hum = float(cand["humidity"])
@@ -218,6 +259,9 @@ def run_whatif(
             "humidity": clipped_hum,
             "sintering_temp": clipped_temp,
         },
+        "capacity_before": capacity_before,
+        "capacity_after": capacity_after,
+        "unit": "mAh/g",
     }
     payload["note"] = (
         "What-if(격자 탐색) 제안입니다. 장비 반영은 작업자 승인 후에만 로그됩니다."

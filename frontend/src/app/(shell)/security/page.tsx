@@ -1,6 +1,7 @@
 'use client'
 
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
+import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
 import { useUiSettings } from '@/components/layout/AppShell'
 
 export default function SecurityPage() {
@@ -17,20 +18,27 @@ export default function SecurityPage() {
       </h1>
       <p className={`mt-3 max-w-2xl text-sm leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
         {language === 'en'
-          ? 'Handle security documents and sensitive queries in this tab. Messages stay on local vLLM only.'
-          : '보안·기밀 질의는 이 탭에서만 처리합니다. 메시지는 외부 LLM으로 나가지 않고 로컬 vLLM만 사용합니다.'}
+          ? 'Register general-chat API keys here (encrypted under ai-service/DB). Sensitive chat stays on local vLLM below.'
+          : '일반 챗봇용 API 키는 아래에서 등록합니다(암호문은 ai-service/DB). 기밀 질의는 아래 보안 챗(로컬 vLLM)을 사용합니다.'}
       </p>
+
+      <LlmApiKeyVault isDark={isDark} />
+
       <div
-        className={`mt-8 max-w-xl ${
+        className={`mt-10 max-w-xl ${
           isDark
             ? '[&>div]:border-slate-600 [&>div]:bg-slate-800 [&>div]:text-slate-400 [&>div>p:first-child]:text-slate-100 [&_code]:text-slate-300'
             : ''
         }`}
       >
+        <h2 className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+          {language === 'en' ? 'Secure chat (local vLLM)' : '보안 챗 (로컬 vLLM)'}
+        </h2>
         <SecurityChatbot />
       </div>
       <p className={`mt-6 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-        참고: docs/references/security-chat-skeleton.md · docs/references/vllm-setup.md
+        참고: docs/references/security-chat-skeleton.md · docs/references/vllm-setup.md ·
+        docs/references/ai-service-feature-catalog.md
       </p>
     </div>
   )

@@ -5,6 +5,7 @@ import { chatRouter } from './routes/chat.js'
 import { controlRouter } from './routes/control.js'
 import { settingsRouter } from './routes/settings.js'
 import { securityChatRouter } from './routes/securityChat.js'
+import { llmKeysRouter } from './routes/llmKeys.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 export function createApp() {
@@ -34,8 +35,10 @@ export function createApp() {
       auth: '/api/auth',
       chat: 'POST /api/chat',
       security_chat: 'POST /api/security-chat',
+      llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',
       control_approve: 'POST /api/control/approve',
       control_revert: 'POST /api/control/approve/:id/revert',
+      control_outcome: 'POST /api/control/approve/:id/outcome',
       control_bounds: 'GET|PUT /api/settings/control-bounds',
     })
   })
@@ -43,6 +46,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes)
   app.use('/api', chatRouter)
   app.use('/api', securityChatRouter)
+  app.use('/api', llmKeysRouter)
   app.use('/api', controlRouter)
   app.use('/api', settingsRouter)
   app.use(errorHandler)

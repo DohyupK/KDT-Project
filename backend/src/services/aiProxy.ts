@@ -1,10 +1,24 @@
 export type AiChatFeatures = Record<string, string | number | undefined>
 
+export type AiLlmCredential = {
+  id: string
+  display_name: string
+  provider_kind: string
+  company: string
+  model: string
+  base_url: string | null
+  api_key: string
+  cost_score: number
+}
+
 export type AiChatRequest = {
   message: string
   features?: AiChatFeatures | null
   fillThreshold?: number | null
   need_guideline?: boolean
+  /** "auto" | stored key id */
+  llm_mode?: string | null
+  llm_credentials?: AiLlmCredential[]
 }
 
 export type AiPredictResult = {
@@ -12,6 +26,12 @@ export type AiPredictResult = {
   probability: number
   applied_threshold: number
   top_risk_factors: string[]
+}
+
+export type AiCapacityResult = {
+  capacity: number
+  unit: string
+  top_factors: string[]
 }
 
 export type AiRecommendation = {
@@ -26,6 +46,8 @@ export type AiChatResponse = {
   mode: string
   provider?: string
   predict: AiPredictResult | null
+  capacity?: AiCapacityResult | null
+  heads?: Record<string, unknown> | null
   recommendation?: AiRecommendation | null
   error: string | null
 }
@@ -40,6 +62,8 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: body.need_guideline ?? false,
+      llm_mode: body.llm_mode ?? undefined,
+      llm_credentials: body.llm_credentials ?? undefined,
     }),
   })
 

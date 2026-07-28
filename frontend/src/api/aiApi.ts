@@ -51,6 +51,9 @@ export type WhatIfSuggestion = {
   limit_reason?: string | null
   ideal_values?: Record<string, number> | null
   clipped_values?: Record<string, number> | null
+  capacity_before?: number | null
+  capacity_after?: number | null
+  unit?: string | null
 }
 
 export type ChatRecommendation = {
@@ -60,6 +63,7 @@ export type ChatRecommendation = {
     defect_status: number
     applied_threshold: number
     features: ChatFeatures
+    capacity?: number | null
   }
   suggestion: WhatIfSuggestion | null
   note?: string | null
@@ -70,6 +74,14 @@ export type ChatRequest = {
   features?: ChatFeatures | null
   fillThreshold?: number | null
   session_id?: string | null
+  /** "auto" | stored key id from /security vault */
+  llm_mode?: string | null
+}
+
+export type ChatCapacityResult = {
+  capacity: number
+  unit: string
+  top_factors: string[]
 }
 
 export type ChatResponse = {
@@ -78,6 +90,8 @@ export type ChatResponse = {
   mode: string
   provider: string
   predict: ChatPredictResult | null
+  capacity?: ChatCapacityResult | null
+  heads?: Record<string, unknown> | null
   recommendation?: ChatRecommendation | null
   error: string | null
   need_guideline?: boolean
@@ -101,6 +115,20 @@ export type ApproveControlResponse = {
   control_store?: string
 }
 
+export type OutcomeControlRequest = {
+  outcome_quality_defect: 0 | 1
+  outcome_capacity?: number | null
+}
+
+export type OutcomeControlResponse = {
+  ok: boolean
+  event_id: number | string
+  status: string
+  outcome_quality_defect: 0 | 1
+  outcome_capacity: number | null
+  control_store?: string
+}
+
 /** Proxied through Express backend: security gate + session + ai-service. */
 export async function postChat(body: ChatRequest): Promise<ChatResponse> {
   const session_id = body.session_id ?? getChatSessionId()
@@ -109,6 +137,7 @@ export async function postChat(body: ChatRequest): Promise<ChatResponse> {
     features: body.features ?? undefined,
     fillThreshold: body.fillThreshold ?? undefined,
     session_id: session_id ?? undefined,
+    llm_mode: body.llm_mode ?? 'auto',
   })
   if (data.session_id) setChatSessionId(data.session_id)
   return data
@@ -133,6 +162,22 @@ export async function postRevertControl(
 ): Promise<ApproveControlResponse> {
   const { data } = await apiClient.post<ApproveControlResponse>(
     `/control/approve/${encodeURIComponent(String(eventId))}/revert`,
+  )
+  return data
+}
+
+/** Record measured outcome only (no synthetic data). */
+export async function postOutcomeControl(
+  eventId: number | string,
+  body: OutcomeControlRequest,
+): Promise<OutcomeControlResponse> {
+  const { data } = await apiClient.post<OutcomeControlResponse>(
+    `/control/approve/${encodeURIComponent(String(eventId))}/outcome`,
+    {
+      outcome_quality_defect: body.outcome_quality_defect,
+      outcome_capacity:
+        body.outcome_capacity === undefined ? null : body.outcome_capacity,
+    },
   )
   return data
 }

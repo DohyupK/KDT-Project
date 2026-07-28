@@ -3,6 +3,7 @@ import {
   getControlStoreMode,
   insertOptimizationEvent,
   revertOptimizationEvent,
+  updateOptimizationOutcome,
 } from '../services/controlStore.js'
 import { ensureSession } from '../services/chatStore.js'
 
@@ -13,6 +14,7 @@ type RecommendationBody = {
     defect_status?: number
     applied_threshold?: number
     features?: Record<string, unknown>
+    capacity?: number | null
   }
   suggestion?: {
     deltas?: Record<string, unknown>
@@ -20,6 +22,8 @@ type RecommendationBody = {
     probability?: number
     defect_status?: number
     applied_threshold?: number
+    capacity_before?: number | null
+    capacity_after?: number | null
   } | null
   note?: string | null
 }
@@ -28,6 +32,11 @@ type ApproveBody = {
   session_id?: string | null
   lot_id?: string | null
   recommendation?: RecommendationBody | null
+}
+
+type OutcomeBody = {
+  outcome_quality_defect?: number
+  outcome_capacity?: number | null
 }
 
 export const controlRouter = Router()
@@ -56,6 +65,10 @@ controlRouter.post('/control/approve', async (req, res) => {
         ? String(suggestion.after_features.id)
         : null)
 
+    const capacityBefore =
+      suggestion.capacity_before ?? rec.baseline.capacity ?? null
+    const capacityAfter = suggestion.capacity_after ?? null
+
     const row = await insertOptimizationEvent({
       sessionId,
       lotId,
@@ -66,6 +79,14 @@ controlRouter.post('/control/approve', async (req, res) => {
       probAfter: Number(suggestion.probability ?? 0),
       method: rec.method || 'whatif_grid',
       status: 'approved',
+      capacityBefore:
+        capacityBefore === null || capacityBefore === undefined
+          ? null
+          : Number(capacityBefore),
+      capacityAfter:
+        capacityAfter === null || capacityAfter === undefined
+          ? null
+          : Number(capacityAfter),
     })
 
     console.info(
@@ -106,5 +127,43 @@ controlRouter.post('/control/approve/:id/revert', async (req, res) => {
     const detail = err instanceof Error ? err.message : String(err)
     console.error('[POST /api/control/approve/:id/revert]', detail)
     res.status(500).json({ error: detail })
+  }
+})
+
+/** Record measured outcome only (no synthetic generation). */
+controlRouter.post('/control/approve/:id/outcome', async (req, res) => {
+  try {
+    const idParam = req.params.id
+    const eventId = /^\d+$/.test(idParam) ? Number(idParam) : idParam
+    const body = req.body as OutcomeBody
+    const defect = body.outcome_quality_defect
+    if (defect !== 0 && defect !== 1) {
+      res.status(400).json({ error: 'outcome_quality_defect must be 0 or 1' })
+      return
+    }
+    const row = await updateOptimizationOutcome(eventId, {
+      outcomeQualityDefect: defect,
+      outcomeCapacity:
+        body.outcome_capacity === undefined ? null : body.outcome_capacity,
+    })
+    if (!row) {
+      res.status(404).json({ error: 'optimization event not found' })
+      return
+    }
+    console.info(
+      `[control_outcome] event=${row.id} defect=${defect} capacity=${body.outcome_capacity ?? 'null'}`,
+    )
+    res.json({
+      ok: true,
+      event_id: row.id,
+      status: row.status,
+      outcome_quality_defect: defect,
+      outcome_capacity: body.outcome_capacity ?? null,
+      control_store: getControlStoreMode(),
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error('[POST /api/control/approve/:id/outcome]', detail)
+    res.status(400).json({ error: detail })
   }
 })
