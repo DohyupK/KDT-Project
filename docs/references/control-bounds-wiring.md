@@ -22,14 +22,17 @@ Setting page (frontend/src/app/(shell)/setting/page.tsx)
 
 기본값: sintering_temp 700–850, humidity 5–95.
 
-## Approve / 5초 Undo
+## Approve / 5초 Undo / 실측 outcome
 
 ```
 GlobalChatbot 「제안 승인」
   → POST /api/control/approve  → optimization_events.status = 'approved'
+    (+ capacity_before/after 메타)
   → 5초 Undo 스낵바
   → POST /api/control/approve/:id/revert → status = 'reverted' (DELETE 금지)
   → 5초 만료 시 DB는 approved 유지
+  → (선택) 실측 양/불·용량 입력
+  → POST /api/control/approve/:id/outcome
 ```
 
 스토어: `CONTROL_STORE` 또는 `CHAT_STORE` (`sqlite` 기본 → `backend/data/control.sqlite`).

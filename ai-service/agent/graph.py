@@ -3,9 +3,9 @@ Minimal LangGraph chatbot.
 
 Flow: START → predict_node → whatif_node → compose_node → END
 
-- predict Tool: train_pipeline.predict (features 있을 때만)
-- whatif: O/X predict 격자 탐색 (Cold start; reg.csv 없음)
-- compose: template by default; CHAT_USE_LLM=1 + keys → Groq/Gemini length routing
+- predict_node: all ready registry heads (clf O/X + reg capacity + future)
+- whatif: O/X predict 격자 탐색 (Cold start)
+- compose: template / LLM
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.llm import compose_with_failover, llm_enabled
 from agent.prompts import USAGE_GUIDELINE
-from agent.tools import run_predict_tool
+from agent.tools import run_registered_heads
 from agent.whatif import run_whatif
 
 
@@ -25,7 +25,11 @@ class ChatState(TypedDict, total=False):
     features: dict[str, Any] | None
     fillThreshold: float | None
     need_guideline: bool
+    llm_mode: str | None
+    llm_credentials: list[dict[str, Any]] | None
     predict_result: dict[str, Any] | None
+    capacity_result: dict[str, Any] | None
+    head_results: dict[str, Any] | None
     recommendation: dict[str, Any] | None
     error: str | None
     reply: str
@@ -62,6 +66,19 @@ def _format_recommendation(recommendation: dict[str, Any] | None) -> str:
             f"(양품 확률 약 {(1.0 - p_after) * 100:.1f}%)."
         ),
     ]
+    cap_before = sug.get("capacity_before")
+    cap_after = sug.get("capacity_after")
+    unit = sug.get("unit") or "mAh/g"
+    if cap_before is not None and cap_after is not None:
+        lines.append(
+            f"예상 용량 {float(cap_before):.1f} → {float(cap_after):.1f} {unit} "
+            "(reg 모델 예측이며 실측이 아닙니다)."
+        )
+    elif cap_after is not None:
+        lines.append(
+            f"제안 적용 시 예상 용량 {float(cap_after):.1f} {unit} "
+            "(reg 모델 예측이며 실측이 아닙니다)."
+        )
     parts: list[str] = []
     if hum_d is not None and float(hum_d) != 0.0:
         parts.append(f"습도 {after.get('humidity')}% (Δ {hum_d:+g})")
@@ -78,23 +95,43 @@ def _format_recommendation(recommendation: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+def _format_capacity(capacity_result: dict[str, Any] | None) -> str:
+    if not capacity_result:
+        return ""
+    cap = float(capacity_result["capacity"])
+    unit = capacity_result.get("unit") or "mAh/g"
+    factors = capacity_result.get("top_factors") or []
+    factors_txt = ", ".join(str(f) for f in factors)
+    note = ""
+    if cap < 185:
+        note = " (데이터상 저용량 구간은 불량 비율이 높은 편입니다.)"
+    elif cap >= 200:
+        note = " (데이터상 고용량 구간은 정상 비율이 높은 편입니다.)"
+    return (
+        f"\n\n[용량 예측] 예상 전지 용량은 **{cap:.1f} {unit}** 입니다.{note}\n"
+        f"용량 모델 Top-4 요인: {factors_txt} "
+        "(전역 SHAP이며 이번 LOT 단독 원인이라고 단정하지 않습니다)."
+    )
+
+
 def _template_reply(
     message: str,
     predict_result: dict[str, Any] | None,
     error: str | None,
     recommendation: dict[str, Any] | None = None,
+    capacity_result: dict[str, Any] | None = None,
 ) -> str:
-    if error:
+    if error and predict_result is None:
         return (
             "진단을 완료하지 못했습니다. "
             f"사유: {error}\n"
             "공정 피처를 확인한 뒤 다시 요청해 주세요."
         )
-    if predict_result is None:
+    if predict_result is None and capacity_result is None:
         return (
             "사용 안내입니다.\n\n"
             "1. Main 화면 「위험 LOT Top」에서 LOT **행을 클릭**하면 "
-            "챗봇에 센서가 연결되고 O/X 진단이 자동으로 시작됩니다.\n"
+            "챗봇에 센서가 연결되고 O/X·용량 진단이 자동으로 시작됩니다.\n"
             "2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n"
             "3. What-if 제안이 나오면 「제안 승인」→ 5초 안 「실행 취소」가능.\n"
             "4. 공정 한계치(온도·습도)는 Setting에서 바꿉니다.\n"
@@ -102,38 +139,48 @@ def _template_reply(
             f"(요청 요약: {message[:80]})"
         )
 
-    status = predict_result["defect_status"]
-    label = "불량(O)" if int(status) == 1 else "정상(X)"
-    prob = float(predict_result["probability"])
-    thr = float(predict_result["applied_threshold"])
-    factors = predict_result.get("top_risk_factors") or []
-    factors_txt = ", ".join(str(f) for f in factors)
-    pct = prob * 100.0
-
-    body = (
-        f"predict Tool 기준 진단 결과입니다.\n\n"
-        f"판정은 **{label}**(defect_status={status})이며, "
-        f"불량 확률은 {prob:.4f}({pct:.1f}%, 임계값 {thr})입니다.\n"
-        f"전역 Top-4 위험 요인은 {factors_txt} 입니다. "
-        "이 수치는 모델 추론 결과만 인용한 것이며, Top-4는 전역 SHAP 중요도입니다 "
-        "(이번 LOT 샘플별 원인이라고 단정하지 않습니다)."
-    )
+    parts: list[str] = []
+    if predict_result is not None:
+        status = predict_result["defect_status"]
+        label = "불량(O)" if int(status) == 1 else "정상(X)"
+        prob = float(predict_result["probability"])
+        thr = float(predict_result["applied_threshold"])
+        factors = predict_result.get("top_risk_factors") or []
+        factors_txt = ", ".join(str(f) for f in factors)
+        pct = prob * 100.0
+        parts.append(
+            "predict Tool 기준 진단 결과입니다.\n\n"
+            f"판정은 **{label}**(defect_status={status})이며, "
+            f"불량 확률은 {prob:.4f}({pct:.1f}%, 임계값 {thr})입니다.\n"
+            f"전역 Top-4 위험 요인은 {factors_txt} 입니다. "
+            "이 수치는 모델 추론 결과만 인용한 것이며, Top-4는 전역 SHAP 중요도입니다 "
+            "(이번 LOT 샘플별 원인이라고 단정하지 않습니다)."
+        )
+    parts.append(_format_capacity(capacity_result).lstrip("\n") if capacity_result else "")
+    body = "\n".join(p for p in parts if p)
     return body + _format_recommendation(recommendation)
 
 
 def predict_node(state: ChatState) -> dict[str, Any]:
     features = state.get("features")
     if not features:
-        return {"predict_result": None, "error": None}
+        return {
+            "predict_result": None,
+            "capacity_result": None,
+            "head_results": None,
+            "error": None,
+        }
 
-    try:
-        result = run_predict_tool(
-            features,
-            fillThreshold=state.get("fillThreshold"),
-        )
-        return {"predict_result": result, "error": None}
-    except Exception as exc:  # noqa: BLE001 — surface to compose
-        return {"predict_result": None, "error": str(exc)}
+    packed = run_registered_heads(
+        features,
+        fillThreshold=state.get("fillThreshold"),
+    )
+    return {
+        "predict_result": packed.get("predict"),
+        "capacity_result": packed.get("capacity"),
+        "head_results": packed.get("heads"),
+        "error": packed.get("error"),
+    }
 
 
 def whatif_node(state: ChatState) -> dict[str, Any]:
@@ -156,32 +203,61 @@ def whatif_node(state: ChatState) -> dict[str, Any]:
 def compose_node(state: ChatState) -> dict[str, Any]:
     message = state.get("message") or ""
     predict_result = state.get("predict_result")
+    capacity_result = state.get("capacity_result")
     recommendation = state.get("recommendation")
     error = state.get("error")
     need_guideline = bool(state.get("need_guideline"))
 
     if llm_enabled():
-        reply, provider = compose_with_failover(
+        reply, provider, llm_err = compose_with_failover(
             message,
             predict_result,
             error,
             need_guideline=need_guideline,
             recommendation=recommendation,
+            capacity_result=capacity_result,
+            head_results=state.get("head_results"),
+            llm_mode=state.get("llm_mode"),
+            llm_credentials=state.get("llm_credentials"),
         )
         if reply:
-            # Ensure structured what-if numbers appear even if LLM omits them
             if recommendation and recommendation.get("suggestion"):
                 if "[What-if 제안]" not in reply:
                     reply = reply.rstrip() + _format_recommendation(recommendation)
+            if capacity_result and "[용량 예측]" not in reply:
+                reply = reply.rstrip() + _format_capacity(capacity_result)
             return {
                 "reply": reply,
                 "mode": "llm",
                 "provider": provider or "llm",
             }
+        if llm_err:
+            base = _template_reply(
+                message,
+                predict_result,
+                error,
+                recommendation,
+                capacity_result,
+            )
+            return {
+                "reply": _append_guideline(
+                    (base.rstrip() + "\n\n" + llm_err).strip(),
+                    need_guideline,
+                ),
+                "mode": "template",
+                "provider": "template",
+                "error": llm_err,
+            }
 
     return {
         "reply": _append_guideline(
-            _template_reply(message, predict_result, error, recommendation),
+            _template_reply(
+                message,
+                predict_result,
+                error,
+                recommendation,
+                capacity_result,
+            ),
             need_guideline,
         ),
         "mode": "template",
@@ -216,9 +292,10 @@ def run_chat(
     features: dict[str, Any] | None = None,
     fillThreshold: float | None = None,
     need_guideline: bool = False,
+    llm_mode: str | None = "auto",
+    llm_credentials: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run the chat graph. Returns reply + optional predict/recommendation JSON."""
-    # Rebuild graph so whatif node is picked up after code reload without process restart quirks
+    """Run the chat graph. Returns reply + optional predict/capacity/recommendation."""
     graph = get_graph()
     out: ChatState = graph.invoke(
         {
@@ -226,6 +303,8 @@ def run_chat(
             "features": features,
             "fillThreshold": fillThreshold,
             "need_guideline": need_guideline,
+            "llm_mode": llm_mode,
+            "llm_credentials": llm_credentials,
         }
     )
     return {
@@ -233,6 +312,8 @@ def run_chat(
         "mode": out.get("mode") or "template",
         "provider": out.get("provider") or "template",
         "predict": out.get("predict_result"),
+        "capacity": out.get("capacity_result"),
+        "heads": out.get("head_results"),
         "recommendation": out.get("recommendation"),
         "error": out.get("error"),
     }

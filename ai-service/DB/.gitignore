@@ -1,0 +1,5 @@
+# Encrypted LLM API keys (written by Express backend).
+# Do not commit *.sqlite — secrets at rest (ciphertext) still stay local.
+*.sqlite
+*.sqlite-*
+!.gitkeep
