@@ -24,13 +24,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas import (
+    ChatRecommendation,
     ChatRequest,
     ChatResponse,
     HealthResponse,
     PredictRequest,
     PredictResponse,
+    SecurityChatRequest,
+    SecurityChatResponse,
 )
 from agent.graph import run_chat
+from agent.secure_llm import compose_secure
 from train_pipeline import MODELS_DIR, predict
 
 app = FastAPI(
@@ -148,11 +152,31 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=f"chat failed: {exc}") from exc
 
     predict_payload = out.get("predict")
+    rec_payload = out.get("recommendation")
+    recommendation = (
+        ChatRecommendation.model_validate(rec_payload) if rec_payload else None
+    )
     return ChatResponse(
         reply=out["reply"],
         mode=out.get("mode") or "template",
         provider=out.get("provider") or "template",
         predict=PredictResponse(**predict_payload) if predict_payload else None,
+        recommendation=recommendation,
+        error=out.get("error"),
+    )
+
+
+@app.post("/security-chat", response_model=SecurityChatResponse)
+def security_chat_endpoint(body: SecurityChatRequest) -> SecurityChatResponse:
+    """
+    Security-tab channel: local vLLM only (CHAT_VLLM_BASE_URL).
+    Never routes to Groq/Gemini. Failures return offline template.
+    """
+    out = compose_secure(body.message)
+    return SecurityChatResponse(
+        reply=out["reply"],
+        mode=out.get("mode") or "template",
+        provider=out.get("provider") or "offline",
         error=out.get("error"),
     )
 
@@ -165,4 +189,5 @@ def root() -> dict[str, str]:
         "health": "/health",
         "predict": "POST /predict",
         "chat": "POST /chat",
+        "security_chat": "POST /security-chat",
     }

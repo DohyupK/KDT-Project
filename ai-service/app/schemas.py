@@ -73,6 +73,32 @@ class ChatRequest(BaseModel):
     )
 
 
+class WhatIfSuggestion(BaseModel):
+    deltas: dict[str, float]
+    after_features: ChatFeatures
+    probability: float
+    defect_status: int
+    applied_threshold: float
+    boundary_hit: bool = False
+    limit_reason: str | None = None
+    ideal_values: dict[str, float] | None = None
+    clipped_values: dict[str, float] | None = None
+
+
+class RecommendationBaseline(BaseModel):
+    probability: float
+    defect_status: int
+    applied_threshold: float
+    features: ChatFeatures
+
+
+class ChatRecommendation(BaseModel):
+    method: str = Field(description="e.g. whatif_grid")
+    baseline: RecommendationBaseline
+    suggestion: WhatIfSuggestion | None = None
+    note: str | None = None
+
+
 class ChatResponse(BaseModel):
     reply: str
     mode: str = Field(description="'template' | 'llm' | 'security_redirect'")
@@ -81,4 +107,19 @@ class ChatResponse(BaseModel):
         description="'groq' | 'gemini_flash' | 'gemini_pro' | 'template' | 'security_redirect'",
     )
     predict: PredictResponse | None = None
+    recommendation: ChatRecommendation | None = None
+    error: str | None = None
+
+
+class SecurityChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Security-tab user text")
+
+
+class SecurityChatResponse(BaseModel):
+    reply: str
+    mode: str = Field(description="'security_vllm' | 'template'")
+    provider: str = Field(
+        default="offline",
+        description="'vllm' | 'offline'",
+    )
     error: str | None = None

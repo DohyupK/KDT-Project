@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
+import { useUiSettings } from '@/components/layout/AppShell';
 
 interface ProcessData {
   time: string;
@@ -116,6 +117,7 @@ interface HandoverReportModalProps {
   isCompleting?: boolean;
 }
 
+/** Light palette — also used by PDF HTML builder (always light). */
 const colors = {
   background: '#f1f5f9',
   panel: '#ffffff',
@@ -134,86 +136,160 @@ const colors = {
   amberSoft: '#fffbeb',
 };
 
-const panelStyle: CSSProperties = {
-  background: colors.panel,
-  border: `1px solid ${colors.line}`,
+type UiColors = typeof colors;
+
+const darkColors: UiColors = {
+  background: '#0f172a',
+  panel: '#1e293b',
+  navy: '#f1f5f9',
+  slate: '#94a3b8',
+  muted: '#94a3b8',
+  line: '#334155',
+  blue: '#60a5fa',
+  blueSoft: 'rgba(23, 37, 84, 0.4)',
+  cyan: '#22d3ee',
+  green: '#34d399',
+  greenSoft: 'rgba(6, 78, 59, 0.4)',
+  red: '#fb7185',
+  redSoft: 'rgba(76, 5, 25, 0.4)',
+  amber: '#fbbf24',
+  amberSoft: 'rgba(69, 26, 3, 0.4)',
+};
+
+const getUiColors = (isDark: boolean): UiColors => (isDark ? darkColors : colors);
+
+const getPanelStyle = (c: UiColors): CSSProperties => ({
+  background: c.panel,
+  border: `1px solid ${c.line}`,
   borderRadius: 18,
-  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
+  boxShadow:
+    c.panel === darkColors.panel
+      ? '0 8px 24px rgba(0, 0, 0, 0.35)'
+      : '0 8px 24px rgba(15, 23, 42, 0.06)',
   padding: 24,
+});
+
+const getInputStyle = (c: UiColors): CSSProperties => {
+  const isDark = c.panel === darkColors.panel;
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: `1px solid ${isDark ? '#475569' : c.line}`,
+    borderRadius: 10,
+    background: isDark ? '#0f172a' : '#f8fafc',
+    color: c.navy,
+    fontSize: 14,
+    padding: '10px 12px',
+    outlineColor: c.blue,
+  };
 };
 
-const inputStyle: CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  border: `1px solid ${colors.line}`,
-  borderRadius: 10,
-  background: '#f8fafc',
-  color: colors.navy,
-  fontSize: 14,
-  padding: '10px 12px',
-  outlineColor: colors.blue,
-};
-
-const labelStyle: CSSProperties = {
+const getLabelStyle = (c: UiColors): CSSProperties => ({
   display: 'block',
   marginBottom: 7,
-  color: colors.slate,
+  color: c.slate,
   fontSize: 13,
   fontWeight: 700,
-};
+});
 
-const riskStyle = (risk: Issue['risk']): CSSProperties => {
+const riskStyle = (risk: Issue['risk'], isDark = false): CSSProperties => {
   if (risk === '높음') {
-    return {
-      background: '#fff1f2',
-      color: '#be123c',
-      border: '1px solid #fecdd3',
-      fontWeight: 700,
-    };
+    return isDark
+      ? {
+          background: 'rgba(76, 5, 25, 0.4)',
+          color: '#fda4af',
+          border: '1px solid #9f1239',
+          fontWeight: 700,
+        }
+      : {
+          background: '#fff1f2',
+          color: '#be123c',
+          border: '1px solid #fecdd3',
+          fontWeight: 700,
+        };
   }
   if (risk === '중간') {
-    return {
-      background: '#fffbeb',
-      color: '#b45309',
-      border: '1px solid #fde68a',
-      fontWeight: 700,
-    };
+    return isDark
+      ? {
+          background: 'rgba(69, 26, 3, 0.4)',
+          color: '#fcd34d',
+          border: '1px solid #b45309',
+          fontWeight: 700,
+        }
+      : {
+          background: '#fffbeb',
+          color: '#b45309',
+          border: '1px solid #fde68a',
+          fontWeight: 700,
+        };
   }
-  return {
-    background: '#ecfdf5',
-    color: '#047857',
-    border: '1px solid #a7f3d0',
-    fontWeight: 700,
-  };
+  return isDark
+    ? {
+        background: 'rgba(6, 78, 59, 0.4)',
+        color: '#6ee7b7',
+        border: '1px solid #047857',
+        fontWeight: 700,
+      }
+    : {
+        background: '#ecfdf5',
+        color: '#047857',
+        border: '1px solid #a7f3d0',
+        fontWeight: 700,
+      };
 };
 
-const statusStyle = (status: Issue['status']): CSSProperties => {
+const statusStyle = (status: Issue['status'], isDark = false): CSSProperties => {
+  const c = getUiColors(isDark);
   if (status === '완료') {
-    return {
-      background: colors.greenSoft,
-      color: colors.green,
-      border: `1px solid #bbf7d0`,
-    };
+    return isDark
+      ? {
+          background: c.greenSoft,
+          color: '#6ee7b7',
+          border: '1px solid #047857',
+        }
+      : {
+          background: colors.greenSoft,
+          color: colors.green,
+          border: `1px solid #bbf7d0`,
+        };
   }
   if (status === '조치 중') {
-    return {
-      background: '#f5f3ff',
-      color: '#7c3aed',
-      border: '1px solid #ddd6fe',
-    };
+    return isDark
+      ? {
+          background: 'rgba(46, 16, 101, 0.4)',
+          color: '#c4b5fd',
+          border: '1px solid #6d28d9',
+        }
+      : {
+          background: '#f5f3ff',
+          color: '#7c3aed',
+          border: '1px solid #ddd6fe',
+        };
   }
   if (status === '분석 중') {
-    return {
-      background: colors.blueSoft,
-      color: colors.blue,
-      border: '1px solid #bfdbfe',
-    };
+    return isDark
+      ? {
+          background: c.blueSoft,
+          color: '#93c5fd',
+          border: '1px solid #1d4ed8',
+        }
+      : {
+          background: colors.blueSoft,
+          color: colors.blue,
+          border: '1px solid #bfdbfe',
+        };
   }
-  return {
-    background: '#f1f5f9',
-    color: colors.slate,
-    border: `1px solid ${colors.line}`,
-  };
+  return isDark
+    ? {
+        background: 'rgba(15, 23, 42, 0.7)',
+        color: c.slate,
+        border: `1px solid ${c.line}`,
+      }
+    : {
+        background: '#f1f5f9',
+        color: colors.slate,
+        border: `1px solid ${colors.line}`,
+      };
 };
 
 const badgeBase: CSSProperties = {
@@ -239,17 +315,30 @@ const statusTagBase: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const filterControlStyle: CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  height: 36,
-  border: '1px solid #e2e8f0',
-  borderRadius: 8,
-  background: '#fff',
-  color: colors.navy,
-  fontSize: 13,
-  padding: '0 10px',
-  outlineColor: colors.blue,
+const getFilterControlStyle = (c: UiColors): CSSProperties => {
+  const isDark = c.panel === darkColors.panel;
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    height: 36,
+    border: `1px solid ${isDark ? '#475569' : '#e2e8f0'}`,
+    borderRadius: 8,
+    background: isDark ? '#0f172a' : '#fff',
+    color: c.navy,
+    fontSize: 13,
+    padding: '0 10px',
+    outlineColor: c.blue,
+  };
+};
+
+const noteCategoryStyle = (
+  category: HandoverNote['category'],
+  isDark = false,
+): CSSProperties => {
+  const c = getUiColors(isDark);
+  if (category === '주의사항') return { background: c.redSoft, color: c.red };
+  if (category === '전달사항') return { background: c.blueSoft, color: c.blue };
+  return { background: c.amberSoft, color: c.amber };
 };
 
 const createProcessData = (
@@ -439,13 +528,15 @@ const HeaderHandoverSection = ({
   onWrite,
   onCloseNotice,
 }: HeaderHandoverSectionProps) => {
+  const { isDark, language } = useUiSettings();
+  const c = getUiColors(isDark);
   const metrics = [
-    { label: '평균 온도', value: `${data.averageTemperature}°C`, alert: false },
-    { label: '평균 압력', value: `${data.averagePressure} bar`, alert: false },
-    { label: '평균 속도', value: `${data.averageSpeed} rpm`, alert: false },
-    { label: 'AI 예측 위험', value: `${data.aiRiskPredictions}건`, alert: false },
-    { label: '위험 LOT', value: `${data.riskyLots}개`, alert: true },
-    { label: '발생 이슈', value: `${data.issueCount}건`, alert: true },
+    { label: language === 'en' ? 'Avg. Temp' : '평균 온도', value: `${data.averageTemperature}°C`, alert: false },
+    { label: language === 'en' ? 'Avg. Pressure' : '평균 압력', value: `${data.averagePressure} bar`, alert: false },
+    { label: language === 'en' ? 'Avg. Speed' : '평균 속도', value: `${data.averageSpeed} rpm`, alert: false },
+    { label: language === 'en' ? 'AI Risk' : 'AI 예측 위험', value: `${data.aiRiskPredictions}`, alert: false },
+    { label: language === 'en' ? 'Risky LOTs' : '위험 LOT', value: `${data.riskyLots}`, alert: true },
+    { label: language === 'en' ? 'Issues' : '발생 이슈', value: `${data.issueCount}`, alert: true },
   ];
 
   return (
@@ -454,12 +545,12 @@ const HeaderHandoverSection = ({
         <div
           role="status"
           style={{
-            ...panelStyle,
+            ...getPanelStyle(c),
             marginBottom: 18,
             padding: '13px 16px',
-            borderColor: '#86efac',
-            background: colors.greenSoft,
-            color: '#166534',
+            borderColor: isDark ? '#047857' : '#86efac',
+            background: c.greenSoft,
+            color: isDark ? '#6ee7b7' : '#166534',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -475,7 +566,7 @@ const HeaderHandoverSection = ({
             style={{
               border: 0,
               background: 'transparent',
-              color: '#166534',
+              color: isDark ? '#6ee7b7' : '#166534',
               cursor: 'pointer',
               fontSize: 20,
             }}
@@ -495,31 +586,35 @@ const HeaderHandoverSection = ({
         }}
       >
         <div>
-          <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
-            이슈 관리
+          <h1 style={{ margin: 0, color: c.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
+            {language === 'en' ? 'Issue Management' : '이슈 관리'}
           </h1>
-          <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
-            공정 이슈를 조회하고 분석하며 처리 현황을 관리할 수 있습니다.
+          <p style={{ margin: '9px 0 0', color: c.slate, fontSize: 15 }}>
+            {language === 'en'
+              ? 'Review process issues, analyze them, and manage resolution status.'
+              : '공정 이슈를 조회하고 분석하며 처리 현황을 관리할 수 있습니다.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
             onClick={onWrite}
-            className="inline-flex h-9 items-center rounded-lg border-2 border-blue-600 bg-white px-3 text-xs font-bold text-blue-600 hover:bg-blue-50"
+            className={`inline-flex h-9 items-center rounded-lg border-2 border-blue-600 px-3 text-xs font-bold text-blue-600 ${
+              isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-white hover:bg-blue-50'
+            }`}
           >
-            + 인수인계 작성
+            {language === 'en' ? '+ Write Handover' : '+ 인수인계 작성'}
           </button>
           <button
             type="button"
             onClick={onGenerate}
             className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-blue-700"
           >
-            인수인계 조회/다운로드
+            {language === 'en' ? 'View / Download Handover' : '인수인계 조회/다운로드'}
           </button>
         </div>
       </div>
-      <div style={panelStyle}>
+      <div style={getPanelStyle(c)}>
         <div
           style={{
             display: 'flex',
@@ -530,8 +625,8 @@ const HeaderHandoverSection = ({
             marginBottom: 18,
           }}
         >
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 18 }}>이전 8시간 공정 요약</h2>
-          <span style={{ color: colors.muted, fontSize: 12 }}>{data.period}</span>
+          <h2 style={{ margin: 0, color: c.navy, fontSize: 18 }}>이전 8시간 공정 요약</h2>
+          <span style={{ color: c.muted, fontSize: 12 }}>{data.period}</span>
         </div>
         <div
           style={{
@@ -543,17 +638,31 @@ const HeaderHandoverSection = ({
           {metrics.map((metric) => (
             <div
               key={metric.label}
-              className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm"
+              className={`rounded-xl border p-4 shadow-sm ${
+                isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+              }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold text-slate-500">{metric.label}</div>
+                <div className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {metric.label}
+                </div>
                 {metric.alert ? (
-                  <span className="rounded-md border border-rose-100 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+                  <span
+                    className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                      isDark
+                        ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                        : 'border-rose-100 bg-rose-50 text-rose-600'
+                    }`}
+                  >
                     주의
                   </span>
                 ) : null}
               </div>
-              <div className="mt-2 text-xl font-bold tracking-tight text-slate-900">
+              <div
+                className={`mt-2 text-xl font-bold tracking-tight ${
+                  isDark ? 'text-slate-100' : 'text-slate-900'
+                }`}
+              >
                 {metric.value}
               </div>
             </div>
@@ -576,6 +685,7 @@ const HandoverReportModal = ({
   onCompleteAll,
   isCompleting = false,
 }: HandoverReportModalProps) => {
+  const { isDark } = useUiSettings();
   const [handoverFrom, setHandoverFrom] = useState('김현수');
   const [handoverTo, setHandoverTo] = useState('박서연');
   const [partyError, setPartyError] = useState('');
@@ -641,10 +751,16 @@ const HandoverReportModal = ({
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className={`flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl shadow-2xl ${
+          isDark ? 'bg-slate-800 text-slate-100' : 'bg-white'
+        }`}
       >
         {/* Pinned top bar */}
-        <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-slate-900 px-5 py-3.5 text-white">
+        <div
+          className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-slate-900 px-5 py-3.5 text-white ${
+            isDark ? 'border-slate-700' : 'border-slate-200'
+          }`}
+        >
           <strong className="text-sm font-semibold tracking-tight">교대 인수인계 브리핑</strong>
           <div className="flex items-center gap-2">
             <button
@@ -674,18 +790,37 @@ const HandoverReportModal = ({
 
         <div className="overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
           {/* 1. Shift Header */}
-          <section className="mb-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+          <section
+            className={`mb-5 rounded-xl border p-4 ${
+              isDark
+                ? 'border-slate-700 bg-slate-900/70'
+                : 'border-slate-200 bg-slate-50/80'
+            }`}
+          >
             <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
               교대 정보
             </div>
             <dl className="grid gap-3 text-sm sm:grid-cols-1">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">교대 구분</dt>
-                <dd className="font-semibold text-slate-900">{shiftLabel}</dd>
+                <dt
+                  className={`w-24 shrink-0 text-xs font-semibold ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  교대 구분
+                </dt>
+                <dd className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  {shiftLabel}
+                </dd>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="handover-from" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                  <label
+                    htmlFor="handover-from"
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     인계자
                   </label>
                   <input
@@ -695,12 +830,21 @@ const HandoverReportModal = ({
                       setHandoverFrom(event.target.value);
                       if (partyError) setPartyError('');
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-white text-slate-900'
+                    }`}
                     placeholder="인계자 이름"
                   />
                 </div>
                 <div>
-                  <label htmlFor="handover-to" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                  <label
+                    htmlFor="handover-to"
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     인수자
                   </label>
                   <input
@@ -710,30 +854,61 @@ const HandoverReportModal = ({
                       setHandoverTo(event.target.value);
                       if (partyError) setPartyError('');
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-white text-slate-900'
+                    }`}
                     placeholder="인수자 이름"
                   />
                 </div>
               </div>
               {partyError ? (
-                <p className="m-0 text-xs font-semibold text-rose-600" role="alert">
+                <p
+                  className={`m-0 text-xs font-semibold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}
+                  role="alert"
+                >
                   {partyError}
                 </p>
               ) : null}
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">작성 일시</dt>
-                <dd className="font-medium text-slate-700">{writtenAt}</dd>
+                <dt
+                  className={`w-24 shrink-0 text-xs font-semibold ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  작성 일시
+                </dt>
+                <dd className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {writtenAt}
+                </dd>
               </div>
             </dl>
             <p className="mt-3 text-[11px] text-slate-400">대상 기간 · {data.period}</p>
           </section>
 
           {/* 2. Top Notice / Callout — 다음 조 전달사항 */}
-          <section className="mb-5 rounded-xl border border-amber-200/80 bg-amber-50/80 p-4">
+          <section
+            className={`mb-5 rounded-xl border p-4 ${
+              isDark
+                ? 'border-amber-800/60 bg-amber-950/40'
+                : 'border-amber-200/80 bg-amber-50/80'
+            }`}
+          >
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="m-0 text-sm font-bold text-amber-900">3. 교대 전달 및 주의사항</h3>
+              <h3
+                className={`m-0 text-sm font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
+              >
+                3. 교대 전달 및 주의사항
+              </h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-md border border-amber-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                <span
+                  className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                    isDark
+                      ? 'border-amber-800 bg-slate-800/70 text-amber-200'
+                      : 'border-amber-200 bg-white/70 text-amber-800'
+                  }`}
+                >
                   전체 {notes.length}건 · 완료 {transferredCount}건 · 대기 {pendingNotes.length}건
                 </span>
                 <button
@@ -747,7 +922,11 @@ const HandoverReportModal = ({
               </div>
             </div>
             {notes.length === 0 ? (
-              <p className="m-0 text-sm font-semibold leading-relaxed text-amber-950">
+              <p
+                className={`m-0 text-sm font-semibold leading-relaxed ${
+                  isDark ? 'text-amber-100' : 'text-amber-950'
+                }`}
+              >
                 ⚠ {defaultBriefing}
               </p>
             ) : (
@@ -759,24 +938,44 @@ const HandoverReportModal = ({
                       key={note.id}
                       className={`rounded-lg border px-3 py-2.5 ${
                         isDone
-                          ? 'border-emerald-100 bg-emerald-50/70'
-                          : 'border-amber-100/80 bg-white/70'
+                          ? isDark
+                            ? 'border-emerald-800 bg-emerald-950/40'
+                            : 'border-emerald-100 bg-emerald-50/70'
+                          : isDark
+                            ? 'border-amber-800/60 bg-slate-800/70'
+                            : 'border-amber-100/80 bg-white/70'
                       }`}
                     >
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <span
                           className="rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-                          style={noteCategoryStyle(note.category)}
+                          style={noteCategoryStyle(note.category, isDark)}
                         >
                           {note.category}
                         </span>
-                        <span className="text-xs font-semibold text-slate-700">{note.author}</span>
-                        <span className="text-[11px] font-semibold text-blue-700">
+                        <span
+                          className={`text-xs font-semibold ${
+                            isDark ? 'text-slate-300' : 'text-slate-700'
+                          }`}
+                        >
+                          {note.author}
+                        </span>
+                        <span
+                          className={`text-[11px] font-semibold ${
+                            isDark ? 'text-blue-300' : 'text-blue-700'
+                          }`}
+                        >
                           {formatShiftRange(note.shiftStart, note.shiftEnd)}
                         </span>
                         <span className="text-[11px] text-slate-400">{note.createdAt}</span>
                         {isDone ? (
-                          <span className="rounded-md border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                          <span
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                              isDark
+                                ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300'
+                                : 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
                             완료됨
                           </span>
                         ) : null}
@@ -784,19 +983,33 @@ const HandoverReportModal = ({
                           type="button"
                           onClick={() => handleCompleteOneClick(note.id)}
                           disabled={isDone || isCompleting}
-                          className="ml-auto inline-flex h-7 items-center rounded-md bg-emerald-600 px-2.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-200 disabled:text-emerald-700"
+                          className={`ml-auto inline-flex h-7 items-center rounded-md bg-emerald-600 px-2.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed ${
+                            isDark
+                              ? 'disabled:bg-emerald-950/40 disabled:text-emerald-400'
+                              : 'disabled:bg-emerald-200 disabled:text-emerald-700'
+                          }`}
                         >
                           {isDone ? '완료됨' : '완료'}
                         </button>
                       </div>
-                      <p className="m-0 text-sm font-medium leading-relaxed text-slate-900">
+                      <p
+                        className={`m-0 text-sm font-medium leading-relaxed ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                      >
                         {note.content}
                       </p>
                     </li>
                   );
                 })}
                 {!notes.some((note) => note.content.includes('소성로')) ? (
-                  <li className="rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 text-sm font-semibold text-rose-800">
+                  <li
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                      isDark
+                        ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                        : 'border-rose-100 bg-rose-50/60 text-rose-800'
+                    }`}
+                  >
                     ⚠ {defaultBriefing}
                   </li>
                 ) : null}
@@ -806,43 +1019,125 @@ const HandoverReportModal = ({
 
           {/* 3. Production Brief */}
           <section className="mb-5">
-            <h3 className="mb-2.5 mt-0 text-sm font-bold text-slate-900">공정 실적 요약</h3>
+            <h3
+              className={`mb-2.5 mt-0 text-sm font-bold ${
+                isDark ? 'text-slate-100' : 'text-slate-900'
+              }`}
+            >
+              공정 실적 요약
+            </h3>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-sm">
-                <div className="text-[11px] font-semibold text-slate-500">주간 생산량</div>
-                <div className="mt-1 text-base font-bold tabular-nums text-slate-900">1,958 LOT</div>
-                <div className="mt-0.5 text-[11px] font-medium text-emerald-700">목표 95.2% 달성</div>
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  주간 생산량
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold tabular-nums ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                  1,958 LOT
+                </div>
+                <div
+                  className={`mt-0.5 text-[11px] font-medium ${
+                    isDark ? 'text-emerald-300' : 'text-emerald-700'
+                  }`}
+                >
+                  목표 95.2% 달성
+                </div>
               </div>
-              <div className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-sm">
-                <div className="text-[11px] font-semibold text-slate-500">평균 불량률</div>
-                <div className="mt-1 text-base font-bold tabular-nums text-slate-900">8.8%</div>
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  평균 불량률
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold tabular-nums ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                  8.8%
+                </div>
                 <div className="mt-0.5 text-[11px] text-slate-400">교대 집계</div>
               </div>
-              <div className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-sm">
-                <div className="text-[11px] font-semibold text-slate-500">특이 설비</div>
-                <div className="mt-1 text-base font-bold text-slate-900">소성로 2호기</div>
-                <div className="mt-0.5 text-[11px] font-medium text-amber-700">점검중</div>
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  특이 설비
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                >
+                  소성로 2호기
+                </div>
+                <div
+                  className={`mt-0.5 text-[11px] font-medium ${
+                    isDark ? 'text-amber-300' : 'text-amber-700'
+                  }`}
+                >
+                  점검중
+                </div>
               </div>
             </div>
           </section>
 
           {/* 4. Unresolved Issues (Compact) */}
           <section>
-            <h3 className="mb-2.5 mt-0 text-sm font-bold text-slate-900">야간 이관 이슈</h3>
+            <h3
+              className={`mb-2.5 mt-0 text-sm font-bold ${
+                isDark ? 'text-slate-100' : 'text-slate-900'
+              }`}
+            >
+              야간 이관 이슈
+            </h3>
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-900/70 text-slate-300'
+                    : 'border-slate-200 bg-slate-50 text-slate-700'
+                }`}
+              >
                 총 발생: {totalCount || data.issueCount}건
               </span>
-              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}
+              >
                 완료: {completedCount}건
               </span>
-              <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                }`}
+              >
                 야간 이관(미완료): {openIssues.length}건
               </span>
             </div>
 
             {criticalOpenIssues.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
+              <div
+                className={`rounded-xl border px-4 py-3 text-center text-sm ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                    : 'border-slate-200 bg-slate-50 text-slate-500'
+                }`}
+              >
                 야간 이관이 필요한 미완료 이슈가 없습니다.
               </div>
             ) : (
@@ -850,13 +1145,21 @@ const HandoverReportModal = ({
                 {criticalOpenIssues.map((issue) => (
                   <li
                     key={issue.id}
-                    className="rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800"
+                    className={`rounded-lg border px-3.5 py-2.5 text-sm ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-800 text-slate-200'
+                        : 'border-slate-200 bg-white text-slate-800'
+                    }`}
                   >
-                    <span className="font-semibold text-blue-700">{issue.id}</span>
-                    <span className="mx-1.5 text-slate-300">|</span>
+                    <span className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                      {issue.id}
+                    </span>
+                    <span className={`mx-1.5 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>|</span>
                     <span className="font-medium">{issue.title}</span>
-                    <span className="mx-1.5 text-slate-300">|</span>
-                    <span className="font-semibold text-rose-600">야간점검 필요</span>
+                    <span className={`mx-1.5 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>|</span>
+                    <span className={`font-semibold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>
+                      야간점검 필요
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -892,13 +1195,9 @@ function formatShiftRange(start: string, end: string): string {
   return `${start || '--:--'} ~ ${end || '--:--'}`;
 }
 
-const noteCategoryStyle = (category: HandoverNote['category']): CSSProperties => {
-  if (category === '주의사항') return { background: colors.redSoft, color: colors.red };
-  if (category === '전달사항') return { background: colors.blueSoft, color: colors.blue };
-  return { background: colors.amberSoft, color: colors.amber };
-};
-
 const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
   const [author] = useState(() => getLoggedInUserName());
   const [category, setCategory] = useState<HandoverNote['category']>('특이사항');
   const [shiftStart, setShiftStart] = useState('08:00');
@@ -951,7 +1250,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
       <section
         onClick={(event) => event.stopPropagation()}
         style={{
-          ...panelStyle,
+          ...getPanelStyle(c),
           width: 'min(680px, 100%)',
           maxHeight: '88vh',
           overflowY: 'auto',
@@ -959,9 +1258,9 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>인수인계 사항 작성</h2>
+          <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>인수인계 사항 작성</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ color: colors.slate, fontSize: 13, fontWeight: 700 }}>
+            <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
               등록 {notes.length}건
             </span>
             <button
@@ -971,7 +1270,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               style={{
                 border: 0,
                 background: 'transparent',
-                color: colors.muted,
+                color: c.muted,
                 cursor: 'pointer',
                 fontSize: 22,
                 lineHeight: 1,
@@ -982,7 +1281,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
             </button>
           </div>
         </div>
-        <p style={{ margin: '0 0 18px', color: colors.slate, fontSize: 13 }}>
+        <p style={{ margin: '0 0 18px', color: c.slate, fontSize: 13 }}>
           다음 교대 근무자에게 전달할 특이사항과 주의사항을 기록하면 인수인계 보고서에 함께 포함됩니다.
         </p>
 
@@ -990,10 +1289,10 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
           <div
             role="alert"
             style={{
-              border: '1px solid #fca5a5',
+              border: isDark ? '1px solid #9f1239' : '1px solid #fca5a5',
               borderRadius: 10,
-              background: colors.redSoft,
-              color: colors.red,
+              background: c.redSoft,
+              color: c.red,
               padding: '11px 13px',
               marginBottom: 16,
               fontSize: 13,
@@ -1014,7 +1313,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
             }}
           >
             <div>
-              <label htmlFor="note-author" style={labelStyle}>
+              <label htmlFor="note-author" style={getLabelStyle(c)}>
                 작성자 (로그인)
               </label>
               <input
@@ -1024,26 +1323,26 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                 aria-readonly="true"
                 title="로그인 계정 정보가 자동 입력됩니다"
                 style={{
-                  ...inputStyle,
-                  background: '#f1f5f9',
-                  color: colors.navy,
+                  ...getInputStyle(c),
+                  background: isDark ? '#0f172a' : '#f1f5f9',
+                  color: c.navy,
                   fontWeight: 700,
                   cursor: 'default',
                 }}
               />
-              <p style={{ margin: '6px 0 0', color: colors.muted, fontSize: 11 }}>
+              <p style={{ margin: '6px 0 0', color: c.muted, fontSize: 11 }}>
                 로그인 정보로 자동 입력됩니다.
               </p>
             </div>
             <div>
-              <label htmlFor="note-category" style={labelStyle}>
+              <label htmlFor="note-category" style={getLabelStyle(c)}>
                 구분
               </label>
               <select
                 id="note-category"
                 value={category}
                 onChange={(event) => setCategory(event.target.value as HandoverNote['category'])}
-                style={inputStyle}
+                style={getInputStyle(c)}
               >
                 <option value="특이사항">특이사항</option>
                 <option value="전달사항">전달사항</option>
@@ -1061,7 +1360,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
             }}
           >
             <div>
-              <label htmlFor="note-shift-start" style={labelStyle}>
+              <label htmlFor="note-shift-start" style={getLabelStyle(c)}>
                 근무 시작
               </label>
               <input
@@ -1069,11 +1368,11 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                 type="time"
                 value={shiftStart}
                 onChange={(event) => setShiftStart(event.target.value)}
-                style={inputStyle}
+                style={getInputStyle(c)}
               />
             </div>
             <div>
-              <label htmlFor="note-shift-end" style={labelStyle}>
+              <label htmlFor="note-shift-end" style={getLabelStyle(c)}>
                 근무 종료
               </label>
               <input
@@ -1081,19 +1380,27 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                 type="time"
                 value={shiftEnd}
                 onChange={(event) => setShiftEnd(event.target.value)}
-                style={inputStyle}
+                style={getInputStyle(c)}
               />
             </div>
             <div className="flex items-end">
-              <div className="mb-0.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-600">
+              <div
+                className={`mb-0.5 w-full rounded-lg border px-3 py-2.5 text-xs font-semibold ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                    : 'border-slate-200 bg-slate-50 text-slate-600'
+                }`}
+              >
                 근무 구간{' '}
-                <span className="text-slate-900">{formatShiftRange(shiftStart, shiftEnd)}</span>
+                <span className={isDark ? 'text-slate-100' : 'text-slate-900'}>
+                  {formatShiftRange(shiftStart, shiftEnd)}
+                </span>
               </div>
             </div>
           </div>
 
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="note-content" style={labelStyle}>
+            <label htmlFor="note-content" style={getLabelStyle(c)}>
               인수인계 내용
             </label>
             <textarea
@@ -1101,7 +1408,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               value={content}
               onChange={(event) => setContent(event.target.value)}
               placeholder="예) 소성로 2호기 냉각 계통 점검 중이므로 온도 트렌드를 30분 간격으로 확인해주세요."
-              style={{ ...inputStyle, minHeight: 90, resize: 'vertical', fontFamily: 'inherit' }}
+              style={{ ...getInputStyle(c), minHeight: 90, resize: 'vertical', fontFamily: 'inherit' }}
             />
           </div>
           <button
@@ -1109,7 +1416,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
             style={{
               border: 0,
               borderRadius: 10,
-              background: colors.blue,
+              background: c.blue,
               color: '#fff',
               padding: '11px 18px',
               fontSize: 14,
@@ -1127,10 +1434,10 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               <div
                 key={note.id}
                 style={{
-                  border: `1px solid ${colors.line}`,
+                  border: `1px solid ${c.line}`,
                   borderRadius: 12,
                   padding: '12px 15px',
-                  background: '#f8fafc',
+                  background: isDark ? '#0f172a' : '#f8fafc',
                 }}
               >
                 <div
@@ -1143,14 +1450,14 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ ...badgeBase, ...noteCategoryStyle(note.category) }}>
+                    <span style={{ ...badgeBase, ...noteCategoryStyle(note.category, isDark) }}>
                       {note.category}
                     </span>
-                    <strong style={{ color: colors.navy, fontSize: 13 }}>{note.author}</strong>
-                    <span style={{ color: colors.blue, fontSize: 12, fontWeight: 700 }}>
+                    <strong style={{ color: c.navy, fontSize: 13 }}>{note.author}</strong>
+                    <span style={{ color: c.blue, fontSize: 12, fontWeight: 700 }}>
                       {formatShiftRange(note.shiftStart, note.shiftEnd)}
                     </span>
-                    <span style={{ color: colors.muted, fontSize: 12 }}>{note.createdAt}</span>
+                    <span style={{ color: c.muted, fontSize: 12 }}>{note.createdAt}</span>
                   </div>
                   <button
                     type="button"
@@ -1160,7 +1467,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                       border: 0,
                       borderRadius: 8,
                       background: 'transparent',
-                      color: colors.muted,
+                      color: c.muted,
                       cursor: 'pointer',
                       fontSize: 17,
                       lineHeight: 1,
@@ -1170,7 +1477,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                     ×
                   </button>
                 </div>
-                <p style={{ margin: '8px 0 0', color: colors.navy, fontSize: 13, lineHeight: 1.65 }}>
+                <p style={{ margin: '8px 0 0', color: c.navy, fontSize: 13, lineHeight: 1.65 }}>
                   {note.content}
                 </p>
               </div>
@@ -1191,23 +1498,31 @@ const IssueListSection = ({
   onApplyFilter,
   onResetFilter,
   onSelect,
-}: IssueListSectionProps) => (
-  <section style={panelStyle}>
+}: IssueListSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+
+  return (
+  <section style={getPanelStyle(c)}>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-      <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>이슈 목록</h2>
-      <span style={{ color: colors.slate, fontSize: 13, fontWeight: 700 }}>
+      <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 목록</h2>
+      <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
         검색 결과 {issues.length}건
       </span>
     </div>
     <form
-      className="mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border border-slate-200/80 bg-slate-50/60 p-3"
+      className={`mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border p-3 ${
+        isDark
+          ? 'border-slate-700 bg-slate-900/70'
+          : 'border-slate-200/80 bg-slate-50/60'
+      }`}
       onSubmit={(event) => {
         event.preventDefault();
         onApplyFilter();
       }}
     >
       <div className="min-w-[180px] flex-1">
-        <label htmlFor="issue-search" style={labelStyle}>
+        <label htmlFor="issue-search" style={getLabelStyle(c)}>
           검색어
         </label>
         <input
@@ -1215,11 +1530,11 @@ const IssueListSection = ({
           value={filters.search}
           onChange={(event) => onFilterChange('search', event.target.value)}
           placeholder="제목 또는 LOT 번호"
-          style={filterControlStyle}
+          style={getFilterControlStyle(c)}
         />
       </div>
       <div className="w-[150px]">
-        <label htmlFor="issue-date" style={labelStyle}>
+        <label htmlFor="issue-date" style={getLabelStyle(c)}>
           날짜
         </label>
         <input
@@ -1227,19 +1542,19 @@ const IssueListSection = ({
           type="date"
           value={filters.date}
           onChange={(event) => onFilterChange('date', event.target.value)}
-          style={{ ...filterControlStyle, colorScheme: 'light' }}
-          className="[color-scheme:light]"
+          style={{ ...getFilterControlStyle(c), colorScheme: isDark ? 'dark' : 'light' }}
+          className={isDark ? '[color-scheme:dark]' : '[color-scheme:light]'}
         />
       </div>
       <div className="min-w-[150px] flex-1">
-        <label htmlFor="issue-lot" style={labelStyle}>
+        <label htmlFor="issue-lot" style={getLabelStyle(c)}>
           LOT
         </label>
         <select
           id="issue-lot"
           value={filters.lot}
           onChange={(event) => onFilterChange('lot', event.target.value)}
-          style={filterControlStyle}
+          style={getFilterControlStyle(c)}
         >
           <option value="">전체 LOT</option>
           {lots.map((lot) => (
@@ -1250,14 +1565,14 @@ const IssueListSection = ({
         </select>
       </div>
       <div className="w-[120px]">
-        <label htmlFor="issue-risk" style={labelStyle}>
+        <label htmlFor="issue-risk" style={getLabelStyle(c)}>
           위험도
         </label>
         <select
           id="issue-risk"
           value={filters.risk}
           onChange={(event) => onFilterChange('risk', event.target.value)}
-          style={filterControlStyle}
+          style={getFilterControlStyle(c)}
         >
           <option value="">전체 위험도</option>
           <option value="높음">높음</option>
@@ -1266,14 +1581,14 @@ const IssueListSection = ({
         </select>
       </div>
       <div className="w-[130px]">
-        <label htmlFor="issue-status" style={labelStyle}>
+        <label htmlFor="issue-status" style={getLabelStyle(c)}>
           처리 상태
         </label>
         <select
           id="issue-status"
           value={filters.status}
           onChange={(event) => onFilterChange('status', event.target.value)}
-          style={filterControlStyle}
+          style={getFilterControlStyle(c)}
         >
           <option value="">전체 상태</option>
           <option value="접수">접수</option>
@@ -1285,14 +1600,20 @@ const IssueListSection = ({
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="submit"
-          className="inline-flex h-9 items-center rounded-lg bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800"
+          className={`inline-flex h-9 items-center rounded-lg px-4 text-xs font-semibold text-white ${
+            isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'
+          }`}
         >
           적용하기
         </button>
         <button
           type="button"
           onClick={onResetFilter}
-          className="inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          className={`inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold ${
+            isDark
+              ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+          }`}
         >
           전체보기
         </button>
@@ -1304,8 +1625,8 @@ const IssueListSection = ({
         style={{
           padding: '54px 20px',
           borderRadius: 14,
-          background: '#f8fafc',
-          color: colors.slate,
+          background: isDark ? '#0f172a' : '#f8fafc',
+          color: c.slate,
           textAlign: 'center',
           fontWeight: 700,
         }}
@@ -1316,7 +1637,13 @@ const IssueListSection = ({
       <div className="-mx-1 overflow-x-auto px-1">
         <table className="w-full min-w-[880px] border-collapse text-left">
           <thead>
-            <tr className="border-y border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500">
+            <tr
+              className={`border-y text-xs font-semibold ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                  : 'border-slate-200 bg-slate-50 text-slate-500'
+              }`}
+            >
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">이슈 ID</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">일시</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
@@ -1332,10 +1659,16 @@ const IssueListSection = ({
                 <tr
                   key={issue.id}
                   onClick={() => onSelect(issue.id)}
-                  className={`cursor-pointer border-b border-slate-100 border-l-4 transition-all hover:bg-slate-50/80 ${
+                  className={`cursor-pointer border-b border-l-4 transition-all ${
+                    isDark ? 'border-slate-700 hover:bg-slate-900/50' : 'border-slate-100 hover:bg-slate-50/80'
+                  } ${
                     selected
-                      ? 'border-l-blue-600 bg-blue-50/70 font-medium'
-                      : 'border-l-transparent bg-white'
+                      ? isDark
+                        ? 'border-l-blue-400 bg-blue-950/30 font-medium'
+                        : 'border-l-blue-600 bg-blue-50/70 font-medium'
+                      : isDark
+                        ? 'border-l-transparent bg-slate-800'
+                        : 'border-l-transparent bg-white'
                   }`}
                 >
                   <td className="whitespace-nowrap px-4 py-3">
@@ -1345,36 +1678,56 @@ const IssueListSection = ({
                         event.stopPropagation();
                         onSelect(issue.id);
                       }}
-                      className="cursor-pointer font-semibold text-blue-600 hover:underline"
+                      className={`cursor-pointer font-semibold hover:underline ${
+                        isDark ? 'text-blue-300' : 'text-blue-600'
+                      }`}
                     >
                       {issue.id}
                     </button>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                  <td
+                    className={`whitespace-nowrap px-4 py-3 text-xs ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     {issue.occurredAt}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-800">
+                  <td
+                    className={`whitespace-nowrap px-4 py-3 text-xs font-semibold ${
+                      isDark ? 'text-slate-200' : 'text-slate-800'
+                    }`}
+                  >
                     {issue.lot}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span
                       className={
                         issue.risk === '높음'
-                          ? 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700'
+                          ? isDark
+                            ? 'inline-flex items-center rounded-full border border-rose-800 bg-rose-950/40 px-2.5 py-0.5 text-xs font-bold text-rose-300'
+                            : 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700'
                           : issue.risk === '중간'
-                            ? 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700'
-                            : 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700'
+                            ? isDark
+                              ? 'inline-flex items-center rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-bold text-amber-300'
+                              : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700'
+                            : isDark
+                              ? 'inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-0.5 text-xs font-bold text-emerald-300'
+                              : 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700'
                       }
                     >
                       {issue.risk}
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span style={{ ...statusTagBase, ...statusStyle(issue.status) }}>
+                    <span style={{ ...statusTagBase, ...statusStyle(issue.status, isDark) }}>
                       {issue.status}
                     </span>
                   </td>
-                  <td className="max-w-[420px] px-4 py-3 text-sm font-semibold text-slate-900">
+                  <td
+                    className={`max-w-[420px] px-4 py-3 text-sm font-semibold ${
+                      isDark ? 'text-slate-100' : 'text-slate-900'
+                    }`}
+                  >
                     <span className="line-clamp-2">{issue.title}</span>
                   </td>
                 </tr>
@@ -1385,7 +1738,8 @@ const IssueListSection = ({
       </div>
     )}
   </section>
-);
+  );
+};
 
 const LineChart = ({
   data,
@@ -1400,6 +1754,8 @@ const LineChart = ({
   min: number;
   max: number;
 }) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
   const width = 560;
   const height = 180;
   const pad = 26;
@@ -1421,7 +1777,7 @@ const LineChart = ({
     >
       {[0, 1, 2, 3].map((line) => {
         const y = pad + (line * (height - pad * 2)) / 3;
-        return <line key={line} x1={pad} y1={y} x2={width - pad} y2={y} stroke={colors.line} />;
+        return <line key={line} x1={pad} y1={y} x2={width - pad} y2={y} stroke={c.line} />;
       })}
       <polyline
         points={points}
@@ -1436,8 +1792,8 @@ const LineChart = ({
         const y = height - pad - ((item[dataKey] - min) / range) * (height - pad * 2);
         return (
           <g key={item.time}>
-            <circle cx={x} cy={y} r="5" fill="#fff" stroke={color} strokeWidth="3" />
-            <text x={x} y={height - 5} textAnchor="middle" fontSize="11" fill={colors.slate}>
+            <circle cx={x} cy={y} r="5" fill={isDark ? c.panel : '#fff'} stroke={color} strokeWidth="3" />
+            <text x={x} y={height - 5} textAnchor="middle" fontSize="11" fill={c.slate}>
               {item.time}
             </text>
           </g>
@@ -1448,10 +1804,13 @@ const LineChart = ({
 };
 
 const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+
   if (!issue) {
     return (
-      <section style={{ ...panelStyle, minHeight: 220, display: 'grid', placeItems: 'center' }}>
-        <div style={{ textAlign: 'center', color: colors.slate }}>
+      <section style={{ ...getPanelStyle(c), minHeight: 220, display: 'grid', placeItems: 'center' }}>
+        <div style={{ textAlign: 'center', color: c.slate }}>
           <div style={{ fontSize: 38, marginBottom: 12 }}>⌁</div>
           <strong>목록에서 이슈를 선택하면 상세 분석 데이터가 표시됩니다.</strong>
         </div>
@@ -1460,7 +1819,7 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
   }
 
   return (
-    <section style={panelStyle}>
+    <section style={getPanelStyle(c)}>
       <div
         style={{
           display: 'flex',
@@ -1472,22 +1831,22 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
         }}
       >
         <div>
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>이슈 상세 분석</h2>
-          <div style={{ marginTop: 6, color: colors.slate, fontSize: 13 }}>
+          <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 상세 분석</h2>
+          <div style={{ marginTop: 6, color: c.slate, fontSize: 13 }}>
             {issue.id} · {issue.lot}
           </div>
         </div>
-        <span style={{ ...badgeBase, ...riskStyle(issue.risk) }}>위험도 {issue.risk}</span>
+        <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>위험도 {issue.risk}</span>
       </div>
 
       <div
         style={{
-          border: '1px solid #fed7aa',
-          borderLeft: `4px solid ${colors.amber}`,
+          border: isDark ? '1px solid #b45309' : '1px solid #fed7aa',
+          borderLeft: `4px solid ${c.amber}`,
           borderRadius: 12,
-          background: colors.amberSoft,
+          background: c.amberSoft,
           padding: 15,
-          color: '#92400e',
+          color: isDark ? '#fcd34d' : '#92400e',
           fontSize: 14,
           lineHeight: 1.65,
           marginBottom: 20,
@@ -1505,18 +1864,18 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
           marginBottom: 20,
         }}
       >
-        <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16 }}>
-          <h3 style={{ margin: 0, color: colors.navy, fontSize: 14 }}>시간대별 온도 변화 (°C)</h3>
-          <LineChart data={issue.processData} dataKey="temperature" color={colors.red} min={720} max={765} />
+        <div style={{ border: `1px solid ${c.line}`, borderRadius: 14, padding: 16 }}>
+          <h3 style={{ margin: 0, color: c.navy, fontSize: 14 }}>시간대별 온도 변화 (°C)</h3>
+          <LineChart data={issue.processData} dataKey="temperature" color={c.red} min={720} max={765} />
         </div>
-        <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16 }}>
-          <h3 style={{ margin: 0, color: colors.navy, fontSize: 14 }}>시간대별 압력 변화 (bar)</h3>
-          <LineChart data={issue.processData} dataKey="pressure" color={colors.cyan} min={1.3} max={3} />
+        <div style={{ border: `1px solid ${c.line}`, borderRadius: 14, padding: 16 }}>
+          <h3 style={{ margin: 0, color: c.navy, fontSize: 14 }}>시간대별 압력 변화 (bar)</h3>
+          <LineChart data={issue.processData} dataKey="pressure" color={c.cyan} min={1.3} max={3} />
         </div>
       </div>
 
-      <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 14px', color: colors.navy, fontSize: 14 }}>
+      <div style={{ border: `1px solid ${c.line}`, borderRadius: 14, padding: 16, marginBottom: 20 }}>
+        <h3 style={{ margin: '0 0 14px', color: c.navy, fontSize: 14 }}>
           AI 위험 점수 Before / After
         </h3>
         <div style={{ display: 'grid', gap: 11 }}>
@@ -1529,27 +1888,41 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
                 alignItems: 'center',
                 gap: 10,
                 fontSize: 11,
-                color: colors.slate,
+                color: c.slate,
               }}
             >
               <strong>{item.time}</strong>
-              <div style={{ height: 18, background: '#fee2e2', borderRadius: 999, overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: 18,
+                  background: isDark ? 'rgba(76, 5, 25, 0.4)' : '#fee2e2',
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                }}
+              >
                 <div
                   style={{
                     width: `${item.riskBefore}%`,
                     height: '100%',
-                    background: colors.red,
+                    background: c.red,
                     borderRadius: 999,
                   }}
                   title={`Before ${item.riskBefore}`}
                 />
               </div>
-              <div style={{ height: 18, background: '#dcfce7', borderRadius: 999, overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: 18,
+                  background: isDark ? 'rgba(6, 78, 59, 0.4)' : '#dcfce7',
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                }}
+              >
                 <div
                   style={{
                     width: `${item.riskAfter}%`,
                     height: '100%',
-                    background: colors.green,
+                    background: c.green,
                     borderRadius: 999,
                   }}
                   title={`After ${item.riskAfter}`}
@@ -1558,8 +1931,8 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 14, fontSize: 11 }}>
-            <span style={{ color: colors.red }}>■ Before</span>
-            <span style={{ color: colors.green }}>■ After</span>
+            <span style={{ color: c.red }}>■ Before</span>
+            <span style={{ color: c.green }}>■ After</span>
           </div>
         </div>
       </div>
@@ -1567,11 +1940,11 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620, fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#f8fafc', color: colors.slate }}>
+            <tr style={{ background: isDark ? '#0f172a' : '#f8fafc', color: c.slate }}>
               {['시간', '온도(°C)', '압력(bar)', '속도(rpm)', '위험 Before', '위험 After'].map((heading) => (
                 <th
                   key={heading}
-                  style={{ padding: 11, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}
+                  style={{ padding: 11, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}
                 >
                   {heading}
                 </th>
@@ -1580,13 +1953,13 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
           </thead>
           <tbody>
             {issue.processData.map((item) => (
-              <tr key={item.time} style={{ color: colors.navy }}>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.time}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.temperature}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.pressure}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.speed}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center', color: colors.red, fontWeight: 800 }}>{item.riskBefore}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center', color: colors.green, fontWeight: 800 }}>{item.riskAfter}</td>
+              <tr key={item.time} style={{ color: c.navy }}>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.time}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.temperature}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.pressure}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.speed}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center', color: c.red, fontWeight: 800 }}>{item.riskBefore}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center', color: c.green, fontWeight: 800 }}>{item.riskAfter}</td>
               </tr>
             ))}
           </tbody>
@@ -1603,20 +1976,24 @@ const ManagementSection = ({
   canSave,
   onChange,
   onSave,
-}: ManagementSectionProps) => (
-  <section style={panelStyle}>
-    <h2 style={{ margin: '0 0 6px', color: colors.navy, fontSize: 19 }}>이슈 처리 관리</h2>
-    <p style={{ margin: '0 0 20px', color: colors.slate, fontSize: 13 }}>
+}: ManagementSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+
+  return (
+  <section style={getPanelStyle(c)}>
+    <h2 style={{ margin: '0 0 6px', color: c.navy, fontSize: 19 }}>이슈 처리 관리</h2>
+    <p style={{ margin: '0 0 20px', color: c.slate, fontSize: 13 }}>
       {issue ? `${issue.id}의 담당자와 처리 현황을 관리합니다.` : '관리할 이슈를 먼저 선택해주세요.'}
     </p>
     {message && (
       <div
         role="status"
         style={{
-          border: '1px solid #86efac',
+          border: isDark ? '1px solid #047857' : '1px solid #86efac',
           borderRadius: 10,
-          background: colors.greenSoft,
-          color: '#166534',
+          background: c.greenSoft,
+          color: isDark ? '#6ee7b7' : '#166534',
           padding: '11px 13px',
           marginBottom: 16,
           fontSize: 13,
@@ -1637,22 +2014,22 @@ const ManagementSection = ({
           }}
         >
           <div>
-            <label htmlFor="manager-assignee" style={labelStyle}>담당자</label>
+            <label htmlFor="manager-assignee" style={getLabelStyle(c)}>담당자</label>
             <input
               id="manager-assignee"
               value={form.assignee}
               onChange={(event) => onChange('assignee', event.target.value)}
               placeholder="담당자 이름"
-              style={inputStyle}
+              style={getInputStyle(c)}
             />
           </div>
           <div>
-            <label htmlFor="manager-status" style={labelStyle}>처리 상태</label>
+            <label htmlFor="manager-status" style={getLabelStyle(c)}>처리 상태</label>
             <select
               id="manager-status"
               value={form.status}
               onChange={(event) => onChange('status', event.target.value as Issue['status'])}
-              style={inputStyle}
+              style={getInputStyle(c)}
             >
               <option value="접수">접수</option>
               <option value="분석 중">분석 중</option>
@@ -1662,13 +2039,13 @@ const ManagementSection = ({
           </div>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label htmlFor="manager-action" style={labelStyle}>조치 내용</label>
+          <label htmlFor="manager-action" style={getLabelStyle(c)}>조치 내용</label>
           <textarea
             id="manager-action"
             value={form.action}
             onChange={(event) => onChange('action', event.target.value)}
             placeholder="분석 내용과 조치 사항을 입력해주세요."
-            style={{ ...inputStyle, minHeight: 110, resize: 'vertical', fontFamily: 'inherit' }}
+            style={{ ...getInputStyle(c), minHeight: 110, resize: 'vertical', fontFamily: 'inherit' }}
           />
         </div>
         <label
@@ -1676,7 +2053,7 @@ const ManagementSection = ({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            color: colors.navy,
+            color: c.navy,
             fontSize: 14,
             fontWeight: 700,
             cursor: issue ? 'pointer' : 'not-allowed',
@@ -1687,7 +2064,7 @@ const ManagementSection = ({
             type="checkbox"
             checked={form.completed}
             onChange={(event) => onChange('completed', event.target.checked)}
-            style={{ width: 18, height: 18, accentColor: colors.blue, cursor: 'pointer' }}
+            style={{ width: 18, height: 18, accentColor: c.blue, cursor: 'pointer' }}
           />
           조치 완료 여부
         </label>
@@ -1698,7 +2075,7 @@ const ManagementSection = ({
             width: '100%',
             border: 0,
             borderRadius: 11,
-            background: issue && canSave ? colors.navy : colors.muted,
+            background: issue && canSave ? (isDark ? c.blue : c.navy) : c.muted,
             color: '#fff',
             padding: '12px 18px',
             fontSize: 14,
@@ -1712,7 +2089,8 @@ const ManagementSection = ({
       </fieldset>
     </form>
   </section>
-);
+  );
+};
 
 const EMPTY_FORM: ManagementForm = {
   assignee: '',
@@ -1905,6 +2283,7 @@ function appendHandoverActionLogs(
 }
 
 export default function IssuePage() {
+  const { isDark } = useUiSettings();
   const [issues, setIssues] = useState<Issue[]>(INITIAL_ISSUES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -2326,8 +2705,8 @@ ${issues
         height: '100%',
         overflowY: 'auto',
         boxSizing: 'border-box',
-        background: colors.background,
-        color: colors.navy,
+        background: isDark ? '#0f172a' : colors.background,
+        color: isDark ? '#f8fafc' : colors.navy,
         padding: '36px clamp(16px, 3vw, 44px) 56px',
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",

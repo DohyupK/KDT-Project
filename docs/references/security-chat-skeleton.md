@@ -1,10 +1,11 @@
-# 보안 챗봇 · 디렉터리·라우팅 골격
+# 보안 챗봇 · 디렉터리·라우팅
 
-일자: 2026-07-23  
-상태: **placeholder만** (vLLM 실호출·실 UI 미구현)
+일자: 2026-07-24  
+상태: **보안 탭 ↔ vLLM 통신망 구현** (모델/vLLM 기동은 수동 — [`vllm-setup.md`](./vllm-setup.md))
 
-일반 챗봇(GlobalChatbot)은 OpenAI / Gemini / NVIDIA API compose를 쓰고,  
-보안·기밀 키워드가 들어오면 **LLM을 호출하지 않고** `/security`로 안내한다.
+일반 챗봇(GlobalChatbot)은 Groq/Gemini compose를 쓰고,  
+보안·기밀 키워드가 들어오면 **일반 채널 LLM을 호출하지 않고** `/security`로 안내한다.  
+보안 탭은 **로컬 vLLM만** 사용한다 (외부 API 폴백 없음).
 
 ---
 
@@ -12,11 +13,14 @@
 
 | 경로 | 역할 |
 |------|------|
-| [`frontend/src/app/(shell)/security/page.tsx`](../../frontend/src/app/(shell)/security/page.tsx) | 보안 탭 placeholder 페이지 |
-| [`frontend/src/components/chat/SecurityChatbot.tsx`](../../frontend/src/components/chat/SecurityChatbot.tsx) | 보안 전용 챗봇 stub |
+| [`frontend/src/app/(shell)/security/page.tsx`](../../frontend/src/app/(shell)/security/page.tsx) | 보안 탭 페이지 |
+| [`frontend/src/components/chat/SecurityChatbot.tsx`](../../frontend/src/components/chat/SecurityChatbot.tsx) | 보안 전용 챗봇 |
+| [`frontend/src/api/securityChatApi.ts`](../../frontend/src/api/securityChatApi.ts) | `POST /api/security-chat` |
 | [`frontend/src/components/chat/GlobalChatbot.tsx`](../../frontend/src/components/chat/GlobalChatbot.tsx) | 일반 챗봇 (보안 키워드 → redirect) |
 | [`backend/src/services/securityGate.ts`](../../backend/src/services/securityGate.ts) | 키워드 게이트 |
-| `ai-service` `CHAT_VLLM_BASE_URL` | 이후 보안 채널 전용 (일반 `/chat` compose에서는 **미사용**) |
+| [`backend/src/routes/securityChat.ts`](../../backend/src/routes/securityChat.ts) | 보안 프록시 |
+| [`ai-service/agent/secure_llm.py`](../../ai-service/agent/secure_llm.py) | vLLM only compose |
+| `CHAT_VLLM_BASE_URL` | 기본 `http://127.0.0.1:8001/v1` |
 
 ---
 
@@ -24,26 +28,25 @@
 
 ```text
 일반 메시지
-  → POST /api/chat (Express)
-  → (비보안) ai-service /chat → predict → LLM priority failover
-
-보안 키워드 포함 메시지
   → POST /api/chat
-  → mode=security_redirect, LLM/ai-service 미호출
+  → (비보안) ai-service /chat → predict → Groq/Gemini
+
+보안 키워드 포함 (일반 챗)
+  → POST /api/chat
+  → mode=security_redirect, ai-service 미호출
   → 「보안 탭(/security) 이용」안내
+
+보안 탭 메시지
+  → POST /api/security-chat
+  → ai-service POST /security-chat
+  → ChatOpenAI → CHAT_VLLM_BASE_URL (:8001)
+  → 실패 시 offline template (클라우드 폴백 없음)
 ```
 
 ---
 
-## 이후 vLLM 연결 시 (미구현 · 할 일)
+## 정책
 
-**정책:** 보안 탭용 모델은 **직접 학습·제작하지 않는다.**  
-다른 사람이 만든(또는 공개) 모델을 가져와 vLLM에 올린 뒤 연결한다.
-
-1. 외부 모델 확보 → 로컬(또는 서버) vLLM OpenAI-compatible 기동  
-2. `CHAT_VLLM_BASE_URL` 설정  
-3. `SecurityChatbot`에서 해당 endpoint만 호출  
-4. 일반 `CHAT_LLM_PRIORITY` 프로바이더는 보안 탭에서 사용 금지  
-5. (선택) `POST /api/chat/secure` 또는 ai-service `channel=secure` 분리  
-
-환경 변수 예시: [`ai-service/.env.example`](../../ai-service/.env.example)
+- 보안 탭용 모델은 **앱 안에서 학습·transformers 로드하지 않는다.**
+- HF에서 받아 vLLM에 올린 뒤 연결한다 ([`vllm-setup.md`](./vllm-setup.md)).
+- Login / MariaDB 정식 연동은 **백로그 홀딩** (이번 스프린트 제외).

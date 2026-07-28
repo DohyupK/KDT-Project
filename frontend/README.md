@@ -135,7 +135,7 @@ frontend/
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
 - [2026-07-23 ai-service ML·챗봇 연동·LLM·시나리오 스모크](../docs/work-log/2026-07-23.md)
-- [2026-07-24 LLM 길이 라우팅 · .env 키 안전 주입](../docs/work-log/2026-07-24.md)
+- [2026-07-24 API키·LLM·LOT·What-if·한계치·Undo·보안vLLM](../docs/work-log/2026-07-24.md)
 
 ---
 

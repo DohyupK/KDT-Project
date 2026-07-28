@@ -41,6 +41,30 @@ export type ChatPredictResult = {
   top_risk_factors: string[]
 }
 
+export type WhatIfSuggestion = {
+  deltas: Record<string, number>
+  after_features: ChatFeatures
+  probability: number
+  defect_status: number
+  applied_threshold: number
+  boundary_hit?: boolean
+  limit_reason?: string | null
+  ideal_values?: Record<string, number> | null
+  clipped_values?: Record<string, number> | null
+}
+
+export type ChatRecommendation = {
+  method: string
+  baseline: {
+    probability: number
+    defect_status: number
+    applied_threshold: number
+    features: ChatFeatures
+  }
+  suggestion: WhatIfSuggestion | null
+  note?: string | null
+}
+
 export type ChatRequest = {
   message: string
   features?: ChatFeatures | null
@@ -54,6 +78,7 @@ export type ChatResponse = {
   mode: string
   provider: string
   predict: ChatPredictResult | null
+  recommendation?: ChatRecommendation | null
   error: string | null
   need_guideline?: boolean
   ai_proxied?: boolean
@@ -61,6 +86,19 @@ export type ChatResponse = {
   similar_streak?: number
   chat_store?: string
   stored_user_messages?: number
+}
+
+export type ApproveControlRequest = {
+  session_id?: string | null
+  lot_id?: string | null
+  recommendation: ChatRecommendation
+}
+
+export type ApproveControlResponse = {
+  ok: boolean
+  event_id: number | string
+  status: string
+  control_store?: string
 }
 
 /** Proxied through Express backend: security gate + session + ai-service. */
@@ -73,6 +111,29 @@ export async function postChat(body: ChatRequest): Promise<ChatResponse> {
     session_id: session_id ?? undefined,
   })
   if (data.session_id) setChatSessionId(data.session_id)
+  return data
+}
+
+/** Log-only control bridge: approve what-if suggestion → optimization_events row. */
+export async function postApproveControl(
+  body: ApproveControlRequest,
+): Promise<ApproveControlResponse> {
+  const session_id = body.session_id ?? getChatSessionId()
+  const { data } = await apiClient.post<ApproveControlResponse>('/control/approve', {
+    session_id: session_id ?? undefined,
+    lot_id: body.lot_id ?? undefined,
+    recommendation: body.recommendation,
+  })
+  return data
+}
+
+/** 5초 Undo: mark event status=reverted (no DELETE). */
+export async function postRevertControl(
+  eventId: number | string,
+): Promise<ApproveControlResponse> {
+  const { data } = await apiClient.post<ApproveControlResponse>(
+    `/control/approve/${encodeURIComponent(String(eventId))}/revert`,
+  )
   return data
 }
 

@@ -59,9 +59,10 @@ Polars
 
 Tool 후보(후속 설계):
 
-- `predict` / 진단 결과 조회  
-- 지식·문서 검색 (backend)  
-- (권한 후) 제어 API 호출  
+- `predict` — O/X 진단 (구현됨)
+- `whatif_grid` — 기존 predict 격자 탐색 Cold start (구현됨; `reg.csv` 전)
+- knowledge / RAG 검색  
+- (권한 후) 제어 API 호출 — backend `POST /api/control/approve`는 **로그 스텁**만 (하드웨어 미연동)
 
 ---
 
@@ -188,8 +189,8 @@ ai-service/
 - [ ] 문서 답은 RAG/backend 검색 결과 인용  
 - [ ] “조절해서 실행”은 권한 확인 후에만 Tool 호출  
 - [x] 1단계 `top_risk_factors`는 전역 중요도임을 사용자 문구에서 과장하지 않기  
-- [x] 시크릿·API 키는 저장소에 넣지 않기 (환경변수만; `.env.example` 참고)  
-- [ ] 보안 탭 vLLM 실연동
+- [x] 시크릿·API 키는 저장소에 넣지 않기 (환경변수만; `.env.example` 참고)
+- [x] 보안 탭 vLLM 통신망 (`POST /security-chat` · `CHAT_VLLM_BASE_URL` · 클라우드 폴백 없음) — 모델 기동은 수동
 
 ---
 
