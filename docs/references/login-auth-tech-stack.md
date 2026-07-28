@@ -128,3 +128,8 @@ npm run dev
 |------|------|
 | 2026-07-28 | 초안. 로그인 공용 Ubuntu MariaDB 연동에 쓰는 스택·패키지 정리. |
 | 2026-07-28 | `bcryptjs` 미설치(`ERR_MODULE_NOT_FOUND`) 원인·`npm install` 절차 기록. backend에 의존성 재설치 완료. |
+| 2026-07-28 | User 작명: 로그인 영속 테이블 `users`, 로그인 식별자 컬럼 `user_id` (`backend/schema.sql`). 설정·대화용 신규 테이블은 이번 범위 밖. |
+| 2026-07-28 | 테마: Setting이 저장한 `kdt-user-settings` / `system_settings_config`(localStorage)를 `/login`·`UserAuthMenu`가 `readStoredUiSettings`·`useUiSettings`로 반영. 다크(0)/라이트(1). |
+| 2026-07-28 | FE 패키지: `next` / `eslint-config-next` **16.2.12**. `allowScripts`: frontend `sharp`·`unrs-resolver`, backend `esbuild`. |
+| 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 `backend/.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
+| 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
