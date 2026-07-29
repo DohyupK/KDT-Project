@@ -12,10 +12,10 @@ Approve(제안 승인) 시 **하드웨어 미연동** — 로그만 남긴다.
 
 ## 저장
 
-| 모드 | 위치 |
+| 저장 | 위치 |
 |------|------|
-| sqlite (기본, `CONTROL_STORE` 또는 `CHAT_STORE`) | `backend/data/control.sqlite` |
-| mariadb | 테이블 `optimization_events` |
+| sqlite (`CONTROL_STORE` 또는 `CHAT_STORE=sqlite`) | `backend/data/control.sqlite` |
+| mariadb (권장, `CHAT_STORE=mariadb`) | 테이블 `optimization_events` |
 | memory | 프로세스 메모리 (개발용) |
 
 API:

@@ -12,7 +12,7 @@
 | 프록시 | Next.js `rewrites` | 브라우저 `/api` → `http://localhost:3001/api` |
 | 백엔드 | Express 5, TypeScript, tsx | `/api/auth` 라우트, 비즈니스 로직 |
 | DB 접속 | `mariadb` (npm) | `backend/src/db/connection.ts` 커넥션 풀 |
-| DB 서버 | MariaDB (Ubuntu apt) | `kdt_project.users` 영속 저장 |
+| DB 서버 | MariaDB (Ubuntu apt) | `users`, `user_settings`, `chat_*`, `llm_api_keys`(암호문), `optimization_events` |
 | 인프라 | Amazon Lightsail Instance | Ubuntu 서버 상시 기동 (공용 DB 위치) |
 | 비밀번호 해시 | bcryptjs | 회원가입·로그인 검증 |
 | 세션 토큰 | jsonwebtoken (JWT) | 로그인 후 인증 |
@@ -87,7 +87,8 @@
 | `DB_NAME` | `kdt_project` |
 | `JWT_SECRET` | JWT 서명 비밀 |
 | `CORS_ORIGIN` | 프론트 origin (`http://localhost:3000`) |
-| `CHAT_STORE` | 챗 세션 저장 (`sqlite` / `mariadb` / `memory`) — 로그인 `users`와는 별 설정 |
+| `CHAT_STORE` | 챗·제어 저장 (`mariadb` 권장 / `sqlite` / `memory`) — 로그인 `users`와 같은 `DB_*` |
+| `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(팀 공통, 16자+, Git 금지). 암호문은 MariaDB `llm_api_keys` |
 
 템플릿: `backend/.env.example` (비밀번호 비움).
 
@@ -128,8 +129,10 @@ npm run dev
 |------|------|
 | 2026-07-28 | 초안. 로그인 공용 Ubuntu MariaDB 연동에 쓰는 스택·패키지 정리. |
 | 2026-07-28 | `bcryptjs` 미설치(`ERR_MODULE_NOT_FOUND`) 원인·`npm install` 절차 기록. backend에 의존성 재설치 완료. |
-| 2026-07-28 | User 작명: 로그인 영속 테이블 `users`, 로그인 식별자 컬럼 `user_id` (`backend/schema.sql`). 설정·대화용 신규 테이블은 이번 범위 밖. |
+| 2026-07-28 | User 작명: 로그인 영속 테이블 `users`, 로그인 식별자 컬럼 `user_id` (`backend/schema.sql`). |
+
 | 2026-07-28 | 테마: Setting이 저장한 `kdt-user-settings` / `system_settings_config`(localStorage)를 `/login`·`UserAuthMenu`가 `readStoredUiSettings`·`useUiSettings`로 반영. 다크(0)/라이트(1). |
 | 2026-07-28 | FE 패키지: `next` / `eslint-config-next` **16.2.12**. `allowScripts`: frontend `sharp`·`unrs-resolver`, backend `esbuild`. |
 | 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 `backend/.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
 | 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
+| 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |

@@ -33,6 +33,7 @@ export function createApp() {
       service: 'backend',
       health: '/api/health',
       auth: '/api/auth',
+      auth_settings: 'GET|PUT /api/auth/settings · POST /api/auth/settings/reset',
       chat: 'POST /api/chat',
       security_chat: 'POST /api/security-chat',
       llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',

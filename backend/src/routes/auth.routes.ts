@@ -14,5 +14,8 @@ router.post('/logout', authMiddleware, authController.logout)
 router.get('/profile', authMiddleware, authController.getProfile)
 router.put('/profile', authMiddleware, authController.updateProfile)
 router.delete('/account', authMiddleware, authController.withdrawAccount)
+router.get('/settings', authMiddleware, authController.getSettings)
+router.put('/settings', authMiddleware, authController.updateSettings)
+router.post('/settings/reset', authMiddleware, authController.resetSettings)
 
 export default router

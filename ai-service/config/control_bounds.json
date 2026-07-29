@@ -5,6 +5,6 @@
   },
   "humidity": {
     "min": 5,
-    "max": 95
+    "max": 100
   }
 }

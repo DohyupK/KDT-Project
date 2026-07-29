@@ -1,15 +1,4 @@
-CREATE TABLE IF NOT EXISTS users (
-  id         INT AUTO_INCREMENT PRIMARY KEY,
-  user_id    VARCHAR(50) NOT NULL UNIQUE,
-  password   VARCHAR(255) NOT NULL,
-  name       VARCHAR(50) NOT NULL,
-  phone      VARCHAR(20) NOT NULL,
-  email      VARCHAR(100) NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Per-user Setting page UI prefs (font/theme/refresh/n8n). Control bounds stay in JSON file.
+-- Per-user Setting page preferences (linked to users.user_id)
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id               VARCHAR(50)  NOT NULL PRIMARY KEY,
   font_size             INT          NOT NULL DEFAULT 18,
