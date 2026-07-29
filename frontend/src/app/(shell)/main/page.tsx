@@ -12,8 +12,6 @@ import { useUiSettings } from '@/components/layout/AppShell';
 /* -------------------------------------------------------------------------- */
 
 type StatusTone = '정상' | '주의' | '경고' | '위험' | '이상';
-type ChartType = 'bar' | 'line' | 'pie';
-type TrendInterval = '1h' | '2h' | 'shift';
 
 type FilterState = {
   startDate: string;
@@ -195,15 +193,8 @@ function isAnomalous(record: LotRecord) {
   );
 }
 
-function getTrendSlots(interval: TrendInterval) {
-  if (interval === '1h') return Array.from({ length: 15 }, (_, i) => `${pad(8 + i)}:00`);
-  if (interval === 'shift') return ['주간(08-20)', '야간(20-08)'];
-  return ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
-}
-
-function hourToShift(hour: string) {
-  const h = Number(hour.slice(0, 2));
-  return h >= 8 && h < 20 ? '주간(08-20)' : '야간(20-08)';
+function getTrendSlots() {
+  return Array.from({ length: 15 }, (_, i) => `${pad(8 + i)}:00`);
 }
 
 function buildProcessParams(records: LotRecord[]): ProcessParam[] {
@@ -374,11 +365,9 @@ function Modal({
 
 function TrendChart({
   data,
-  chartType,
   isDark = false,
 }: {
   data: TrendPoint[];
-  chartType: ChartType;
   isDark?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -391,79 +380,12 @@ function TrendChart({
   const passMin = 80;
   const passMax = 100;
   const slotW = data.length > 0 ? innerW / data.length : innerW;
-  const barW = Math.max(8, slotW * 0.42);
   const yProd = (v: number) => pad.top + innerH - (Math.min(prodMax, Math.max(0, v)) / prodMax) * innerH;
   const yPass = (v: number) =>
     pad.top + innerH - ((Math.min(passMax, Math.max(passMin, v)) - passMin) / (passMax - passMin)) * innerH;
   const yRisk = (v: number) => pad.top + innerH - Math.min(1, Math.max(0, v)) * innerH;
-  const totalPie = data.reduce((s, d) => s + d.production, 0) || 1;
-  const colors = ['#2563eb', '#0d9488', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#059669', '#ea580c'];
   const gridStroke = isDark ? '#334155' : '#f1f5f9';
   const tickFill = isDark ? '#cbd5e1' : '#94a3b8';
-  const pieHole = isDark ? '#1e293b' : '#fff';
-
-  if (chartType === 'pie') {
-    let cursor = -Math.PI / 2;
-    const arcs = data.map((d, i) => {
-      const ratio = d.production / totalPie;
-      const start = cursor;
-      const end = cursor + ratio * Math.PI * 2;
-      cursor = end;
-      const large = end - start > Math.PI ? 1 : 0;
-      const x1 = 160 + Math.cos(start) * 90;
-      const y1 = 140 + Math.sin(start) * 90;
-      const x2 = 160 + Math.cos(end) * 90;
-      const y2 = 140 + Math.sin(end) * 90;
-      return { d, i, path: `M160,140 L${x1},${y1} A90,90 0 ${large} 1 ${x2},${y2} Z`, color: colors[i % colors.length] };
-    });
-    return (
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,280px)_1fr]">
-        <svg viewBox="0 0 320 280" className="mx-auto h-auto w-full max-w-[320px]">
-          {arcs.map((a) => (
-            <path key={a.d.time} d={a.path} fill={a.color} opacity={0.9} />
-          ))}
-          <circle cx="160" cy="140" r="48" fill={pieHole} />
-          <text
-            x="160"
-            y="136"
-            textAnchor="middle"
-            className={`text-[12px] font-bold ${isDark ? '' : 'fill-slate-700'}`}
-            fill={isDark ? '#f1f5f9' : undefined}
-          >
-            생산량
-          </text>
-          <text
-            x="160"
-            y="154"
-            textAnchor="middle"
-            className={`text-[11px] ${isDark ? '' : 'fill-slate-500'}`}
-            fill={isDark ? '#94a3b8' : undefined}
-          >
-            {totalPie}건
-          </text>
-        </svg>
-        <ul className="space-y-2 text-sm">
-          {arcs.map((a) => (
-            <li key={a.d.time} className="flex items-center justify-between gap-3">
-              <span
-                className={`inline-flex items-center gap-2 ${
-                  isDark ? 'text-slate-300' : 'text-slate-700'
-                }`}
-              >
-                <span className="h-3 w-3 rounded-sm" style={{ background: a.color }} />
-                {a.d.time}
-              </span>
-              <span
-                className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-              >
-                {a.d.production}건 ({Math.round((a.d.production / totalPie) * 100)}%)
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
 
   const passPoints = data.map((d, i) => `${pad.left + (i + 0.5) * slotW},${yPass(d.passRate)}`).join(' ');
   const riskPoints = data.map((d, i) => `${pad.left + (i + 0.5) * slotW},${yRisk(d.riskIndex)}`).join(' ');
@@ -512,51 +434,34 @@ function TrendChart({
             </g>
           );
         })}
-        {data.map((d, i) => {
-          const x = pad.left + i * slotW + (slotW - barW) / 2;
-          const y = yProd(d.production);
-          return (
-            <g key={d.time} onMouseEnter={() => setHoverIndex(i)}>
-              <rect
-                x={pad.left + i * slotW}
-                y={pad.top}
-                width={slotW}
-                height={innerH}
-                fill={hoverIndex === i ? 'rgba(37,99,235,0.06)' : 'transparent'}
-              />
-              {chartType === 'bar' ? (
-                <rect
-                  x={x}
-                  y={y}
-                  width={barW}
-                  height={Math.max(0, pad.top + innerH - y)}
-                  rx={4}
-                  fill="#3b82f6"
-                  opacity={0.85}
-                />
-              ) : null}
-              <text
-                x={pad.left + (i + 0.5) * slotW}
-                y={height - 10}
-                textAnchor="middle"
-                fill={tickFill}
-                fontSize="10"
-              >
-                {d.time}
-              </text>
-            </g>
-          );
-        })}
-        {chartType === 'line' ? (
-          <polyline fill="none" stroke="#3b82f6" strokeWidth="2.4" points={linePoints} />
-        ) : null}
+        {data.map((d, i) => (
+          <g key={d.time} onMouseEnter={() => setHoverIndex(i)}>
+            <rect
+              x={pad.left + i * slotW}
+              y={pad.top}
+              width={slotW}
+              height={innerH}
+              fill={hoverIndex === i ? 'rgba(37,99,235,0.06)' : 'transparent'}
+            />
+            <text
+              x={pad.left + (i + 0.5) * slotW}
+              y={height - 10}
+              textAnchor="middle"
+              fill={tickFill}
+              fontSize="10"
+            >
+              {d.time}
+            </text>
+          </g>
+        ))}
+        <polyline fill="none" stroke="#3b82f6" strokeWidth="2.4" points={linePoints} />
         <polyline fill="none" stroke="#10b981" strokeWidth="2" points={passPoints} />
         <polyline fill="none" stroke="#f59e0b" strokeWidth="2" points={riskPoints} />
         {data.map((d, i) => {
           const x = pad.left + (i + 0.5) * slotW;
           return (
             <g key={`p-${d.time}`} onMouseEnter={() => setHoverIndex(i)}>
-              {chartType === 'line' ? <circle cx={x} cy={yProd(d.production)} r="3" fill="#3b82f6" /> : null}
+              <circle cx={x} cy={yProd(d.production)} r="3" fill="#3b82f6" />
               <circle cx={x} cy={yPass(d.passRate)} r="2.8" fill="#10b981" />
               <circle cx={x} cy={yRisk(d.riskIndex)} r="2.8" fill="#f59e0b" />
             </g>
@@ -617,10 +522,9 @@ export default function MainPage() {
   // Empty on SSR so server/client HTML match; clock starts after mount.
   const [now, setNow] = useState('');
   const [seed, setSeed] = useState(7);
-  const [draftFilter, setDraftFilter] = useState<FilterState>(DEFAULT_FILTER);
-  const [appliedFilter, setAppliedFilter] = useState<FilterState>(DEFAULT_FILTER);
-  const [chartType, setChartType] = useState<ChartType>('bar');
-  const [trendInterval, setTrendInterval] = useState<TrendInterval>('2h');
+  /** 생산 추이 차트 전용 날짜 필터 (적용 시에만 반영) */
+  const [trendFilterDraft, setTrendFilterDraft] = useState<FilterState>(DEFAULT_FILTER);
+  const [trendFilterApplied, setTrendFilterApplied] = useState<FilterState>(DEFAULT_FILTER);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
   const [isNotifyOpen, setIsNotifyOpen] = useState(false);
@@ -647,11 +551,23 @@ export default function MainPage() {
 
   const dataset = useMemo(() => buildLotDataset(seed), [seed]);
 
-  const filteredRecords = useMemo(() => {
-    return dataset.filter(
-      (r) => r.date >= appliedFilter.startDate && r.date <= appliedFilter.endDate,
-    );
-  }, [dataset, appliedFilter]);
+  /** KPI·위험 LOT·공정 파라미터용 — 전체 데이터 (최상단 기간 필터 없음) */
+  const filteredRecords = dataset;
+
+  const dataRangeStart = useMemo(
+    () =>
+      dataset.length === 0
+        ? DEFAULT_FILTER.startDate
+        : dataset.reduce((m, r) => (r.date < m ? r.date : m), dataset[0].date),
+    [dataset],
+  );
+  const dataRangeEnd = useMemo(
+    () =>
+      dataset.length === 0
+        ? DEFAULT_FILTER.endDate
+        : dataset.reduce((m, r) => (r.date > m ? r.date : m), dataset[0].date),
+    [dataset],
+  );
 
   const riskLots = useMemo(() => {
     return filteredRecords
@@ -697,21 +613,20 @@ export default function MainPage() {
 
   const topKpis = kpis;
 
+  /** 생산 추이 차트 전용 — 적용된 날짜 필터 */
+  const trendRecords = useMemo(() => {
+    const { startDate, endDate } = trendFilterApplied;
+    if (startDate > endDate) return [];
+    return dataset.filter((r) => r.date >= startDate && r.date <= endDate);
+  }, [dataset, trendFilterApplied]);
+
   const trendData = useMemo(() => {
-    const slots = getTrendSlots(trendInterval);
+    const slots = getTrendSlots();
     return slots.map((time) => {
-      const rows = filteredRecords.filter((r) => {
-        if (trendInterval === 'shift') return hourToShift(r.hour) === time;
-        if (trendInterval === '2h') {
-          const h = Number(r.hour.slice(0, 2));
-          const slotH = Number(time.slice(0, 2));
-          return h === slotH || h === slotH + 1;
-        }
-        return r.hour === time;
-      });
+      const rows = trendRecords.filter((r) => r.hour === time);
       const production = Math.min(
         60,
-        Math.round(rows.reduce((s, r) => s + r.production, 0) / Math.max(1, trendInterval === '1h' ? 3 : 2)),
+        Math.round(rows.reduce((s, r) => s + r.production, 0) / 3),
       );
       const defects = rows.filter((r) => r.quality_defect === 1).length;
       const passRate =
@@ -733,7 +648,7 @@ export default function MainPage() {
         riskIndex,
       };
     });
-  }, [filteredRecords, trendInterval]);
+  }, [trendRecords]);
 
   const params = useMemo(() => buildProcessParams(filteredRecords), [filteredRecords]);
   const unreadCount = notifications.filter((n) => n.unread).length;
@@ -768,20 +683,23 @@ export default function MainPage() {
     toastTimersRef.current.push(timer);
   };
 
-  const handleSearch = () => {
-    if (draftFilter.startDate > draftFilter.endDate) {
-      pushToast('시작일이 종료일보다 늦을 수 없습니다.', 'error');
+  const handleSearchTrendFilters = () => {
+    if (trendFilterDraft.startDate > trendFilterDraft.endDate) {
+      pushToast('생산 추이: 시작일이 종료일보다 늦을 수 없습니다.', 'error');
       return;
     }
-    setAppliedFilter({ ...draftFilter });
-    pushToast('필터가 적용되었습니다.', 'success');
+    setTrendFilterApplied({ ...trendFilterDraft });
+    pushToast('생산 추이 날짜 필터가 적용되었습니다.', 'success');
   };
 
-  const handleReset = () => {
-    setDraftFilter(DEFAULT_FILTER);
-    setAppliedFilter(DEFAULT_FILTER);
-    setSeed(7);
-    pushToast('필터가 초기화되었습니다.', 'info');
+  const handleResetTrendFilters = () => {
+    const reset = {
+      startDate: dataRangeStart,
+      endDate: dataRangeEnd,
+    };
+    setTrendFilterDraft(reset);
+    setTrendFilterApplied(reset);
+    pushToast('생산 추이 날짜 필터가 초기화되었습니다.', 'info');
   };
 
   const { connectLot } = useSelectedLot();
@@ -797,9 +715,6 @@ export default function MainPage() {
   };
   const cardClass = isDark
     ? 'rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
-    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
-  const filterClass = isDark
-    ? 'rounded-xl border border-slate-700 bg-slate-900/70 shadow-sm'
     : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
   const subpanelClass = isDark
     ? 'rounded-xl border border-slate-700 bg-slate-900/70'
@@ -937,56 +852,6 @@ export default function MainPage() {
           </div>
         </header>
 
-        <section className={`${filterClass} px-3 py-2 sm:px-4`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <div
-              className={`inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border sm:w-auto ${
-                isDark
-                  ? 'border-slate-700 bg-slate-950/40'
-                  : 'border-slate-200 bg-slate-50/80'
-              }`}
-            >
-              <input
-                type="date"
-                aria-label="시작일"
-                value={draftFilter.startDate}
-                onChange={(e) => setDraftFilter((p) => ({ ...p, startDate: e.target.value }))}
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-              <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
-              <input
-                type="date"
-                aria-label="종료일"
-                value={draftFilter.endDate}
-                onChange={(e) => setDraftFilter((p) => ({ ...p, endDate: e.target.value }))}
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleSearch}
-              className="inline-flex h-8 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              적용
-            </button>
-            <button
-              type="button"
-              onClick={handleReset}
-              className={`inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium ${
-                isDark
-                  ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-              }`}
-            >
-              초기화
-            </button>
-          </div>
-        </section>
-
         <section
           className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${
             isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
@@ -1072,99 +937,91 @@ export default function MainPage() {
 
         <section className="grid grid-cols-1 gap-5 pb-8 xl:grid-cols-12">
           <div className={`${cardClass} p-4 md:p-5 xl:col-span-7`}>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2
                   className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
                 >
                   생산 추이
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-400">듀얼 Y축 · 집계 주기 선택</p>
+                <p className="mt-0.5 text-xs text-slate-400">선형 그래프 · 듀얼 Y축</p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div
-                  className={`inline-flex rounded-lg border p-0.5 ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-900/70'
-                      : 'border-slate-200 bg-slate-50'
-                  }`}
-                >
-                  {(
-                    [
-                      ['bar', '막대', 'M4 14h3v6H4zm6-8h3v14h-3zm6 4h3v10h-3z'],
-                      ['line', '선형', 'M4 16l5-5 4 3 7-8'],
-                      ['pie', '원형', 'M12 3a9 9 0 1 1-9 9h9V3z'],
-                    ] as Array<[ChartType, string, string]>
-                  ).map(([type, label, d]) => (
-                    <button
-                      key={type}
-                      type="button"
-                      title={label}
-                      aria-label={label}
-                      onClick={() => setChartType(type)}
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition ${
-                        chartType === type
-                          ? isDark
-                            ? 'bg-slate-800 text-slate-100 shadow-sm'
-                            : 'bg-white text-slate-900 shadow-sm'
-                          : isDark
-                            ? 'text-slate-500 hover:text-slate-300'
-                            : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path
-                          d={d}
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          fill={type === 'pie' ? 'currentColor' : 'none'}
-                          fillOpacity={type === 'pie' ? 0.2 : 0}
-                        />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-                <select
-                  value={trendInterval}
-                  onChange={(e) => setTrendInterval(e.target.value as TrendInterval)}
-                  className={`h-8 rounded-lg border px-2.5 text-xs font-medium outline-none ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-950/40 text-slate-100 hover:bg-slate-900'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <option value="1h">1시간 단위</option>
-                  <option value="2h">2시간 단위</option>
-                  <option value="shift">Shift (주간·야간)</option>
-                </select>
-                <Link
-                  href="/dashboard"
-                  className={`ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  상세보기 →
-                </Link>
-              </div>
+              <Link
+                href="/dashboard"
+                className={`ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}
+              >
+                상세보기 →
+              </Link>
             </div>
-            <TrendChart data={trendData} chartType={chartType} isDark={isDark} />
+
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <div
+                className={`inline-flex h-9 w-full max-w-full items-center overflow-hidden rounded-lg border sm:w-auto ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-950/40'
+                    : 'border-slate-200 bg-slate-50/80'
+                }`}
+              >
+                <input
+                  type="date"
+                  aria-label="생산 추이 시작일"
+                  value={trendFilterDraft.startDate}
+                  onChange={(e) =>
+                    setTrendFilterDraft((p) => ({ ...p, startDate: e.target.value }))
+                  }
+                  className={`h-9 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none ${
+                    isDark ? 'text-slate-100' : 'text-slate-700'
+                  }`}
+                />
+                <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
+                <input
+                  type="date"
+                  aria-label="생산 추이 종료일"
+                  value={trendFilterDraft.endDate}
+                  onChange={(e) =>
+                    setTrendFilterDraft((p) => ({ ...p, endDate: e.target.value }))
+                  }
+                  className={`h-9 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none ${
+                    isDark ? 'text-slate-100' : 'text-slate-700'
+                  }`}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSearchTrendFilters}
+                className="inline-flex h-9 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                적용
+              </button>
+              <button
+                type="button"
+                onClick={handleResetTrendFilters}
+                className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors ${
+                  isDark
+                    ? 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                초기화
+              </button>
+            </div>
+
+            <TrendChart data={trendData} isDark={isDark} />
           </div>
 
           <div className={`${cardClass} p-4 md:p-5 xl:col-span-5`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  행 클릭 → 챗봇 자동 진단 · 「상세」로 공정 데이터
-                </p>
                 <h2
                   className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
                 >
                   위험 LOT Top
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-400">위험도 내림차순 · 행 클릭 시 상세</p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  위험도 내림차순 · 행 클릭 → 챗봇 자동 진단 · 「상세」로 공정 데이터
+                </p>
               </div>
               <Link
                 href="/issue"

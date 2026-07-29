@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { useUiSettings } from '@/components/layout/AppShell';
+import { useSelectedLot } from '@/context/SelectedLotContext';
+import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 
 interface ProcessData {
   time: string;
   temperature: number;
   pressure: number;
-  speed: number;
+  humidity: number;
   riskBefore: number;
   riskAfter: number;
 }
@@ -40,7 +42,7 @@ interface HandoverData {
   period: string;
   averageTemperature: number;
   averagePressure: number;
-  averageSpeed: number;
+  averageHumidity: number;
   aiRiskPredictions: number;
   riskyLots: number;
   issueCount: number;
@@ -70,10 +72,13 @@ interface IssueListSectionProps {
   onApplyFilter: () => void;
   onResetFilter: () => void;
   onSelect: (id: string) => void;
+  /** 메인「위험 LOT Top」과 동일 — 챗봇 features 주입 + 자동 진단 */
+  onDiagnose: (issue: Issue) => void;
 }
 
 interface DetailAnalysisSectionProps {
   issue: Issue | null;
+  onDiagnose?: (issue: Issue) => void;
 }
 
 interface ManagementSectionProps {
@@ -351,10 +356,41 @@ const createProcessData = (
     time: `${index * 2}h`,
     temperature,
     pressure: pressures[index],
-    speed: 34 + (index % 3),
+    humidity: [45.2, 46.1, 44.8, 47.3, 48.6, 43.9, 49.2, 46.7, 45.5, 44.3][index % 10],
     riskBefore: before[index],
     riskAfter: after[index],
   }));
+
+/**
+ * 이슈 processData → 챗봇 LotSensorRecord.
+ * 메인 위험 LOT 연결과 동일한 connectLot 입력 형태.
+ */
+function issueToLotSensorRecord(issue: Issue): LotSensorRecord {
+  const points = issue.processData;
+  const last = points[points.length - 1];
+  const peakTemp =
+    points.length > 0 ? Math.max(...points.map((p) => p.temperature)) : 740;
+  const peakPressure =
+    points.length > 0 ? Math.max(...points.map((p) => p.pressure)) : 1.8;
+  const timePart = issue.occurredAt.includes(' ')
+    ? issue.occurredAt.split(' ')[1] ?? '00:00'
+    : '00:00';
+  const hour = timePart.length >= 5 ? timePart.slice(0, 5) : timePart;
+  const riskBoost = issue.risk === '높음' ? 1 : issue.risk === '중간' ? 0.5 : 0;
+
+  return {
+    id: issue.lot,
+    date: issue.date,
+    hour,
+    sintering_temp: last?.temperature ?? peakTemp,
+    tank_pressure: last?.pressure ?? peakPressure,
+    process_time: Math.max(60, points.length * 20),
+    lithium_input: Math.round((1.02 + riskBoost * 0.04) * 1000) / 1000,
+    humidity: Math.round(38 + riskBoost * 4),
+    metal_impurity: Math.round((0.022 + riskBoost * 0.01) * 1000) / 1000,
+    additive_ratio: Math.round((2.5 + riskBoost * 0.3) * 10) / 10,
+  };
+}
 
 const INITIAL_ISSUES: Issue[] = [
   {
@@ -402,11 +438,11 @@ const INITIAL_ISSUES: Issue[] = [
     lot: 'LOT-CA-260721-05',
     risk: '낮음',
     status: '완료',
-    title: '혼합기 진동 센서 일시 이상',
+    title: '혼합기 습도 센서 일시 이상',
     assignee: '이도윤',
     action: '센서 커넥터를 재체결하고 정상 신호 수신을 확인했습니다.',
     completed: true,
-    anomaly: '진동 센서 신호가 4분간 단절되었으나 설비 실측 진동값은 정상 범위였습니다.',
+    anomaly: '내부 습도(Humidity)가 일시적으로 50%를 초과하였으나 즉시 정상 범위로 복구되었습니다.',
     processData: createProcessData(
       [735, 736, 737, 738, 737, 736],
       [1.7, 1.7, 1.8, 1.8, 1.7, 1.7],
@@ -515,7 +551,7 @@ const HANDOVER_DATA: HandoverData = {
   period: '2026-07-21 08:00 ~ 16:00',
   averageTemperature: 742.6,
   averagePressure: 1.94,
-  averageSpeed: 35.2,
+  averageHumidity: 45.8,
   aiRiskPredictions: 5,
   riskyLots: 3,
   issueCount: 4,
@@ -530,15 +566,6 @@ const HeaderHandoverSection = ({
 }: HeaderHandoverSectionProps) => {
   const { isDark, language } = useUiSettings();
   const c = getUiColors(isDark);
-  const metrics = [
-    { label: language === 'en' ? 'Avg. Temp' : '평균 온도', value: `${data.averageTemperature}°C`, alert: false },
-    { label: language === 'en' ? 'Avg. Pressure' : '평균 압력', value: `${data.averagePressure} bar`, alert: false },
-    { label: language === 'en' ? 'Avg. Speed' : '평균 속도', value: `${data.averageSpeed} rpm`, alert: false },
-    { label: language === 'en' ? 'AI Risk' : 'AI 예측 위험', value: `${data.aiRiskPredictions}`, alert: false },
-    { label: language === 'en' ? 'Risky LOTs' : '위험 LOT', value: `${data.riskyLots}`, alert: true },
-    { label: language === 'en' ? 'Issues' : '발생 이슈', value: `${data.issueCount}`, alert: true },
-  ];
-
   return (
     <section>
       {notice && (
@@ -612,61 +639,6 @@ const HeaderHandoverSection = ({
           >
             {language === 'en' ? 'View / Download Handover' : '인수인계 조회/다운로드'}
           </button>
-        </div>
-      </div>
-      <div style={getPanelStyle(c)}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 18,
-          }}
-        >
-          <h2 style={{ margin: 0, color: c.navy, fontSize: 18 }}>이전 8시간 공정 요약</h2>
-          <span style={{ color: c.muted, fontSize: 12 }}>{data.period}</span>
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {metrics.map((metric) => (
-            <div
-              key={metric.label}
-              className={`rounded-xl border p-4 shadow-sm ${
-                isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {metric.label}
-                </div>
-                {metric.alert ? (
-                  <span
-                    className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
-                      isDark
-                        ? 'border-rose-800 bg-rose-950/40 text-rose-300'
-                        : 'border-rose-100 bg-rose-50 text-rose-600'
-                    }`}
-                  >
-                    주의
-                  </span>
-                ) : null}
-              </div>
-              <div
-                className={`mt-2 text-xl font-bold tracking-tight ${
-                  isDark ? 'text-slate-100' : 'text-slate-900'
-                }`}
-              >
-                {metric.value}
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </section>
@@ -1498,14 +1470,20 @@ const IssueListSection = ({
   onApplyFilter,
   onResetFilter,
   onSelect,
+  onDiagnose,
 }: IssueListSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
 
   return (
   <section style={getPanelStyle(c)}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-      <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 목록</h2>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+      <div>
+        <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 목록</h2>
+        <p style={{ margin: '4px 0 0', color: c.slate, fontSize: 12 }}>
+          행 클릭 → 상세 선택 · 「진단」으로 챗봇 자동 진단
+        </p>
+      </div>
       <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
         검색 결과 {issues.length}건
       </span>
@@ -1650,6 +1628,7 @@ const IssueListSection = ({
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">처리상태</th>
               <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">진단</th>
             </tr>
           </thead>
           <tbody>
@@ -1730,6 +1709,22 @@ const IssueListSection = ({
                   >
                     <span className="line-clamp-2">{issue.title}</span>
                   </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                        isDark
+                          ? 'border-blue-700 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60'
+                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDiagnose(issue);
+                      }}
+                    >
+                      챗봇으로 진단
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -1758,14 +1753,33 @@ const LineChart = ({
   const c = getUiColors(isDark);
   const width = 560;
   const height = 180;
-  const pad = 26;
-  const range = max - min;
+  const axisPad = 44;
+  const rightPad = 18;
+  const topBottomPad = 26;
+  const effectiveMin =
+    dataKey === 'temperature'
+      ? Math.min(730, ...data.map((item) => item.temperature))
+      : Math.min(1.5, ...data.map((item) => item.pressure));
+  const effectiveMax =
+    dataKey === 'temperature'
+      ? Math.max(760, ...data.map((item) => item.temperature))
+      : Math.max(3.0, ...data.map((item) => item.pressure));
+  const range = Math.max(effectiveMax - effectiveMin, 1);
+  const yTicks =
+    dataKey === 'temperature'
+      ? [760, 750, 740, 730]
+      : [3.0, 2.5, 2.0, 1.5];
+  const chartLeft = axisPad;
+  const chartRight = width - rightPad;
+  const chartTop = topBottomPad;
+  const chartBottom = height - topBottomPad;
+  const chartWidth = chartRight - chartLeft;
+  const chartHeight = chartBottom - chartTop;
+  const toX = (index: number) =>
+    chartLeft + (index * chartWidth) / Math.max(data.length - 1, 1);
+  const toY = (value: number) => chartBottom - ((value - effectiveMin) / range) * chartHeight;
   const points = data
-    .map((item, index) => {
-      const x = pad + (index * (width - pad * 2)) / Math.max(data.length - 1, 1);
-      const y = height - pad - ((item[dataKey] - min) / range) * (height - pad * 2);
-      return `${x},${y}`;
-    })
+    .map((item, index) => `${toX(index)},${toY(item[dataKey])}`)
     .join(' ');
 
   return (
@@ -1775,10 +1789,27 @@ const LineChart = ({
       aria-label={`${dataKey} 시계열 그래프`}
       style={{ width: '100%', height: 180, display: 'block' }}
     >
-      {[0, 1, 2, 3].map((line) => {
-        const y = pad + (line * (height - pad * 2)) / 3;
-        return <line key={line} x1={pad} y1={y} x2={width - pad} y2={y} stroke={c.line} />;
+      {yTicks.map((tick) => {
+        const y = toY(tick);
+        return (
+          <g key={tick}>
+            <text
+              x={chartLeft - 8}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="11"
+              fill={c.slate}
+              className="text-xs font-normal whitespace-nowrap"
+            >
+              {dataKey === 'temperature' ? String(tick) : tick.toFixed(1)}
+            </text>
+            <line x1={chartLeft} y1={y} x2={chartRight} y2={y} stroke={c.line} />
+          </g>
+        );
       })}
+      <text x={12} y={16} fontSize="11" fill={c.slate} className="text-xs font-normal whitespace-nowrap">
+        {dataKey === 'temperature' ? '°C' : 'bar'}
+      </text>
       <polyline
         points={points}
         fill="none"
@@ -1788,8 +1819,8 @@ const LineChart = ({
         strokeLinejoin="round"
       />
       {data.map((item, index) => {
-        const x = pad + (index * (width - pad * 2)) / Math.max(data.length - 1, 1);
-        const y = height - pad - ((item[dataKey] - min) / range) * (height - pad * 2);
+        const x = toX(index);
+        const y = toY(item[dataKey]);
         return (
           <g key={item.time}>
             <circle cx={x} cy={y} r="5" fill={isDark ? c.panel : '#fff'} stroke={color} strokeWidth="3" />
@@ -1803,7 +1834,25 @@ const LineChart = ({
   );
 };
 
-const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
+function renderHighlightedAnomaly(anomaly: string) {
+  const highlightTokens = ['750°C', '3회', '91점'] as const;
+  const pattern = new RegExp(
+    `(${highlightTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'g',
+  );
+  const parts = anomaly.split(pattern);
+  return parts.map((part, index) =>
+    highlightTokens.includes(part as (typeof highlightTokens)[number]) ? (
+      <span key={`${part}-${index}`} className="font-bold text-red-600">
+        {part}
+      </span>
+    ) : (
+      <span key={`text-${index}`}>{part}</span>
+    ),
+  );
+}
+
+const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
 
@@ -1836,7 +1885,20 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
             {issue.id} · {issue.lot}
           </div>
         </div>
-        <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>위험도 {issue.risk}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>위험도 {issue.risk}</span>
+          {onDiagnose ? (
+            <button
+              type="button"
+              onClick={() => onDiagnose(issue)}
+              className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-white ${
+                isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              챗봇으로 진단
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div
@@ -1853,7 +1915,7 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
         }}
       >
         <strong>이상 징후 요약</strong>
-        <div style={{ marginTop: 4 }}>{issue.anomaly}</div>
+        <div style={{ marginTop: 4 }}>{renderHighlightedAnomaly(issue.anomaly)}</div>
       </div>
 
       <div
@@ -1884,7 +1946,7 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
               key={item.time}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '34px 1fr 1fr',
+                gridTemplateColumns: '34px minmax(0, 1fr) minmax(0, 1fr)',
                 alignItems: 'center',
                 gap: 10,
                 fontSize: 11,
@@ -1892,41 +1954,53 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
               }}
             >
               <strong>{item.time}</strong>
-              <div
-                style={{
-                  height: 18,
-                  background: isDark ? 'rgba(76, 5, 25, 0.4)' : '#fee2e2',
-                  borderRadius: 999,
-                  overflow: 'hidden',
-                }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <div
+                  aria-label={`Before ${item.riskBefore}`}
                   style={{
-                    width: `${item.riskBefore}%`,
-                    height: '100%',
-                    background: c.red,
+                    flex: 1,
+                    minWidth: 0,
+                    height: 18,
+                    background: isDark ? 'rgba(76, 5, 25, 0.4)' : '#fee2e2',
                     borderRadius: 999,
+                    overflow: 'hidden',
                   }}
-                  title={`Before ${item.riskBefore}`}
-                />
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(0, Math.min(100, item.riskBefore))}%`,
+                      height: '100%',
+                      background: c.red,
+                      borderRadius: 999,
+                    }}
+                    title={`Before ${item.riskBefore}`}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-red-600">{item.riskBefore}</span>
               </div>
-              <div
-                style={{
-                  height: 18,
-                  background: isDark ? 'rgba(6, 78, 59, 0.4)' : '#dcfce7',
-                  borderRadius: 999,
-                  overflow: 'hidden',
-                }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <div
+                  aria-label={`After ${item.riskAfter}`}
                   style={{
-                    width: `${item.riskAfter}%`,
-                    height: '100%',
-                    background: c.green,
+                    flex: 1,
+                    minWidth: 0,
+                    height: 18,
+                    background: isDark ? 'rgba(6, 78, 59, 0.4)' : '#dcfce7',
                     borderRadius: 999,
+                    overflow: 'hidden',
                   }}
-                  title={`After ${item.riskAfter}`}
-                />
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(0, Math.min(100, item.riskAfter))}%`,
+                      height: '100%',
+                      background: c.green,
+                      borderRadius: 999,
+                    }}
+                    title={`After ${item.riskAfter}`}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-green-600">{item.riskAfter}</span>
               </div>
             </div>
           ))}
@@ -1941,10 +2015,21 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620, fontSize: 13 }}>
           <thead>
             <tr style={{ background: isDark ? '#0f172a' : '#f8fafc', color: c.slate }}>
-              {['시간', '온도(°C)', '압력(bar)', '속도(rpm)', '위험 Before', '위험 After'].map((heading) => (
+              {['시간', '온도(°C)', '압력(bar)', '습도(%)', '위험 Before', '위험 After'].map((heading) => (
                 <th
                   key={heading}
-                  style={{ padding: 11, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}
+                  scope="col"
+                  style={{
+                    padding: 11,
+                    borderBottom: `1px solid ${c.line}`,
+                    textAlign: 'center',
+                    color:
+                      heading === '위험 Before'
+                        ? '#dc2626'
+                        : heading === '위험 After'
+                          ? '#16a34a'
+                          : c.slate,
+                  }}
                 >
                   {heading}
                 </th>
@@ -1957,7 +2042,7 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
                 <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.time}</td>
                 <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.temperature}</td>
                 <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.pressure}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{item.speed}</td>
+                <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center' }}>{Number.isFinite(item.humidity) ? item.humidity.toFixed(1) : '-'}</td>
                 <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center', color: c.red, fontWeight: 800 }}>{item.riskBefore}</td>
                 <td style={{ padding: 10, borderBottom: `1px solid ${c.line}`, textAlign: 'center', color: c.green, fontWeight: 800 }}>{item.riskAfter}</td>
               </tr>
@@ -2075,14 +2160,11 @@ const ManagementSection = ({
             width: '100%',
             border: 0,
             borderRadius: 11,
-            background: issue && canSave ? (isDark ? c.blue : c.navy) : c.muted,
-            color: '#fff',
             padding: '12px 18px',
             fontSize: 14,
-            fontWeight: 800,
             cursor: issue && canSave ? 'pointer' : 'not-allowed',
-            opacity: issue && canSave ? 1 : 0.65,
           }}
+          className="bg-blue-600 text-white hover:bg-blue-700 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:hover:bg-gray-300"
         >
           저장
         </button>
@@ -2284,6 +2366,7 @@ function appendHandoverActionLogs(
 
 export default function IssuePage() {
   const { isDark } = useUiSettings();
+  const { connectLot } = useSelectedLot();
   const [issues, setIssues] = useState<Issue[]>(INITIAL_ISSUES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -2399,6 +2482,14 @@ export default function IssuePage() {
     setAppliedFilters(draftFilters);
   };
 
+  /** 메인 위험 LOT Top과 동일 — 챗봇 패널 오픈 + 자동 O/X 진단 */
+  const handleDiagnoseIssue = (issue: Issue) => {
+    connectLot(issueToLotSensorRecord(issue), { openChat: true, diagnose: true });
+    setSelectedId(issue.id);
+    setToastMessage(`${issue.lot} 연결 · 챗봇 진단 시작`);
+    setShowToast(true);
+  };
+
   const handleResetFilter = () => {
     setDraftFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
@@ -2504,7 +2595,7 @@ export default function IssuePage() {
 <div class="period">대상 기간: ${data.period}</div>
 <h2>1. 공정 요약</h2>
 <table>
-  <tr><th>평균 온도</th><td>${data.averageTemperature}°C</td><th>평균 압력</th><td>${data.averagePressure} bar</td><th>평균 속도</th><td>${data.averageSpeed} rpm</td></tr>
+  <tr><th>평균 온도</th><td>${data.averageTemperature}°C</td><th>평균 압력</th><td>${data.averagePressure} bar</td><th>평균 습도</th><td>${data.averageHumidity}%</td></tr>
   <tr><th>AI 예측 위험</th><td>${data.aiRiskPredictions}건</td><th>위험 LOT</th><td>${data.riskyLots}개</td><th>발생 이슈</th><td>${data.issueCount}건</td></tr>
 </table>
 <h2>2. 미완료 이슈 (${openIssues.length}건)</h2>
@@ -2574,11 +2665,11 @@ ${issues
       toRow(['대상 기간', data.period]),
       toRow([]),
       toRow(['1. 공정 요약']),
-      toRow(['평균 온도(°C)', '평균 압력(bar)', '평균 속도(rpm)', 'AI 예측 위험(건)', '위험 LOT(개)', '발생 이슈(건)']),
+      toRow(['평균 온도(°C)', '평균 압력(bar)', '평균 습도(%)', 'AI 예측 위험(건)', '위험 LOT(개)', '발생 이슈(건)']),
       toRow([
         data.averageTemperature,
         data.averagePressure,
-        data.averageSpeed,
+        data.averageHumidity,
         data.aiRiskPredictions,
         data.riskyLots,
         data.issueCount,
@@ -2730,6 +2821,7 @@ ${issues
             onApplyFilter={handleApplyFilter}
             onResetFilter={handleResetFilter}
             onSelect={setSelectedId}
+            onDiagnose={handleDiagnoseIssue}
           />
           <div
             style={{
@@ -2739,7 +2831,7 @@ ${issues
               alignItems: 'start',
             }}
           >
-            <DetailAnalysisSection issue={selectedIssue} />
+            <DetailAnalysisSection issue={selectedIssue} onDiagnose={handleDiagnoseIssue} />
             <ManagementSection
               issue={selectedIssue}
               form={managementForm}
