@@ -3,10 +3,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   user_id               VARCHAR(50)  NOT NULL PRIMARY KEY,
   font_size             INT          NOT NULL DEFAULT 18,
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
-  language              VARCHAR(10)  NOT NULL DEFAULT 'ko',
-  auto_refresh_enabled  TINYINT(1)   NOT NULL DEFAULT 1,
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
-  n8n_alert             TINYINT(1)   NOT NULL DEFAULT 1,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)

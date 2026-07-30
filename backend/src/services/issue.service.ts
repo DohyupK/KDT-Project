@@ -1,4 +1,4 @@
-import { query, withTransaction } from '../db/connection.js'
+import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import type { RiskLevel } from './lotScore.js'
 
@@ -17,6 +17,7 @@ export type IssueDetail = IssueListItem & {
   actionContent: string | null
   assigneeUserId: string | null
   assigneeName: string | null
+  /** status=완료 또는 completed_at 존재 */
   completed: boolean
   completedAt: string | null
 }
@@ -31,7 +32,6 @@ type IssueRow = {
   action_content: string | null
   assignee_user_id: string | null
   assignee_name?: string | null
-  completed: number | boolean
   completed_at: Date | string | null
 }
 
@@ -54,6 +54,10 @@ function toRisk(level: string): RiskLevel {
   return '낮음'
 }
 
+function isCompleted(row: { status: string; completed_at: Date | string | null }): boolean {
+  return row.status === '완료' || row.completed_at != null
+}
+
 function toListItem(row: IssueRow): IssueListItem {
   return {
     issueId: row.issue_id,
@@ -71,7 +75,7 @@ function toDetail(row: IssueRow): IssueDetail {
     actionContent: row.action_content,
     assigneeUserId: row.assignee_user_id,
     assigneeName: row.assignee_name ?? null,
-    completed: Boolean(row.completed),
+    completed: isCompleted(row),
     completedAt: row.completed_at ? formatDateTime(row.completed_at) : null,
   }
 }
@@ -120,7 +124,7 @@ export async function listOpenIssues(q: IssueListQuery): Promise<{
   )
   const rows = await query<IssueRow[]>(
     `SELECT issue_id, lot_id, occurred_at, risk_level, status, title,
-            action_content, assignee_user_id, completed, completed_at
+            action_content, assignee_user_id, completed_at
      FROM issues WHERE ${whereSql}
      ORDER BY occurred_at DESC`,
     params,
@@ -135,7 +139,7 @@ export async function listOpenIssues(q: IssueListQuery): Promise<{
 export async function getIssueById(issueId: string): Promise<IssueDetail> {
   const rows = await query<IssueRow[]>(
     `SELECT i.issue_id, i.lot_id, i.occurred_at, i.risk_level, i.status, i.title,
-            i.action_content, i.assignee_user_id, i.completed, i.completed_at,
+            i.action_content, i.assignee_user_id, i.completed_at,
             u.name AS assignee_name
      FROM issues i
      LEFT JOIN users u ON u.user_id = i.assignee_user_id
@@ -168,66 +172,110 @@ export async function updateIssue(
   const actionContent =
     body.actionContent !== undefined ? body.actionContent : current.actionContent
 
-  await withTransaction(async (conn) => {
-    await conn.query(
-      `UPDATE issues SET
-         status = ?, action_content = ?, assignee_user_id = ?,
-         completed = ?, completed_at = CASE WHEN ? = 1 THEN COALESCE(completed_at, NOW()) ELSE NULL END
-       WHERE issue_id = ?`,
-      [
-        status,
-        actionContent,
-        actor.userId,
-        completed ? 1 : 0,
-        completed ? 1 : 0,
-        issueId,
-      ],
-    )
-
-    if (completed) {
-      const lotRows = await conn.query(
-        `SELECT risk_reason FROM lots WHERE lot_id = ? LIMIT 1`,
-        [current.lotId],
-      ) as { risk_reason: string | null }[]
-      const cause = lotRows[0]?.risk_reason ?? null
-      const eventDate = formatDate(new Date())
-
-      await conn.query(
-        `INSERT INTO handover_history (
-           issue_id, lot_id, risk_level, situation, action, cause,
-           manager, assignee_user_id, event_date, category, snapshot_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '전달사항', ?)
-         ON DUPLICATE KEY UPDATE
-           situation = VALUES(situation),
-           action = VALUES(action),
-           cause = VALUES(cause),
-           manager = VALUES(manager),
-           assignee_user_id = VALUES(assignee_user_id),
-           event_date = VALUES(event_date),
-           snapshot_json = VALUES(snapshot_json),
-           archived_at = CURRENT_TIMESTAMP`,
-        [
-          issueId,
-          current.lotId,
-          current.riskLevel,
-          current.title,
-          actionContent,
-          cause,
-          actor.name,
-          actor.userId,
-          eventDate,
-          JSON.stringify({
-            issueId,
-            lotId: current.lotId,
-            riskLevel: current.riskLevel,
-            status: '완료',
-          }),
-        ],
-      )
-    }
-  })
+  // 완료 → 과거 자료 (completed_at). handover INSERT 없음.
+  await query(
+    `UPDATE issues SET
+       status = ?, action_content = ?, assignee_user_id = ?,
+       completed_at = CASE WHEN ? = 1 THEN COALESCE(completed_at, NOW()) ELSE NULL END
+     WHERE issue_id = ?`,
+    [status, actionContent, actor.userId, completed ? 1 : 0, issueId],
+  )
 
   return getIssueById(issueId)
+}
+
+/** 라이브러리 과거 자료 목록 (위험도·처리상태 제외) */
+export type PastIssueListItem = {
+  issueId: string
+  occurredAt: string
+  lotId: string
+  title: string
+  assigneeName: string | null
+  completedAt: string | null
+}
+
+export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; total: number }> {
+  const rows = await query<
+    {
+      issue_id: string
+      lot_id: string
+      occurred_at: Date | string
+      title: string
+      assignee_name: string | null
+      completed_at: Date | string | null
+    }[]
+  >(
+    `SELECT i.issue_id, i.lot_id, i.occurred_at, i.title, i.completed_at,
+            u.name AS assignee_name
+     FROM issues i
+     LEFT JOIN users u ON u.user_id = i.assignee_user_id
+     WHERE i.status = '완료' OR i.completed_at IS NOT NULL
+     ORDER BY i.completed_at DESC, i.occurred_at DESC`,
+  )
+
+  const items = rows.map((r) => ({
+    issueId: r.issue_id,
+    occurredAt: formatDateTime(r.occurred_at),
+    lotId: r.lot_id,
+    title: r.title,
+    assigneeName: r.assignee_name?.trim() || null,
+    completedAt: r.completed_at ? formatDateTime(r.completed_at) : null,
+  }))
+
+  return { items, total: items.length }
+}
+
+/** 과거 자료 상세: 조치내용 + LOT 보조 (양식 TBD). issue_analyses 없음. */
+export type PastIssueDetail = PastIssueListItem & {
+  actionContent: string | null
+  lot: {
+    lotId: string
+    riskReason: string | null
+    defectProb: number | null
+    residualLithium: number | null
+    spcStatus: string | null
+  } | null
+}
+
+export async function getPastIssueById(issueId: string): Promise<PastIssueDetail> {
+  const issue = await getIssueById(issueId)
+  if (!issue.completed) {
+    throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
+  }
+
+  const lotRows = await query<
+    {
+      lot_id: string
+      risk_reason: string | null
+      defect_prob: number | null
+      residual_lithium: number | null
+      spc_status: string | null
+    }[]
+  >(
+    `SELECT lot_id, risk_reason, defect_prob, residual_lithium, spc_status
+     FROM lots WHERE lot_id = ? LIMIT 1`,
+    [issue.lotId],
+  )
+  const lot = lotRows[0]
+
+  return {
+    issueId: issue.issueId,
+    occurredAt: issue.occurredAt,
+    lotId: issue.lotId,
+    title: issue.title,
+    assigneeName: issue.assigneeName,
+    completedAt: issue.completedAt,
+    actionContent: issue.actionContent,
+    lot: lot
+      ? {
+          lotId: lot.lot_id,
+          riskReason: lot.risk_reason,
+          defectProb: lot.defect_prob,
+          residualLithium: lot.residual_lithium,
+          spcStatus: lot.spc_status,
+        }
+      : null,
+  }
 }
 
 export type HandoverHistoryItem = {
@@ -238,8 +286,11 @@ export type HandoverHistoryItem = {
   situation: string
   action: string | null
   cause: string | null
+  handoverFrom: string | null
+  handoverTo: string | null
   manager: string | null
   eventDate: string
+  date: string
   category: string | null
   archivedAt: string
 }
@@ -254,6 +305,8 @@ export async function listHandoverHistory(): Promise<{ items: HandoverHistoryIte
       situation: string
       action: string | null
       cause: string | null
+      handover_from: string | null
+      handover_to: string | null
       manager: string | null
       event_date: Date | string
       category: string | null
@@ -261,24 +314,31 @@ export async function listHandoverHistory(): Promise<{ items: HandoverHistoryIte
     }[]
   >(
     `SELECT history_id, issue_id, lot_id, risk_level, situation, action, cause,
-            manager, event_date, category, archived_at
+            handover_from, handover_to, manager, event_date, category, archived_at
      FROM handover_history
      ORDER BY archived_at DESC`,
   )
 
-  const items = rows.map((r) => ({
-    historyId: Number(r.history_id),
-    issueId: r.issue_id,
-    lotId: r.lot_id,
-    riskLevel: toRisk(r.risk_level),
-    situation: r.situation,
-    action: r.action,
-    cause: r.cause,
-    manager: r.manager,
-    eventDate: formatDate(r.event_date),
-    category: r.category,
-    archivedAt: formatDateTime(r.archived_at),
-  }))
+  const items = rows.map((r) => {
+    const from = r.handover_from?.trim() || r.manager?.trim() || null
+    const eventDate = formatDate(r.event_date)
+    return {
+      historyId: Number(r.history_id),
+      issueId: r.issue_id,
+      lotId: r.lot_id,
+      riskLevel: toRisk(r.risk_level),
+      situation: r.situation,
+      action: r.action,
+      cause: r.cause,
+      handoverFrom: from,
+      handoverTo: r.handover_to?.trim() || null,
+      manager: from,
+      eventDate,
+      date: eventDate,
+      category: r.category,
+      archivedAt: formatDateTime(r.archived_at),
+    }
+  })
 
   return { items, total: items.length }
 }

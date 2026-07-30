@@ -30,10 +30,10 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 - Docs: `http://127.0.0.1:8800/docs`
 - **CWD는 항상 `ai-service/`** (`models/` 상대 경로)
 
-### LLM compose — 키는 보안 탭 / MariaDB
+### LLM compose — 키는 보안 탭 / DB만
 
 일반 챗 API 키(Groq, Gemini, Claude 등)는 **`ai-service/.env`에 두지 않습니다.**  
-프론트 **`/security`** 에서 저장 → Express가 AES-GCM 암호화 → 공용 MariaDB **`llm_api_keys`**.
+프론트 **`/security`** 에서 저장 → Express가 암호화 → [`DB/llm_keys.sqlite`](./DB/).
 
 ```text
 CHAT_USE_LLM=1
@@ -44,7 +44,7 @@ CHAT_VLLM_MODEL=local-model
 - `CHAT_USE_LLM=1` + **등록된 키** → Auto(단가·100자 티어) / 수동
 - 키 없음 → template + 「보안 탭에서 API 키를 저장」안내
 - `CHAT_VLLM_*` 는 **보안 탭 전용**
-- 마스터 암호 키: **`backend/.env`의 `LLM_KEYS_ENCRYPTION_KEY`**(팀 공통, Git 금지)
+- 마스터 암호 키: **`backend/.env`의 `LLM_KEYS_ENCRYPTION_KEY`**
 - 기동 시 `app/main.py`가 `ai-service/.env`를 `load_dotenv`로 읽음
 
 ---

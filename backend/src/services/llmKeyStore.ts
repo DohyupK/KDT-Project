@@ -1,9 +1,12 @@
 /**
- * Encrypted LLM API keys in shared MariaDB (AES-GCM).
- * Master key: backend/.env LLM_KEYS_ENCRYPTION_KEY (team-shared, never commit).
+ * Encrypted LLM API keys stored under ai-service/DB (not backend/data).
+ * Logic (encrypt/CRUD) lives in Express; only the sqlite file path is in ai-service.
  */
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { withConn } from '../db.js'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 
 export type LlmProviderKind =
   | 'openai_compatible'
@@ -27,33 +30,41 @@ export type LlmKeySecret = LlmKeyRecord & {
   api_key: string
 }
 
-let tableReady: Promise<void> | null = null
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-async function ensureTable(): Promise<void> {
-  if (!tableReady) {
-    tableReady = withConn(async (conn) => {
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS llm_api_keys (
-          id VARCHAR(64) NOT NULL PRIMARY KEY,
-          display_name VARCHAR(255) NOT NULL,
-          provider_kind VARCHAR(64) NOT NULL,
-          company VARCHAR(64) NOT NULL,
-          model VARCHAR(255) NOT NULL,
-          base_url VARCHAR(512) NULL,
-          key_last4 VARCHAR(8) NOT NULL,
-          cost_score DOUBLE NOT NULL DEFAULT 1,
-          ciphertext BLOB NOT NULL,
-          iv BLOB NOT NULL,
-          tag BLOB NOT NULL,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-      `)
-    }).catch((err) => {
-      tableReady = null
-      throw err
-    })
-  }
-  await tableReady
+/** Default: <repo>/ai-service/DB/llm_keys.sqlite */
+export function defaultLlmKeysDbPath(): string {
+  return path.resolve(__dirname, '../../../ai-service/DB/llm_keys.sqlite')
+}
+
+function dbPath(): string {
+  return process.env.LLM_KEYS_SQLITE_PATH || defaultLlmKeysDbPath()
+}
+
+let sqliteDb: DatabaseSync | null = null
+
+function getDb(): DatabaseSync {
+  if (sqliteDb) return sqliteDb
+  const p = dbPath()
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  sqliteDb = new DatabaseSync(p)
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS llm_api_keys (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      provider_kind TEXT NOT NULL,
+      company TEXT NOT NULL,
+      model TEXT NOT NULL,
+      base_url TEXT,
+      key_last4 TEXT NOT NULL,
+      cost_score REAL NOT NULL DEFAULT 1,
+      ciphertext BLOB NOT NULL,
+      iv BLOB NOT NULL,
+      tag BLOB NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+  return sqliteDb
 }
 
 function deriveKey(): Buffer {
@@ -78,13 +89,6 @@ function decrypt(ciphertext: Buffer, iv: Buffer, tag: Buffer): string {
   const decipher = createDecipheriv('aes-256-gcm', deriveKey(), iv)
   decipher.setAuthTag(tag)
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')
-}
-
-function asBuffer(value: unknown): Buffer {
-  if (Buffer.isBuffer(value)) return value
-  if (value instanceof Uint8Array) return Buffer.from(value)
-  if (typeof value === 'string') return Buffer.from(value, 'binary')
-  throw new Error('expected BLOB buffer for llm key crypto field')
 }
 
 /** Default cost_score from 2026-07 reference table (blended ~0.4*in+0.6*out). */
@@ -158,9 +162,6 @@ export function defaultModel(company: string, tier: 'lite' | 'quality'): string 
 }
 
 function rowToPublic(row: Record<string, unknown>): LlmKeyRecord {
-  const created = row.created_at
-  const created_at =
-    created instanceof Date ? created.toISOString() : String(created ?? '')
   return {
     id: String(row.id),
     display_name: String(row.display_name),
@@ -170,39 +171,37 @@ function rowToPublic(row: Record<string, unknown>): LlmKeyRecord {
     base_url: row.base_url != null ? String(row.base_url) : null,
     key_last4: String(row.key_last4),
     cost_score: Number(row.cost_score),
-    created_at,
+    created_at: String(row.created_at),
   }
 }
 
-export async function listLlmKeys(): Promise<LlmKeyRecord[]> {
-  await ensureTable()
-  return withConn(async (conn) => {
-    const rows = await conn.query(
+export function listLlmKeys(): LlmKeyRecord[] {
+  const db = getDb()
+  const rows = db
+    .prepare(
       `SELECT id, display_name, provider_kind, company, model, base_url, key_last4, cost_score, created_at
        FROM llm_api_keys ORDER BY cost_score ASC, created_at ASC`,
     )
-    if (!Array.isArray(rows)) return []
-    return (rows as Record<string, unknown>[]).map(rowToPublic)
-  })
+    .all() as Record<string, unknown>[]
+  return rows.map(rowToPublic)
 }
 
-export async function listLlmKeysWithSecrets(): Promise<LlmKeySecret[]> {
-  await ensureTable()
-  return withConn(async (conn) => {
-    const rows = await conn.query(
+export function listLlmKeysWithSecrets(): LlmKeySecret[] {
+  const db = getDb()
+  const rows = db
+    .prepare(
       `SELECT id, display_name, provider_kind, company, model, base_url, key_last4, cost_score, created_at,
               ciphertext, iv, tag
        FROM llm_api_keys ORDER BY cost_score ASC, created_at ASC`,
     )
-    if (!Array.isArray(rows)) return []
-    return (rows as Record<string, unknown>[]).map((row) => {
-      const api_key = decrypt(
-        asBuffer(row.ciphertext),
-        asBuffer(row.iv),
-        asBuffer(row.tag),
-      )
-      return { ...rowToPublic(row), api_key }
-    })
+    .all() as Record<string, unknown>[]
+  return rows.map((row) => {
+    const api_key = decrypt(
+      Buffer.from(row.ciphertext as Uint8Array),
+      Buffer.from(row.iv as Uint8Array),
+      Buffer.from(row.tag as Uint8Array),
+    )
+    return { ...rowToPublic(row), api_key }
   })
 }
 
@@ -216,7 +215,7 @@ export type CreateLlmKeyInput = {
   provider_kind?: LlmProviderKind
 }
 
-export async function createLlmKey(input: CreateLlmKeyInput): Promise<LlmKeyRecord> {
+export function createLlmKey(input: CreateLlmKeyInput): LlmKeyRecord {
   const api_key = input.api_key.trim()
   if (!api_key) throw new Error('api_key is required')
   const display_name = input.display_name.trim()
@@ -226,7 +225,9 @@ export async function createLlmKey(input: CreateLlmKeyInput): Promise<LlmKeyReco
   const provider_kind = input.provider_kind || kindForCompany(company)
   const model = (input.model || defaultModel(company, 'lite')).trim()
   const base_url =
-    input.base_url !== undefined ? input.base_url : defaultBaseUrl(company)
+    input.base_url !== undefined
+      ? input.base_url
+      : defaultBaseUrl(company)
   const cost_score =
     input.cost_score ?? COMPANY_COST_DEFAULTS[company] ?? COMPANY_COST_DEFAULTS.custom
 
@@ -234,27 +235,24 @@ export async function createLlmKey(input: CreateLlmKeyInput): Promise<LlmKeyReco
   const key_last4 = api_key.slice(-4)
   const { ciphertext, iv, tag } = encrypt(api_key)
 
-  await ensureTable()
-  await withConn(async (conn) => {
-    await conn.query(
-      `INSERT INTO llm_api_keys
-        (id, display_name, provider_kind, company, model, base_url, key_last4, cost_score, ciphertext, iv, tag)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        display_name,
-        provider_kind,
-        company,
-        model,
-        base_url,
-        key_last4,
-        cost_score,
-        ciphertext,
-        iv,
-        tag,
-      ],
-    )
-  })
+  const db = getDb()
+  db.prepare(
+    `INSERT INTO llm_api_keys
+      (id, display_name, provider_kind, company, model, base_url, key_last4, cost_score, ciphertext, iv, tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    display_name,
+    provider_kind,
+    company,
+    model,
+    base_url,
+    key_last4,
+    cost_score,
+    ciphertext,
+    iv,
+    tag,
+  )
 
   return {
     id,
@@ -269,27 +267,14 @@ export async function createLlmKey(input: CreateLlmKeyInput): Promise<LlmKeyReco
   }
 }
 
-export async function deleteLlmKey(id: string): Promise<boolean> {
-  await ensureTable()
-  return withConn(async (conn) => {
-    const result = await conn.query(`DELETE FROM llm_api_keys WHERE id = ?`, [id])
-    const affected =
-      result && typeof result === 'object' && 'affectedRows' in result
-        ? Number((result as { affectedRows: number }).affectedRows)
-        : 0
-    return affected > 0
-  })
+export function deleteLlmKey(id: string): boolean {
+  const db = getDb()
+  const result = db.prepare(`DELETE FROM llm_api_keys WHERE id = ?`).run(id)
+  return Number(result.changes) > 0
 }
 
-/** Docs / API meta: keys live in shared MariaDB, not a local file. */
-export function getLlmKeysStoreLabelForDocs(): string {
-  const db = process.env.DB_NAME || 'kdt_project'
-  return `mariadb:${db}.llm_api_keys`
-}
-
-/** @deprecated use getLlmKeysStoreLabelForDocs */
 export function getLlmKeysDbPathForDocs(): string {
-  return getLlmKeysStoreLabelForDocs()
+  return dbPath()
 }
 
 function randomId(): string {

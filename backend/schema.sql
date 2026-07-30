@@ -9,15 +9,12 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Per-user Setting page UI prefs (font/theme/refresh/n8n). Control bounds stay in JSON file.
+-- Per-user Setting page UI prefs (font/theme/refresh). Control bounds stay in JSON file.
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id               VARCHAR(50)  NOT NULL PRIMARY KEY,
   font_size             INT          NOT NULL DEFAULT 18,
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
-  language              VARCHAR(10)  NOT NULL DEFAULT 'ko',
-  auto_refresh_enabled  TINYINT(1)   NOT NULL DEFAULT 1,
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
-  n8n_alert             TINYINT(1)   NOT NULL DEFAULT 1,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -60,10 +57,7 @@ CREATE TABLE IF NOT EXISTS issues (
   title             VARCHAR(255) NOT NULL,
   action_content    TEXT         NULL,
   assignee_user_id  VARCHAR(50)  NULL,
-  completed         TINYINT(1)   NOT NULL DEFAULT 0,
   completed_at      DATETIME     NULL,
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(lot_id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
@@ -78,28 +72,27 @@ CREATE TABLE IF NOT EXISTS handover_history (
   issue_id          VARCHAR(32)  NOT NULL,
   lot_id            VARCHAR(64)  NOT NULL,
   risk_level        VARCHAR(10)  NOT NULL,
-  situation         VARCHAR(255) NOT NULL,
-  action            TEXT         NULL,
+  situation         VARCHAR(255) NOT NULL COMMENT '발생 상황 ← issues.title',
+  action            TEXT         NULL COMMENT '대응/조치 ← action_content',
   cause             VARCHAR(255) NULL,
-  manager           VARCHAR(50)  NULL,
+  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← 담당자 성명',
+  handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
+  manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
-  event_date        DATE         NOT NULL,
-  category          VARCHAR(32)  NULL,
+  event_date        DATE         NOT NULL COMMENT '날짜 ← issues.occurred_at 일자',
+  category          VARCHAR(32)  NULL COMMENT '분류 ← 처리상태 status',
   snapshot_json     JSON         NULL,
   archived_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_handover_issue (issue_id),
+  CONSTRAINT fk_handover_issue
+    FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_handover_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(lot_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_handover_assignee
+    FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
+    ON DELETE SET NULL,
   INDEX idx_handover_lot (lot_id),
   INDEX idx_handover_date (event_date)
-);
-
-CREATE TABLE IF NOT EXISTS issue_analyses (
-  analysis_id       BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  issue_id          VARCHAR(32)  NOT NULL,
-  summary_text      MEDIUMTEXT   NOT NULL,
-  model_name        VARCHAR(64)  NULL,
-  prompt_version    VARCHAR(32)  NULL,
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_analyses_issue FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
-    ON DELETE CASCADE,
-  INDEX idx_analyses_issue (issue_id)
 );

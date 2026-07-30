@@ -35,7 +35,7 @@ GlobalChatbot 「제안 승인」
   → POST /api/control/approve/:id/outcome
 ```
 
-스토어: `CONTROL_STORE` 또는 `CHAT_STORE` (`mariadb` 권장 → `optimization_events` / `sqlite` → `backend/data/control.sqlite`).
+스토어: `CONTROL_STORE` 또는 `CHAT_STORE` (`sqlite` 기본 → `backend/data/control.sqlite`).
 
 ## 관련 코드 주석
 

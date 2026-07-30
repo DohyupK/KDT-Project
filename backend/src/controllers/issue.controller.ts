@@ -66,3 +66,13 @@ export const listHandoverHistory = asyncHandler(async (_req, res) => {
   const result = await issueService.listHandoverHistory()
   res.status(200).json(result)
 })
+
+export const listPastIssues = asyncHandler(async (_req, res) => {
+  const result = await issueService.listPastIssues()
+  res.status(200).json(result)
+})
+
+export const getPastIssue = asyncHandler(async (req, res) => {
+  const item = await issueService.getPastIssueById(String(req.params.issueId))
+  res.status(200).json({ item })
+})

@@ -12,7 +12,7 @@
 | 프록시 | Next.js `rewrites` | 브라우저 `/api` → `http://localhost:3001/api` |
 | 백엔드 | Express 5, TypeScript, tsx | `/api/auth` 라우트, 비즈니스 로직 |
 | DB 접속 | `mariadb` (npm) | `backend/src/db/connection.ts` 커넥션 풀 |
-| DB 서버 | MariaDB (Ubuntu apt) | `users`, `user_settings`, `chat_*`, `llm_api_keys`(암호문), `optimization_events` |
+| DB 서버 | MariaDB (Ubuntu apt) | `users`, `user_settings`, `chat_*`, `optimization_events` 등 |
 | 인프라 | Amazon Lightsail Instance | Ubuntu 서버 상시 기동 (공용 DB 위치) |
 | 비밀번호 해시 | bcryptjs | 회원가입·로그인 검증 |
 | 세션 토큰 | jsonwebtoken (JWT) | 로그인 후 인증 |
@@ -88,7 +88,7 @@
 | `JWT_SECRET` | JWT 서명 비밀 |
 | `CORS_ORIGIN` | 프론트 origin (`http://localhost:3000`) |
 | `CHAT_STORE` | 챗·제어 저장 (`mariadb` 권장 / `sqlite` / `memory`) — 로그인 `users`와 같은 `DB_*` |
-| `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(팀 공통, 16자+, Git 금지). 암호문은 MariaDB `llm_api_keys` |
+| `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(16자+, Git 금지). 암호문은 `ai-service/DB/llm_keys.sqlite` |
 
 템플릿: `backend/.env.example` (비밀번호 비움).
 

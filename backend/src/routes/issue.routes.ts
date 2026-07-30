@@ -13,6 +13,9 @@ router.get('/issues', issueController.listIssues)
 router.get('/issues/:issueId', issueController.getIssue)
 router.put('/issues/:issueId', authMiddleware, issueController.updateIssue)
 
+router.get('/knowledge/past-issues', issueController.listPastIssues)
+router.get('/knowledge/past-issues/:issueId', issueController.getPastIssue)
+/** 인수인계 이력 — 후속(이슈 완료와 무관) */
 router.get('/knowledge/handover-history', issueController.listHandoverHistory)
 
 export const issueRouter = router

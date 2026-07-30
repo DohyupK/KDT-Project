@@ -67,7 +67,7 @@ chatRouter.post('/chat', async (req, res) => {
 
     let llm_credentials: Awaited<ReturnType<typeof listLlmKeysWithSecrets>> = []
     try {
-      llm_credentials = await listLlmKeysWithSecrets()
+      llm_credentials = listLlmKeysWithSecrets()
     } catch (err) {
       // Encryption key missing / empty DB — chat uses template (no .env API fallback)
       console.warn(
