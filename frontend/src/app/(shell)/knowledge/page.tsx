@@ -1152,11 +1152,22 @@ export default function KnowledgePage() {
           </div>
         )}
 
-        <div style={{ marginBottom: 22 }}>
-          <h1 style={{ margin: 0, color: uiColors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
+        <div className="mb-6 flex flex-col gap-1">
+          <p
+            className={`text-sm font-bold tracking-wide ${
+              isDark ? 'text-blue-400' : 'text-blue-600'
+            }`}
+          >
+            Knowledge Base
+          </p>
+          <h1
+            className={`mt-1 text-3xl font-bold tracking-tight ${
+              isDark ? 'text-slate-100' : 'text-gray-900'
+            }`}
+          >
             {language === 'en' ? 'Library' : '라이브러리'}
           </h1>
-          <p style={{ margin: '9px 0 0', color: uiColors.slate, fontSize: 15 }}>
+          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
             {language === 'en'
               ? 'Issue action archive · Knowledge library'
               : '이슈 조치 이력 아카이브 · 지식 라이브러리'}
