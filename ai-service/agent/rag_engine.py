@@ -170,9 +170,18 @@ class SecureRagEngine:
         class named SelfQueryRetriever). Filters only — hybrid B/C/D stay outside.
 
         When llm_invoke is None (offline score smoke): heuristic only.
+        When SECURE_SELF_QUERY=0: heuristic only (skip LM filter call).
         On Self-Query / vLLM failure: heuristic fallback (no cloud).
         """
         if llm_invoke is None:
+            return _heuristic_filters(query)
+        if os.environ.get("SECURE_SELF_QUERY", "1").strip() in (
+            "0",
+            "false",
+            "False",
+            "no",
+            "off",
+        ):
             return _heuristic_filters(query)
         try:
             filters = self._filters_via_self_query(query)
@@ -221,13 +230,17 @@ class SecureRagEngine:
                 ),
             ],
         )
+        # Short timeout + small max_tokens: filter JSON only (avoid long GEN on LM Studio).
+        sq_timeout = float(os.environ.get("SECURE_SELF_QUERY_TIMEOUT", "20"))
+        sq_max_tokens = int(os.environ.get("SECURE_SELF_QUERY_MAX_TOKENS", "256"))
         llm = OpenAI(
             api_base=vllm_base_url(),
             api_key="EMPTY",
             model=vllm_model(),
             temperature=0.0,
             max_retries=0,
-            timeout=60.0,
+            timeout=sq_timeout,
+            max_tokens=sq_max_tokens,
         )
         self._auto_retriever = VectorIndexAutoRetriever(
             index=index,
