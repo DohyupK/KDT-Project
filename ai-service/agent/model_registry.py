@@ -112,11 +112,13 @@ def run_all_ready_heads(
       heads: {head_id: {ok, task, result|error}}
       predict: clf result if present (compat)
       capacity: reg result if present (compat)
+      residual: residual head result if present (compat)
       error: clf error string if clf failed (compat for chat)
     """
     heads_out: dict[str, Any] = {}
     predict: dict[str, Any] | None = None
     capacity: dict[str, Any] | None = None
+    residual: dict[str, Any] | None = None
     error: str | None = None
 
     for head in list_ready_heads():
@@ -131,10 +133,14 @@ def run_all_ready_heads(
         elif hid == "reg":
             if packed.get("ok"):
                 capacity = packed.get("result")
+        elif hid == "residual":
+            if packed.get("ok"):
+                residual = packed.get("result")
 
     return {
         "heads": heads_out,
         "predict": predict,
         "capacity": capacity,
+        "residual": residual,
         "error": error,
     }

@@ -1,8 +1,8 @@
-import SecurityChatbot from '@/components/chat/SecurityChatbot'
+'use client'
 
-export default function SecurityPage() {
-import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
+import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import { useUiSettings } from '@/components/layout/AppShell'
+import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
 
 export default function SecurityPage() {
   const { isDark, language, copy } = useUiSettings()
@@ -38,4 +38,8 @@ export default function SecurityPage() {
       </div>
       <p className={`mt-6 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
         참고: docs/references/security-chat-skeleton.md · docs/references/vllm-setup.md ·
-        docs/references/ai-service-feature-catalog.md
+        docs/references/ai-service-feature-catalog.md · docs/references/secure-rag.md
+      </p>
+    </div>
+  )
+}

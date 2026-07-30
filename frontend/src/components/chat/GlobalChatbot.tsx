@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import Link from 'next/link'
-import { MessageCircle, X } from 'lucide-react'
+import { Maximize2, MessageCircle, Minimize2, X } from 'lucide-react'
+import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import {
   postApproveControl,
   postOutcomeControl,
@@ -13,6 +14,10 @@ import {
   type ChatFeatures,
   type ChatRecommendation,
 } from '@/api/aiApi'
+import {
+  parseOutcomeCapacityInput,
+  parseOutcomeResidualLiInput,
+} from '@/lib/outcomeBounds'
 import {
   readLlmProvidersCache,
   type LlmKeyPublic,
@@ -31,12 +36,17 @@ type ChatMessage = {
   approving?: boolean
   /** After approve: event id for outcome form */
   eventId?: number | string | null
+  /** Undo window finished without revert */
+  outcomeEligible?: boolean
+  /** Undo applied — no outcome form */
+  reverted?: boolean
   outcomeSaved?: boolean
   outcomeSaving?: boolean
 }
 
 type UndoSnack = {
   eventId: number | string
+  msgId: number
   secondsLeft: number
 }
 
@@ -61,6 +71,9 @@ export default function GlobalChatbot() {
   const [undoBusy, setUndoBusy] = useState(false)
   const [outcomeDefect, setOutcomeDefect] = useState<'0' | '1' | ''>('')
   const [outcomeCapacity, setOutcomeCapacity] = useState('')
+  const [outcomeResidual, setOutcomeResidual] = useState('')
+  /** Fullscreen overlay with SecurityChatbot (separate from general chat session). */
+  const [fullscreenOpen, setFullscreenOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -95,6 +108,15 @@ export default function GlobalChatbot() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!fullscreenOpen) return
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreenOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullscreenOpen])
+
   const clearUndoTimer = () => {
     if (undoTimerRef.current) {
       clearInterval(undoTimerRef.current)
@@ -102,14 +124,21 @@ export default function GlobalChatbot() {
     }
   }
 
-  const startUndoWindow = (eventId: number | string) => {
+  const startUndoWindow = (eventId: number | string, msgId: number) => {
     clearUndoTimer()
-    setUndoSnack({ eventId, secondsLeft: UNDO_SECONDS })
+    setUndoSnack({ eventId, msgId, secondsLeft: UNDO_SECONDS })
     undoTimerRef.current = setInterval(() => {
       setUndoSnack((prev) => {
         if (!prev) return null
         if (prev.secondsLeft <= 1) {
           clearUndoTimer()
+          setMessages((msgs) =>
+            msgs.map((m) =>
+              m.id === prev.msgId && !m.reverted
+                ? { ...m, outcomeEligible: true }
+                : m,
+            ),
+          )
           return null
         }
         return { ...prev, secondsLeft: prev.secondsLeft - 1 }
@@ -223,6 +252,8 @@ export default function GlobalChatbot() {
                 approved: true,
                 approving: false,
                 eventId: res.event_id,
+                outcomeEligible: false,
+                reverted: false,
               }
             : m,
         ),
@@ -233,12 +264,13 @@ export default function GlobalChatbot() {
         {
           id: idRef.current,
           role: 'ai',
-          text: `승인 내용이 제어 로그에 기록되었습니다. (event_id=${res.event_id}, status=${res.status}) 5초 안에 실행 취소할 수 있습니다. 아래에서 실측 양/불을 입력할 수 있습니다.`,
+          text: `승인 내용이 제어 로그에 기록되었습니다. (event_id=${res.event_id}, status=${res.status}) 5초 안에 실행 취소할 수 있습니다. 취소하지 않으면 실측 입력란이 열립니다.`,
         },
       ])
       setOutcomeDefect('')
       setOutcomeCapacity('')
-      startUndoWindow(res.event_id)
+      setOutcomeResidual('')
+      startUndoWindow(res.event_id, msgId)
     } catch (err) {
       let detail = '승인 기록에 실패했습니다.'
       if (err && typeof err === 'object') {
@@ -264,15 +296,12 @@ export default function GlobalChatbot() {
       prev.map((m) => (m.id === msgId ? { ...m, outcomeSaving: true } : m)),
     )
     try {
-      const capRaw = outcomeCapacity.trim()
-      const cap =
-        capRaw === '' ? null : Number(capRaw)
-      if (cap !== null && !Number.isFinite(cap)) {
-        throw new Error('실측 용량은 숫자여야 합니다.')
-      }
+      const cap = parseOutcomeCapacityInput(outcomeCapacity)
+      const residual = parseOutcomeResidualLiInput(outcomeResidual)
       const res = await postOutcomeControl(eventId, {
         outcome_quality_defect: Number(outcomeDefect) as 0 | 1,
         outcome_capacity: cap,
+        outcome_residual_li: residual,
       })
       setMessages((prev) =>
         prev.map((m) =>
@@ -293,11 +322,15 @@ export default function GlobalChatbot() {
             (res.outcome_capacity != null
               ? `, 용량=${res.outcome_capacity} mAh/g`
               : '') +
+            (res.outcome_residual_li != null
+              ? `, 잔여리튬=${res.outcome_residual_li} ppm`
+              : '') +
             ')',
         },
       ])
       setOutcomeDefect('')
       setOutcomeCapacity('')
+      setOutcomeResidual('')
     } catch (err) {
       let detail = '실측 기록에 실패했습니다.'
       if (err && typeof err === 'object') {
@@ -317,17 +350,29 @@ export default function GlobalChatbot() {
     if (!undoSnack || undoBusy) return
     setUndoBusy(true)
     const eventId = undoSnack.eventId
+    const msgId = undoSnack.msgId
     try {
       const res = await postRevertControl(eventId)
       clearUndoTimer()
       setUndoSnack(null)
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                reverted: true,
+                outcomeEligible: false,
+              }
+            : m,
+        ),
+      )
       idRef.current += 1
       setMessages((prev) => [
         ...prev,
         {
           id: idRef.current,
           role: 'ai',
-          text: `승인이 취소되었습니다. (event_id=${res.event_id}, status=${res.status}) 이력은 DB에 보존됩니다.`,
+          text: `취소됨. 승인이 철회되었습니다. (event_id=${res.event_id}, status=${res.status}) 실측은 기록할 수 없습니다. 이력은 DB에 보존됩니다.`,
         },
       ])
     } catch (err) {
@@ -404,10 +449,19 @@ export default function GlobalChatbot() {
 
   return (
     <>
-      {chatOpen ? (
+      {chatOpen && !fullscreenOpen ? (
         <div className="fixed bottom-24 right-4 z-[60] flex h-[min(520px,70vh)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:right-6">
-          <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="min-w-0">
+          <div className="flex items-start gap-2 border-b border-slate-200 bg-slate-50 px-3 py-3">
+            <button
+              type="button"
+              aria-label="보안 챗 전체화면"
+              title="보안 챗 전체화면"
+              onClick={() => setFullscreenOpen(true)}
+              className="mt-0.5 shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
+            >
+              <Maximize2 size={16} />
+            </button>
+            <div className="min-w-0 flex-1">
               <strong className="text-sm text-slate-800">AI 공정 지원 챗봇</strong>
               {selectedLotId ? (
                 <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-600">
@@ -461,7 +515,9 @@ export default function GlobalChatbot() {
                 {m.recommendation?.suggestion && m.role === 'ai' ? (
                   <div className="mt-2 space-y-2">
                     {m.approved ? (
-                      <span className="text-[11px] font-medium text-emerald-700">승인됨</span>
+                      <span className="text-[11px] font-medium text-emerald-700">
+                        {m.reverted ? '취소됨' : '승인됨'}
+                      </span>
                     ) : (
                       <button
                         type="button"
@@ -472,9 +528,13 @@ export default function GlobalChatbot() {
                         {m.approving ? '기록 중…' : '제안 승인'}
                       </button>
                     )}
-                    {m.approved && m.eventId != null && !m.outcomeSaved ? (
+                    {m.approved &&
+                    m.eventId != null &&
+                    m.outcomeEligible &&
+                    !m.reverted &&
+                    !m.outcomeSaved ? (
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
-                        <div className="font-medium text-slate-800">실측 기록 (선택)</div>
+                        <div className="font-medium text-slate-800">실측 기록</div>
                         <p className="mt-0.5 text-[10px] text-slate-500">
                           작업자 실측만 저장합니다. 값을 만들지 않습니다.
                         </p>
@@ -498,12 +558,28 @@ export default function GlobalChatbot() {
                             용량
                             <input
                               type="number"
-                              step="any"
+                              step="0.01"
+                              min={130}
+                              max={250}
                               placeholder="mAh/g"
                               value={outcomeCapacity}
                               onChange={(e) => setOutcomeCapacity(e.target.value)}
                               disabled={m.outcomeSaving}
                               className="h-7 w-20 rounded border border-slate-200 bg-white px-1"
+                            />
+                          </label>
+                          <label className="flex items-center gap-1">
+                            잔여리튬
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={500}
+                              max={8000}
+                              placeholder="ppm"
+                              value={outcomeResidual}
+                              onChange={(e) => setOutcomeResidual(e.target.value)}
+                              disabled={m.outcomeSaving}
+                              className="h-7 w-24 rounded border border-slate-200 bg-white px-1"
                             />
                           </label>
                           <button
@@ -611,12 +687,51 @@ export default function GlobalChatbot() {
         </div>
       ) : null}
 
+      {fullscreenOpen ? (
+        <div className="fixed inset-0 z-[70] flex flex-col bg-slate-900/50 p-3 sm:p-6">
+          <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <button
+                type="button"
+                aria-label="전체화면 닫기"
+                title="전체화면 닫기"
+                onClick={() => setFullscreenOpen(false)}
+                className="rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
+              >
+                <Minimize2 size={16} />
+              </button>
+              <strong className="text-sm text-slate-800">보안 전용 챗 · 전체화면</strong>
+              <span className="text-[10px] text-slate-400">Esc로 닫기 · 일반 챗과 세션 분리</span>
+              <button
+                type="button"
+                aria-label="전체화면 닫기"
+                onClick={() => setFullscreenOpen(false)}
+                className="ml-auto rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 p-3 sm:p-4">
+              <SecurityChatbot variant="embedded" />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <button
         type="button"
         aria-label="AI 챗봇"
-        aria-expanded={chatOpen}
-        onClick={() => setChatOpen(!chatOpen)}
-        className="fixed bottom-5 right-5 z-[65] flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700"
+        aria-expanded={chatOpen || fullscreenOpen}
+        onClick={() => {
+          if (fullscreenOpen) {
+            setFullscreenOpen(false)
+            return
+          }
+          setChatOpen(!chatOpen)
+        }}
+        className={`fixed bottom-5 right-5 z-[75] flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 ${
+          fullscreenOpen ? 'hidden' : ''
+        }`}
       >
         {chatOpen ? <X size={22} /> : <MessageCircle size={22} />}
       </button>

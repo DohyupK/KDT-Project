@@ -41,6 +41,12 @@ class CapacityResponse(BaseModel):
     top_factors: list[str] = Field(default_factory=list)
 
 
+class ResidualResponse(BaseModel):
+    residual_li: float
+    unit: str = "ppm"
+    top_factors: list[str] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None
@@ -74,7 +80,8 @@ class ChatRequest(BaseModel):
     features: ChatFeatures | None = Field(
         default=None,
         description=(
-            "If set, agent runs all ready registry heads (clf O/X + reg capacity + future) "
+            "If set, agent runs all ready registry heads "
+            "(clf O/X + reg capacity + residual + future) "
             "then replies citing those JSON results only."
         ),
     )
@@ -106,6 +113,9 @@ class WhatIfSuggestion(BaseModel):
     limit_reason: str | None = None
     ideal_values: dict[str, float] | None = None
     clipped_values: dict[str, float] | None = None
+    residual_before: float | None = None
+    residual_after: float | None = None
+    residual_unit: str | None = "ppm"
     capacity_before: float | None = None
     capacity_after: float | None = None
     unit: str | None = "mAh/g"
@@ -117,6 +127,7 @@ class RecommendationBaseline(BaseModel):
     applied_threshold: float
     features: ChatFeatures
     capacity: float | None = None
+    residual_li: float | None = None
 
 
 class ChatRecommendation(BaseModel):
@@ -135,9 +146,10 @@ class ChatResponse(BaseModel):
     )
     predict: PredictResponse | None = None
     capacity: CapacityResponse | None = None
+    residual: ResidualResponse | None = None
     heads: dict[str, Any] | None = Field(
         default=None,
-        description="Extensible bag of registry head results (clf/reg/future).",
+        description="Extensible bag of registry head results (clf/reg/residual/future).",
     )
     recommendation: ChatRecommendation | None = None
     error: str | None = None
@@ -147,11 +159,24 @@ class SecurityChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Security-tab user text")
 
 
+class SecurityChatSource(BaseModel):
+    doc_id: str | None = None
+    title: str | None = None
+    category: str | None = None
+    process: str | None = None
+    source_path: str | None = None
+    chunk_index: int | None = None
+    text: str = ""
+
+
 class SecurityChatResponse(BaseModel):
     reply: str
-    mode: str = Field(description="'security_vllm' | 'template'")
+    mode: str = Field(
+        description="'security_rag' | 'security_no_docs' | 'security_vllm' | 'template'",
+    )
     provider: str = Field(
         default="offline",
-        description="'vllm' | 'offline'",
+        description="'vllm' | 'rag' | 'offline'",
     )
     error: str | None = None
+    sources: list[SecurityChatSource] = Field(default_factory=list)

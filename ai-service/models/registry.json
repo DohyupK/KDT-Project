@@ -15,6 +15,15 @@
       "entrypoint": "train_reg_pipeline.predict_capacity",
       "data": "data/cathode_reg_data.csv",
       "train": "python train_reg_pipeline.py"
+    },
+    "residual": {
+      "task": "residual_li_regression",
+      "dir": "models/residual",
+      "ready": true,
+      "entrypoint": "train_residual_pipeline.predict_residual_li",
+      "data": "data/cathode_qc_reg_data.csv",
+      "train": "python train_residual_pipeline.py",
+      "unit": "ppm"
     }
   }
 }

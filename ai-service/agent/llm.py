@@ -39,6 +39,7 @@ def _build_messages(
     need_guideline: bool,
     recommendation: dict[str, Any] | None = None,
     capacity_result: dict[str, Any] | None = None,
+    residual_result: dict[str, Any] | None = None,
     head_results: dict[str, Any] | None = None,
 ) -> list[Any]:
     system = SYSTEM_COMPOSE
@@ -49,14 +50,17 @@ def _build_messages(
         "user_message": message,
         "predict": predict_result,
         "capacity": capacity_result,
+        "residual": residual_result,
         "heads": head_results,
         "recommendation": recommendation,
         "error": error,
         "need_guideline": need_guideline,
         "data_note": (
-            "실측 분포상 capacity가 낮을수록(특히 <185 mAh/g) 불량 비율이 높고, "
-            "높을수록(≥200) 정상 비율이 높다. 단, predict·capacity는 각각 별도 모델 "
-            "결과이므로 숫자를 서로 대체하거나 임의로 만들지 말 것."
+            "실측 분포상 (1) capacity가 낮을수록(특히 <185 mAh/g) 불량 비율이 높고 "
+            "≥200이면 정상 비율이 높다. (2) residual_li가 3500–4500에서 불량 폭증, "
+            "≥5000에서 불량>정상, ≥6500 정상 0. (3) residual↑ ↔ capacity↓ (r≈-0.66). "
+            "단, predict·capacity·residual은 각각 별도 모델 결과이므로 "
+            "숫자를 서로 대체하거나 임의로 만들지 말 것."
         ),
     }
     return [
@@ -79,6 +83,7 @@ def compose_with_failover(
     llm_mode: str | None = "auto",
     llm_credentials: list[dict[str, Any]] | None = None,
     capacity_result: dict[str, Any] | None = None,
+    residual_result: dict[str, Any] | None = None,
     head_results: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """
@@ -100,6 +105,7 @@ def compose_with_failover(
         need_guideline,
         recommendation,
         capacity_result=capacity_result,
+        residual_result=residual_result,
         head_results=head_results,
     )
 

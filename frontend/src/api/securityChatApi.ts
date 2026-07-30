@@ -1,7 +1,7 @@
 import { apiClient } from '@/api/axios'
 
 /**
- * Security-tab chat only → POST /api/security-chat → ai-service /security-chat → vLLM :8001.
+ * Security-tab chat only → POST /api/security-chat → ai-service /security-chat → vLLM :8001 (+ secure RAG).
  * Never uses general /api/chat (Groq/Gemini).
  */
 
@@ -22,12 +22,23 @@ export type SecurityChatRequest = {
   session_id?: string | null
 }
 
+export type SecurityChatSource = {
+  doc_id: string
+  title: string
+  category?: string | null
+  process?: string | null
+  source_path?: string | null
+  chunk_index?: number | null
+  text: string
+}
+
 export type SecurityChatResponse = {
   session_id: string
   reply: string
   mode: string
   provider: string
   error: string | null
+  sources?: SecurityChatSource[]
 }
 
 export async function postSecurityChat(

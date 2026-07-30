@@ -20,13 +20,15 @@ pip install -r requirements.txt
 # 학습 (승인 후):
 #   python train_pipeline.py
 #   python train_reg_pipeline.py
+#   python train_residual_pipeline.py
 uvicorn app.main:app --host 127.0.0.1 --port 8800
 ```
 
 - Health: `GET http://127.0.0.1:8800/health` (`registry_ready`에 활성 헤드 id)
 - Predict (clf): `POST http://127.0.0.1:8800/predict`
 - Capacity (reg): `POST http://127.0.0.1:8800/predict-capacity`
-- Chat: `POST http://127.0.0.1:8800/chat` — features 있으면 **ready 헤드 전부 자동 호출** (clf+reg+확장)
+- Residual: `POST http://127.0.0.1:8800/predict-residual`
+- Chat: `POST http://127.0.0.1:8800/chat` — features 있으면 **ready 헤드 전부 자동 호출** (clf+reg+residual+확장)
 - Docs: `http://127.0.0.1:8800/docs`
 - **CWD는 항상 `ai-service/`** (`models/` 상대 경로)
 
@@ -113,10 +115,32 @@ clf와 **같은 뼈대**, 다른 점만: 타깃·Regressor·RMSE minimize·산�
 |------|-----|------|
 | `clf` | `/predict` | O/X 불량 확률 |
 | `reg` | `/predict-capacity` | 전지 용량 mAh/g |
+| `residual` | `/predict-residual` | 잔여 리튬 (ppm 예시) |
 
 새 학습 데이터/모델 추가 시: `models/<name>/` 학습 산출 + registry에 헤드 추가 + `agent/tools.py`에 `register_builtin` (또는 features→DataFrame 어댑터). 챗 UI 모델 피커 없이 자동 포함.
 
-용량·불량 비율의 **실측 상관**(저용량↑불량)은 compose의 `data_note`로만 설명하고, clf는 capacity를 입력으로 쓰지 않는다.
+용량·잔여 리튬·불량 비율의 **실측 상관**은 compose의 `data_note`로만 설명하고, clf는 capacity/residual을 입력으로 쓰지 않는다.
+
+---
+
+## residual 학습 방식·기준 (residual_li → `/predict-residual`)
+
+상세 계약: [`docs/references/cathode-residual-schema.md`](../docs/references/cathode-residual-schema.md)  
+스크립트: [`train_residual_pipeline.py`](./train_residual_pipeline.py) · 산출: [`models/residual/`](./models/residual/)  
+레지스트리: `residual.ready`는 학습 성공 후 `true`
+
+| 항목 | 내용 |
+|------|------|
+| 데이터 | `data/cathode_qc_reg_data.csv` |
+| 타깃 | `residual_li` (잔여 리튬, 단위 **ppm** 예시) |
+| Feature | clf/reg와 동일 공정 9개 + `operator_id` + 동일 도메인 피처 |
+| CV / 튜닝 | TimeSeriesSplit, Optuna **100**, study `xgb_residual_reg_v1` / `cat_residual_reg_v1` |
+| Optuna DB | `optuna_residual.db` |
+| 목적 | Fold 평균 **RMSE minimize** |
+| 모델 | XGBRegressor + CatBoostRegressor, 앙상블 **0.5 / 0.5** |
+| 실행 | `cd ai-service` 후 **승인 받고** `USE_GPU=0 OPTUNA_TRIALS=100 python train_residual_pipeline.py` |
+
+What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 시 capacity 최대.
 
 ---
 
@@ -133,6 +157,7 @@ clf와 **같은 뼈대**, 다른 점만: 타깃·Regressor·RMSE minimize·산�
 - LangChain Google GenAI (Gemini)
 - Anthropic Messages: 표준 라이브러리 HTTP (추가 pip 없음)
 - Auto/수동: 보안 탭 등록 키만 (`.env` API 키 폴백 없음)
+- **Secure RAG:** Qdrant · BM25 · RRF fusion · bge-m3 / bge-reranker-v2-m3 (**CPU**) · LlamaIndex SentenceSplitter
 
 ### ML · 데이터
 - Polars
@@ -140,23 +165,26 @@ clf와 **같은 뼈대**, 다른 점만: 타깃·Regressor·RMSE minimize·산�
 - XGBoost, CatBoost
 - Optuna (SQLite resume)
 - SHAP
+- sentence-transformers, rank-bm25, qdrant-client, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant
 
 ### 예정
-- What-if capacity · ReAct · RAG
+- TS 불량률(기상 데이터 후)
 
 ### 주요 산출물 경로
-- 학습: `train_pipeline.py` (clf) · `train_reg_pipeline.py` (reg)
-- 모델: `models/` (clf) · `models/reg/` · `models/registry.json`
-- API: `app/main.py` (`/predict`, `/predict-capacity`, `/chat`)
-- Agent: `agent/` (`model_registry.py` · tools · graph)
+- 학습: `train_pipeline.py` (clf) · `train_reg_pipeline.py` (reg) · `train_residual_pipeline.py` (residual)
+- 모델: `models/` (clf) · `models/reg/` · `models/residual/` · `models/registry.json`
+- API: `app/main.py` (`/predict`, `/predict-capacity`, `/predict-residual`, `/chat`, `/security-chat`)
+- Agent: `agent/` (`model_registry.py` · tools · graph · whatif · `rag_engine` · `secure_graph`)
+- Secure docs: `data/secure_docs/` · ingest: `ingest_secure.py`
+- Secure RAG E2E smoke: `python scripts/smoke_secure_rag_e2e.py` (needs vLLM `:8001`)
 
 ---
 
 ## 사용할 라이브러리 (requirements.txt 기준)
 
-**직접 의존성:** polars, numpy, scikit-learn, xgboost, catboost, optuna, shap, joblib, fastapi, uvicorn[standard], pydantic, langgraph, langchain-core, langchain-openai, langchain-google-genai, python-dotenv
+**직접 의존성:** polars, numpy, scikit-learn, xgboost, catboost, optuna, shap, joblib, fastapi, uvicorn[standard], pydantic, langgraph, langchain-core, langchain-openai, langchain-google-genai, python-dotenv, qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant
 
-**설치 시 따라온 주요 패키지(참고):** polars-runtime, sqlalchemy, alembic, numba, llvmlite, slicer, cloudpickle, starlette, httptools, watchfiles, websockets, graphviz, plotly, langgraph-checkpoint, langgraph-prebuilt, langgraph-sdk, langsmith, openai, tiktoken, orjson, tenacity, jsonpatch, google-generativeai 등
+**설치 시 따라온 주요 패키지(참고):** polars-runtime, sqlalchemy, alembic, numba, llvmlite, slicer, cloudpickle, starlette, httptools, watchfiles, websockets, graphviz, plotly, langgraph-checkpoint, langgraph-prebuilt, langgraph-sdk, langsmith, openai, tiktoken, orjson, tenacity, jsonpatch, google-generativeai, transformers, huggingface-hub 등
 
 ---
 

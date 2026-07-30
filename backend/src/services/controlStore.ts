@@ -4,6 +4,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { withConn } from '../db.js'
+import {
+  parseOutcomeCapacity,
+  parseOutcomeResidualLi,
+} from './outcomeBounds.js'
 
 export type ControlStoreMode = 'memory' | 'mariadb' | 'sqlite'
 
@@ -19,16 +23,22 @@ export type OptimizationEventInput = {
   status?: string
   capacityBefore?: number | null
   capacityAfter?: number | null
+  residualBefore?: number | null
+  residualAfter?: number | null
 }
 
 export type OptimizationEventRow = {
   id: number | string
   status: string
+  outcomeQualityDefect?: 0 | 1
+  outcomeCapacity?: number | null
+  outcomeResidualLi?: number | null
 }
 
 export type OutcomeInput = {
   outcomeQualityDefect: 0 | 1
   outcomeCapacity?: number | null
+  outcomeResidualLi?: number | null
 }
 
 type MemEvent = OptimizationEventInput & {
@@ -37,6 +47,7 @@ type MemEvent = OptimizationEventInput & {
   createdAt: number
   outcomeQualityDefect: number | null
   outcomeCapacity: number | null
+  outcomeResidualLi: number | null
 }
 
 const mem: MemEvent[] = []
@@ -76,6 +87,9 @@ function ensureSqliteColumns(db: DatabaseSync): void {
   alter('capacity_before', 'capacity_before REAL')
   alter('capacity_after', 'capacity_after REAL')
   alter('outcome_capacity', 'outcome_capacity REAL')
+  alter('residual_before', 'residual_before REAL')
+  alter('residual_after', 'residual_after REAL')
+  alter('outcome_residual_li', 'outcome_residual_li REAL')
 }
 
 function getSqlite(): DatabaseSync {
@@ -99,6 +113,9 @@ function getSqlite(): DatabaseSync {
       capacity_before REAL,
       capacity_after REAL,
       outcome_capacity REAL,
+      residual_before REAL,
+      residual_after REAL,
+      outcome_residual_li REAL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_optimization_events_created
@@ -126,6 +143,9 @@ async function ensureMariaTable(): Promise<void> {
         capacity_before DOUBLE NULL,
         capacity_after DOUBLE NULL,
         outcome_capacity DOUBLE NULL,
+        residual_before DOUBLE NULL,
+        residual_after DOUBLE NULL,
+        outcome_residual_li DOUBLE NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `)
@@ -134,6 +154,9 @@ async function ensureMariaTable(): Promise<void> {
       'ADD COLUMN capacity_before DOUBLE NULL',
       'ADD COLUMN capacity_after DOUBLE NULL',
       'ADD COLUMN outcome_capacity DOUBLE NULL',
+      'ADD COLUMN residual_before DOUBLE NULL',
+      'ADD COLUMN residual_after DOUBLE NULL',
+      'ADD COLUMN outcome_residual_li DOUBLE NULL',
     ]) {
       try {
         await conn.query(`ALTER TABLE optimization_events ${ddl}`)
@@ -153,6 +176,10 @@ export async function insertOptimizationEvent(
     input.capacityBefore === undefined ? null : input.capacityBefore
   const capacityAfter =
     input.capacityAfter === undefined ? null : input.capacityAfter
+  const residualBefore =
+    input.residualBefore === undefined ? null : input.residualBefore
+  const residualAfter =
+    input.residualAfter === undefined ? null : input.residualAfter
 
   if (mode === 'memory') {
     const id = randomUUID()
@@ -160,11 +187,14 @@ export async function insertOptimizationEvent(
       ...input,
       capacityBefore,
       capacityAfter,
+      residualBefore,
+      residualAfter,
       id,
       status,
       createdAt: Date.now(),
       outcomeQualityDefect: null,
       outcomeCapacity: null,
+      outcomeResidualLi: null,
     })
     return { id, status }
   }
@@ -176,8 +206,9 @@ export async function insertOptimizationEvent(
         `INSERT INTO optimization_events (
           session_id, lot_id, before_features, proposed_deltas, after_features,
           prob_before, prob_after, method, status, outcome_quality_defect,
-          capacity_before, capacity_after, outcome_capacity
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+          capacity_before, capacity_after, outcome_capacity,
+          residual_before, residual_after
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`,
       )
       .run(
         input.sessionId,
@@ -191,6 +222,8 @@ export async function insertOptimizationEvent(
         status,
         capacityBefore,
         capacityAfter,
+        residualBefore,
+        residualAfter,
       )
     return { id: Number(result.lastInsertRowid), status }
   }
@@ -201,8 +234,9 @@ export async function insertOptimizationEvent(
       `INSERT INTO optimization_events (
         session_id, lot_id, before_features, proposed_deltas, after_features,
         prob_before, prob_after, method, status, outcome_quality_defect,
-        capacity_before, capacity_after, outcome_capacity
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+        capacity_before, capacity_after, outcome_capacity,
+        residual_before, residual_after
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`,
       [
         input.sessionId,
         input.lotId,
@@ -215,6 +249,8 @@ export async function insertOptimizationEvent(
         status,
         capacityBefore,
         capacityAfter,
+        residualBefore,
+        residualAfter,
       ],
     )
     const insertId =
@@ -289,20 +325,30 @@ export async function updateOptimizationOutcome(
   if (defect !== 0 && defect !== 1) {
     throw new Error('outcome_quality_defect must be 0 or 1')
   }
-  const capacity =
-    input.outcomeCapacity === undefined || input.outcomeCapacity === null
-      ? null
-      : Number(input.outcomeCapacity)
-  if (capacity !== null && !Number.isFinite(capacity)) {
-    throw new Error('outcome_capacity must be a finite number')
-  }
+
+  const capacity = parseOutcomeCapacity(
+    input.outcomeCapacity === undefined ? null : input.outcomeCapacity,
+  )
+  const residualLi = parseOutcomeResidualLi(
+    input.outcomeResidualLi === undefined ? null : input.outcomeResidualLi,
+  )
 
   if (mode === 'memory') {
     const row = mem.find((e) => String(e.id) === idStr)
     if (!row) return null
+    if (row.status === 'reverted') {
+      throw new Error('reverted events cannot record outcome')
+    }
     row.outcomeQualityDefect = defect
     row.outcomeCapacity = capacity
-    return { id: row.id, status: row.status }
+    row.outcomeResidualLi = residualLi
+    return {
+      id: row.id,
+      status: row.status,
+      outcomeQualityDefect: defect,
+      outcomeCapacity: capacity,
+      outcomeResidualLi: residualLi,
+    }
   }
 
   if (mode === 'sqlite') {
@@ -311,12 +357,21 @@ export async function updateOptimizationOutcome(
       .prepare('SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1')
       .get(Number(eventId) || eventId) as { id: number; status: string } | undefined
     if (!existing) return null
+    if (existing.status === 'reverted') {
+      throw new Error('reverted events cannot record outcome')
+    }
     db.prepare(
       `UPDATE optimization_events
-       SET outcome_quality_defect = ?, outcome_capacity = ?
+       SET outcome_quality_defect = ?, outcome_capacity = ?, outcome_residual_li = ?
        WHERE id = ?`,
-    ).run(defect, capacity, existing.id)
-    return { id: existing.id, status: existing.status }
+    ).run(defect, capacity, residualLi, existing.id)
+    return {
+      id: existing.id,
+      status: existing.status,
+      outcomeQualityDefect: defect,
+      outcomeCapacity: capacity,
+      outcomeResidualLi: residualLi,
+    }
   }
 
   await ensureMariaTable()
@@ -327,12 +382,21 @@ export async function updateOptimizationOutcome(
     )
     if (!Array.isArray(rows) || rows.length === 0) return null
     const existing = rows[0] as { id: number | string; status: string }
+    if (existing.status === 'reverted') {
+      throw new Error('reverted events cannot record outcome')
+    }
     await conn.query(
       `UPDATE optimization_events
-       SET outcome_quality_defect = ?, outcome_capacity = ?
+       SET outcome_quality_defect = ?, outcome_capacity = ?, outcome_residual_li = ?
        WHERE id = ?`,
-      [defect, capacity, existing.id],
+      [defect, capacity, residualLi, existing.id],
     )
-    return { id: existing.id, status: existing.status }
+    return {
+      id: existing.id,
+      status: existing.status,
+      outcomeQualityDefect: defect,
+      outcomeCapacity: capacity,
+      outcomeResidualLi: residualLi,
+    }
   })
 }

@@ -3,8 +3,8 @@ Minimal LangGraph chatbot.
 
 Flow: START → predict_node → whatif_node → compose_node → END
 
-- predict_node: all ready registry heads (clf O/X + reg capacity + future)
-- whatif: O/X predict 격자 탐색 (Cold start)
+- predict_node: all ready registry heads (clf O/X + reg capacity + residual + future)
+- whatif: O/X + residual + capacity 격자 탐색
 - compose: template / LLM
 """
 
@@ -29,6 +29,7 @@ class ChatState(TypedDict, total=False):
     llm_credentials: list[dict[str, Any]] | None
     predict_result: dict[str, Any] | None
     capacity_result: dict[str, Any] | None
+    residual_result: dict[str, Any] | None
     head_results: dict[str, Any] | None
     recommendation: dict[str, Any] | None
     error: str | None
@@ -66,6 +67,19 @@ def _format_recommendation(recommendation: dict[str, Any] | None) -> str:
             f"(양품 확률 약 {(1.0 - p_after) * 100:.1f}%)."
         ),
     ]
+    res_before = sug.get("residual_before")
+    res_after = sug.get("residual_after")
+    res_unit = sug.get("residual_unit") or "ppm"
+    if res_before is not None and res_after is not None:
+        lines.append(
+            f"예상 잔여 리튬 {float(res_before):.1f} → {float(res_after):.1f} {res_unit} "
+            "(residual 모델 예측이며 실측이 아닙니다)."
+        )
+    elif res_after is not None:
+        lines.append(
+            f"제안 적용 시 예상 잔여 리튬 {float(res_after):.1f} {res_unit} "
+            "(residual 모델 예측이며 실측이 아닙니다)."
+        )
     cap_before = sug.get("capacity_before")
     cap_after = sug.get("capacity_after")
     unit = sug.get("unit") or "mAh/g"
@@ -114,12 +128,34 @@ def _format_capacity(capacity_result: dict[str, Any] | None) -> str:
     )
 
 
+def _format_residual(residual_result: dict[str, Any] | None) -> str:
+    if not residual_result:
+        return ""
+    val = float(residual_result["residual_li"])
+    unit = residual_result.get("unit") or "ppm"
+    factors = residual_result.get("top_factors") or []
+    factors_txt = ", ".join(str(f) for f in factors)
+    note = ""
+    if val >= 5000:
+        note = " (데이터상 고잔여 구간은 불량 비율이 정상보다 높습니다.)"
+    elif val >= 3500:
+        note = " (데이터상 잔여 리튬이 높아질수록 불량 비율이 증가하는 편입니다.)"
+    elif 2500 <= val < 3500:
+        note = " (데이터상 양산 중심 구간에 가깝습니다.)"
+    return (
+        f"\n\n[잔여 리튬 예측] 예상 잔여 리튬은 **{val:.1f} {unit}** 입니다.{note}\n"
+        f"잔여 리튬 모델 Top-4 요인: {factors_txt} "
+        "(전역 SHAP이며 이번 LOT 단독 원인이라고 단정하지 않습니다)."
+    )
+
+
 def _template_reply(
     message: str,
     predict_result: dict[str, Any] | None,
     error: str | None,
     recommendation: dict[str, Any] | None = None,
     capacity_result: dict[str, Any] | None = None,
+    residual_result: dict[str, Any] | None = None,
 ) -> str:
     if error and predict_result is None:
         return (
@@ -127,11 +163,15 @@ def _template_reply(
             f"사유: {error}\n"
             "공정 피처를 확인한 뒤 다시 요청해 주세요."
         )
-    if predict_result is None and capacity_result is None:
+    if (
+        predict_result is None
+        and capacity_result is None
+        and residual_result is None
+    ):
         return (
             "사용 안내입니다.\n\n"
             "1. Main 화면 「위험 LOT Top」에서 LOT **행을 클릭**하면 "
-            "챗봇에 센서가 연결되고 O/X·용량 진단이 자동으로 시작됩니다.\n"
+            "챗봇에 센서가 연결되고 O/X·용량·잔여 리튬 진단이 자동으로 시작됩니다.\n"
             "2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n"
             "3. What-if 제안이 나오면 「제안 승인」→ 5초 안 「실행 취소」가능.\n"
             "4. 공정 한계치(온도·습도)는 Setting에서 바꿉니다.\n"
@@ -157,6 +197,7 @@ def _template_reply(
             "(이번 LOT 샘플별 원인이라고 단정하지 않습니다)."
         )
     parts.append(_format_capacity(capacity_result).lstrip("\n") if capacity_result else "")
+    parts.append(_format_residual(residual_result).lstrip("\n") if residual_result else "")
     body = "\n".join(p for p in parts if p)
     return body + _format_recommendation(recommendation)
 
@@ -167,6 +208,7 @@ def predict_node(state: ChatState) -> dict[str, Any]:
         return {
             "predict_result": None,
             "capacity_result": None,
+            "residual_result": None,
             "head_results": None,
             "error": None,
         }
@@ -178,6 +220,7 @@ def predict_node(state: ChatState) -> dict[str, Any]:
     return {
         "predict_result": packed.get("predict"),
         "capacity_result": packed.get("capacity"),
+        "residual_result": packed.get("residual"),
         "head_results": packed.get("heads"),
         "error": packed.get("error"),
     }
@@ -204,6 +247,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
     message = state.get("message") or ""
     predict_result = state.get("predict_result")
     capacity_result = state.get("capacity_result")
+    residual_result = state.get("residual_result")
     recommendation = state.get("recommendation")
     error = state.get("error")
     need_guideline = bool(state.get("need_guideline"))
@@ -216,6 +260,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
             need_guideline=need_guideline,
             recommendation=recommendation,
             capacity_result=capacity_result,
+            residual_result=residual_result,
             head_results=state.get("head_results"),
             llm_mode=state.get("llm_mode"),
             llm_credentials=state.get("llm_credentials"),
@@ -226,6 +271,8 @@ def compose_node(state: ChatState) -> dict[str, Any]:
                     reply = reply.rstrip() + _format_recommendation(recommendation)
             if capacity_result and "[용량 예측]" not in reply:
                 reply = reply.rstrip() + _format_capacity(capacity_result)
+            if residual_result and "[잔여 리튬 예측]" not in reply:
+                reply = reply.rstrip() + _format_residual(residual_result)
             return {
                 "reply": reply,
                 "mode": "llm",
@@ -238,6 +285,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
                 error,
                 recommendation,
                 capacity_result,
+                residual_result,
             )
             return {
                 "reply": _append_guideline(
@@ -257,6 +305,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
                 error,
                 recommendation,
                 capacity_result,
+                residual_result,
             ),
             need_guideline,
         ),
@@ -295,7 +344,7 @@ def run_chat(
     llm_mode: str | None = "auto",
     llm_credentials: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run the chat graph. Returns reply + optional predict/capacity/recommendation."""
+    """Run the chat graph. Returns reply + optional predict/capacity/residual/recommendation."""
     graph = get_graph()
     out: ChatState = graph.invoke(
         {
@@ -313,6 +362,7 @@ def run_chat(
         "provider": out.get("provider") or "template",
         "predict": out.get("predict_result"),
         "capacity": out.get("capacity_result"),
+        "residual": out.get("residual_result"),
         "heads": out.get("head_results"),
         "recommendation": out.get("recommendation"),
         "error": out.get("error"),

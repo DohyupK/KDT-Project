@@ -51,6 +51,9 @@ export type WhatIfSuggestion = {
   limit_reason?: string | null
   ideal_values?: Record<string, number> | null
   clipped_values?: Record<string, number> | null
+  residual_before?: number | null
+  residual_after?: number | null
+  residual_unit?: string | null
   capacity_before?: number | null
   capacity_after?: number | null
   unit?: string | null
@@ -64,6 +67,7 @@ export type ChatRecommendation = {
     applied_threshold: number
     features: ChatFeatures
     capacity?: number | null
+    residual_li?: number | null
   }
   suggestion: WhatIfSuggestion | null
   note?: string | null
@@ -84,6 +88,12 @@ export type ChatCapacityResult = {
   top_factors: string[]
 }
 
+export type ChatResidualResult = {
+  residual_li: number
+  unit: string
+  top_factors: string[]
+}
+
 export type ChatResponse = {
   session_id: string
   reply: string
@@ -91,6 +101,7 @@ export type ChatResponse = {
   provider: string
   predict: ChatPredictResult | null
   capacity?: ChatCapacityResult | null
+  residual?: ChatResidualResult | null
   heads?: Record<string, unknown> | null
   recommendation?: ChatRecommendation | null
   error: string | null
@@ -118,6 +129,7 @@ export type ApproveControlResponse = {
 export type OutcomeControlRequest = {
   outcome_quality_defect: 0 | 1
   outcome_capacity?: number | null
+  outcome_residual_li?: number | null
 }
 
 export type OutcomeControlResponse = {
@@ -126,6 +138,7 @@ export type OutcomeControlResponse = {
   status: string
   outcome_quality_defect: 0 | 1
   outcome_capacity: number | null
+  outcome_residual_li?: number | null
   control_store?: string
 }
 
@@ -177,6 +190,8 @@ export async function postOutcomeControl(
       outcome_quality_defect: body.outcome_quality_defect,
       outcome_capacity:
         body.outcome_capacity === undefined ? null : body.outcome_capacity,
+      outcome_residual_li:
+        body.outcome_residual_li === undefined ? null : body.outcome_residual_li,
     },
   )
   return data

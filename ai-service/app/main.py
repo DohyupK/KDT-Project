@@ -31,6 +31,7 @@ from app.schemas import (
     HealthResponse,
     PredictRequest,
     PredictResponse,
+    ResidualResponse,
     SecurityChatRequest,
     SecurityChatResponse,
 )
@@ -41,8 +42,8 @@ from train_pipeline import MODELS_DIR, predict
 
 app = FastAPI(
     title="KDT ai-service",
-    description="O/X + capacity diagnosis API (chatbot Tool backend; registry-extensible).",
-    version="1.3.0",
+    description="O/X + capacity + residual_li diagnosis API (registry-extensible).",
+    version="1.4.0",
 )
 
 # Incremented on POST /chat — used to verify Express security gate does not proxy.
@@ -170,11 +171,48 @@ def predict_capacity_endpoint(body: PredictRequest) -> CapacityResponse:
     return CapacityResponse(**result)
 
 
+@app.post("/predict-residual", response_model=ResidualResponse)
+def predict_residual_endpoint(body: PredictRequest) -> ResidualResponse:
+    """
+    Single-row residual_li inference.
+    Same raw features as /predict; domain engineering inside train_residual_pipeline.
+    """
+    from train_residual_pipeline import MODELS_DIR as RES_DIR
+    from train_residual_pipeline import predict_residual_li
+
+    required = RES_DIR / "xgb_model.json"
+    if not required.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="Residual model artifacts missing. Train first (ai-service/models/residual/).",
+        )
+
+    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
+    if body.id is not None:
+        row["id"] = body.id
+    if body.timestamp is not None:
+        row["timestamp"] = body.timestamp
+
+    df = pl.DataFrame([row])
+    try:
+        result = predict_residual_li(df)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"predict-residual failed: {exc}"
+        ) from exc
+
+    return ResidualResponse(**result)
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(body: ChatRequest) -> ChatResponse:
     """
     Minimal LangGraph chatbot.
-    features가 있으면 registry ready heads(clf+reg+…)를 자동 이중(다중) 호출 후 답변.
+    features가 있으면 registry ready heads(clf+reg+residual+…)를 자동 다중 호출 후 답변.
     CHAT_USE_LLM=1 + provider keys → Groq/Gemini length-based compose.
     """
     global _chat_request_count
@@ -195,6 +233,7 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
 
     predict_payload = out.get("predict")
     capacity_payload = out.get("capacity")
+    residual_payload = out.get("residual")
     rec_payload = out.get("recommendation")
     recommendation = (
         ChatRecommendation.model_validate(rec_payload) if rec_payload else None
@@ -205,6 +244,7 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
         provider=out.get("provider") or "template",
         predict=PredictResponse(**predict_payload) if predict_payload else None,
         capacity=CapacityResponse(**capacity_payload) if capacity_payload else None,
+        residual=ResidualResponse(**residual_payload) if residual_payload else None,
         heads=out.get("heads"),
         recommendation=recommendation,
         error=out.get("error"),
@@ -223,6 +263,7 @@ def security_chat_endpoint(body: SecurityChatRequest) -> SecurityChatResponse:
         mode=out.get("mode") or "template",
         provider=out.get("provider") or "offline",
         error=out.get("error"),
+        sources=out.get("sources") or [],
     )
 
 
@@ -234,6 +275,7 @@ def root() -> dict[str, str]:
         "health": "/health",
         "predict": "POST /predict",
         "predict_capacity": "POST /predict-capacity",
+        "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
         "security_chat": "POST /security-chat",
     }
