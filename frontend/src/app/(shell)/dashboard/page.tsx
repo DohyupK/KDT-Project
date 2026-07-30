@@ -10,7 +10,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
-import { useUiSettings } from '@/components/layout/AppShell';
+import { useUiSettings } from '@/components/layout/AppShell'
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -96,7 +97,7 @@ type FeatureImportanceItem = {
   importance: number;
 };
 
-/** 데모용 Feature Importance — 실제 AI API 응답으로 교체 가능 */
+/** 데모용 Feature Importance — 기간 LOT가 없을 때 fallback */
 const FEATURE_IMPORTANCE_MOCK: FeatureImportanceItem[] = [
   { label: '소성 온도 이탈', importance: 0.32 },
   { label: '리튬 투입비 편차', sub: 'Lithium Input', importance: 0.24 },
@@ -105,8 +106,54 @@ const FEATURE_IMPORTANCE_MOCK: FeatureImportanceItem[] = [
 ];
 
 /**
+ * 전체 LOT로 Feature Importance를 추정 (화면 데모용).
+ * - 소성 온도·금속 불순물: 실측 필드 편차
+ * - 리튬 투입비·입도: CathodeLot에 필드가 없어 capacity 편차·날짜 시드로 대리 추정
+ */
+function computeFeatureImportanceFromLots(lots: CathodeLot[]): FeatureImportanceItem[] | null {
+  if (lots.length === 0) return null;
+
+  let tempScore = 0;
+  let metalScore = 0;
+  let lithiumScore = 0;
+  let particleScore = 0;
+
+  for (const lot of lots) {
+    const w = lot.qualityDefect === 1 ? 2.4 : 1;
+    const tempDev = Math.abs(lot.sinteringTemp - 800);
+    const metalDev = Math.max(0, lot.metalImpurity - 0.024);
+    const capacityDev = Math.abs(lot.capacity - 200);
+    const daySeed =
+      lot.date.split('-').reduce((acc, part) => acc + (Number(part) || 0), 0) % 11;
+
+    tempScore += (tempDev / 12) * w;
+    metalScore += (metalDev / 0.008) * w;
+    // 조성(리튬) 대리: 용량 편차 + 불량 LOT 가중
+    lithiumScore += (capacityDev / 8) * w * (lot.qualityDefect === 1 ? 1.15 : 0.7);
+    // 입도 대리: 불순물·용량·일자 시드 조합
+    particleScore += ((metalDev / 0.01 + capacityDev / 14 + daySeed * 0.08) / 2.2) * w;
+  }
+
+  const raw = [
+    { label: '소성 온도 이탈', importance: tempScore },
+    { label: '리튬 투입비 편차', sub: 'Lithium Input', importance: lithiumScore },
+    { label: '전구체 입도 이상', sub: 'd50, d90', importance: particleScore },
+    { label: '금속 불순물 증가', importance: metalScore },
+  ];
+  const sum = raw.reduce((acc, item) => acc + item.importance, 0);
+  if (sum <= 0) return null;
+
+  // 합계를 Mock과 비슷한 0.88 스케일로 정규화
+  const targetSum = 0.88;
+  return raw.map((item) => ({
+    ...item,
+    importance: Math.round((item.importance / sum) * targetSum * 1000) / 1000,
+  }));
+}
+
+/**
  * Feature Importance 해석기.
- * - remote가 있으면 API/모델 결과 사용
+ * - remote가 있으면 API/기간 추정 결과 사용
  * - 없으면 Mock 유지 (화면 데모용)
  */
 function resolveFeatureImportance(
@@ -136,16 +183,6 @@ type DailyDetailRow = {
   avgMetalImpurity: number;
   avgSinteringTemp: number;
   status: '수집 중' | '집계 완료';
-};
-
-type TableDetailFilterState = {
-  startDate: string;
-  endDate: string;
-};
-
-const EMPTY_TABLE_DETAIL_FILTER: TableDetailFilterState = {
-  startDate: '',
-  endDate: '',
 };
 
 type LiveConnectionStatus = 'connected' | 'updating' | 'error';
@@ -857,7 +894,7 @@ function lotsToProductionRecords(lots: CathodeLot[]): ProductionRecord[] {
 function computeDetailedKpis(lots: CathodeLot[]): DetailedKpi[] {
   if (lots.length === 0) {
     return [
-      { key: 'total', label: '총 생산량 (LOT)', value: '-', unit: '', sub: '선택 기간 총 생산 실적' },
+      { key: 'total', label: '총 생산량 (LOT)', value: '-', unit: '', sub: '전체 생산 실적' },
       {
         key: 'capacity',
         label: '평균 방전 용량',
@@ -924,7 +961,7 @@ function computeDetailedKpis(lots: CathodeLot[]): DetailedKpi[] {
       label: '총 생산량 (LOT)',
       value: formatNumber(total),
       unit: '개',
-      sub: '선택 기간 총 생산 실적',
+      sub: '전체 생산 실적',
     },
     {
       key: 'capacity',
@@ -969,15 +1006,6 @@ function computeDetailedKpis(lots: CathodeLot[]): DetailedKpi[] {
 
 const MOCK_LOTS: CathodeLot[] = buildCathodeLots();
 const MOCK_RECORDS: ProductionRecord[] = lotsToProductionRecords(MOCK_LOTS);
-
-const DATA_MIN_DATE = MOCK_LOTS.reduce(
-  (min, r) => (r.date < min ? r.date : min),
-  MOCK_LOTS[0].date,
-);
-const DATA_MAX_DATE = MOCK_LOTS.reduce(
-  (max, r) => (r.date > max ? r.date : max),
-  MOCK_LOTS[0].date,
-);
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -1384,7 +1412,7 @@ function FeatureImportancePanel({
         <span className="text-sm font-normal text-gray-400">Feature Importance</span>
       </div>
       <p className={`mb-4 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-        데모용 중요도 · 양극재 공정 변수
+        전체 LOT 기준 추정 중요도 · 양극재 공정 변수
       </p>
       <ul className="space-y-4">
         {items.map((item, i) => {
@@ -1438,15 +1466,6 @@ function FeatureImportancePanel({
 
 export default function DashBoardPage() {
   const { isDark } = useUiSettings();
-  const [draftFilter, setDraftFilter] = useState({
-    startDate: DATA_MIN_DATE,
-    endDate: DATA_MAX_DATE,
-  });
-  const [appliedFilter, setAppliedFilter] = useState({
-    startDate: DATA_MIN_DATE,
-    endDate: DATA_MAX_DATE,
-  });
-  const { startDate, endDate } = appliedFilter;
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
 
@@ -1459,10 +1478,6 @@ export default function DashBoardPage() {
   const fetchingRef = useRef(false);
   const liveVersionRef = useRef(0);
 
-  const [tableFilterDraft, setTableFilterDraft] =
-    useState<TableDetailFilterState>(EMPTY_TABLE_DETAIL_FILTER);
-  const [tableFilterApplied, setTableFilterApplied] =
-    useState<TableDetailFilterState>(EMPTY_TABLE_DETAIL_FILTER);
   const [tablePage, setTablePage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSizeOption>(10);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -1555,10 +1570,21 @@ export default function DashBoardPage() {
     return liveLots.reduce((m, l) => (l.date > m ? l.date : m), liveLots[0].date);
   }, [liveLots]);
 
-  const periodLots = useMemo(() => {
-    if (startDate > endDate) return [] as CathodeLot[];
-    return liveLots.filter((lot) => lot.date >= startDate && lot.date <= endDate);
-  }, [liveLots, startDate, endDate]);
+  const { startDate, endDate } = useMemo(() => {
+    if (liveLots.length === 0) {
+      const today = formatDate(new Date());
+      return { startDate: today, endDate: today };
+    }
+    let start = liveLots[0].date;
+    let end = liveLots[0].date;
+    for (const lot of liveLots) {
+      if (lot.date < start) start = lot.date;
+      if (lot.date > end) end = lot.date;
+    }
+    return { startDate: start, endDate: end };
+  }, [liveLots]);
+
+  const periodLots = liveLots;
 
   const filteredRecords = useMemo(() => lotsToProductionRecords(periodLots), [periodLots]);
   const hasData = periodLots.length > 0;
@@ -1593,10 +1619,10 @@ export default function DashBoardPage() {
     [dailyAggregates],
   );
 
-  /** 실제 AI Feature Importance API 연동 시 remote 인자만 주입 */
+  /** 전체 LOT 기준 Feature Importance (liveLots 갱신 시 변동) */
   const featureImportanceItems = useMemo(
-    () => resolveFeatureImportance(null),
-    [],
+    () => resolveFeatureImportance(computeFeatureImportanceFromLots(periodLots)),
+    [periodLots],
   );
 
   const kpi: KpiSummary = useMemo(() => {
@@ -1634,16 +1660,7 @@ export default function DashBoardPage() {
     };
   }, [filteredRecords, dailyAggregates, hasData]);
 
-  const tableDetailFilterActive =
-    tableFilterApplied.startDate !== '' || tableFilterApplied.endDate !== '';
-
-  const searchedDetailRows = useMemo(() => {
-    return dailyDetailRows.filter((r) => {
-      if (tableFilterApplied.startDate && r.date < tableFilterApplied.startDate) return false;
-      if (tableFilterApplied.endDate && r.date > tableFilterApplied.endDate) return false;
-      return true;
-    });
-  }, [dailyDetailRows, tableFilterApplied]);
+  const searchedDetailRows = dailyDetailRows;
 
   const tableTotalPages = Math.max(1, Math.ceil(searchedDetailRows.length / pageSize));
   const tableSafePage = Math.min(tablePage, tableTotalPages);
@@ -1671,12 +1688,8 @@ export default function DashBoardPage() {
   const tableRangeEnd = Math.min(tableSafePage * pageSize, searchedDetailRows.length);
   const tableStatusText =
     searchedDetailRows.length === 0
-      ? tableDetailFilterActive
-        ? '검색 조건에 해당하는 생산 데이터가 없습니다.'
-        : '표시할 데이터가 없습니다.'
-      : tableDetailFilterActive
-        ? `검색 결과 ${formatNumber(searchedDetailRows.length)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`
-        : `총 ${formatNumber(searchedDetailRows.length)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
+      ? '표시할 데이터가 없습니다.'
+      : `총 ${formatNumber(searchedDetailRows.length)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
 
   useEffect(() => {
     if (tablePage > tableTotalPages) setTablePage(tableTotalPages);
@@ -1836,48 +1849,6 @@ export default function DashBoardPage() {
     };
   }, [dailyAggregates, filteredRecords, hasData, startDate, endDate, liveLots]);
 
-  const handleSearchFilters = () => {
-    if (draftFilter.startDate > draftFilter.endDate) {
-      pushToast('시작일이 종료일보다 늦을 수 없습니다.', 'error');
-      return;
-    }
-    setAppliedFilter({ ...draftFilter });
-    setTablePage(1);
-    pushToast('필터가 적용되었습니다.', 'success');
-  };
-
-  const handleResetFilters = () => {
-    const reset = {
-      startDate: DATA_MIN_DATE,
-      endDate: DATA_MAX_DATE,
-    };
-    setDraftFilter(reset);
-    setAppliedFilter(reset);
-    setTablePage(1);
-    pushToast('필터가 초기화되었습니다.', 'info');
-  };
-
-  const handleTableDetailSearch = () => {
-    if (
-      tableFilterDraft.startDate &&
-      tableFilterDraft.endDate &&
-      tableFilterDraft.startDate > tableFilterDraft.endDate
-    ) {
-      pushToast('시작일이 종료일보다 늦을 수 없습니다.', 'error');
-      return;
-    }
-    setTableFilterApplied({ ...tableFilterDraft });
-    setTablePage(1);
-    pushToast('생산 상세 검색 결과가 적용되었습니다.', 'success');
-  };
-
-  const handleTableDetailReset = () => {
-    setTableFilterDraft(EMPTY_TABLE_DETAIL_FILTER);
-    setTableFilterApplied(EMPTY_TABLE_DETAIL_FILTER);
-    setTablePage(1);
-    pushToast('생산 상세 필터가 초기화되었습니다.', 'info');
-  };
-
   const handleSelectRow = (id: string) => {
     setSelectedItems((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -1946,7 +1917,7 @@ export default function DashBoardPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `production-detail_${startDate}_${endDate}.csv`;
+    a.download = `production-detail_${liveToday}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1957,9 +1928,6 @@ export default function DashBoardPage() {
   const cardClass = isDark
     ? 'rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
     : 'rounded-xl border border-slate-200 bg-white shadow-sm';
-  const filterClass = isDark
-    ? 'rounded-xl border border-slate-700 bg-slate-900/70 shadow-sm'
-    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
 
   const liveStatusLabel =
     liveStatus === 'updating'
@@ -1976,7 +1944,7 @@ export default function DashBoardPage() {
           : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
       }`}
     >
-      <div className="mx-auto max-w-[1600px] px-6 py-6 pb-28 lg:px-8">
+      <div className={`${SHELL_CONTENT_CLASS} py-6 pb-28`}>
         <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div className="mb-6 flex flex-col gap-1">
             <p className="text-sm font-bold tracking-wide text-blue-600">
@@ -1986,7 +1954,7 @@ export default function DashBoardPage() {
               생산 대시보드
             </h1>
             <p className="mt-2 text-sm text-gray-500">
-              기간 필터에 따라 KPI, 추이, 불량 분석이 동기화됩니다.
+              생산 KPI, 추이, 불량 분석을 한눈에 확인합니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2033,61 +2001,6 @@ export default function DashBoardPage() {
             </div>
           </div>
         </header>
-
-        {/* Filters — KPI / 차트 / 상세 테이블 공통 */}
-        <section className={`mb-5 px-4 py-2.5 ${filterClass}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <div
-              className={`inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border sm:w-auto ${
-                isDark
-                  ? 'border-slate-700 bg-slate-950/40'
-                  : 'border-slate-200 bg-slate-50/80'
-              }`}
-            >
-              <input
-                type="date"
-                aria-label="시작일"
-                value={draftFilter.startDate}
-                onChange={(e) =>
-                  setDraftFilter((prev) => ({ ...prev, startDate: e.target.value }))
-                }
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-              <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
-              <input
-                type="date"
-                aria-label="종료일"
-                value={draftFilter.endDate}
-                onChange={(e) =>
-                  setDraftFilter((prev) => ({ ...prev, endDate: e.target.value }))
-                }
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleSearchFilters}
-              className="inline-flex h-8 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              적용
-            </button>
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className={`inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium ${
-                isDark
-                  ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-              }`}
-            >
-              초기화
-            </button>
-          </div>
-        </section>
 
         {/* KPI — 6 detailed data-driven cards */}
         <section className="mb-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
@@ -2780,7 +2693,7 @@ export default function DashBoardPage() {
                 isDark={isDark}
               />
             ) : (
-              <EmptyState message="선택한 기간에 해당하는 생산 데이터가 없습니다." />
+              <EmptyState message="표시할 생산 데이터가 없습니다." />
             )}
           </div>
 
@@ -2803,60 +2716,6 @@ export default function DashBoardPage() {
           </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-3">
-            <div
-              className={`inline-flex h-9 items-center overflow-hidden rounded-lg border ${
-                isDark
-                  ? 'border-slate-700 bg-slate-950/40'
-                  : 'border-slate-200 bg-white'
-              }`}
-            >
-              <input
-                type="date"
-                aria-label="생산 상세 시작일"
-                value={tableFilterDraft.startDate}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, startDate: e.target.value }))
-                }
-                className={`h-9 w-[138px] border-0 bg-transparent px-2.5 text-sm outline-none ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-              <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
-              <input
-                type="date"
-                aria-label="생산 상세 종료일"
-                value={tableFilterDraft.endDate}
-                onChange={(e) =>
-                  setTableFilterDraft((prev) => ({ ...prev, endDate: e.target.value }))
-                }
-                className={`h-9 w-[138px] border-0 bg-transparent px-2.5 text-sm outline-none ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleTableDetailSearch}
-              className="inline-flex h-9 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              검색
-            </button>
-            <button
-              type="button"
-              onClick={handleTableDetailReset}
-              disabled={
-                !tableDetailFilterActive &&
-                tableFilterDraft.startDate === '' &&
-                tableFilterDraft.endDate === ''
-              }
-              className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                isDark
-                  ? 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              초기화
-            </button>
             <div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
               <label
                 className={`inline-flex items-center gap-1.5 text-[11px] ${

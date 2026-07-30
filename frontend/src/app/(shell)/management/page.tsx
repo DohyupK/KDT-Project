@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { useUiSettings } from '@/components/layout/AppShell'
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 
 type MailImportance = '높음' | '보통' | '낮음'
 type InquiryStatus = '대기' | '진행중' | '완료'
@@ -940,8 +941,10 @@ export default function ManagementPage() {
 
   return (
     <div
-      className={`relative flex h-full w-full flex-col gap-4 overflow-hidden p-6 ${
-        isDark ? 'bg-slate-900 text-slate-100' : 'text-slate-800'
+      className={`relative flex h-full w-full flex-col gap-4 overflow-hidden py-6 ${SHELL_CONTENT_CLASS} ${
+        isDark
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100'
+          : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 text-slate-800'
       }`}
     >
       {toastMessage ? (

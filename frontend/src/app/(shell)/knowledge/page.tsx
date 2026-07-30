@@ -3,7 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type React from 'react';
+import { usePathname } from 'next/navigation';
 import { useUiSettings } from '@/components/layout/AppShell';
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import DateInput from '@/components/DateInput';
+import SpcAnalysisPanel, {
+  buildSpcMetrics,
+  type SpcMetric,
+} from '@/components/SpcAnalysisPanel';
+import {
+  COMPLETED_KNOWLEDGE_STORAGE_KEY,
+  COMPLETED_KNOWLEDGE_UPDATED_EVENT,
+  readCompletedKnowledgeLogs,
+} from '@/lib/completedKnowledgeTransfer';
 
 interface DocumentItem {
   id: string;
@@ -14,6 +26,17 @@ interface DocumentItem {
   process: string;
   lot: string;
   detail: string;
+  /** 이슈 목록과 통일 — 표시용 */
+  risk: '높음' | '중간' | '낮음';
+  status: '접수' | '분석 중' | '조치 중' | '완료';
+  /** 일시 표시. 없으면 date 사용 */
+  occurredAt?: string;
+  /** 이슈에서 이관된 경우 원본 이슈 ID */
+  sourceIssueId?: string;
+  anomaly?: string;
+  residualLiMargin?: number;
+  defectProbability?: number;
+  spcMetrics?: SpcMetric[];
 }
 
 interface ActionHistoryItem {
@@ -181,40 +204,48 @@ function getHeadCellStyle(c: UiColors): CSSProperties {
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
-const COMPLETED_KNOWLEDGE_STORAGE_KEY = 'completed_knowledge_logs';
 const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
 
-function readTransferredKnowledgeDocuments(): DocumentItem[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(COMPLETED_KNOWLEDGE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+function isSpcMetricArray(value: unknown): value is SpcMetric[] {
+  return Array.isArray(value) && value.length > 0;
+}
 
-    const result: DocumentItem[] = [];
-    const seen = new Set<string>();
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const row = item as Record<string, unknown>;
-      if (typeof row.id !== 'string' || !row.id) continue;
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      result.push({
-        id: row.id,
-        manager: typeof row.manager === 'string' ? row.manager : '',
-        date: typeof row.date === 'string' ? row.date : '',
-        title: typeof row.title === 'string' ? row.title : '',
-        summary: typeof row.summary === 'string' ? row.summary : '',
-        process: typeof row.process === 'string' ? row.process : '',
-        lot: typeof row.lot === 'string' ? row.lot : '',
-        detail: typeof row.detail === 'string' ? row.detail : '',
-      });
-    }
-    return result;
-  } catch {
-    return [];
+function readTransferredKnowledgeDocuments(): DocumentItem[] {
+  const logs = readCompletedKnowledgeLogs();
+  const result: DocumentItem[] = [];
+  const seen = new Set<string>();
+  for (const row of logs) {
+    if (!row.id || seen.has(row.id)) continue;
+    seen.add(row.id);
+    result.push({
+      id: row.id,
+      manager: row.manager ?? '',
+      date: row.date ?? '',
+      title: row.title ?? '',
+      summary: row.summary ?? '',
+      process: row.process ?? '',
+      lot: row.lot ?? '',
+      detail: row.detail ?? '',
+      risk:
+        row.risk === '높음' || row.risk === '중간' || row.risk === '낮음' ? row.risk : '중간',
+      status:
+        row.status === '접수' ||
+        row.status === '분석 중' ||
+        row.status === '조치 중' ||
+        row.status === '완료'
+          ? row.status
+          : '완료',
+      ...(row.occurredAt ? { occurredAt: row.occurredAt } : {}),
+      ...(row.sourceIssueId ? { sourceIssueId: row.sourceIssueId } : {}),
+      anomaly: typeof row.anomaly === 'string' ? row.anomaly : '',
+      residualLiMargin:
+        typeof row.residualLiMargin === 'number' ? row.residualLiMargin : 0.2,
+      defectProbability:
+        typeof row.defectProbability === 'number' ? row.defectProbability : 25,
+      spcMetrics: isSpcMetricArray(row.spcMetrics) ? row.spcMetrics : buildSpcMetrics(),
+    });
   }
+  return result;
 }
 
 function readHandoverActionItems(): ActionHistoryItem[] {
@@ -262,100 +293,213 @@ const DOCUMENTS: DocumentItem[] = [
     id: 'DOC-2026-041',
     manager: '김현수',
     date: '2026-07-18',
+    occurredAt: '2026-07-18 21:10',
     title: '소성로 2호기 온도 프로파일 최적화 결과',
     summary: '온도 상한 초과 재발 방지를 위한 구간별 설정값 조정 결과 정리',
     process: '소성',
     lot: 'LOT-CA-260718-11',
+    risk: '높음',
+    status: '완료',
     detail:
       '소성로 2호기의 구간별 온도 프로파일을 재설계하여 3구간 목표 온도를 748°C에서 742°C로 하향 조정했습니다. 조정 후 72시간 동안 불량률이 2.4%에서 1.7%로 감소했으며, 결정 구조 분석 결과 리튬 잔류량도 기준치 이내로 확인되었습니다. 동절기에는 승온 속도를 5% 낮추는 보정이 추가로 필요합니다.',
+    anomaly: '온도와 투입량 복합 영향으로 AI 예측 불량률이 2.73%까지 상승했습니다.',
+    residualLiMargin: 0.08,
+    defectProbability: 78.9,
+    spcMetrics: buildSpcMetrics(
+      { sintering_temp: '이상', lithium_input: '이상', humidity: '주의' },
+      {
+        sintering_temp: [739, 743, 749, 753, 751, 747],
+        lithium_input: [1.06, 1.09, 1.12, 1.15, 1.14, 1.13],
+        humidity: [46, 48, 51, 53, 52, 51],
+      },
+    ),
   },
   {
     id: 'DOC-2026-040',
     manager: '박서연',
     date: '2026-07-15',
+    occurredAt: '2026-07-15 14:20',
     title: '리튬 계량기 교정 주기 개선 보고',
     summary: '투입량 편차 원인이었던 계량기 드리프트 보정 주기 단축안',
     process: '원료 투입',
     lot: 'LOT-CA-260715-04',
+    risk: '중간',
+    status: '완료',
     detail:
       '리튬 계량기의 월 1회 교정 주기를 2주 1회로 단축한 결과, 투입량 표준편차가 0.021에서 0.008로 감소했습니다. 드리프트는 주로 호퍼 진동에 의한 로드셀 미세 변형에서 발생하며, 방진 패드 교체 시 교정 주기를 다시 완화할 수 있습니다.',
+    anomaly: '리튬 투입 속도의 표준편차가 기준 대비 32% 증가하여 조성 불균일 가능성이 감지되었습니다.',
+    residualLiMargin: 0.18,
+    defectProbability: 48.6,
+    spcMetrics: buildSpcMetrics(
+      { lithium_input: '이상', additive_ratio: '주의' },
+      {
+        lithium_input: [1.06, 1.08, 1.11, 1.15, 1.14, 1.16],
+        additive_ratio: [2.5, 2.6, 2.7, 2.85, 2.9, 2.92],
+      },
+    ),
   },
   {
     id: 'DOC-2026-039',
     manager: '이도윤',
     date: '2026-07-12',
+    occurredAt: '2026-07-12 11:05',
     title: '혼합 공정 임펠러 마모 점검 이력',
     summary: '혼합 균일도 저하와 임펠러 마모의 상관관계 분석',
     process: '혼합',
     lot: 'LOT-CA-260712-08',
+    risk: '낮음',
+    status: '완료',
     detail:
       '임펠러 날개 끝단 마모가 1.2mm를 초과하면 혼합 균일도 지수가 급격히 저하되는 것을 확인했습니다. 마모 측정을 월 점검 항목에 추가했고, 예비품 재고 기준을 2개에서 4개로 상향했습니다.',
+    anomaly: '내부 습도(Humidity)가 일시적으로 50%를 초과하였으나 즉시 정상 범위로 복구되었습니다.',
+    residualLiMargin: 0.28,
+    defectProbability: 18.2,
+    spcMetrics: buildSpcMetrics(
+      { humidity: '주의', process_time: '주의' },
+      {
+        humidity: [45, 47, 50, 52, 53, 53],
+        process_time: [118, 122, 128, 131, 132, 133],
+      },
+    ),
   },
   {
     id: 'DOC-2026-038',
     manager: '최유진',
     date: '2026-07-10',
+    occurredAt: '2026-07-10 18:12',
     title: '입도 분포 관리 기준 개정안',
     summary: 'D50 관리 상한 초과 사례 분석 및 분쇄 조건 표준화',
     process: '분쇄',
     lot: 'LOT-CA-260710-03',
+    risk: '중간',
+    status: '완료',
     detail:
       '최근 3개월간 D50 상한 접근 사례 7건을 분석한 결과, 분쇄기 회전수와 원료 수분 함량의 조합이 주요 변수였습니다. 수분 0.25% 초과 시 회전수를 3% 하향하는 조건표를 작성하여 표준 작업 지침에 반영했습니다.',
+    anomaly: 'D50 측정값이 관리 상한에 근접했으나 공정 조정 후 정상 중앙값으로 회복되었습니다.',
+    residualLiMargin: 0.22,
+    defectProbability: 34.1,
+    spcMetrics: buildSpcMetrics(
+      { d50: '주의', d90: '주의' },
+      {
+        d50: [12.1, 12.4, 12.8, 13.1, 13.2, 13.3],
+        d90: [28.2, 29.0, 30.1, 31.0, 31.4, 31.6],
+      },
+    ),
   },
   {
     id: 'DOC-2026-037',
     manager: '김현수',
     date: '2026-07-08',
+    occurredAt: '2026-07-08 23:36',
     title: '냉각 구간 압력 이상 대응 매뉴얼',
     summary: '냉각수 압력 급상승 시 단계별 조치 절차 정리',
     process: '냉각',
     lot: 'LOT-CA-260708-12',
+    risk: '높음',
+    status: '완료',
     detail:
       '냉각수 압력이 2.5bar를 초과하면 1단계로 바이패스 밸브를 개방하고, 2.8bar 초과 시 라인 절환 후 열교환기 스케일 점검을 수행합니다. 7월 초 발생한 압력 급상승은 열교환기 스케일 축적이 원인이었으며, 세정 후 정상화되었습니다.',
+    anomaly: '냉각수 압력이 2.7bar까지 급상승하고 배출 온도 안정화 시간이 평소보다 18분 지연되었습니다.',
+    residualLiMargin: 0.09,
+    defectProbability: 81.5,
+    spcMetrics: buildSpcMetrics(
+      { tank_pressure: '이상', process_time: '이상', sintering_temp: '주의' },
+      {
+        tank_pressure: [1.9, 2.1, 2.4, 2.7, 2.6, 2.65],
+        process_time: [122, 128, 136, 142, 140, 138],
+        sintering_temp: [741, 744, 747, 749, 748, 748],
+      },
+    ),
   },
   {
     id: 'DOC-2026-036',
     manager: '정민재',
     date: '2026-07-05',
+    occurredAt: '2026-07-05 16:48',
     title: '표면 검사 카메라 조도 보정 기록',
     summary: '오검출률 개선을 위한 조명 세팅 변경 이력',
     process: '검사',
     lot: 'LOT-CA-260705-06',
+    risk: '낮음',
+    status: '완료',
     detail:
       '검사 부스 조도를 4200lux에서 4800lux로 상향하고 카메라 노출 시간을 재조정하여 표면 결함 오검출률을 3.1%에서 1.2%로 낮췄습니다. 조도 센서 값이 4500lux 아래로 내려가면 알람이 발생하도록 설정했습니다.',
+    anomaly: '표면 검사 이미지 수집이 평균 1.2초 지연되었으나 검사 결과 누락은 없었습니다.',
+    residualLiMargin: 0.35,
+    defectProbability: 8.4,
+    spcMetrics: buildSpcMetrics(),
   },
   {
     id: 'DOC-2026-035',
     manager: '한지우',
     date: '2026-07-02',
+    occurredAt: '2026-07-02 09:22',
     title: '전구체 보관 습도 관리 개선 보고',
     summary: '수분 함량 변동 저감을 위한 보관 환경 기준 강화',
     process: '원료 보관',
     lot: 'LOT-CA-260702-01',
+    risk: '중간',
+    status: '완료',
     detail:
       '전구체 보관 창고의 상대습도 기준을 45%에서 35%로 강화하고 제습기 가동 로직을 자동화했습니다. 개선 후 입고 로트 간 수분 함량 편차가 절반 이하로 감소했습니다.',
+    anomaly: '수분 함량이 0.03%p 상승하여 소성 후 잔류 리튬 증가 가능성이 확인되었습니다.',
+    residualLiMargin: 0.15,
+    defectProbability: 56.8,
+    spcMetrics: buildSpcMetrics(
+      { humidity: '이상', metal_impurity: '주의' },
+      {
+        humidity: [46, 50, 56, 58, 57, 58],
+        metal_impurity: [0.016, 0.018, 0.021, 0.023, 0.024, 0.024],
+      },
+    ),
   },
   {
     id: 'DOC-2026-034',
     manager: '박서연',
     date: '2026-06-28',
+    occurredAt: '2026-06-28 13:40',
     title: '소성 배가스 산소 농도 트렌드 분석',
     summary: '산소 농도와 결정성 상관 분석 및 급기 제어 개선',
     process: '소성',
     lot: 'LOT-CA-260628-09',
+    risk: '중간',
+    status: '완료',
     detail:
       '배가스 산소 농도가 19.2% 아래로 내려간 구간에서 결정성 저하가 관측되었습니다. 급기 팬 제어를 수동에서 PID 자동 제어로 전환하여 산소 농도 변동 폭을 ±0.5%에서 ±0.15%로 줄였습니다.',
+    anomaly: '14시 이후 온도가 관리 상한 750°C를 3회 초과했으며 AI 위험 점수가 91점까지 상승했습니다.',
+    residualLiMargin: 0.12,
+    defectProbability: 72.4,
+    spcMetrics: buildSpcMetrics(
+      { sintering_temp: '이상', tank_pressure: '이상', humidity: '주의' },
+      {
+        sintering_temp: [738, 742, 748, 754, 752, 751],
+        tank_pressure: [1.9, 2.1, 2.3, 2.6, 2.5, 2.55],
+        humidity: [46, 48, 51, 53, 54, 54],
+      },
+    ),
   },
   {
     id: 'DOC-2026-033',
     manager: '이도윤',
     date: '2026-06-24',
+    occurredAt: '2026-06-24 10:15',
     title: '설비 예지보전 진동 데이터 리뷰',
     summary: '혼합기·분쇄기 베어링 진동 스펙트럼 월간 리뷰',
     process: '설비 관리',
     lot: '-',
+    risk: '낮음',
+    status: '완료',
     detail:
       '분쇄기 2호기 베어링에서 외륜 결함 주파수 성분이 미세하게 증가하는 추세가 확인되었습니다. 8월 정기 보전 시 교체를 권고하며, 그 전까지 주 1회 정밀 측정을 수행합니다.',
+    anomaly: '공정 파라미터는 관리 한계 내였으나 설비 진동 스펙트럼에서 외륜 결함 주파수 성분이 증가했습니다.',
+    residualLiMargin: 0.3,
+    defectProbability: 12.5,
+    spcMetrics: buildSpcMetrics(
+      { process_time: '주의' },
+      {
+        process_time: [118, 120, 124, 128, 130, 131],
+      },
+    ),
   },
 ];
 
@@ -499,6 +643,49 @@ function extractRiskPercent(riskSummary: string): number | null {
   const value = Number(match[1]);
   if (Number.isNaN(value)) return null;
   return Math.min(100, Math.max(0, value));
+}
+
+function riskBadgeClass(risk: DocumentItem['risk'], isDark: boolean) {
+  if (risk === '높음') {
+    return isDark
+      ? 'inline-flex items-center rounded-full border border-rose-800 bg-rose-950/40 px-2.5 py-0.5 text-xs font-bold text-rose-300'
+      : 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700';
+  }
+  if (risk === '중간') {
+    return isDark
+      ? 'inline-flex items-center rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-bold text-amber-300'
+      : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700';
+  }
+  return isDark
+    ? 'inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-0.5 text-xs font-bold text-emerald-300'
+    : 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700';
+}
+
+function statusBadgeClass(status: DocumentItem['status'], isDark: boolean) {
+  if (status === '완료') {
+    return isDark
+      ? 'inline-flex items-center rounded-md border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs font-semibold text-emerald-300'
+      : 'inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700';
+  }
+  if (status === '조치 중') {
+    return isDark
+      ? 'inline-flex items-center rounded-md border border-violet-800 bg-violet-950/40 px-2 py-0.5 text-xs font-semibold text-violet-300'
+      : 'inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700';
+  }
+  if (status === '분석 중') {
+    return isDark
+      ? 'inline-flex items-center rounded-md border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs font-semibold text-blue-300'
+      : 'inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700';
+  }
+  return isDark
+    ? 'inline-flex items-center rounded-md border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-xs font-semibold text-sky-300'
+    : 'inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700';
+}
+
+function displayIssueId(doc: DocumentItem) {
+  if (doc.sourceIssueId) return doc.sourceIssueId;
+  if (doc.id.startsWith('DOC-ISS-')) return doc.id.slice(4);
+  return doc.id;
 }
 
 function CategoryBadge({ label }: { label: string }) {
@@ -655,6 +842,7 @@ function useMasterCheckbox(
 }
 
 export default function KnowledgePage() {
+  const pathname = usePathname();
   const { isDark, language } = useUiSettings();
   const uiColors = getUiColors(isDark);
   const panelStyle = getPanelStyle(uiColors);
@@ -701,6 +889,7 @@ export default function KnowledgePage() {
 
   const refreshTransferredDocuments = () => {
     setTransferredDocuments(readTransferredKnowledgeDocuments());
+    setDocPage(1);
   };
 
   const refreshHandoverActions = () => {
@@ -713,11 +902,43 @@ export default function KnowledgePage() {
   }, []);
 
   useEffect(() => {
+    if (pathname.includes('/knowledge')) {
+      refreshTransferredDocuments();
+      refreshHandoverActions();
+    }
+  }, [pathname]);
+
+  useEffect(() => {
     if (activeTab === 'knowledge') {
       refreshTransferredDocuments();
       refreshHandoverActions();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const onUpdated = () => {
+      refreshTransferredDocuments();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === COMPLETED_KNOWLEDGE_STORAGE_KEY) onUpdated();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      refreshTransferredDocuments();
+      refreshHandoverActions();
+    };
+
+    window.addEventListener(COMPLETED_KNOWLEDGE_UPDATED_EVENT, onUpdated);
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      window.removeEventListener(COMPLETED_KNOWLEDGE_UPDATED_EVENT, onUpdated);
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);
 
   const transferredIdSet = useMemo(
     () => new Set(transferredDocuments.map((doc) => doc.id)),
@@ -741,13 +962,16 @@ export default function KnowledgePage() {
   const filteredDocuments = useMemo(() => {
     const keyword = appliedFilters.keyword.trim().toLowerCase();
     return allDocuments.filter((doc) => {
-      const matchesDate = !appliedFilters.date || doc.date === appliedFilters.date;
+      const docDay = (doc.occurredAt || doc.date).slice(0, 10);
+      const matchesDate = !appliedFilters.date || doc.date === appliedFilters.date || docDay === appliedFilters.date;
       const matchesKeyword =
         !keyword ||
         doc.title.toLowerCase().includes(keyword) ||
         doc.summary.toLowerCase().includes(keyword) ||
         doc.process.toLowerCase().includes(keyword) ||
-        doc.lot.toLowerCase().includes(keyword);
+        doc.lot.toLowerCase().includes(keyword) ||
+        doc.id.toLowerCase().includes(keyword) ||
+        (doc.sourceIssueId ?? '').toLowerCase().includes(keyword);
       return matchesDate && matchesKeyword;
     });
   }, [appliedFilters, allDocuments]);
@@ -1118,18 +1342,22 @@ export default function KnowledgePage() {
 
   return (
     <div
+      className={
+        isDark
+          ? 'h-full overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'h-full overflow-y-auto bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
+      }
       style={{
-        height: '100%',
-        overflowY: 'auto',
         boxSizing: 'border-box',
-        background: uiColors.background,
         color: uiColors.navy,
-        padding: '36px clamp(16px, 3vw, 44px) 56px',
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
       }}
     >
-      <div style={{ width: '100%', maxWidth: 1280, margin: '0 auto', paddingBottom: selectedCount > 0 ? 88 : 0 }}>
+      <div
+        className={`${SHELL_CONTENT_CLASS} py-6 pb-14`}
+        style={{ paddingBottom: selectedCount > 0 ? 88 : undefined }}
+      >
         {toast && (
           <div
             role="status"
@@ -1243,14 +1471,15 @@ export default function KnowledgePage() {
                 <label htmlFor="doc-date" style={labelStyle}>
                   날짜 (YYYY. MM. DD.)
                 </label>
-                <input
+                <DateInput
                   id="doc-date"
-                  type="date"
                   value={filters.date}
-                  onChange={(event) =>
-                    setFilters((current) => ({ ...current, date: event.target.value }))
+                  onChange={(date) =>
+                    setFilters((current) => ({ ...current, date }))
                   }
+                  isDark={isDark}
                   style={inputStyle}
+                  aria-label="날짜"
                 />
               </div>
               <div className="min-w-[180px] flex-[1.4]">
@@ -1362,16 +1591,16 @@ export default function KnowledgePage() {
                   </p>
                 </div>
                 <div id="past-documents-list" className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] border-collapse text-left">
+                  <table className="w-full min-w-[960px] border-collapse text-left">
                     <thead>
                       <tr
-                        className={`border-b text-xs font-semibold ${
+                        className={`border-y text-xs font-semibold ${
                           isDark
-                            ? 'border-slate-700 bg-slate-900/60 text-slate-400'
-                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                            ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                            : 'border-slate-200 bg-slate-50 text-slate-500'
                         }`}
                       >
-                        <th className="w-12 px-3 py-3">
+                        <th className="w-12 px-4 py-2.5">
                           <input
                             ref={docMaster.ref}
                             type="checkbox"
@@ -1382,18 +1611,20 @@ export default function KnowledgePage() {
                             className="h-4 w-4 accent-blue-600"
                           />
                         </th>
-                        <th className="w-[118px] whitespace-nowrap px-3 py-3">문서 ID</th>
-                        <th className="w-[104px] whitespace-nowrap px-3 py-3">분류</th>
-                        <th className="min-w-[280px] px-3 py-3">제목</th>
-                        <th className="w-[88px] whitespace-nowrap px-3 py-3">담당자</th>
-                        <th className="w-[108px] whitespace-nowrap px-3 py-3">날짜</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">이슈 ID</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">일시</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">처리상태</th>
+                        <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
+                        <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">진단</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredDocuments.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={8}
                             className={`px-4 py-12 text-center text-sm ${
                               isDark ? 'text-slate-500' : 'text-slate-400'
                             }`}
@@ -1404,6 +1635,7 @@ export default function KnowledgePage() {
                       ) : (
                         renderedDocuments.map((doc) => {
                           const checked = validSelectedDocIds.includes(doc.id);
+                          const issueIdLabel = displayIssueId(doc);
                           return (
                             <tr
                               key={doc.id}
@@ -1412,22 +1644,22 @@ export default function KnowledgePage() {
                               onKeyDown={(event) =>
                                 onRowKeyOpen(event, () => openDocumentDetail(doc))
                               }
-                              className={`cursor-pointer border-b transition-colors ${
+                              className={`cursor-pointer border-b border-l-4 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
                                 isDark
                                   ? `border-slate-700 hover:bg-slate-700/40 ${
                                       checked
-                                        ? 'border-l-4 border-l-blue-500 bg-blue-950/30'
-                                        : 'border-l-4 border-l-transparent bg-slate-800'
+                                        ? 'border-l-blue-500 bg-blue-950/30'
+                                        : 'border-l-transparent bg-slate-800'
                                     }`
                                   : `border-slate-100 hover:bg-slate-50/80 ${
                                       checked
-                                        ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
-                                        : 'border-l-4 border-l-transparent bg-white'
+                                        ? 'border-l-blue-600 bg-blue-50/60'
+                                        : 'border-l-transparent bg-white'
                                     }`
                               }`}
                             >
                               <td
-                                className="w-12 px-3 py-3.5"
+                                className="w-12 px-4 py-3"
                                 onClick={(event) => event.stopPropagation()}
                               >
                                 <input
@@ -1438,10 +1670,10 @@ export default function KnowledgePage() {
                                   className="h-4 w-4 accent-blue-600"
                                 />
                               </td>
-                              <td className="w-[118px] whitespace-nowrap px-3 py-3.5">
+                              <td className="whitespace-nowrap px-4 py-3">
                                 <button
                                   type="button"
-                                  className={`cursor-pointer text-xs font-medium hover:underline ${
+                                  className={`cursor-pointer font-semibold hover:underline ${
                                     isDark ? 'text-blue-300' : 'text-blue-600'
                                   }`}
                                   onClick={(event) => {
@@ -1449,70 +1681,55 @@ export default function KnowledgePage() {
                                     openDocumentDetail(doc);
                                   }}
                                 >
-                                  {doc.id}
+                                  {issueIdLabel}
                                 </button>
                               </td>
-                              <td className="w-[104px] whitespace-nowrap px-3 py-3.5">
-                                {doc.process ? (
-                                  <CategoryBadge label={doc.process} />
-                                ) : transferredIdSet.has(doc.id) ? (
-                                  <span
-                                    className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
-                                      isDark
-                                        ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
-                                        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                    }`}
-                                  >
-                                    이슈완료
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-slate-400">-</span>
-                                )}
+                              <td
+                                className={`whitespace-nowrap px-4 py-3 text-xs ${
+                                  isDark ? 'text-slate-400' : 'text-slate-500'
+                                }`}
+                              >
+                                {doc.occurredAt || doc.date}
                               </td>
-                              <td className="min-w-[280px] px-3 py-3.5">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <div
-                                    className={`line-clamp-2 text-sm font-semibold ${
-                                      isDark ? 'text-slate-100' : 'text-slate-800'
-                                    }`}
-                                    title={doc.title}
-                                  >
-                                    {doc.title}
-                                  </div>
-                                  {transferredIdSet.has(doc.id) && doc.process ? (
-                                    <span
-                                      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
-                                        isDark
-                                          ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
-                                          : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                      }`}
-                                    >
-                                      이슈완료
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div
-                                  className={`mt-1 line-clamp-1 text-xs ${
-                                    isDark ? 'text-slate-400' : 'text-slate-500'
+                              <td
+                                className={`whitespace-nowrap px-4 py-3 text-xs font-semibold ${
+                                  isDark ? 'text-slate-200' : 'text-slate-800'
+                                }`}
+                              >
+                                {doc.lot || '-'}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3">
+                                <span className={riskBadgeClass(doc.risk, isDark)}>{doc.risk}</span>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3">
+                                <span className={statusBadgeClass(doc.status, isDark)}>
+                                  {doc.status}
+                                </span>
+                              </td>
+                              <td
+                                className={`max-w-[420px] px-4 py-3 text-sm font-semibold ${
+                                  isDark ? 'text-slate-100' : 'text-slate-900'
+                                }`}
+                              >
+                                <span className="line-clamp-2" title={doc.title}>
+                                  {doc.title}
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right">
+                                <button
+                                  type="button"
+                                  className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                                    isDark
+                                      ? 'border-blue-700 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60'
+                                      : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
                                   }`}
-                                  title={doc.summary}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openDocumentDetail(doc);
+                                  }}
                                 >
-                                  {doc.summary}
-                                </div>
-                              </td>
-                              <td
-                                className={`w-[88px] whitespace-nowrap px-3 py-3.5 text-sm ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}
-                              >
-                                {doc.manager}
-                              </td>
-                              <td
-                                className={`w-[108px] whitespace-nowrap px-3 py-3.5 text-sm ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}
-                              >
-                                {doc.date}
+                                  상세 보기
+                                </button>
                               </td>
                             </tr>
                           );
@@ -2357,6 +2574,28 @@ export default function KnowledgePage() {
               }`}
             >
               {detailTarget.item.detail}
+            </div>
+            <div
+              className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
+            >
+              <h5
+                className={`mb-3 mt-0 text-sm font-bold ${
+                  isDark ? 'text-slate-100' : 'text-slate-900'
+                }`}
+              >
+                상세 분석
+              </h5>
+              <SpcAnalysisPanel
+                anomaly={detailTarget.item.anomaly ?? ''}
+                spcMetrics={
+                  detailTarget.item.spcMetrics?.length
+                    ? detailTarget.item.spcMetrics
+                    : buildSpcMetrics()
+                }
+                residualLiMargin={detailTarget.item.residualLiMargin ?? 0.2}
+                defectProbability={detailTarget.item.defectProbability ?? 25}
+                isDark={isDark}
+              />
             </div>
           </div>
         )}

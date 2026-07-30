@@ -18,6 +18,7 @@ import {
   type ControlBounds,
 } from '@/api/settingsApi'
 import { notifyUiSettingsChange } from '@/components/layout/AppShell'
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const DEFAULT_FONT_SIZE = 18
@@ -411,8 +412,10 @@ export default function SettingPage() {
 
   return (
     <div
-      className={`h-full w-full overflow-y-auto p-4 md:p-6 font-sans ${textPrimary} ${
-        isDarkMode ? 'bg-slate-900' : 'bg-transparent'
+      className={`h-full w-full overflow-y-auto font-sans ${textPrimary} ${
+        isDarkMode
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
       }`}
     >
       {toastMessage ? (
@@ -425,7 +428,7 @@ export default function SettingPage() {
         </div>
       ) : null}
 
-      <div className="flex w-full flex-col gap-6">
+      <div className={`${SHELL_CONTENT_CLASS} flex flex-col gap-6 py-6`}>
         <header>
           <div className="mb-6 flex flex-col gap-1">
             <p className="text-sm font-bold tracking-wide text-blue-600">

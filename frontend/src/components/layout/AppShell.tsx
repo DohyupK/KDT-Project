@@ -296,7 +296,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         <div
           className={`flex h-full min-w-0 flex-1 flex-col ${
-            isDark ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-800'
+            isDark
+              ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100'
+              : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 text-gray-800'
           }`}
         >
           <ShellHeader />
