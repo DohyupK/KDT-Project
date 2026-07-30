@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import {
-  Settings,
   RotateCcw,
   Save,
   Sun,
@@ -428,13 +427,15 @@ export default function SettingPage() {
 
       <div className="flex w-full flex-col gap-6">
         <header>
-          <div className="mb-1 flex items-center gap-3">
-            <Settings size={28} className="text-blue-500" aria-hidden />
-            <h1 className={`text-2xl font-bold ${textPrimary}`}>설정</h1>
+          <div className="mb-6 flex flex-col gap-1">
+            <p className="text-sm font-bold tracking-wide text-blue-600">
+              System Preferences
+            </p>
+            <h1 className={`mt-1 text-3xl font-bold tracking-tight ${textPrimary}`}>설정</h1>
+            <p className={`mt-2 text-sm ${textSecondary}`}>
+              시스템 환경을 사용자에 맞게 조정합니다.
+            </p>
           </div>
-          <p className={`ml-10 text-sm ${textSecondary}`}>
-            시스템 환경을 사용자에 맞게 조정합니다.
-          </p>
         </header>
 
         <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">

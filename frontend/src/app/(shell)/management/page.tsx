@@ -955,11 +955,22 @@ export default function ManagementPage() {
       ) : null}
 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className={`text-xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+        <div className="flex flex-col gap-1">
+          <p
+            className={`text-sm font-bold tracking-wide ${
+              isDark ? 'text-blue-400' : 'text-blue-600'
+            }`}
+          >
+            Admin Operations
+          </p>
+          <h1
+            className={`mt-1 text-3xl font-bold tracking-tight ${
+              isDark ? 'text-slate-100' : 'text-gray-900'
+            }`}
+          >
             {copy.menus['/management']}
           </h1>
-          <p className={`mt-0.5 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
             {language === 'en'
               ? 'Mail · Inquiry / Replies · Defect Monitoring'
               : '메일 · 문의/답변 · 불량률 모니터링'}

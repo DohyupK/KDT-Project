@@ -86,6 +86,7 @@ interface ManagementSectionProps {
   form: ManagementForm;
   message: string;
   canSave: boolean;
+  isSaving?: boolean;
   onChange: <K extends keyof ManagementForm>(key: K, value: ManagementForm[K]) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -612,11 +613,22 @@ const HeaderHandoverSection = ({
           marginBottom: 22,
         }}
       >
-        <div>
-          <h1 style={{ margin: 0, color: c.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
+        <div className="flex flex-col gap-1">
+          <p
+            className={`text-sm font-bold tracking-wide ${
+              isDark ? 'text-blue-400' : 'text-blue-600'
+            }`}
+          >
+            Issue Operations
+          </p>
+          <h1
+            className={`mt-1 text-3xl font-bold tracking-tight ${
+              isDark ? 'text-slate-100' : 'text-gray-900'
+            }`}
+          >
             {language === 'en' ? 'Issue Management' : '이슈 관리'}
           </h1>
-          <p style={{ margin: '9px 0 0', color: c.slate, fontSize: 15 }}>
+          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
             {language === 'en'
               ? 'Review process issues, analyze them, and manage resolution status.'
               : '공정 이슈를 조회하고 분석하며 처리 현황을 관리할 수 있습니다.'}
@@ -1858,7 +1870,10 @@ const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps
 
   if (!issue) {
     return (
-      <section style={{ ...getPanelStyle(c), minHeight: 220, display: 'grid', placeItems: 'center' }}>
+      <section
+        id="issue-detail-analysis"
+        style={{ ...getPanelStyle(c), minHeight: 220, display: 'grid', placeItems: 'center' }}
+      >
         <div style={{ textAlign: 'center', color: c.slate }}>
           <div style={{ fontSize: 38, marginBottom: 12 }}>⌁</div>
           <strong>목록에서 이슈를 선택하면 상세 분석 데이터가 표시됩니다.</strong>
@@ -1868,7 +1883,7 @@ const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps
   }
 
   return (
-    <section style={getPanelStyle(c)}>
+    <section id="issue-detail-analysis" style={getPanelStyle(c)}>
       <div
         style={{
           display: 'flex',
@@ -2059,11 +2074,13 @@ const ManagementSection = ({
   form,
   message,
   canSave,
+  isSaving = false,
   onChange,
   onSave,
 }: ManagementSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
+  const saveDisabled = !issue || !canSave || isSaving;
 
   return (
   <section style={getPanelStyle(c)}>
@@ -2155,18 +2172,18 @@ const ManagementSection = ({
         </label>
         <button
           type="submit"
-          disabled={!issue || !canSave}
+          disabled={saveDisabled}
           style={{
             width: '100%',
             border: 0,
             borderRadius: 11,
             padding: '12px 18px',
             fontSize: 14,
-            cursor: issue && canSave ? 'pointer' : 'not-allowed',
+            cursor: !saveDisabled ? 'pointer' : 'not-allowed',
           }}
           className="bg-blue-600 text-white hover:bg-blue-700 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:hover:bg-gray-300"
         >
-          저장
+          {isSaving ? '저장 중...' : '저장'}
         </button>
       </fieldset>
     </form>
@@ -2376,6 +2393,7 @@ export default function IssuePage() {
   const [saveMessage, setSaveMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
@@ -2473,6 +2491,15 @@ export default function IssuePage() {
     const timer = window.setTimeout(() => setShowToast(false), 2500);
     return () => window.clearTimeout(timer);
   }, [showToast]);
+
+  const handleSelectIssue = (id: string) => {
+    setSelectedId(id);
+    window.setTimeout(() => {
+      document
+        .getElementById('issue-detail-analysis')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
 
   const handleFilterChange = (key: keyof FilterState, value: string) => {
     setDraftFilters((current) => ({ ...current, [key]: value }));
@@ -2724,14 +2751,52 @@ ${issues
     });
   };
 
+  const handleCompleteIssue = () => {
+    if (!selectedIssue || !managementForm.completed || isSaving) return;
+
+    const issueId = selectedIssue.id;
+    const savedData = {
+      assignee: managementForm.assignee,
+      status: '완료' as const,
+      action: managementForm.action,
+      completed: true,
+    };
+
+    setIsSaving(true);
+
+    window.setTimeout(() => {
+      try {
+        const transferredIssue: Issue = {
+          ...selectedIssue,
+          ...savedData,
+        };
+        appendCompletedKnowledgeLog(transferredIssue);
+
+        setIssues((current) => current.filter((issue) => issue.id !== issueId));
+
+        setToastMessage(
+          '✅ 조치가 완료되어 해당 이슈가 라이브러리 지식베이스로 자동 이관되었습니다.',
+        );
+        setShowToast(true);
+        setSelectedId(null);
+        setSaveMessage('');
+      } finally {
+        setIsSaving(false);
+      }
+    }, 500);
+  };
+
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedIssue || !canSave) return;
+    if (!selectedIssue || !canSave || isSaving) return;
 
-    const nextStatus: Issue['status'] = managementForm.completed
-      ? '완료'
-      : managementForm.status;
-    const nextCompleted = nextStatus === '완료' ? true : managementForm.completed;
+    if (managementForm.completed) {
+      handleCompleteIssue();
+      return;
+    }
+
+    const nextStatus: Issue['status'] = managementForm.status;
+    const nextCompleted = false;
 
     const savedData = {
       issueId: selectedIssue.id,
@@ -2761,33 +2826,8 @@ ${issues
       completed: savedData.completed,
     });
     setSaveMessage('이슈 처리 내역이 저장되었습니다.');
-
-    const isCompleted = savedData.completed || savedData.status === '완료';
-    if (isCompleted) {
-      const transferredIssue: Issue = {
-        ...selectedIssue,
-        assignee: savedData.assignee,
-        status: savedData.status,
-        action: savedData.action,
-        completed: savedData.completed,
-      };
-      const transferResult = appendCompletedKnowledgeLog(transferredIssue);
-      if (transferResult === 'added') {
-        setToastMessage('✓ 조치가 완료되어 지식 관리 라이브러리로 자동 이관되었습니다.');
-        setShowToast(true);
-      } else if (transferResult === 'failed') {
-        setToastMessage(
-          '이슈는 저장되었지만 지식 라이브러리 이관에 실패했습니다. 브라우저 저장소 권한을 확인해 주세요.',
-        );
-        setShowToast(true);
-      } else {
-        setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
-        setShowToast(true);
-      }
-    } else {
-      setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
-      setShowToast(true);
-    }
+    setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
+    setShowToast(true);
   };
 
   return (
@@ -2820,7 +2860,7 @@ ${issues
             onFilterChange={handleFilterChange}
             onApplyFilter={handleApplyFilter}
             onResetFilter={handleResetFilter}
-            onSelect={setSelectedId}
+            onSelect={handleSelectIssue}
             onDiagnose={handleDiagnoseIssue}
           />
           <div
@@ -2837,6 +2877,7 @@ ${issues
               form={managementForm}
               message={saveMessage}
               canSave={canSave}
+              isSaving={isSaving}
               onChange={handleFormChange}
               onSave={handleSave}
             />

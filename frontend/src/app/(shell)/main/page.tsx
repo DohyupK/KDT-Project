@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import UserAuthMenu from '@/components/layout/UserAuthMenu';
 import { useSelectedLot } from '@/context/SelectedLotContext';
 import { useUiSettings } from '@/components/layout/AppShell';
 
@@ -12,6 +11,8 @@ import { useUiSettings } from '@/components/layout/AppShell';
 /* -------------------------------------------------------------------------- */
 
 type StatusTone = '정상' | '주의' | '경고' | '위험' | '이상';
+
+type RiskGrade = '높음' | '중간' | '낮음';
 
 type FilterState = {
   startDate: string;
@@ -36,7 +37,7 @@ type LotRecord = {
 type RiskLotView = {
   id: string;
   riskScore: number;
-  status: StatusTone;
+  status: RiskGrade;
   riskReason: string;
   record: LotRecord;
 };
@@ -61,14 +62,6 @@ type ToastItem = {
   id: number;
   message: string;
   variant: 'success' | 'error' | 'info';
-};
-
-type NotificationItem = {
-  id: string;
-  time: string;
-  title: string;
-  message: string;
-  unread: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -101,6 +94,102 @@ function toneClass(tone: StatusTone) {
   if (tone === '이상') return `${base} border border-yellow-200 bg-yellow-50 text-yellow-700`;
   return `${base} border border-red-200 bg-red-50 text-red-700`;
 }
+
+function riskGradeClass(grade: RiskGrade) {
+  const base =
+    'inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold';
+  if (grade === '높음') return `${base} bg-red-100 text-red-600`;
+  if (grade === '중간') return `${base} bg-orange-100 text-orange-600`;
+  return `${base} bg-green-100 text-green-600`;
+}
+
+function makeMockLotRecord(
+  partial: Pick<LotRecord, 'id' | 'date' | 'hour'> & Partial<LotRecord>,
+): LotRecord {
+  return {
+    sintering_temp: 810,
+    lithium_input: 2.4,
+    humidity: 45,
+    metal_impurity: 0.015,
+    tank_pressure: 2.1,
+    process_time: 120,
+    additive_ratio: 3.2,
+    quality_defect: 1,
+    production: 24,
+    ...partial,
+  };
+}
+
+/** 위험 LOT Top 테이블 전용 Mock (위험도·위험등급 매칭) */
+const TOP_RISK_LOTS_MOCK: RiskLotView[] = [
+  {
+    id: 'LOT-20260722-N12',
+    riskScore: 0.94,
+    status: '높음',
+    riskReason: '소성 온도 상승, 금속 불순물 농도 초과',
+    record: makeMockLotRecord({
+      id: 'LOT-20260722-N12',
+      date: '2026-07-22',
+      hour: '14:00',
+      sintering_temp: 842,
+      metal_impurity: 0.042,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260721-N08',
+    riskScore: 0.87,
+    status: '높음',
+    riskReason: '공정 습도 과다, 원료 투입비 편차',
+    record: makeMockLotRecord({
+      id: 'LOT-20260721-N08',
+      date: '2026-07-21',
+      hour: '11:00',
+      humidity: 68,
+      lithium_input: 1.52,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260722-N05',
+    riskScore: 0.72,
+    status: '중간',
+    riskReason: '소성 온도 상승',
+    record: makeMockLotRecord({
+      id: 'LOT-20260722-N05',
+      date: '2026-07-22',
+      hour: '09:00',
+      sintering_temp: 828,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260720-N15',
+    riskScore: 0.51,
+    status: '중간',
+    riskReason: '원료 투입비 편차',
+    record: makeMockLotRecord({
+      id: 'LOT-20260720-N15',
+      date: '2026-07-20',
+      hour: '16:00',
+      lithium_input: 3.35,
+      quality_defect: 0,
+    }),
+  },
+  {
+    id: 'LOT-20260721-N03',
+    riskScore: 0.28,
+    status: '낮음',
+    riskReason: '품질 불량 예측',
+    record: makeMockLotRecord({
+      id: 'LOT-20260721-N03',
+      date: '2026-07-21',
+      hour: '08:00',
+      sintering_temp: 808,
+      quality_defect: 1,
+    }),
+  },
+];
 
 function buildLotDataset(seed: number): LotRecord[] {
   const rows: LotRecord[] = [];
@@ -164,10 +253,10 @@ function computeRiskScore(record: LotRecord): number {
   return Math.min(1, Math.round(score * 100) / 100);
 }
 
-function riskStatus(score: number): StatusTone {
-  if (score >= 0.8) return '위험';
-  if (score >= 0.7) return '경고';
-  return '주의';
+function riskStatus(score: number): RiskGrade {
+  if (score >= 0.85) return '높음';
+  if (score >= 0.4) return '중간';
+  return '낮음';
 }
 
 function toRiskLotView(record: LotRecord): RiskLotView {
@@ -521,33 +610,15 @@ export default function MainPage() {
   const { isDark, language } = useUiSettings();
   // Empty on SSR so server/client HTML match; clock starts after mount.
   const [now, setNow] = useState('');
-  const [seed, setSeed] = useState(7);
+  const [seed] = useState(7);
   /** 생산 추이 차트 전용 날짜 필터 (적용 시에만 반영) */
   const [trendFilterDraft, setTrendFilterDraft] = useState<FilterState>(DEFAULT_FILTER);
   const [trendFilterApplied, setTrendFilterApplied] = useState<FilterState>(DEFAULT_FILTER);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
-  const [isNotifyOpen, setIsNotifyOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: 'n1',
-      time: '11:03',
-      title: '위험 LOT 경고',
-      message: '고위험 LOT가 감지되었습니다.',
-      unread: true,
-    },
-    {
-      id: 'n2',
-      time: '10:42',
-      title: '공정 습도',
-      message: '습도 상한 근접 구간이 있습니다.',
-      unread: true,
-    },
-  ]);
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const notifyRef = useRef<HTMLDivElement | null>(null);
 
   const dataset = useMemo(() => buildLotDataset(seed), [seed]);
 
@@ -576,7 +647,7 @@ export default function MainPage() {
       .sort((a, b) => b.riskScore - a.riskScore);
   }, [filteredRecords]);
 
-  const topRiskLots = useMemo(() => riskLots.slice(0, 5), [riskLots]);
+  const topRiskLots = TOP_RISK_LOTS_MOCK;
 
   const kpis = useMemo(() => {
     const totalLots = new Set(filteredRecords.map((r) => r.id)).size;
@@ -651,23 +722,12 @@ export default function MainPage() {
   }, [trendRecords]);
 
   const params = useMemo(() => buildProcessParams(filteredRecords), [filteredRecords]);
-  const unreadCount = notifications.filter((n) => n.unread).length;
 
   useEffect(() => {
     setNow(formatDateTime(new Date()));
     const timer = setInterval(() => setNow(formatDateTime(new Date())), 1000);
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!isNotifyOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (notifyRef.current && !notifyRef.current.contains(target)) setIsNotifyOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [isNotifyOpen]);
 
   useEffect(() => {
     return () => {
@@ -723,132 +783,25 @@ export default function MainPage() {
   return (
     <div className={`h-full overflow-y-auto ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-6 pb-40 sm:px-6 lg:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
+        <header className="mb-1 min-w-0">
+          <div className="mb-6 flex flex-col gap-1">
+            <p
+              className={`text-sm font-bold tracking-wide ${
+                isDark ? 'text-blue-400' : 'text-blue-600'
+              }`}
+            >
+              Process Monitoring
+            </p>
             <h1
-              className={`text-xl font-semibold tracking-tight sm:text-2xl ${
-                isDark ? 'text-slate-100' : 'text-slate-900'
+              className={`mt-1 text-3xl font-bold tracking-tight ${
+                isDark ? 'text-slate-100' : 'text-gray-900'
               }`}
             >
               {language === 'en' ? 'Overall Process Monitoring' : '종합 공정 모니터링'}
             </h1>
-            <p className={`mt-1 text-xs sm:text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
               {now}
             </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSeed((s) => s + 1);
-                pushToast(
-                  language === 'en' ? 'Data has been refreshed.' : '데이터가 갱신되었습니다.',
-                  'success',
-                );
-              }}
-              className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm ${
-                isDark
-                  ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
-                  : 'border-slate-200/60 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {language === 'en' ? 'Refresh' : '새로고침'}
-            </button>
-
-            <div className="relative" ref={notifyRef}>
-              <button
-                type="button"
-                aria-label="알림"
-                onClick={() => setIsNotifyOpen((v) => !v)}
-                className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    : 'border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.1c0 .7-.2 1.4-.6 2L4.7 14.4a1.2 1.2 0 0 0 1 1.9h12.6a1.2 1.2 0 0 0 1-1.9l-1.2-1.8c-.4-.6-.6-1.3-.6-2V8.5A5.5 5.5 0 0 0 12 3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9.2 17.6a2.8 2.8 0 0 0 5.6 0"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                {unreadCount > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                    {unreadCount}
-                  </span>
-                ) : null}
-              </button>
-              {isNotifyOpen ? (
-                <div
-                  className={`absolute right-0 top-11 z-40 w-[min(92vw,320px)] overflow-hidden rounded-xl border shadow-lg ${
-                    isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/60 bg-white'
-                  }`}
-                >
-                  <div
-                    className={`flex items-center justify-between border-b px-4 py-3 ${
-                      isDark ? 'border-slate-700' : 'border-slate-100'
-                    }`}
-                  >
-                    <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                      알림
-                    </strong>
-                    <button
-                      type="button"
-                      className={`text-xs font-medium ${
-                        isDark
-                          ? 'text-slate-400 hover:text-slate-200'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                      onClick={() =>
-                        setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
-                      }
-                    >
-                      모두 읽음
-                    </button>
-                  </div>
-                  {notifications.map((n) => (
-                    <button
-                      key={n.id}
-                      type="button"
-                      className={`block w-full border-b px-4 py-3 text-left ${
-                        isDark
-                          ? `border-slate-700/80 hover:bg-slate-800/60 ${
-                              n.unread ? 'bg-blue-950/40' : ''
-                            }`
-                          : `border-slate-50 hover:bg-slate-50 ${n.unread ? 'bg-blue-50/40' : ''}`
-                      }`}
-                      onClick={() =>
-                        setNotifications((prev) =>
-                          prev.map((item) => (item.id === n.id ? { ...item, unread: false } : item)),
-                        )
-                      }
-                    >
-                      <div
-                        className={`flex justify-between gap-2 text-sm font-semibold ${
-                          isDark ? 'text-slate-100' : 'text-slate-800'
-                        }`}
-                      >
-                        <span>{n.title}</span>
-                        <span className="text-xs font-normal text-slate-400">{n.time}</span>
-                      </div>
-                      <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {n.message}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            <UserAuthMenu />
           </div>
         </header>
 
@@ -1036,7 +989,7 @@ export default function MainPage() {
               <table className="w-full min-w-[520px] border-collapse text-left text-sm">
                 <thead>
                   <tr className="text-xs text-slate-400">
-                    {['LOT', '위험 원인', '위험도', '상태', ''].map((h) => (
+                    {['LOT', '위험 원인', '위험도', '위험등급', ''].map((h) => (
                       <th
                         key={h || 'action'}
                         className={`border-b pb-2 pr-3 font-medium ${
@@ -1088,13 +1041,7 @@ export default function MainPage() {
                           isDark ? 'border-slate-700/80' : 'border-slate-50'
                         }`}
                       >
-                        <span
-                          className={
-                            lot.status === '위험'
-                              ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-rose-100 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600'
-                              : toneClass(lot.status)
-                          }
-                        >
+                        <span className={riskGradeClass(lot.status)}>
                           {lot.status}
                         </span>
                       </td>
@@ -1139,8 +1086,8 @@ export default function MainPage() {
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">상태</div>
-                <span className={toneClass(selectedLot.status)}>{selectedLot.status}</span>
+                <div className="text-xs text-slate-500">위험등급</div>
+                <span className={riskGradeClass(selectedLot.status)}>{selectedLot.status}</span>
               </div>
               <div>
                 <div className="text-xs text-slate-500">위험도</div>

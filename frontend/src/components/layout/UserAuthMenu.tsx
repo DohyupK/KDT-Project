@@ -8,18 +8,37 @@ import { authApi } from '@/api/authApi'
 import { clearAuthSession, getAuthUser, isLoggedIn } from '@/lib/authStorage'
 import { useUiSettings } from '@/components/layout/AppShell'
 
-export default function UserAuthMenu() {
+type UserAuthMenuProps = {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+export default function UserAuthMenu({ open, onOpenChange }: UserAuthMenuProps) {
   const router = useRouter()
   const { isDark } = useUiSettings()
   const [loggedIn, setLoggedIn] = useState(false)
   const [userName, setUserName] = useState('')
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
+  const [authReady, setAuthReady] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  const isControlled = typeof open === 'boolean' && typeof onOpenChange === 'function'
+  const menuOpen = isControlled ? open : internalOpen
+
+  const setMenuOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(menuOpen) : next
+    if (isControlled) onOpenChange?.(resolved)
+    else setInternalOpen(resolved)
+  }
 
   useEffect(() => {
     const syncAuth = () => {
       setLoggedIn(isLoggedIn())
-      setUserName(getAuthUser()?.name ?? '')
+      const user = getAuthUser()
+      setUserName(user?.name ?? '')
+      setUserEmail(user?.email ?? '')
+      setAuthReady(true)
     }
     syncAuth()
     window.addEventListener('storage', syncAuth)
@@ -33,8 +52,15 @@ export default function UserAuthMenu() {
         setMenuOpen(false)
       }
     }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
     document.addEventListener('mousedown', handleOutsideClick)
-    return () => document.removeEventListener('mousedown', handleOutsideClick)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick)
+      document.removeEventListener('keydown', handleEscape)
+    }
   }, [menuOpen])
 
   const handleLogout = async () => {
@@ -46,38 +72,68 @@ export default function UserAuthMenu() {
     clearAuthSession()
     setLoggedIn(false)
     setUserName('')
+    setUserEmail('')
     setMenuOpen(false)
     router.push('/login')
   }
 
   const triggerClass = isDark
-    ? 'inline-flex h-9 items-center gap-2 rounded-lg border border-slate-600/80 bg-slate-800 pl-1.5 pr-3 text-sm font-medium text-slate-100 shadow-sm hover:bg-slate-700'
-    : 'inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200/60 bg-white pl-1.5 pr-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50'
+    ? 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-600/80 bg-slate-800 py-1.5 pl-1.5 pr-3 text-sm font-medium text-slate-100 shadow-sm hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200/60 bg-white py-1.5 pl-1.5 pr-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
 
   const avatarClass = isDark
-    ? 'flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-[11px] font-semibold text-slate-200'
-    : 'flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600'
+    ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-semibold text-slate-200'
+    : 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600'
+
+  if (!authReady) {
+    return (
+      <div
+        className={`inline-flex min-h-10 min-w-[120px] animate-pulse items-center rounded-lg border px-3 ${
+          isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'
+        }`}
+        aria-hidden
+      />
+    )
+  }
 
   if (loggedIn) {
     return (
       <div ref={menuRef} className="relative">
         <button
           type="button"
-          onClick={() => setMenuOpen((prev) => !prev)}
+          onClick={() => setMenuOpen(!menuOpen)}
           aria-label="사용자 메뉴"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          title="사용자 메뉴"
           className={triggerClass}
         >
-          <span className={avatarClass}>{userName.charAt(0) || 'U'}</span>
-          <span className="max-w-[80px] truncate">{userName || '사용자'}</span>
+          <span className={avatarClass} aria-hidden>
+            {userName.charAt(0) || 'U'}
+          </span>
+          <span className="min-w-0 text-left">
+            <span className="block max-w-[110px] truncate text-sm font-semibold leading-tight sm:max-w-[140px]">
+              {userName || '사용자'}
+            </span>
+            <span
+              className={`hidden max-w-[140px] truncate text-[11px] font-normal leading-tight sm:block ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`}
+            >
+              {userEmail || '로그인됨'}
+            </span>
+          </span>
         </button>
         {menuOpen && (
           <div
-            className={`absolute right-0 mt-2 w-40 overflow-hidden rounded-xl border shadow-lg z-20 ${
+            role="menu"
+            className={`absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border shadow-lg ${
               isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
             }`}
           >
             <Link
               href="/setting"
+              role="menuitem"
               onClick={() => setMenuOpen(false)}
               className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
                 isDark
@@ -85,11 +141,12 @@ export default function UserAuthMenu() {
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
-              <User size={16} />
-              설정
+              <User size={16} aria-hidden />
+              내 정보
             </Link>
             <button
               type="button"
+              role="menuitem"
               onClick={handleLogout}
               className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
                 isDark
@@ -97,7 +154,7 @@ export default function UserAuthMenu() {
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
-              <LogOut size={16} />
+              <LogOut size={16} aria-hidden />
               로그아웃
             </button>
           </div>
@@ -107,9 +164,9 @@ export default function UserAuthMenu() {
   }
 
   return (
-    <Link href="/login" aria-label="로그인" className={triggerClass}>
+    <Link href="/login" aria-label="로그인" title="로그인" className={triggerClass}>
       <span className={avatarClass}>
-        <User size={14} />
+        <User size={14} aria-hidden />
       </span>
       로그인
     </Link>
