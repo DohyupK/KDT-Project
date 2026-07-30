@@ -79,6 +79,20 @@ def run_capacity_tool(features: dict[str, Any]) -> dict[str, Any]:
     return predict_capacity(df)
 
 
+def run_residual_tool(features: dict[str, Any]) -> dict[str, Any]:
+    """Single-row residual_li Tool via train_residual_pipeline.predict_residual_li."""
+    from train_residual_pipeline import MODELS_DIR as RES_DIR
+    from train_residual_pipeline import predict_residual_li
+
+    required = RES_DIR / "xgb_model.json"
+    if not required.exists():
+        raise FileNotFoundError(
+            "Residual model artifacts missing. Train first (ai-service/models/residual/).",
+        )
+    df = pl.DataFrame([_row_from_features(features)])
+    return predict_residual_li(df)
+
+
 def run_registered_heads(
     features: dict[str, Any],
     fillThreshold: float | None = None,
@@ -90,3 +104,4 @@ def run_registered_heads(
 # Register built-ins so registry entrypoints stay stable even if import paths change.
 register_builtin("clf", run_predict_tool)
 register_builtin("reg", run_capacity_tool)
+register_builtin("residual", run_residual_tool)

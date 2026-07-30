@@ -34,6 +34,12 @@ export type AiCapacityResult = {
   top_factors: string[]
 }
 
+export type AiResidualResult = {
+  residual_li: number
+  unit: string
+  top_factors: string[]
+}
+
 export type AiRecommendation = {
   method: string
   baseline: Record<string, unknown>
@@ -47,6 +53,7 @@ export type AiChatResponse = {
   provider?: string
   predict: AiPredictResult | null
   capacity?: AiCapacityResult | null
+  residual?: AiResidualResult | null
   heads?: Record<string, unknown> | null
   recommendation?: AiRecommendation | null
   error: string | null

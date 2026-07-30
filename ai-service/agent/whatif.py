@@ -1,10 +1,12 @@
 """
-What-if grid search on O/X predict + capacity regression.
+What-if grid search on O/X predict + residual_li + capacity regression.
 
 Clips candidates to admin control bounds (Setting → Express → control_bounds.json).
 If unconstrained ideal exceeds bounds, sets boundary_hit + limit_reason (compromise).
 
-Selection: minimize defect probability first; on ties prefer higher predicted capacity.
+Selection: (1) minimize defect probability
+           (2) on ties, minimize residual_li
+           (3) on further ties, maximize capacity
 """
 
 from __future__ import annotations
@@ -14,7 +16,12 @@ import os
 from typing import Any
 
 from agent.bounds_cache import clip_value, get_control_bounds
-from agent.tools import RAW_FEATURE_KEYS, run_capacity_tool, run_predict_tool
+from agent.tools import (
+    RAW_FEATURE_KEYS,
+    run_capacity_tool,
+    run_predict_tool,
+    run_residual_tool,
+)
 
 METHOD = "whatif_grid"
 
@@ -70,22 +77,45 @@ def _try_capacity(features: dict[str, Any]) -> float | None:
         return None
 
 
+def _try_residual(features: dict[str, Any]) -> float | None:
+    try:
+        out = run_residual_tool(features)
+        return float(out["residual_li"])
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _is_better(
     prob: float,
+    residual: float | None,
     capacity: float | None,
     best_prob: float,
+    best_residual: float | None,
     best_capacity: float | None,
 ) -> bool:
-    """True if (prob, capacity) beats current best: lower prob, then higher capacity."""
+    """Lower defect prob → lower residual_li → higher capacity."""
     if prob < best_prob - 1e-9:
         return True
-    if abs(prob - best_prob) <= 1e-9:
-        if capacity is None:
+    if abs(prob - best_prob) > 1e-9:
+        return False
+
+    # Tie on probability: prefer lower residual
+    if residual is not None or best_residual is not None:
+        if residual is None:
             return False
-        if best_capacity is None:
+        if best_residual is None:
             return True
-        return capacity > best_capacity + 1e-9
-    return False
+        if residual < best_residual - 1e-9:
+            return True
+        if abs(residual - best_residual) > 1e-9:
+            return False
+
+    # Further tie: prefer higher capacity
+    if capacity is None:
+        return False
+    if best_capacity is None:
+        return True
+    return capacity > best_capacity + 1e-9
 
 
 def run_whatif(
@@ -104,6 +134,7 @@ def run_whatif(
     thr = float(baseline.get("applied_threshold", fillThreshold or 0.5))
     bounds = get_control_bounds()
     capacity_before = _try_capacity(baseline_features)
+    residual_before = _try_residual(baseline_features)
 
     payload: dict[str, Any] = {
         "method": METHOD,
@@ -113,6 +144,7 @@ def run_whatif(
             "applied_threshold": thr,
             "features": baseline_features,
             "capacity": capacity_before,
+            "residual_li": residual_before,
         },
         "suggestion": None,
         "note": None,
@@ -128,13 +160,13 @@ def run_whatif(
     hum0 = float(baseline_features["humidity"])
     temp0 = float(baseline_features["sintering_temp"])
 
-    # Best within admin bounds (clipped candidates)
     best_clipped: dict[str, Any] | None = None
     best_clipped_prob = base_prob
+    best_clipped_res: float | None = residual_before
     best_clipped_cap: float | None = capacity_before
-    # Unconstrained ideal (no admin clip) — for boundary_hit messaging
     best_ideal: dict[str, Any] | None = None
     best_ideal_prob = base_prob
+    best_ideal_res: float | None = residual_before
     best_ideal_cap: float | None = capacity_before
 
     for dh in hum_deltas:
@@ -145,7 +177,6 @@ def run_whatif(
             ideal_hum = round(hum0 + dh, 4)
             ideal_temp = round(temp0 + dt, 4)
 
-            # Unconstrained soft floor/ceiling only to keep predict numeric-safe
             ideal_row = copy.deepcopy(baseline_features)
             ideal_row["humidity"] = max(0.0, min(100.0, ideal_hum))
             ideal_row["sintering_temp"] = max(600.0, min(1000.0, ideal_temp))
@@ -157,14 +188,19 @@ def run_whatif(
 
             if ideal_pred is not None:
                 ip = float(ideal_pred["probability"])
+                ires = _try_residual(ideal_row)
                 icap = _try_capacity(ideal_row)
-                if _is_better(ip, icap, best_ideal_prob, best_ideal_cap):
+                if _is_better(
+                    ip, ires, icap, best_ideal_prob, best_ideal_res, best_ideal_cap
+                ):
                     best_ideal_prob = ip
+                    best_ideal_res = ires
                     best_ideal_cap = icap
                     best_ideal = {
                         "humidity": float(ideal_row["humidity"]),
                         "sintering_temp": float(ideal_row["sintering_temp"]),
                         "probability": ip,
+                        "residual_li": ires,
                         "capacity": icap,
                     }
 
@@ -180,13 +216,18 @@ def run_whatif(
                 continue
 
             p = float(pred["probability"])
+            res = _try_residual(cand)
             cap = _try_capacity(cand)
-            if _is_better(p, cap, best_clipped_prob, best_clipped_cap):
+            if _is_better(
+                p, res, cap, best_clipped_prob, best_clipped_res, best_clipped_cap
+            ):
                 best_clipped_prob = p
+                best_clipped_res = res
                 best_clipped_cap = cap
                 best_clipped = {
                     "cand": cand,
                     "pred": pred,
+                    "residual_li": res,
                     "capacity": cap,
                     "ideal_hum": float(ideal_row["humidity"]),
                     "ideal_temp": float(ideal_row["sintering_temp"]),
@@ -198,9 +239,9 @@ def run_whatif(
 
     cand = best_clipped["cand"]
     pred = best_clipped["pred"]
+    residual_after = best_clipped.get("residual_li")
     capacity_after = best_clipped.get("capacity")
 
-    # Prefer ideal point's values for boundary messaging when ideal beat clipped path
     if best_ideal is not None:
         ideal_hum = float(best_ideal["humidity"])
         ideal_temp = float(best_ideal["sintering_temp"])
@@ -211,7 +252,6 @@ def run_whatif(
     clipped_hum = float(cand["humidity"])
     clipped_temp = float(cand["sintering_temp"])
 
-    # If unconstrained ideal is outside admin bounds, clip that ideal and re-predict
     clipped_from_ideal_hum = clip_value("humidity", ideal_hum, bounds)
     clipped_from_ideal_temp = clip_value("sintering_temp", ideal_temp, bounds)
     boundary_hit = (
@@ -225,10 +265,12 @@ def run_whatif(
         cand["sintering_temp"] = round(clipped_from_ideal_temp, 4)
         try:
             pred = run_predict_tool(cand, fillThreshold=fillThreshold)
+            residual_after = _try_residual(cand)
             capacity_after = _try_capacity(cand)
         except Exception:  # noqa: BLE001
             pred = best_clipped["pred"]
             cand = best_clipped["cand"]
+            residual_after = best_clipped.get("residual_li")
             capacity_after = best_clipped.get("capacity")
             clipped_from_ideal_hum = float(cand["humidity"])
             clipped_from_ideal_temp = float(cand["sintering_temp"])
@@ -259,6 +301,9 @@ def run_whatif(
             "humidity": clipped_hum,
             "sintering_temp": clipped_temp,
         },
+        "residual_before": residual_before,
+        "residual_after": residual_after,
+        "residual_unit": "ppm",
         "capacity_before": capacity_before,
         "capacity_after": capacity_after,
         "unit": "mAh/g",

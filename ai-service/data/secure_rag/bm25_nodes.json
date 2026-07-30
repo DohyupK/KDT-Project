@@ -1,0 +1,74 @@
+[
+  {
+    "text": "# 금속 불순물 관리 매뉴얼 v1.0 (내부)\n\n## 목적\n원료·공정 중 금속 불순물(metal_impurity) 유입을 통제하여 불량률을 낮춘다.\n\n## 기준\n- 허용 상한: 0.02 wt% 이하\n- 경보: 0.015 wt% 초과 지속\n- 샘플링: LOT당 최소 2회\n\n## 이상 시 조치\n1. 경보 시 해당 배치 원료를 격리하고 재분석을 의뢰한다.\n2. 혼합·코팅 설비의 마모 파편을 점검한다.\n3. 연속 경보 시 생산 라인을 보류한다.\n\n## 보안\n사내 내부용. 외부 반출 금지.",
+    "metadata": {
+      "doc_id": "manual-metal-v1",
+      "title": "금속 불순물 관리 매뉴얼 v1.0",
+      "category": "매뉴얼",
+      "process": "metal_impurity",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/manual-metal-v1.md",
+      "chunk_index": 0
+    }
+  },
+  {
+    "text": "# 전구체 혼합 공정 매뉴얼 v1.0 (내부)\n\n## 목적\n전구체·리튬원료 혼합비를 표준화하여 입도 편차와 불균일 소성을 줄인다.\n\n## 기준\n- 혼합 시간: 45–60분\n- 회전수: 20–30 rpm\n- 목표 D50 편차: ±0.3 μm 이내\n\n## 이상 시 조치\n1. 혼합 시간이 부족하면 추가 15분 운전 후 샘플링한다.\n2. 금속 불순물 경보가 동반되면 metal_impurity 매뉴얼을 병행 확인한다.\n3. 습도 50% 초과 시 혼합을 일시 중단한다.\n\n## 보안\n사내 내부용. 외부 반출 금지.",
+    "metadata": {
+      "doc_id": "manual-mixing-v1",
+      "title": "전구체 혼합 공정 매뉴얼 v1.0",
+      "category": "매뉴얼",
+      "process": "mixing",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/manual-mixing-v1.md",
+      "chunk_index": 0
+    }
+  },
+  {
+    "text": "# 리튬 투입비 관리 규정 v1.0 (내부)\n\n## 목적\n리튬 투입비(lithium_input) 상·하한을 규정하여 잔여 리튬·용량 이상을 예방한다.\n\n## 기준\n- 표준 투입비: 1.03–1.07\n- 경보: 1.02 미만 또는 1.08 초과\n- 잔여 리튬 상한 초과 시 투입비 재검토 필수\n\n## 이상 시 조치\n1. 경보 발생 LOT는 즉시 계량 저울·원료 배치를 점검한다.\n2. 연속 2 LOT 경보 시 생산을 중단하고 품질 승인을 받는다.\n3. 소성 SOP·잔여 리튬 예측값과 교차 확인한다.\n\n## 보안\n사내 규정. 클라우드 LLM/외부 전송 금지.",
+    "metadata": {
+      "doc_id": "rule-lithium-v1",
+      "title": "리튬 투입비 관리 규정 v1.0",
+      "category": "규정",
+      "process": "lithium_input",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/rule-lithium-v1.md",
+      "chunk_index": 0
+    }
+  },
+  {
+    "text": "# 전극 슬러리 코팅 SOP v1.1 (내부)\n\n## 목적\n코팅 두께·건조 온도를 표준화하여 용량 편차와 도막 불량을 줄인다.\n\n## 표준 조건\n- 코팅 두께: 80–120 μm\n- 건조 온도: 90–110°C\n- 라인 속도: 1.5–2.5 m/min\n\n## 이상 시 조치\n1. 두께가 하한을 밑돌면 슬러리 점도·노즐을 점검한다.\n2. 건조 온도가 110°C를 초과하면 즉시 출력을 낮춘다.\n3. 핀홀·줄무늬가 반복되면 LOT를 보류하고 품질 팀에 통보한다.\n\n## 보안\n본 문서는 사내 내부용이다. 외부 반출을 금지한다.",
+    "metadata": {
+      "doc_id": "sop-coating-v1",
+      "title": "전극 슬러리 코팅 SOP v1.1",
+      "category": "SOP",
+      "process": "coating",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/sop-coating-v1.md",
+      "chunk_index": 0
+    }
+  },
+  {
+    "text": "# 공정 습도 관리 매뉴얼 v1.0 (내부)\n\n## 관리 범위\n혼합·소성 전 구간의 상대 습도를 관리한다.\n\n## 기준\n- 권장 상대 습도: 35–45%\n- 경보: 50% 초과 지속 30분 이상\n- 기록: LOT별 습도 로그를 필수 첨부\n\n## 대응\n1. 제습기를 기동하고 외기 유입 밸브를 점검한다.\n2. 습도 경보 중에는 신규 리튬 투입을 보류한다.\n3. 관련 SOP(소성)와 교차 확인한다.\n\n## 보안\n사내 규정 문서. 클라우드 LLM/외부 전송 금지.",
+    "metadata": {
+      "doc_id": "sop-humidity-v1",
+      "title": "공정 습도 관리 매뉴얼 v1.0",
+      "category": "매뉴얼",
+      "process": "humidity",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/sop-humidity-v1.md",
+      "chunk_index": 0
+    }
+  },
+  {
+    "text": "# 양극재 소성공정 SOP v1.2 (내부)\n\n## 목적\n소성로 온도·유지 시간을 표준화하여 용량 편차와 잔여 리튬 이상을 줄인다.\n\n## 표준 조건\n- 목표 소성 온도: 780–820°C (권장 800°C)\n- 유지 시간: 8–12시간\n- 승온 속도: 2°C/min 이하\n\n## 이상 시 조치\n1. 온도가 820°C를 초과하면 즉시 가열 출력을 낮추고 로트 기록을 남긴다.\n2. 습도가 동반 상승한 경우 humidity SOP를 병행 확인한다.\n3. 잔여 리튬이 공정 상한을 넘으면 리튬 투입비 재검토를 요청한다.\n\n## 보안\n본 문서는 사내 내부용이다. 외부 반출을 금지한다.",
+    "metadata": {
+      "doc_id": "sop-sintering-v1",
+      "title": "양극재 소성공정 SOP v1.2",
+      "category": "SOP",
+      "process": "sintering",
+      "security_level": "internal",
+      "source_path": "data/secure_docs/sop-sintering-v1.md",
+      "chunk_index": 0
+    }
+  }
+]

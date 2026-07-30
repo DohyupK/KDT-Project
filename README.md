@@ -146,6 +146,7 @@ rewrite 변경 뒤에는 **Next를 한 번 재시작**합니다.
 - Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib
 - FastAPI, Uvicorn, Pydantic  
 - LangGraph, LangChain Core, LangChain OpenAI, LangChain Google GenAI (선택)  
+- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant (bge-m3 / bge-reranker CPU · Self-Query via VectorIndexAutoRetriever)  
 → 상세: [`ai-service/README.md`](./ai-service/README.md)
 
 ---
@@ -165,6 +166,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 | `GET /health` | 상태 · 모델 버전 |
 | `POST /predict` | O/X 1행 진단 |
 | `POST /chat` | LangGraph 챗봇 (backend가 프록시) |
+| `POST /security-chat` | 보안 탭 · vLLM + secure RAG |
 
 화면과 같이 쓰려면 위 [로컬 실행 — 챗봇](#로컬-실행--챗봇-터미널-3개)처럼 **backend·frontend도 함께** 켭니다.  
 자세한 스택·산출물: **[`ai-service/README.md`](./ai-service/README.md)**.
