@@ -7,6 +7,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "migrate:issue-lots": "tsx scripts/migrate-issue-lots.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -6,6 +6,7 @@ import { controlRouter } from './routes/control.js'
 import { settingsRouter } from './routes/settings.js'
 import { securityChatRouter } from './routes/securityChat.js'
 import { llmKeysRouter } from './routes/llmKeys.js'
+import { issueRouter } from './routes/issue.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 export function createApp() {
@@ -34,6 +35,9 @@ export function createApp() {
       health: '/api/health',
       auth: '/api/auth',
       auth_settings: 'GET|PUT /api/auth/settings · POST /api/auth/settings/reset',
+      lots: 'GET /api/lots/risk-top · GET /api/lots/:lotId · POST /api/lots/import',
+      issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
+      handover_history: 'GET /api/knowledge/handover-history',
       chat: 'POST /api/chat',
       security_chat: 'POST /api/security-chat',
       llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',
@@ -45,6 +49,7 @@ export function createApp() {
   })
 
   app.use('/api/auth', authRoutes)
+  app.use('/api', issueRouter)
   app.use('/api', chatRouter)
   app.use('/api', securityChatRouter)
   app.use('/api', llmKeysRouter)
