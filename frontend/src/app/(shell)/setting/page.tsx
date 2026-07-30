@@ -222,21 +222,22 @@ export default function SettingPage() {
   const [boundsMessage, setBoundsMessage] = useState('')
 
   const cacheSettingsLocally = (settings: UserSettingsDto) => {
+    const currentConfig = readSystemSettingsConfig()
     const local: UserSettings = {
       UserId: settings.userId,
       FontSize: settings.fontSize as FontSize,
       ThemeMode: settings.themeMode,
-      Language: settings.language,
+      Language: settings.language ?? currentConfig?.language ?? 'ko',
       RefreshInterval: settings.refreshInterval as RefreshInterval,
       UpdateAt: settings.updatedAt,
     }
     const config: SystemSettingsConfig = {
       theme: settings.themeMode,
-      language: settings.language,
+      language: settings.language ?? currentConfig?.language ?? 'ko',
       fontSize: settings.fontSize as FontSize,
-      autoRefreshEnabled: settings.autoRefreshEnabled,
+      autoRefreshEnabled: settings.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
       refreshInterval: settings.refreshInterval as RefreshInterval,
-      n8nAlert: settings.n8nAlert,
+      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? true,
     }
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(local))
@@ -276,13 +277,14 @@ export default function SettingPage() {
           const { data } = await authApi.getSettings()
           if (cancelled) return
           const s = data.settings
+          const currentConfig = readSystemSettingsConfig()
           applySettingsToUi({
             fontSize: s.fontSize as FontSize,
             themeMode: s.themeMode,
-            language: s.language,
+            language: s.language ?? currentConfig?.language ?? 'ko',
             refreshInterval: s.refreshInterval as RefreshInterval,
-            autoRefreshEnabled: s.autoRefreshEnabled,
-            n8nAlert: s.n8nAlert,
+            autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
+            n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
           })
           cacheSettingsLocally(s)
           return

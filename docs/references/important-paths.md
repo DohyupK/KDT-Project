@@ -11,8 +11,6 @@
 | `docs/plans/2026-07-23-chatbot-integration.md` | AI 챗봇·연동 작업서 (경로 지도) |
 | `docs/plans/2026-07-23-llm-formal-integration.md` | LLM 정식 연동 · 보안 · 세션 |
 | `docs/references/issue-lot-api.md` | Issue/LOT/과거 자료 API |
-| `docs/references/issue-lot-erd.md` | Issue/LOT 시각 ERD 안내 |
-| `docs/references/issue-lot.dbml` | dbdiagram.io용 DBML (첨부 스타일) |
 | `AGENTS.md` | 전체 공통 규칙 |
 | `.cursor/rules/` | 전체·개별 룰 (`ask-before-run.mdc` 포함) |
 

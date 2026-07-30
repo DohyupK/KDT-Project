@@ -66,11 +66,6 @@
 
 완료 판정: `status = '완료'` 또는 `completed_at IS NOT NULL` (`completed` 컬럼 없음).
 
-## ERD (시각 그림)
-
-- 안내: [`issue-lot-erd.md`](./issue-lot-erd.md)
-- DBML (dbdiagram.io): [`issue-lot.dbml`](./issue-lot.dbml)
-
 ## DDL
 
 - [`backend/src/sql/issue_lot_tables.sql`](../backend/src/sql/issue_lot_tables.sql)

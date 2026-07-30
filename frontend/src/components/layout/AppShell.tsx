@@ -244,13 +244,24 @@ export function useUiSettings() {
             fontSize: (isUiFontSize(s.fontSize) ? s.fontSize : DEFAULT_UI_FONT_SIZE) as UiFontSize,
           }
           try {
+            let currentLocal: Record<string, any> = {}
+            let currentSystem: Record<string, any> = {}
+            try {
+              const rawLocal = localStorage.getItem(SETTINGS_STORAGE_KEY)
+              if (rawLocal) currentLocal = JSON.parse(rawLocal)
+            } catch {}
+            try {
+              const rawSystem = localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
+              if (rawSystem) currentSystem = JSON.parse(rawSystem)
+            } catch {}
+
             localStorage.setItem(
               SETTINGS_STORAGE_KEY,
               JSON.stringify({
                 UserId: s.userId,
                 FontSize: s.fontSize,
                 ThemeMode: s.themeMode,
-                Language: s.language,
+                Language: s.language ?? currentLocal.Language ?? 'ko',
                 RefreshInterval: s.refreshInterval,
                 UpdateAt: s.updatedAt,
               }),
@@ -259,11 +270,11 @@ export function useUiSettings() {
               SYSTEM_SETTINGS_CONFIG_KEY,
               JSON.stringify({
                 theme: s.themeMode,
-                language: s.language,
+                language: s.language ?? currentSystem.language ?? 'ko',
                 fontSize: s.fontSize,
-                autoRefreshEnabled: s.autoRefreshEnabled,
+                autoRefreshEnabled: s.autoRefreshEnabled ?? currentSystem.autoRefreshEnabled ?? true,
                 refreshInterval: s.refreshInterval,
-                n8nAlert: s.n8nAlert,
+                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? true,
               }),
             )
           } catch {
