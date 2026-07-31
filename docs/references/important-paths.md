@@ -10,7 +10,7 @@
 | `docs/` | 방향·일지·계획 |
 | `docs/plans/2026-07-23-chatbot-integration.md` | AI 챗봇·연동 작업서 (경로 지도) |
 | `docs/plans/2026-07-23-llm-formal-integration.md` | LLM 정식 연동 · 보안 · 세션 |
-| `docs/references/security-chat-skeleton.md` | 보안 탭 디렉터리·라우팅 골격 |
+| `docs/references/issue-lot-api.md` | Issue/LOT/과거 자료 API |
 | `AGENTS.md` | 전체 공통 규칙 |
 | `.cursor/rules/` | 전체·개별 룰 (`ask-before-run.mdc` 포함) |
 

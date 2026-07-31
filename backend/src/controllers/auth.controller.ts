@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import * as authService from '../services/auth.service.js'
+import * as userSettingsService from '../services/userSettings.service.js'
 import { AppError } from '../middleware/errorHandler.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
@@ -80,4 +81,22 @@ export const withdrawAccount = asyncHandler(async (req, res) => {
 
   const result = await authService.withdrawAccount(req.auth.userId, password)
   res.status(200).json(result)
+})
+
+export const getSettings = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const settings = await userSettingsService.getUserSettings(req.auth.userId)
+  res.status(200).json({ settings })
+})
+
+export const updateSettings = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const settings = await userSettingsService.updateUserSettings(req.auth.userId, req.body ?? {})
+  res.status(200).json({ settings, message: '설정이 저장되었습니다.' })
+})
+
+export const resetSettings = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const settings = await userSettingsService.resetUserSettings(req.auth.userId)
+  res.status(200).json({ settings, message: '설정이 기본값으로 초기화되었습니다.' })
 })

@@ -60,3 +60,17 @@ export interface UpdateProfileRequest {
 export interface MessageResponse {
   message: string
 }
+
+/** Per-user Setting page prefs stored in MariaDB `user_settings`. */
+export interface UserSettingsDto {
+  userId: string
+  fontSize: number
+  themeMode: 0 | 1
+  language: 'ko' | 'en'
+  autoRefreshEnabled: boolean
+  refreshInterval: number
+  n8nAlert: boolean
+  updatedAt: string
+}
+
+export type UpdateUserSettingsRequest = Omit<UserSettingsDto, 'userId' | 'updatedAt'>

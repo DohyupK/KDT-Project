@@ -1,27 +1,7 @@
-CREATE TABLE IF NOT EXISTS users (
-  id         INT AUTO_INCREMENT PRIMARY KEY,
-  user_id    VARCHAR(50) NOT NULL UNIQUE,
-  password   VARCHAR(255) NOT NULL,
-  name       VARCHAR(50) NOT NULL,
-  phone      VARCHAR(20) NOT NULL,
-  email      VARCHAR(100) NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+-- Issue / LOT / handover (shared ops data). Requires users table.
+-- Risk Top = query on lots (no separate top table).
+-- issue_analyses removed. handover_history kept for later.
 
--- Per-user Setting page UI prefs (font/theme/refresh). Control bounds stay in JSON file.
-CREATE TABLE IF NOT EXISTS user_settings (
-  user_id               VARCHAR(50)  NOT NULL PRIMARY KEY,
-  font_size             INT          NOT NULL DEFAULT 18,
-  theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
-  refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
-  updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_user_settings_user
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-    ON DELETE CASCADE
-);
-
--- LOT SSOT + scoring (Risk Top = query, no separate top table)
 CREATE TABLE IF NOT EXISTS lots (
   lot_id            VARCHAR(64)  NOT NULL PRIMARY KEY,
   recorded_at       DATETIME     NOT NULL,
@@ -36,10 +16,11 @@ CREATE TABLE IF NOT EXISTS lots (
   tank_pressure     DOUBLE       NULL,
   operator_id       VARCHAR(32)  NULL,
   quality_defect    TINYINT(1)   NOT NULL DEFAULT 0,
-  defect_prob       DOUBLE       NULL,
-  residual_lithium  DOUBLE       NULL,
-  spc_status        VARCHAR(32)  NULL,
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '낮음',
+  defect_prob       DOUBLE       NULL COMMENT '불량확률(잠정/채점)',
+  residual_lithium  DOUBLE       NULL COMMENT '잔여리튬(잠정/채점)',
+  spc_status        VARCHAR(32)  NULL COMMENT 'SPC 상태(잠정/채점)',
+  risk_level        VARCHAR(10)  NOT NULL DEFAULT '낮음'
+    COMMENT '높음|중간|낮음',
   risk_reason       VARCHAR(255) NULL,
   scored_at         DATETIME     NULL,
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -49,15 +30,16 @@ CREATE TABLE IF NOT EXISTS lots (
 );
 
 CREATE TABLE IF NOT EXISTS issues (
-  issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY,
+  issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY COMMENT 'ISS-yyMMdd-seq',
   lot_id            VARCHAR(64)  NOT NULL,
   occurred_at       DATETIME     NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL,
-  status            VARCHAR(20)  NOT NULL DEFAULT '접수',
-  title             VARCHAR(255) NOT NULL,
-  action_content    TEXT         NULL,
+  risk_level        VARCHAR(10)  NOT NULL COMMENT '높음|중간|낮음',
+  status            VARCHAR(20)  NOT NULL DEFAULT '접수'
+    COMMENT '접수|분석 중|조치 중|완료',
+  title             VARCHAR(255) NOT NULL COMMENT '이슈 내용',
+  action_content    TEXT         NULL COMMENT '조치 내용(목록 미노출)',
   assignee_user_id  VARCHAR(50)  NULL,
-  completed_at      DATETIME     NULL,
+  completed_at      DATETIME     NULL COMMENT '처리날짜 (완료 시)',
   CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(lot_id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
