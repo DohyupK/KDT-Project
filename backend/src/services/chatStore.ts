@@ -24,7 +24,7 @@ type MemSession = {
 const mem = new Map<string, MemSession>()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEFAULT_SQLITE = path.resolve(__dirname, '../../data/chat.sqlite')
+const DEFAULT_SQLITE = path.resolve(__dirname, '../../../DB/data/chat.sqlite')
 
 let sqliteDb: DatabaseSync | null = null
 

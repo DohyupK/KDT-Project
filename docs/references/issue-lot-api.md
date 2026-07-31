@@ -68,8 +68,8 @@
 
 ## DDL
 
-- [`backend/src/sql/issue_lot_tables.sql`](../backend/src/sql/issue_lot_tables.sql)
-- [`backend/schema.sql`](../backend/schema.sql)
+- [`DB/issue_lot_tables.sql`](../DB/issue_lot_tables.sql)
+- [`DB/schema.sql`](../DB/schema.sql)
 - AWS 정리: `npm run migrate:schema-cleanup`
 
 ## FE

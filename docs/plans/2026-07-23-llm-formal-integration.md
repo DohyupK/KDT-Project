@@ -18,7 +18,7 @@
 
 ## 실행 (터미널 3개)
 
-1. MariaDB 스키마: `backend/src/sql/schema.sql`
+1. MariaDB 스키마: `DB/chat_schema.sql`
 2. `ai-service` uvicorn `:8800` (next.config `/ai`와 동일)
 3. `backend` `npm run dev` `:3001`
 4. `frontend` `npm run dev` `:3000`

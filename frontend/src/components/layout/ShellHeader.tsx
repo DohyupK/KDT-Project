@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bell, RefreshCw, User } from 'lucide-react'
+import { Bell, RefreshCw } from 'lucide-react'
 import { useUiSettings } from '@/components/layout/AppShell'
+import UserAuthMenu from '@/components/layout/UserAuthMenu'
 
 type HeaderNotification = {
   id: string
@@ -50,8 +51,6 @@ export default function ShellHeader() {
   const router = useRouter()
   const { isDark } = useUiSettings()
 
-  const [isLoggedIn] = useState<boolean>(false)
-  const [userName] = useState<string>('김현수')
   const [now, setNow] = useState('')
 
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -63,7 +62,6 @@ export default function ShellHeader() {
 
   const unreadCount = notifications.filter((item) => item.unread).length
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
-  const avatarInitial = userName.trim().charAt(0)
 
   useEffect(() => {
     setNow(formatHeaderDateTime(new Date()))
@@ -119,6 +117,10 @@ export default function ShellHeader() {
     setIsNotifyOpen((prev) => !prev)
   }
 
+  const iconBtnClass = isDark
+    ? 'inline-flex items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800 text-slate-100 shadow-sm transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
+    : 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
+
   return (
     <header
       className={`sticky top-0 z-50 flex h-16 w-full items-center justify-between gap-4 border-b px-6 ${
@@ -145,7 +147,7 @@ export default function ShellHeader() {
           disabled={isRefreshing}
           aria-label="현재 페이지 새로고침"
           title="새로고침"
-          className="inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 sm:px-3"
+          className={`${iconBtnClass} min-h-10 min-w-10 gap-1.5 px-2.5 text-sm font-medium sm:px-3`}
         >
           <RefreshCw
             size={16}
@@ -163,7 +165,7 @@ export default function ShellHeader() {
             title="알림"
             aria-expanded={isNotifyOpen}
             aria-haspopup="menu"
-            className="relative inline-flex min-h-12 min-w-12 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            className={`${iconBtnClass} relative min-h-12 min-w-12`}
           >
             <Bell size={20} aria-hidden />
             {unreadCount > 0 ? (
@@ -176,14 +178,26 @@ export default function ShellHeader() {
           {isNotifyOpen ? (
             <div
               role="menu"
-              className="absolute right-0 top-12 z-50 w-[min(92vw,320px)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
+              className={`absolute right-0 top-12 z-50 w-[min(92vw,320px)] overflow-hidden rounded-xl border shadow-lg ${
+                isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
+              }`}
             >
-              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-                <strong className="text-sm text-gray-800">알림</strong>
+              <div
+                className={`flex items-center justify-between border-b px-4 py-3 ${
+                  isDark ? 'border-slate-700' : 'border-gray-100'
+                }`}
+              >
+                <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>
+                  알림
+                </strong>
                 {unreadCount > 0 ? (
                   <button
                     type="button"
-                    className="text-xs font-medium text-gray-500 hover:text-gray-700"
+                    className={`text-xs font-medium ${
+                      isDark
+                        ? 'text-slate-400 hover:text-slate-200'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
                     onClick={() =>
                       setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })))
                     }
@@ -194,7 +208,11 @@ export default function ShellHeader() {
               </div>
 
               {notifications.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-gray-500">
+                <p
+                  className={`px-4 py-8 text-center text-sm ${
+                    isDark ? 'text-slate-400' : 'text-gray-500'
+                  }`}
+                >
                   새로운 알림이 없습니다.
                 </p>
               ) : (
@@ -203,8 +221,10 @@ export default function ShellHeader() {
                     key={item.id}
                     type="button"
                     role="menuitem"
-                    className={`block w-full border-b border-gray-50 px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 ${
-                      item.unread ? 'bg-blue-50/50' : ''
+                    className={`block w-full border-b px-4 py-3 text-left last:border-b-0 ${
+                      isDark
+                        ? `border-slate-800 hover:bg-slate-800 ${item.unread ? 'bg-blue-950/40' : ''}`
+                        : `border-gray-50 hover:bg-gray-50 ${item.unread ? 'bg-blue-50/50' : ''}`
                     }`}
                     onClick={() =>
                       setNotifications((prev) =>
@@ -212,11 +232,23 @@ export default function ShellHeader() {
                       )
                     }
                   >
-                    <div className="flex justify-between gap-2 text-sm font-semibold text-gray-800">
+                    <div
+                      className={`flex justify-between gap-2 text-sm font-semibold ${
+                        isDark ? 'text-slate-100' : 'text-gray-800'
+                      }`}
+                    >
                       <span className="min-w-0 truncate">{item.title}</span>
-                      <span className="shrink-0 text-xs font-normal text-slate-400">{item.time}</span>
+                      <span
+                        className={`shrink-0 text-xs font-normal ${
+                          isDark ? 'text-slate-500' : 'text-slate-400'
+                        }`}
+                      >
+                        {item.time}
+                      </span>
                     </div>
-                    <p className="mt-1 text-xs text-gray-500">{item.message}</p>
+                    <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                      {item.message}
+                    </p>
                   </button>
                 ))
               )}
@@ -224,38 +256,7 @@ export default function ShellHeader() {
           ) : null}
         </div>
 
-        {isLoggedIn ? (
-          <button
-            type="button"
-            aria-label="사용자 프로필"
-            title="사용자 프로필"
-            className="inline-flex min-h-10 max-w-[200px] items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-700">
-              {avatarInitial ? (
-                avatarInitial
-              ) : (
-                <User size={14} aria-hidden />
-              )}
-            </span>
-            <span className="truncate text-sm font-medium text-gray-800">
-              {userName} 님
-            </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label="로그인"
-            title="로그인"
-            onClick={() => router.push('/login')}
-            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white py-1.5 pl-1.5 pr-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600">
-              <User size={14} aria-hidden />
-            </span>
-            로그인
-          </button>
-        )}
+        <UserAuthMenu />
       </div>
     </header>
   )

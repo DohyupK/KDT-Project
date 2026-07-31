@@ -1,0 +1,16 @@
+---
+description: All database files and SQL schemas live under repo-root DB/
+alwaysApply: true
+---
+
+# DB 위치 규칙
+
+1. **모든 DB 관련 산출물**은 저장소 루트 [`DB/`](DB/) 아래에 둔다.
+   - MariaDB DDL: `DB/schema.sql`, `DB/chat_schema.sql`, `DB/issue_lot_tables.sql` 등
+   - 런타임 SQLite: `DB/data/*.sqlite` (chat, control, llm_keys 등)
+2. **앞으로 새로 만드는 DB/스키마/SQLite**도 반드시 `DB/` (또는 `DB/data/`)에 생성한다. `backend/data`, `backend/DB`, `ai-service/DB` 등에 **새로** 두지 않는다.
+3. 예외적으로 다른 폴더가 꼭 필요하면:
+   - 루트에 **`NEW DB/`** 폴더를 만들어 쓰거나
+   - 사용자에게 위치를 먼저 알리고 승인을 받는다.
+4. 백엔드 연동 PLAN의 시각 ERD 기준 DDL 경로는 [`DB/schema.sql`](DB/schema.sql)이다.
+5. 기존 `ai-service/DB/`에 남은 로컬 파일은 레거시일 수 있다. 새 기본 경로는 `DB/data/`이다.

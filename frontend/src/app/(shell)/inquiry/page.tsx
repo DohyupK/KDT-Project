@@ -12,6 +12,25 @@ import type {
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
+import axios from 'axios';
+import { authApi } from '@/api/authApi';
+import { inquiryApi, type InquiryApiItem } from '@/api/inquiryApi';
+import {
+  AUTH_CHANGED_EVENT,
+  getAuthToken,
+  getAuthUser,
+  isLoggedIn,
+  saveAuthSession,
+} from '@/lib/authStorage';
+import type { AuthUser } from '@/types';
+
+function getApiErrorMessage(err: unknown, fallback: string) {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { message?: string } | undefined;
+    if (data?.message) return data.message;
+  }
+  return fallback;
+}
 
 type InquiryStatus = '접수' | '답변완료';
 type Visibility = '공개' | '비공개';
@@ -47,97 +66,19 @@ type InquiryItem = {
   answeredAt?: string;
 };
 
-const INQUIRY_STORAGE_KEY = 'inquiry_records_db';
-
-function parseInquirySeq(id: string): number {
-  const matched = /^INQ-(\d+)$/.exec(id);
-  if (!matched) return 0;
-  const value = Number(matched[1]);
-  return Number.isFinite(value) ? value : 0;
-}
-
-function readInquiryRecords(): InquiryItem[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(INQUIRY_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    const result: InquiryItem[] = [];
-    const seen = new Set<string>();
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const row = item as Record<string, unknown>;
-      if (typeof row.id !== 'string' || !row.id) continue;
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      const status = row.status === '답변완료' ? '답변완료' : '접수';
-      const visibility = row.visibility === '비공개' ? '비공개' : '공개';
-      result.push({
-        id: row.id,
-        category: typeof row.category === 'string' ? row.category : '',
-        title: typeof row.title === 'string' ? row.title : '',
-        author: typeof row.author === 'string' ? row.author : '',
-        date: typeof row.date === 'string' ? row.date : '',
-        status,
-        content: typeof row.content === 'string' ? row.content : '',
-        answer: typeof row.answer === 'string' ? row.answer : '',
-        visibility,
-        ...(typeof row.answeredAt === 'string' && row.answeredAt
-          ? { answeredAt: row.answeredAt }
-          : {}),
-      });
-    }
-    return result;
-  } catch {
-    return [];
-  }
-}
-
-function writeInquiryRecords(records: InquiryItem[]): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    window.localStorage.setItem(INQUIRY_STORAGE_KEY, JSON.stringify(records));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function appendInquiryRecord(item: InquiryItem): boolean {
-  const current = readInquiryRecords();
-  if (current.some((row) => row.id === item.id)) return true;
-  return writeInquiryRecords([item, ...current]);
-}
-
-function allocateInquiryId(existingIds: string[]): string {
-  const maxSeq = existingIds.reduce((max, id) => Math.max(max, parseInquirySeq(id)), 0);
-  return `INQ-${String(maxSeq + 1).padStart(3, '0')}`;
-}
-
-function mergeInquiryBoardList(
-  baseList: InquiryItem[],
-  storedList: InquiryItem[],
-  staticIds: Set<string>,
-): InquiryItem[] {
-  const byId = new Map<string, InquiryItem>();
-
-  for (const item of baseList) {
-    byId.set(item.id, item);
-  }
-
-  const storedOnly: InquiryItem[] = [];
-  for (const item of storedList) {
-    if (staticIds.has(item.id)) continue;
-    byId.set(item.id, item);
-    storedOnly.push(item);
-  }
-
-  const rest = [...byId.values()].filter(
-    (item) => !storedOnly.some((stored) => stored.id === item.id),
-  );
-  return [...storedOnly, ...rest];
+function mapApiItem(item: InquiryApiItem): InquiryItem {
+  return {
+    id: item.id,
+    category: item.category,
+    title: item.title,
+    author: item.author,
+    date: item.date,
+    status: item.status === '답변완료' ? '답변완료' : '접수',
+    content: item.content,
+    answer: item.answer ?? '',
+    visibility: item.visibility === '비공개' ? '비공개' : '공개',
+    ...(item.answeredAt ? { answeredAt: item.answeredAt } : {}),
+  };
 }
 
 const CATEGORIES = [
@@ -162,144 +103,7 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
   { key: '답변완료', label: '답변완료' },
 ];
 
-const USER_NAME = '홍길동';
-const USER_EMAIL = 'hong@example.com';
 const PAGE_SIZE = 5;
-
-const INITIAL_INQUIRIES: InquiryItem[] = [
-  {
-    id: 'INQ-012',
-    category: '시스템 오류 제보',
-    title: '대시보드 KPI 수치가 간헐적으로 0으로 표시됩니다',
-    author: '김민수',
-    date: '2026-07-21',
-    status: '답변완료',
-    content: '생산 대시보드에서 새로고침 후 KPI 카드가 잠깐 0으로 보이다가 복구됩니다.',
-    answer: '캐시 갱신 지연 이슈를 확인했으며, 다음 배포에서 로딩 스켈레톤으로 개선 예정입니다.',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-011',
-    category: '기능 개선 제안',
-    title: '이슈 목록에 담당자 필터를 추가해 주세요',
-    author: '이서연',
-    date: '2026-07-20',
-    status: '접수',
-    content: '담당자별 이슈만 빠르게 보고 싶습니다. 다중 선택 필터면 더 좋습니다.',
-    answer: '',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-010',
-    category: '비즈니스 협업 문의',
-    title: '외부 파트너사 계정 공유 가능 여부',
-    author: '박준호',
-    date: '2026-07-19',
-    status: '답변완료',
-    content: '협력사 QC 담당자에게 읽기 전용 계정 발급이 가능한지 문의드립니다.',
-    answer: '읽기 전용 게스트 계정은 보안 승인 후 발급 가능합니다. IT 지원팀에 요청해 주세요.',
-    visibility: '비공개',
-  },
-  {
-    id: 'INQ-009',
-    category: '불량 검사 문의',
-    title: 'LOT-8821 수분 함량 편차 확인 요청',
-    author: '정하늘',
-    date: '2026-07-18',
-    status: '접수',
-    content: '출하 전 검사에서 수분 함량이 상한을 초과한 샘플이 있습니다. 원인 분석 부탁드립니다.',
-    answer: '',
-    visibility: '비공개',
-  },
-  {
-    id: 'INQ-008',
-    category: '기타',
-    title: '사이트 매뉴얼 PDF 다운로드 링크가 동작하지 않습니다',
-    author: '오수진',
-    date: '2026-07-17',
-    status: '답변완료',
-    content: '헤더의 사이트 매뉴얼 버튼을 눌러도 반응이 없습니다.',
-    answer: '정적 파일 경로를 수정했고, 현재는 정상 다운로드됩니다.',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-007',
-    category: '시스템 오류 제보',
-    title: '문의 첨부파일 업로드 시 용량 제한 안내가 없습니다',
-    author: '한도윤',
-    date: '2026-07-16',
-    status: '접수',
-    content: '대용량 파일을 올리면 실패하는데 안내 문구가 없어 원인을 알기 어렵습니다.',
-    answer: '',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-006',
-    category: '기능 개선 제안',
-    title: '지식베이스 검색에 태그 필터를 추가해 주세요',
-    author: '윤채원',
-    date: '2026-07-15',
-    status: '답변완료',
-    content: '공정/설비 태그로 자료를 좁혀보고 싶습니다.',
-    answer: '태그 필터는 백로그에 반영했으며 다음 스프린트에서 검토합니다.',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-005',
-    category: '비즈니스 협업 문의',
-    title: '월간 품질 리포트 자동 공유 일정 협의',
-    author: '최유진',
-    date: '2026-07-14',
-    status: '접수',
-    content: '매월 1일 품질 리포트를 메일로 공유하는 프로세스를 협의하고 싶습니다.',
-    answer: '',
-    visibility: '비공개',
-  },
-  {
-    id: 'INQ-004',
-    category: '불량 검사 문의',
-    title: '표면 결함 판정 기준 문서 위치 문의',
-    author: '강도현',
-    date: '2026-07-13',
-    status: '답변완료',
-    content: '최신 표면 결함 판정 기준서가 어디에 있는지 알려주세요.',
-    answer: '지식베이스 > 품질 기준서 폴더의 표면결함_판정기준_v3.pdf를 확인해 주세요.',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-003',
-    category: '기타',
-    title: '알림음 설정 초기화 방법',
-    author: '서예린',
-    date: '2026-07-12',
-    status: '접수',
-    content: '이슈 알림음이 너무 잦아 끄고 싶은데 설정 위치를 모르겠습니다.',
-    answer: '',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-002',
-    category: '시스템 오류 제보',
-    title: '모바일에서 테이블 가로 스크롤이 끊깁니다',
-    author: '남기태',
-    date: '2026-07-11',
-    status: '답변완료',
-    content: '태블릿 가로 모드에서 문의/이슈 테이블이 중간에 끊깁니다.',
-    answer: '반응형 overflow 설정을 수정해 배포했습니다. 캐시 삭제 후 재확인 부탁드립니다.',
-    visibility: '공개',
-  },
-  {
-    id: 'INQ-001',
-    category: '기능 개선 제안',
-    title: '챗봇 답변에 LOT 바로가기 링크 추가 요청',
-    author: '문지아',
-    date: '2026-07-10',
-    status: '접수',
-    content: '챗봇이 LOT를 언급할 때 상세 페이지로 바로 이동되면 좋겠습니다.',
-    answer: '',
-    visibility: '공개',
-  },
-];
 
 const colors = {
   bg: '#f8fafc',
@@ -316,17 +120,6 @@ const colors = {
   amber: '#d97706',
   amberSoft: '#fffbeb',
 };
-
-function formatToday() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function formatAnsweredAt(date = new Date()) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 function matchesCategoryFilter(category: string, filter: CategoryFilterKey) {
   if (filter === 'all') return true;
@@ -417,7 +210,8 @@ function visibilityBadgeStyle(visibility: Visibility, isDark: boolean): CSSPrope
 
 export default function InquiryPage() {
   const { isDark, language } = useUiSettings();
-  const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES);
+  const [inquiries, setInquiries] = useState<InquiryItem[]>([]);
+  const [isLoadingList, setIsLoadingList] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
   const [draftFilters, setDraftFilters] = useState<InquiryFilterState>(EMPTY_INQUIRY_FILTERS);
@@ -441,13 +235,18 @@ export default function InquiryPage() {
     content: string;
   }>({ category: '', subject: '', content: '' });
   const [toastMessage, setToastMessage] = useState('');
+  const [toastTone, setToastTone] = useState<'success' | 'warning'>('success');
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
+  const [writerProfile, setWriterProfile] = useState<AuthUser | null>(null);
+  const [isLoadingWriter, setIsLoadingWriter] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const categoryFieldRef = useRef<HTMLDivElement | null>(null);
   const subjectInputRef = useRef<HTMLInputElement | null>(null);
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const nextIdRef = useRef(13);
   const toastTimerRef = useRef<number | null>(null);
   const answerTimerRef = useRef<number | null>(null);
   const answerSectionRef = useRef<HTMLDivElement | null>(null);
@@ -554,38 +353,55 @@ export default function InquiryPage() {
     }
   };
 
-  const showSuccessToast = (message?: string) => {
+  const showToast = (message: string, tone: 'success' | 'warning' = 'success') => {
     clearToastTimer();
-    setToastMessage(
-      message ?? '✓ 문의가 정상 접수되었습니다. 관리자 확인 후 답변드릴 예정입니다.',
-    );
+    setToastTone(tone);
+    setToastMessage(message);
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage('');
       toastTimerRef.current = null;
-    }, 3000);
+    }, 3200);
   };
 
-  const staticInquiryIds = useMemo(
-    () => new Set(INITIAL_INQUIRIES.map((item) => item.id)),
-    [],
-  );
+  const showSuccessToast = (message?: string) => {
+    const text =
+      message ?? '✓ 문의가 정상 접수되었습니다. 관리자 확인 후 답변드릴 예정입니다.';
+    const tone =
+      text.includes('로그인') || text.includes('실패') || text.includes('불러오지')
+        ? 'warning'
+        : 'success';
+    showToast(text, tone);
+  };
 
-  const refreshStoredInquiries = () => {
-    const stored = readInquiryRecords();
-    setInquiries((prev) => mergeInquiryBoardList(prev, stored, staticInquiryIds));
+  const loadInquiriesFromApi = async () => {
+    if (!isLoggedIn()) {
+      setInquiries([]);
+      return;
+    }
+    setIsLoadingList(true);
+    try {
+      const { data } = await inquiryApi.list({ page: 1, pageSize: 50 });
+      setInquiries(data.items.map(mapApiItem));
+    } catch (err) {
+      setInquiries([]);
+      showToast(getApiErrorMessage(err, '문의 목록을 불러오지 못했습니다.'), 'warning');
+    } finally {
+      setIsLoadingList(false);
+    }
   };
 
   useEffect(() => {
-    refreshStoredInquiries();
-  }, []);
-
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== INQUIRY_STORAGE_KEY) return;
-      refreshStoredInquiries();
+    const syncLocalUser = () => {
+      const loggedIn = isLoggedIn();
+      setWriterProfile(getAuthUser());
+      setIsAuthenticated(loggedIn);
+      setAuthReady(true);
+      if (loggedIn) void loadInquiriesFromApi();
+      else setInquiries([]);
     };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    syncLocalUser();
+    window.addEventListener(AUTH_CHANGED_EVENT, syncLocalUser);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, syncLocalUser);
   }, []);
 
   useEffect(() => {
@@ -611,6 +427,7 @@ export default function InquiryPage() {
   const closeModal = () => {
     resetForm();
     setIsModalOpen(false);
+    setIsLoadingWriter(false);
   };
 
   useEffect(() => {
@@ -620,6 +437,7 @@ export default function InquiryPage() {
       if (isModalOpen) {
         resetForm();
         setIsModalOpen(false);
+        setIsLoadingWriter(false);
       } else {
         setSelectedInquiryId(null);
       }
@@ -628,9 +446,32 @@ export default function InquiryPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, [isModalOpen, selectedInquiryId]);
 
-  const openModal = () => {
+  const openModal = async () => {
+    if (!isAuthenticated) {
+      showSuccessToast('문의하려면 로그인이 필요합니다.');
+      return;
+    }
+
     resetForm();
     setIsModalOpen(true);
+    setIsLoadingWriter(true);
+
+    const localUser = getAuthUser();
+    if (localUser) setWriterProfile(localUser);
+
+    try {
+      const { data } = await authApi.getProfile();
+      setWriterProfile(data.user);
+      const token = getAuthToken();
+      if (token) saveAuthSession(token, data.user);
+    } catch {
+      if (!localUser) {
+        setIsModalOpen(false);
+        showSuccessToast('프로필을 불러오지 못했습니다. 다시 로그인해 주세요.');
+      }
+    } finally {
+      setIsLoadingWriter(false);
+    }
   };
 
   const resetFilters = () => {
@@ -744,7 +585,7 @@ export default function InquiryPage() {
     setIsEditingAnswer(true);
   };
 
-  const handleSubmitAnswer = () => {
+  const handleSubmitAnswer = async () => {
     if (!selectedInquiry || isSubmittingAnswer) return;
 
     const trimmed = answerDraft.trim();
@@ -762,50 +603,23 @@ export default function InquiryPage() {
     setAnswerError('');
     setIsSubmittingAnswer(true);
 
-    clearAnswerTimer();
-    answerTimerRef.current = window.setTimeout(() => {
-      try {
-        const answeredAt = formatAnsweredAt();
-        setInquiries((prev) =>
-          prev.map((item) =>
-            item.id === inquiryId
-              ? {
-                  ...item,
-                  status: '답변완료',
-                  answer: trimmed,
-                  answeredAt,
-                }
-              : item,
-          ),
-        );
-
-        const stored = readInquiryRecords();
-        const existsInStorage = stored.some((item) => item.id === inquiryId);
-        if (existsInStorage) {
-          writeInquiryRecords(
-            stored.map((item) =>
-              item.id === inquiryId
-                ? { ...item, status: '답변완료', answer: trimmed, answeredAt }
-                : item,
-            ),
-          );
-        }
-
-        setAnswerDraft('');
-        setIsEditingAnswer(false);
-        showSuccessToast(
-          isEdit
-            ? '✅ 문의 답변이 수정되었습니다.'
-            : '✅ 문의 답변이 등록되었습니다.',
-        );
-      } finally {
-        setIsSubmittingAnswer(false);
-        answerTimerRef.current = null;
-      }
-    }, 500);
+    try {
+      const { data } = await inquiryApi.answer(inquiryId, trimmed);
+      const updated = mapApiItem(data.item);
+      setInquiries((prev) => prev.map((item) => (item.id === inquiryId ? updated : item)));
+      setAnswerDraft('');
+      setIsEditingAnswer(false);
+      showSuccessToast(
+        isEdit ? '✅ 문의 답변이 수정되었습니다.' : '✅ 문의 답변이 등록되었습니다.',
+      );
+    } catch (err) {
+      setAnswerError(getApiErrorMessage(err, '답변 등록에 실패했습니다.'));
+    } finally {
+      setIsSubmittingAnswer(false);
+    }
   };
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     const nextErrors = {
@@ -836,50 +650,30 @@ export default function InquiryPage() {
 
     if (!category) return;
 
+    if (!isAuthenticated || !writerProfile?.name?.trim() || !writerProfile?.email?.trim()) {
+      setErrorMessage('로그인 계정 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
+      return;
+    }
+
     setErrorMessage('');
-
-    const existingIds = [
-      ...inquiries.map((item) => item.id),
-      ...readInquiryRecords().map((item) => item.id),
-    ];
-    const newId = allocateInquiryId(existingIds);
-    nextIdRef.current = Math.max(nextIdRef.current, parseInquirySeq(newId) + 1);
-
-    const payload = {
-      id: newId,
-      category,
-      title: subject.trim(),
-      author: USER_NAME,
-      date: formatToday(),
-      status: '접수' as const,
-      content: content.trim(),
-      answer: '',
-      visibility,
-      email: USER_EMAIL,
-      files: files.map((file) => file.name),
-    };
-
-    console.log('문의 접수 데이터:', payload);
-
-    const newItem: InquiryItem = {
-      id: payload.id,
-      category: payload.category,
-      title: payload.title,
-      author: payload.author,
-      date: payload.date,
-      status: payload.status,
-      content: payload.content,
-      answer: payload.answer,
-      visibility: payload.visibility,
-    };
-
-    setInquiries((prev) => [newItem, ...prev.filter((item) => item.id !== newItem.id)]);
-    const saved = appendInquiryRecord(newItem);
-    setCurrentPage(1);
-    resetForm();
-    setIsModalOpen(false);
-    if (saved) {
+    setIsSubmittingInquiry(true);
+    try {
+      const { data } = await inquiryApi.create({
+        category,
+        visibility,
+        title: subject.trim(),
+        content: content.trim(),
+      });
+      const created = mapApiItem(data.item);
+      setInquiries((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+      setCurrentPage(1);
+      resetForm();
+      setIsModalOpen(false);
       showSuccessToast();
+    } catch (err) {
+      setErrorMessage(getApiErrorMessage(err, '문의 접수에 실패했습니다.'));
+    } finally {
+      setIsSubmittingInquiry(false);
     }
   };
 
@@ -1007,11 +801,20 @@ export default function InquiryPage() {
 
         {toastMessage ? (
           <div
-            role="status"
-            aria-live="polite"
-            className="fixed bottom-5 right-5 z-[120] max-w-[min(420px,calc(100vw-2rem))] rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg"
+            className="fixed inset-0 z-[220] flex items-center justify-center bg-black/35 p-4"
+            role="presentation"
           >
-            {toastMessage}
+            <div
+              role="status"
+              aria-live="polite"
+              className={`max-w-[min(440px,calc(100vw-2rem))] rounded-2xl border px-5 py-4 text-center text-sm font-semibold shadow-2xl ${
+                toastTone === 'warning'
+                  ? 'border-amber-300 bg-amber-50 text-amber-900'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              }`}
+            >
+              {toastMessage}
+            </div>
           </div>
         ) : null}
 
@@ -1146,9 +949,15 @@ export default function InquiryPage() {
         <section style={{ ...card, padding: 0, overflow: 'hidden' }}>
           {visibleInquiries.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: mutedText, fontSize: 14 }}>
-              {inquiries.length === 0
-                ? '등록된 문의가 없습니다.'
-                : '조건에 맞는 문의가 없습니다.'}
+              {isLoadingList
+                ? '문의 목록을 불러오는 중...'
+                : !authReady
+                  ? '로그인 상태를 확인하는 중...'
+                  : !isAuthenticated
+                  ? '로그인 후 문의 목록을 확인할 수 있습니다.'
+                  : inquiries.length === 0
+                    ? '등록된 문의가 없습니다.'
+                    : '조건에 맞는 문의가 없습니다.'}
             </div>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -1676,7 +1485,9 @@ export default function InquiryPage() {
                       cursor: 'default',
                     }}
                   >
-                    {USER_NAME}
+                    {isLoadingWriter
+                      ? '불러오는 중...'
+                      : writerProfile?.name?.trim() || '—'}
                   </div>
                 </div>
                 <div>
@@ -1689,7 +1500,9 @@ export default function InquiryPage() {
                       cursor: 'default',
                     }}
                   >
-                    {USER_EMAIL}
+                    {isLoadingWriter
+                      ? '불러오는 중...'
+                      : writerProfile?.email?.trim() || '—'}
                   </div>
                 </div>
               </div>
@@ -1862,8 +1675,12 @@ export default function InquiryPage() {
                 <button type="button" onClick={closeModal} style={secondaryBtn}>
                   취소
                 </button>
-                <button type="submit" style={primaryBtn}>
-                  문의 접수
+                <button
+                  type="submit"
+                  style={primaryBtn}
+                  disabled={isSubmittingInquiry || isLoadingWriter}
+                >
+                  {isSubmittingInquiry ? '접수 중...' : '문의 접수'}
                 </button>
               </div>
             </form>

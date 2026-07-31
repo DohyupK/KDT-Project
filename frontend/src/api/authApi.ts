@@ -39,6 +39,9 @@ export const authApi = {
   updateProfile: (payload: UpdateProfileRequest) =>
     apiClient.put<{ user: AuthUser; message: string }>('/auth/profile', payload),
 
+  verifyCurrentPassword: (password: string) =>
+    apiClient.post<{ valid: boolean; message: string }>('/auth/verify-password', { password }),
+
   withdrawAccount: (password: string) =>
     apiClient.delete<MessageResponse>('/auth/account', { data: { password } }),
 

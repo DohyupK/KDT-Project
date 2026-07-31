@@ -74,6 +74,13 @@ export const updateProfile = asyncHandler(async (req, res) => {
   res.status(200).json(result)
 })
 
+export const verifyCurrentPassword = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const password = String(req.body?.password ?? '')
+  const result = await authService.verifyCurrentPassword(req.auth.userId, password)
+  res.status(200).json(result)
+})
+
 export const withdrawAccount = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
   const { password } = req.body

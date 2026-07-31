@@ -32,7 +32,20 @@
 - `frontend/src/app/login/page.tsx`
 - `frontend/src/api/authApi.ts`
 - `frontend/src/api/axios.ts`
-- `frontend/src/lib/authStorage.ts`
+- `frontend/src/lib/authStorage.ts` (`kdt-auth-token` / `kdt-auth-user`, `AUTH_CHANGED_EVENT`)
+- `frontend/src/components/layout/UserAuthMenu.tsx` — 헤더 프로필 · 로그아웃
+- `frontend/src/components/layout/PersonalInfoModal.tsx` — **내 정보 팝업** (이메일·연락처·비밀번호)
+- `frontend/src/app/(shell)/setting/page.tsx` — 시스템 설정만 (개인정보 UI 없음)
+
+### 내 정보 UX (고정)
+
+| 항목 | 내용 |
+|------|------|
+| 진입 | 헤더 프로필 → 「내 정보」 |
+| UI | 모달 팝업 (`PersonalInfoModal`). `/setting`으로 이동하지 않음 |
+| API | `GET/PUT /api/auth/profile` |
+| 편집 | 이메일·연락처·비밀번호 / 아이디·성명 읽기 전용 |
+| 설정 페이지 | 폰트·테마·새로고침·알림·제어 한계치만 |
 
 ## 백엔드 패키지 (`backend/package.json`)
 
@@ -52,7 +65,7 @@
 - `backend/src/controllers/auth.controller.ts`
 - `backend/src/services/auth.service.ts`
 - `backend/src/db/connection.ts`
-- `backend/schema.sql` (`users` 테이블)
+- `DB/schema.sql` (`users` 테이블)
 
 ## Auth API (요약)
 
@@ -88,7 +101,7 @@
 | `JWT_SECRET` | JWT 서명 비밀 |
 | `CORS_ORIGIN` | 프론트 origin (`http://localhost:3000`) |
 | `CHAT_STORE` | 챗·제어 저장 (`mariadb` 권장 / `sqlite` / `memory`) — 로그인 `users`와 같은 `DB_*` |
-| `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(16자+, Git 금지). 암호문은 `ai-service/DB/llm_keys.sqlite` |
+| `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(16자+, Git 금지). 암호문은 `DB/data/llm_keys.sqlite` |
 
 템플릿: `backend/.env.example` (비밀번호 비움).
 
@@ -129,10 +142,11 @@ npm run dev
 |------|------|
 | 2026-07-28 | 초안. 로그인 공용 Ubuntu MariaDB 연동에 쓰는 스택·패키지 정리. |
 | 2026-07-28 | `bcryptjs` 미설치(`ERR_MODULE_NOT_FOUND`) 원인·`npm install` 절차 기록. backend에 의존성 재설치 완료. |
-| 2026-07-28 | User 작명: 로그인 영속 테이블 `users`, 로그인 식별자 컬럼 `user_id` (`backend/schema.sql`). |
+| 2026-07-28 | User 작명: 로그인 영속 테이블 `users`, 로그인 식별자 컬럼 `user_id` (`DB/schema.sql`). |
 
 | 2026-07-28 | 테마: Setting이 저장한 `kdt-user-settings` / `system_settings_config`(localStorage)를 `/login`·`UserAuthMenu`가 `readStoredUiSettings`·`useUiSettings`로 반영. 다크(0)/라이트(1). |
 | 2026-07-28 | FE 패키지: `next` / `eslint-config-next` **16.2.12**. `allowScripts`: frontend `sharp`·`unrs-resolver`, backend `esbuild`. |
 | 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 `backend/.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
 | 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
 | 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |
+| 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/profile-personal-info-modal.mdc`. |
