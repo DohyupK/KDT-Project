@@ -25,6 +25,8 @@
 | `frontend/src/api/aiApi.ts` | `POST /api/chat` + `session_id`; `/ai` health |
 | `frontend/src/types/index.ts` | `AppData.fillThreshold` — 이름 변경 금지 |
 | `frontend/src/api/axios.ts` | `baseURL: '/api'` (backend) |
+| `frontend/src/components/layout/UserAuthMenu.tsx` | 헤더 로그인/프로필 · 로그아웃 |
+| `frontend/src/components/layout/PersonalInfoModal.tsx` | 내 정보 팝업 (프로필 API) |
 | `frontend/next.config.ts` | `/api` → `:3001`; `/ai` → `127.0.0.1:8800` |
 
 ## backend
@@ -35,7 +37,9 @@
 | `backend/src/routes/chat.ts` | `POST /api/chat` |
 | `backend/src/services/securityGate.ts` | 보안 키워드 → redirect |
 | `backend/src/services/similarity.ts` | 유사 질문 ≥ 3 → guideline |
-| `backend/src/sql/schema.sql` | `chat_sessions` / `chat_messages` |
+| `DB/schema.sql` | `users` / settings / lots / issues / handover |
+| `DB/chat_schema.sql` | `chat_sessions` / `chat_messages` |
+| `DB/data/*.sqlite` | chat / control / llm_keys 런타임 SQLite |
 
 ## ai-service
 

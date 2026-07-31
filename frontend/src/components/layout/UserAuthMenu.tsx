@@ -5,8 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { LogOut, User } from 'lucide-react'
 import { authApi } from '@/api/authApi'
-import { clearAuthSession, getAuthUser, isLoggedIn } from '@/lib/authStorage'
+import {
+  AUTH_CHANGED_EVENT,
+  clearAuthSession,
+  getAuthUser,
+  isLoggedIn,
+} from '@/lib/authStorage'
 import { useUiSettings } from '@/components/layout/AppShell'
+import PersonalInfoModal from '@/components/layout/PersonalInfoModal'
 
 type UserAuthMenuProps = {
   open?: boolean
@@ -21,6 +27,7 @@ export default function UserAuthMenu({ open, onOpenChange }: UserAuthMenuProps) 
   const [userEmail, setUserEmail] = useState('')
   const [authReady, setAuthReady] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   const isControlled = typeof open === 'boolean' && typeof onOpenChange === 'function'
@@ -42,7 +49,11 @@ export default function UserAuthMenu({ open, onOpenChange }: UserAuthMenuProps) 
     }
     syncAuth()
     window.addEventListener('storage', syncAuth)
-    return () => window.removeEventListener('storage', syncAuth)
+    window.addEventListener(AUTH_CHANGED_EVENT, syncAuth)
+    return () => {
+      window.removeEventListener('storage', syncAuth)
+      window.removeEventListener(AUTH_CHANGED_EVENT, syncAuth)
+    }
   }, [])
 
   useEffect(() => {
@@ -74,6 +85,7 @@ export default function UserAuthMenu({ open, onOpenChange }: UserAuthMenuProps) 
     setUserName('')
     setUserEmail('')
     setMenuOpen(false)
+    setProfileOpen(false)
     router.push('/login')
   }
 
@@ -98,68 +110,74 @@ export default function UserAuthMenu({ open, onOpenChange }: UserAuthMenuProps) 
 
   if (loggedIn) {
     return (
-      <div ref={menuRef} className="relative">
-        <button
-          type="button"
-          onClick={() => setMenuOpen(!menuOpen)}
-          aria-label="사용자 메뉴"
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          title="사용자 메뉴"
-          className={triggerClass}
-        >
-          <span className={avatarClass} aria-hidden>
-            {userName.charAt(0) || 'U'}
-          </span>
-          <span className="min-w-0 text-left">
-            <span className="block max-w-[110px] truncate text-sm font-semibold leading-tight sm:max-w-[140px]">
-              {userName || '사용자'}
-            </span>
-            <span
-              className={`hidden max-w-[140px] truncate text-[11px] font-normal leading-tight sm:block ${
-                isDark ? 'text-slate-400' : 'text-slate-500'
-              }`}
-            >
-              {userEmail || '로그인됨'}
-            </span>
-          </span>
-        </button>
-        {menuOpen && (
-          <div
-            role="menu"
-            className={`absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border shadow-lg ${
-              isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
-            }`}
+      <>
+        <div ref={menuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="사용자 메뉴"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            title="사용자 메뉴"
+            className={triggerClass}
           >
-            <Link
-              href="/setting"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
-                isDark
-                  ? 'text-slate-200 hover:bg-slate-800'
-                  : 'text-gray-700 hover:bg-gray-50'
+            <span className={avatarClass} aria-hidden>
+              {userName.charAt(0) || 'U'}
+            </span>
+            <span className="min-w-0 text-left">
+              <span className="block max-w-[110px] truncate text-sm font-semibold leading-tight sm:max-w-[140px]">
+                {userName || '사용자'}
+              </span>
+              <span
+                className={`hidden max-w-[140px] truncate text-[11px] font-normal leading-tight sm:block ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}
+              >
+                {userEmail || '로그인됨'}
+              </span>
+            </span>
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className={`absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border shadow-lg ${
+                isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
               }`}
             >
-              <User size={16} aria-hidden />
-              내 정보
-            </Link>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={handleLogout}
-              className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
-                isDark
-                  ? 'text-slate-200 hover:bg-slate-800'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              <LogOut size={16} aria-hidden />
-              로그아웃
-            </button>
-          </div>
-        )}
-      </div>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setProfileOpen(true)
+                }}
+                className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
+                  isDark
+                    ? 'text-slate-200 hover:bg-slate-800'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <User size={16} aria-hidden />
+                내 정보
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={handleLogout}
+                className={`flex w-full items-center gap-2 px-4 py-3 text-sm transition-colors ${
+                  isDark
+                    ? 'text-slate-200 hover:bg-slate-800'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <LogOut size={16} aria-hidden />
+                로그아웃
+              </button>
+            </div>
+          )}
+        </div>
+        <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+      </>
     )
   }
 

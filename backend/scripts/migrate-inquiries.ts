@@ -1,10 +1,14 @@
 import 'dotenv/config'
 import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import mariadb from 'mariadb'
-import * as lotService from '../src/services/lot.service.ts'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 async function main() {
-  const sql = fs.readFileSync('../DB/issue_lot_tables.sql', 'utf8')
+  const sqlPath = path.resolve(__dirname, '../../DB/inquiries.sql')
+  const sql = fs.readFileSync(sqlPath, 'utf8')
   const conn = await mariadb.createConnection({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT),
@@ -15,15 +19,10 @@ async function main() {
   })
   try {
     await conn.query(sql)
-    console.log('DDL_OK')
+    console.log('DDL_OK inquiries')
   } finally {
     await conn.end()
   }
-
-  const imported = await lotService.importLotsFromCsv()
-  console.log('IMPORT', JSON.stringify(imported))
-  const issuesCreated = await lotService.ensureIssuesForRiskLots()
-  console.log('ISSUES_CREATED', issuesCreated)
 }
 
 main()

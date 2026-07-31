@@ -1,5 +1,5 @@
-# Encrypted LLM API keys (written by Express backend).
-# Do not commit *.sqlite — secrets at rest (ciphertext) still stay local.
+# Legacy folder. New default for LLM keys: ../../DB/data/llm_keys.sqlite
+# Do not commit leftover *.sqlite here.
 *.sqlite
 *.sqlite-*
 !.gitkeep

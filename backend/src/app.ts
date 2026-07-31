@@ -7,6 +7,7 @@ import { settingsRouter } from './routes/settings.js'
 import { securityChatRouter } from './routes/securityChat.js'
 import { llmKeysRouter } from './routes/llmKeys.js'
 import { issueRouter } from './routes/issue.routes.js'
+import inquiryRoutes from './routes/inquiry.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 export function createApp() {
@@ -39,6 +40,7 @@ export function createApp() {
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
       past_issues: 'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId',
       handover_history: 'GET /api/knowledge/handover-history (후속)',
+      inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',
       security_chat: 'POST /api/security-chat',
       llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',
@@ -50,6 +52,7 @@ export function createApp() {
   })
 
   app.use('/api/auth', authRoutes)
+  app.use('/api/inquiries', inquiryRoutes)
   app.use('/api', issueRouter)
   app.use('/api', chatRouter)
   app.use('/api', securityChatRouter)

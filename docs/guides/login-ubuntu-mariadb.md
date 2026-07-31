@@ -65,7 +65,7 @@
    EXIT;
    ```
 5. `bind-address = 0.0.0.0` (`/etc/mysql/mariadb.conf.d/50-server.cnf`) 후 서비스 restart  
-6. `users` 테이블: `backend/schema.sql`의 `users` 정의 적용  
+6. `users` 테이블: `DB/schema.sql`의 `users` 정의 적용  
 7. 위 **재연결** 5~6과 동일하게 `.env` · 팀 검증
 
 ### SSH / nano 주의

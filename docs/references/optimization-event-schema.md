@@ -15,7 +15,7 @@ Undo 타임아웃 후에만 FE 실측 폼 노출.
 
 | 모드 | 위치 |
 |------|------|
-| sqlite (기본) | `backend/data/control.sqlite` |
+| sqlite (기본) | `DB/data/control.sqlite` |
 | mariadb | 테이블 `optimization_events` |
 | memory | 프로세스 메모리 (개발용) |
 

@@ -32,7 +32,7 @@
 ## 5. Approve 로그 (Step 3)
 
 - [ ] `POST /api/control/approve` → `status=approved`, `event_id` 반환
-- [ ] `backend/data/control.sqlite` 행 `status=approved`
+- [ ] `DB/data/control.sqlite` 행 `status=approved`
 - [ ] `POST /api/control/approve/:id/revert` → `status=reverted` (행 유지)
 - [ ] 챗봇 5초 Undo 스낵바 *(브라우저)*
 

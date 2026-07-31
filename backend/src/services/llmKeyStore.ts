@@ -1,6 +1,6 @@
 /**
- * Encrypted LLM API keys stored under ai-service/DB (not backend/data).
- * Logic (encrypt/CRUD) lives in Express; only the sqlite file path is in ai-service.
+ * Encrypted LLM API keys stored under repo DB/data (SQLite).
+ * Logic (encrypt/CRUD) lives in Express.
  */
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import fs from 'node:fs'
@@ -32,9 +32,9 @@ export type LlmKeySecret = LlmKeyRecord & {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-/** Default: <repo>/ai-service/DB/llm_keys.sqlite */
+/** Default: <repo>/DB/data/llm_keys.sqlite */
 export function defaultLlmKeysDbPath(): string {
-  return path.resolve(__dirname, '../../../ai-service/DB/llm_keys.sqlite')
+  return path.resolve(__dirname, '../../../DB/data/llm_keys.sqlite')
 }
 
 function dbPath(): string {

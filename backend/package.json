@@ -10,6 +10,8 @@
     "migrate:issue-lots": "tsx scripts/migrate-issue-lots.ts",
     "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
+    "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
+    "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
