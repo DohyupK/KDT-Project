@@ -10,11 +10,29 @@ import type {
   MouseEvent,
 } from 'react';
 import { useUiSettings } from '@/components/layout/AppShell';
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import DateInput from '@/components/DateInput';
 
 type InquiryStatus = '접수' | '답변완료';
 type Visibility = '공개' | '비공개';
 type CategoryFilterKey = 'all' | 'system' | 'feature' | 'business' | 'etc';
 type StatusFilterKey = 'all' | InquiryStatus;
+
+type InquiryFilterState = {
+  category: CategoryFilterKey;
+  status: StatusFilterKey;
+  search: string;
+  startDate: string;
+  endDate: string;
+};
+
+const EMPTY_INQUIRY_FILTERS: InquiryFilterState = {
+  category: 'all',
+  status: 'all',
+  search: '',
+  startDate: '',
+  endDate: '',
+};
 
 type InquiryItem = {
   id: string;
@@ -146,7 +164,7 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 
 const USER_NAME = '홍길동';
 const USER_EMAIL = 'hong@example.com';
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 
 const INITIAL_INQUIRIES: InquiryItem[] = [
   {
@@ -402,9 +420,8 @@ export default function InquiryPage() {
   const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterKey>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [draftFilters, setDraftFilters] = useState<InquiryFilterState>(EMPTY_INQUIRY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<InquiryFilterState>(EMPTY_INQUIRY_FILTERS);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInquiryId, setSelectedInquiryId] = useState<string | null>(null);
@@ -438,10 +455,12 @@ export default function InquiryPage() {
   const dragDepthRef = useRef(0);
 
   const filteredInquiries = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
+    const keyword = appliedFilters.search.trim().toLowerCase();
     return inquiries.filter((item) => {
-      if (!matchesCategoryFilter(item.category, categoryFilter)) return false;
-      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+      if (!matchesCategoryFilter(item.category, appliedFilters.category)) return false;
+      if (appliedFilters.status !== 'all' && item.status !== appliedFilters.status) return false;
+      if (appliedFilters.startDate && item.date < appliedFilters.startDate) return false;
+      if (appliedFilters.endDate && item.date > appliedFilters.endDate) return false;
 
       if (!keyword) return true;
 
@@ -454,7 +473,7 @@ export default function InquiryPage() {
         item.title.toLowerCase().includes(keyword) || item.content.toLowerCase().includes(keyword)
       );
     });
-  }, [inquiries, categoryFilter, statusFilter, searchQuery]);
+  }, [inquiries, appliedFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filteredInquiries.length / PAGE_SIZE));
 
@@ -615,9 +634,13 @@ export default function InquiryPage() {
   };
 
   const resetFilters = () => {
-    setCategoryFilter('all');
-    setStatusFilter('all');
-    setSearchQuery('');
+    setDraftFilters(EMPTY_INQUIRY_FILTERS);
+    setAppliedFilters(EMPTY_INQUIRY_FILTERS);
+    setCurrentPage(1);
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters(draftFilters);
     setCurrentPage(1);
   };
 
@@ -864,12 +887,14 @@ export default function InquiryPage() {
     height: '100%',
     overflowY: 'auto',
     boxSizing: 'border-box',
-    background: isDark ? '#0f172a' : colors.bg,
     color: isDark ? '#f8fafc' : colors.navy,
-    padding: '28px 24px 48px',
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
   };
+
+  const pageBgClass = isDark
+    ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+    : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50';
 
   const card: CSSProperties = {
     background: isDark ? '#1e293b' : colors.card,
@@ -942,8 +967,8 @@ export default function InquiryPage() {
   const readonlyFieldBg = isDark ? '#0f172a' : '#f1f5f9';
 
   return (
-    <div style={page}>
-      <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+    <div className={pageBgClass} style={page}>
+      <div className={`${SHELL_CONTENT_CLASS} py-6 pb-12`}>
         <div
           style={{
             display: 'flex',
@@ -995,7 +1020,13 @@ export default function InquiryPage() {
             isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
           }`}
         >
-          <div className="flex flex-col gap-3">
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleApplyFilters();
+            }}
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 카테고리
@@ -1004,11 +1035,10 @@ export default function InquiryPage() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => {
-                    setCategoryFilter(item.key);
-                    setCurrentPage(1);
-                  }}
-                  className={filterChipClass(categoryFilter === item.key)}
+                  onClick={() =>
+                    setDraftFilters((prev) => ({ ...prev, category: item.key }))
+                  }
+                  className={filterChipClass(draftFilters.category === item.key)}
                 >
                   {item.label}
                 </button>
@@ -1022,17 +1052,50 @@ export default function InquiryPage() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => {
-                    setStatusFilter(item.key);
-                    setCurrentPage(1);
-                  }}
-                  className={filterChipClass(statusFilter === item.key)}
+                  onClick={() =>
+                    setDraftFilters((prev) => ({ ...prev, status: item.key }))
+                  }
+                  className={filterChipClass(draftFilters.status === item.key)}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
             <div className="flex flex-wrap items-end gap-2">
+              <div className="w-full min-w-[140px] sm:w-[148px]">
+                <label
+                  htmlFor="inquiry-start-date"
+                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  시작일
+                </label>
+                <DateInput
+                  id="inquiry-start-date"
+                  aria-label="문의 시작일"
+                  value={draftFilters.startDate}
+                  onChange={(startDate) =>
+                    setDraftFilters((prev) => ({ ...prev, startDate }))
+                  }
+                  isDark={isDark}
+                />
+              </div>
+              <div className="w-full min-w-[140px] sm:w-[148px]">
+                <label
+                  htmlFor="inquiry-end-date"
+                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  종료일
+                </label>
+                <DateInput
+                  id="inquiry-end-date"
+                  aria-label="문의 종료일"
+                  value={draftFilters.endDate}
+                  onChange={(endDate) =>
+                    setDraftFilters((prev) => ({ ...prev, endDate }))
+                  }
+                  isDark={isDark}
+                />
+              </div>
               <div className="min-w-[200px] flex-1">
                 <label
                   htmlFor="inquiry-search"
@@ -1043,26 +1106,31 @@ export default function InquiryPage() {
                 <input
                   id="inquiry-search"
                   type="search"
-                  value={searchQuery}
-                  onChange={(event) => {
-                    setSearchQuery(event.target.value);
-                    setCurrentPage(1);
-                  }}
+                  value={draftFilters.search}
+                  onChange={(event) =>
+                    setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
+                  }
                   placeholder="제목 또는 내용 검색..."
-                  className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:border-blue-400 ${
+                  className={`h-9 w-full rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
                     isDark
                       ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
-                      : 'border-slate-200 bg-slate-50 text-slate-800'
+                      : 'border-slate-200 bg-white text-slate-800'
                   }`}
                 />
               </div>
               <button
+                type="submit"
+                className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+              >
+                검색
+              </button>
+              <button
                 type="button"
                 onClick={resetFilters}
-                className={`inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold ${
+                className={`inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   isDark
-                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                    ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
                 초기화
@@ -1071,7 +1139,7 @@ export default function InquiryPage() {
             <div className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               검색 결과 {filteredInquiries.length}건
             </div>
-          </div>
+          </form>
         </div>
 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">

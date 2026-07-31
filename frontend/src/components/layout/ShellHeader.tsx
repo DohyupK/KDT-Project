@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Bell, RefreshCw, User } from 'lucide-react'
+import { useUiSettings } from '@/components/layout/AppShell'
 
 type HeaderNotification = {
   id: string
@@ -36,12 +37,22 @@ const MOCK_NOTIFICATIONS: HeaderNotification[] = [
   },
 ]
 
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function formatHeaderDateTime(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+}
+
 export default function ShellHeader() {
   const pathname = usePathname()
   const router = useRouter()
+  const { isDark } = useUiSettings()
 
   const [isLoggedIn] = useState<boolean>(false)
   const [userName] = useState<string>('김현수')
+  const [now, setNow] = useState('')
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isNotifyOpen, setIsNotifyOpen] = useState(false)
@@ -53,6 +64,14 @@ export default function ShellHeader() {
   const unreadCount = notifications.filter((item) => item.unread).length
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
   const avatarInitial = userName.trim().charAt(0)
+
+  useEffect(() => {
+    setNow(formatHeaderDateTime(new Date()))
+    const timer = window.setInterval(() => {
+      setNow(formatHeaderDateTime(new Date()))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     setIsNotifyOpen(false)
@@ -101,8 +120,25 @@ export default function ShellHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-50 flex h-16 w-full items-center justify-end border-b border-gray-200 bg-white px-6">
-      <div className="flex items-center gap-4">
+    <header
+      className={`sticky top-0 z-50 flex h-16 w-full items-center justify-between gap-4 border-b px-6 ${
+        isDark
+          ? 'border-slate-700/80 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'border-slate-200/80 bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
+      }`}
+    >
+      <time
+        dateTime={now || undefined}
+        aria-live="polite"
+        aria-atomic="true"
+        className={`min-w-0 truncate font-mono text-sm tabular-nums tracking-tight sm:text-base ${
+          isDark ? 'text-slate-300' : 'text-slate-600'
+        }`}
+      >
+        {now || '\u00A0'}
+      </time>
+
+      <div className="flex shrink-0 items-center gap-4">
         <button
           type="button"
           onClick={handleRefresh}
