@@ -7,8 +7,8 @@ import {
 
 /**
  * Security-tab proxy only.
- * FE SecurityChatbot → POST /api/security-chat → ai-service POST /security-chat → vLLM :8001
- * Never uses general /api/chat or Groq/Gemini.
+ * FE SecurityChatbot → POST /api/security-chat → ai-service POST /security-chat
+ * → secure RAG + vLLM :8001. Never uses general /api/chat or Groq/Gemini.
  */
 
 type SecurityChatBody = {
@@ -16,11 +16,22 @@ type SecurityChatBody = {
   session_id?: string | null
 }
 
+type AiSecuritySource = {
+  doc_id?: string | null
+  title?: string | null
+  category?: string | null
+  process?: string | null
+  source_path?: string | null
+  chunk_index?: number | null
+  text?: string
+}
+
 type AiSecurityChatResponse = {
   reply: string
   mode: string
   provider?: string
   error: string | null
+  sources?: AiSecuritySource[]
 }
 
 async function proxySecurityChat(message: string): Promise<AiSecurityChatResponse> {
@@ -48,8 +59,6 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       return
     }
 
-    // Separate from general chat sessions via FE localStorage key;
-    // mode=security_vllm on stored rows for audit distinction.
     const sessionId = await ensureSession(body.session_id)
     await insertMessage(sessionId, 'user', message, 'security_user', 'security')
 
@@ -59,7 +68,7 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       sessionId,
       'assistant',
       ai.reply,
-      ai.mode || 'security_vllm',
+      ai.mode || 'security_rag',
       ai.provider ?? 'vllm',
     )
 
@@ -69,6 +78,7 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       mode: ai.mode,
       provider: ai.provider ?? ai.mode,
       error: ai.error,
+      sources: ai.sources ?? [],
       chat_store: getChatStoreMode(),
       channel: 'security',
     })

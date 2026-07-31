@@ -23,6 +23,6 @@
 
 룰·스킬이 어떻게 돌아가는지: [루트 README — 문서와 AI 규칙](../README.md#문서와-ai-규칙-어떻게-나뉘나)
 
-작업 일지: [work-log/](./work-log/) · [오늘(2026-07-23)](./work-log/2026-07-23.md) · [2026-07-22](./work-log/2026-07-22.md)
+작업 일지: [work-log/](./work-log/) · [오늘(2026-07-30)](./work-log/2026-07-30.md) · [2026-07-29](./work-log/2026-07-29.md)
 
 관련 계획·프롬프트: [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [O/X 프롬프트 보강](./plans/2026-07-22-ox-classifier-prompt.md) · [train_pipeline 프롬프트](./prompts/train-pipeline-ox-classifier.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [중요 경로](./references/important-paths.md)

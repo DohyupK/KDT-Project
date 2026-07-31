@@ -8,6 +8,10 @@ venv/
 # Local Optuna / logs (models/ is tracked for team share)
 optuna.db
 optuna.db-*
+optuna_reg.db
+optuna_reg.db-*
+optuna_residual.db
+optuna_residual.db-*
 logs/
 
 # OS / IDE

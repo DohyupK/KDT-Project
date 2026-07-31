@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
+import ShellHeader from '@/components/layout/ShellHeader'
 import { SelectedLotProvider } from '@/context/SelectedLotContext'
 import { authApi } from '@/api/authApi'
 import { isLoggedIn } from '@/lib/authStorage'
@@ -60,10 +61,10 @@ const UI_COPY = {
       '/dashboard': '대시보드',
       '/issue': '이슈 관리',
       '/knowledge': '라이브러리',
-      '/inquiry': '문의',
+      '/inquiry': '문의 게시판',
       '/management': '관리',
       '/security': '보안',
-      '/setting': '설정',
+      '/setting': '환경 설정',
     } as Record<string, string>,
     actions: {
       save: '저장',
@@ -90,7 +91,7 @@ const UI_COPY = {
       '/dashboard': 'Dashboard',
       '/issue': 'Issue Management',
       '/knowledge': 'Library',
-      '/inquiry': 'Inquiry',
+      '/inquiry': 'Inquiry Board',
       '/management': 'Management',
       '/security': 'Security',
       '/setting': 'Settings',
@@ -416,10 +417,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         <div
           className={`flex h-full min-w-0 flex-1 flex-col ${
-            isDark ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-800'
+            isDark
+              ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100'
+              : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 text-gray-800'
           }`}
         >
-          <main className="h-full min-h-0 w-full overflow-hidden">{children}</main>
+          <ShellHeader />
+          <main className="h-full min-h-0 w-full flex-1 overflow-hidden">{children}</main>
         </div>
       </div>
 

@@ -15,6 +15,7 @@ type RecommendationBody = {
     applied_threshold?: number
     features?: Record<string, unknown>
     capacity?: number | null
+    residual_li?: number | null
   }
   suggestion?: {
     deltas?: Record<string, unknown>
@@ -24,6 +25,8 @@ type RecommendationBody = {
     applied_threshold?: number
     capacity_before?: number | null
     capacity_after?: number | null
+    residual_before?: number | null
+    residual_after?: number | null
   } | null
   note?: string | null
 }
@@ -37,6 +40,7 @@ type ApproveBody = {
 type OutcomeBody = {
   outcome_quality_defect?: number
   outcome_capacity?: number | null
+  outcome_residual_li?: number | null
 }
 
 export const controlRouter = Router()
@@ -68,6 +72,9 @@ controlRouter.post('/control/approve', async (req, res) => {
     const capacityBefore =
       suggestion.capacity_before ?? rec.baseline.capacity ?? null
     const capacityAfter = suggestion.capacity_after ?? null
+    const residualBefore =
+      suggestion.residual_before ?? rec.baseline?.residual_li ?? null
+    const residualAfter = suggestion.residual_after ?? null
 
     const row = await insertOptimizationEvent({
       sessionId,
@@ -87,6 +94,14 @@ controlRouter.post('/control/approve', async (req, res) => {
         capacityAfter === null || capacityAfter === undefined
           ? null
           : Number(capacityAfter),
+      residualBefore:
+        residualBefore === null || residualBefore === undefined
+          ? null
+          : Number(residualBefore),
+      residualAfter:
+        residualAfter === null || residualAfter === undefined
+          ? null
+          : Number(residualAfter),
     })
 
     console.info(
@@ -145,20 +160,25 @@ controlRouter.post('/control/approve/:id/outcome', async (req, res) => {
       outcomeQualityDefect: defect,
       outcomeCapacity:
         body.outcome_capacity === undefined ? null : body.outcome_capacity,
+      outcomeResidualLi:
+        body.outcome_residual_li === undefined ? null : body.outcome_residual_li,
     })
     if (!row) {
       res.status(404).json({ error: 'optimization event not found' })
       return
     }
     console.info(
-      `[control_outcome] event=${row.id} defect=${defect} capacity=${body.outcome_capacity ?? 'null'}`,
+      `[control_outcome] event=${row.id} defect=${defect}` +
+        ` capacity=${row.outcomeCapacity ?? 'null'}` +
+        ` residual_li=${row.outcomeResidualLi ?? 'null'}`,
     )
     res.json({
       ok: true,
       event_id: row.id,
       status: row.status,
-      outcome_quality_defect: defect,
-      outcome_capacity: body.outcome_capacity ?? null,
+      outcome_quality_defect: row.outcomeQualityDefect ?? defect,
+      outcome_capacity: row.outcomeCapacity ?? null,
+      outcome_residual_li: row.outcomeResidualLi ?? null,
       control_store: getControlStoreMode(),
     })
   } catch (err) {
