@@ -180,3 +180,7 @@ class SecurityChatResponse(BaseModel):
     )
     error: str | None = None
     sources: list[SecurityChatSource] = Field(default_factory=list)
+    trace: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Stage diagnostics: [{stage, ms, ok, detail}, ...]",
+    )

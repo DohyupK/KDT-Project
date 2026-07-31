@@ -37,13 +37,16 @@ def vllm_model() -> str:
 
 
 def make_vllm() -> ChatOpenAI:
+    # Soft-fail before FE/BE 180s budget; then extractive RAG reply is used.
+    timeout_s = float(os.environ.get("SECURE_VLLM_TIMEOUT", "45"))
     return ChatOpenAI(
         base_url=vllm_base_url(),
         api_key="EMPTY",
         model=vllm_model(),
         temperature=0.2,
-        timeout=120,
+        timeout=timeout_s,
         max_retries=0,
+        max_tokens=int(os.environ.get("SECURE_VLLM_MAX_TOKENS", "512")),
     )
 
 

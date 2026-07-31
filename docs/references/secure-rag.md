@@ -62,9 +62,20 @@ docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 cd ai-service
 python ingest_secure.py
+# BM25는 서버 기동 시 로드 → ingest 후 ai-service(:8800) 재시작 권장
 ```
 
 문서: `ai-service/data/secure_docs/*.md` (YAML frontmatter).
+
+환경 (선택):
+
+```text
+SECURE_SELF_QUERY=0          # heuristic만 (느린 LM Studio 권장)
+SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (관련 질의 500 방지)
+SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
+SECURE_SELF_QUERY_TIMEOUT=20
+SECURE_SELF_QUERY_MAX_TOKENS=256
+```
 
 ## 가드레일 (필수) — SelfQuery 교체 후에도 유지
 
@@ -110,7 +121,15 @@ python scripts/smoke_secure_rag_e2e.py
 | 소성 SOP 질의 | `security_rag` | ≥1, `text`/`title` 비어 있지 않음, reply에 `[출처:` |
 | 점심 메뉴 | `security_no_docs` | `[]` |
 
-vLLM/ai-service 미기동 시 **가짜 성공 금지** — 스크립트가 FAIL.
+vLLM 미기동 시 **가짜 성공 금지** — 스크립트가 FAIL.
+
+## RCA 메모 (2026-07-30)
+
+- FE 보안 전용 **180s** · BE `AbortSignal` · `SECURE_SELF_QUERY=0` 권장.
+- **단계 진단:** 실패 시 챗에 `HTTP · stage · elapsed · trace` 표시 (뭉뚱그린「연결 실패」제거).
+- **반드시 재시작:** 진단·타임아웃 코드 반영을 위해 **backend(:3001) · frontend · ai-service(:8800)** 모두 재기동.
+- ai-service 콘솔: `[secure-chat] stage=...` / Express: `[security-chat] proxy_*`
+- 수정 플랜: [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](../plans/2026-07-30-secure-chat-timeout-selfquery.md)
 
 ## 수동 Maximize 체크리스트
 

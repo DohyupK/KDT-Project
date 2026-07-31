@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { FileText, Shield, X } from 'lucide-react'
 import {
+  formatSecurityChatFailure,
   postSecurityChat,
+  type SecurityChatErrorBody,
   type SecurityChatSource,
 } from '@/api/securityChatApi'
+import axios from 'axios'
 
 type ChatRole = 'user' | 'ai'
 
@@ -188,23 +191,28 @@ export default function SecurityChatbot({
       }
     } catch (err) {
       if (ac.signal.aborted) return
-      let detail = '요청에 실패했습니다.'
-      if (err && typeof err === 'object') {
-        const ax = err as {
-          message?: string
-          response?: { data?: { error?: unknown }; status?: number }
+      let status: number | undefined
+      let data: SecurityChatErrorBody | null = null
+      let message = '요청에 실패했습니다.'
+      if (axios.isAxiosError(err)) {
+        status = err.response?.status
+        const raw = err.response?.data
+        if (raw && typeof raw === 'object') {
+          data = raw as SecurityChatErrorBody
         }
-        if (typeof ax.response?.data?.error === 'string') detail = ax.response.data.error
-        else if (ax.message) detail = ax.message
-        if (ax.response?.status) detail = `[${ax.response.status}] ${detail}`
+        message = err.message || message
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        message = String((err as { message?: string }).message || message)
       }
+      console.warn('[security-chat] fail', { status, data, message })
+      const text = formatSecurityChatFailure({ status, data, message })
       idRef.current += 1
       setMessages((prev) => [
         ...prev,
         {
           id: idRef.current,
           role: 'ai',
-          text: `보안 챗봇 연결 실패. backend(:3001) · ai-service(:8800) · (선택) vLLM(:8001) · Qdrant(:6333)을 확인하세요.\n(${detail})`,
+          text,
           mode: 'template',
           provider: 'offline',
         },

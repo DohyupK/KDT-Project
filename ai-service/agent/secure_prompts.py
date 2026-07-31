@@ -31,6 +31,15 @@ OFFLINE_REPLY = (
     "자세한 수동 절차는 docs/references/vllm-setup.md 를 참고하세요."
 )
 
+HIT_BUT_LLM_TIMEOUT_REPLY = (
+    "사내 보안 문서에서는 관련 내용을 찾았지만, "
+    "로컬 LLM(vLLM/LM Studio) 응답이 시간 초과·실패했습니다. "
+    "보안 채널은 외부 API로 폴백하지 않습니다.\n\n"
+    "작업자 안내: LM Studio가 생성 중(GEN)인지 확인하고, "
+    "모델 부하를 낮추거나 잠시 후 다시 시도하세요. "
+    "CHAT_VLLM_BASE_URL · CHAT_VLLM_MODEL 설정도 확인하세요."
+)
+
 
 def format_rag_context(sources: list[dict[str, Any]]) -> str:
     blocks: list[str] = []
@@ -43,3 +52,31 @@ def format_rag_context(sources: list[dict[str, Any]]) -> str:
             f"{s.get('text') or ''}"
         )
     return "\n\n".join(blocks)
+
+
+def format_extractive_reply(
+    sources: list[dict[str, Any]],
+    *,
+    notice: str | None = None,
+) -> str:
+    """Return cited document excerpts without calling the chat LLM."""
+    titles = sorted(
+        {str(s.get("title") or "") for s in sources if s.get("title")}
+    )
+    lines: list[str] = []
+    if notice:
+        lines.append(notice)
+        lines.append("")
+    lines.append("검색된 사내 보안 문서 발췌:")
+    lines.append("")
+    for i, s in enumerate(sources[:4], start=1):
+        title = s.get("title") or s.get("doc_id") or f"doc-{i}"
+        text = (s.get("text") or "").strip()
+        if len(text) > 900:
+            text = text[:900].rstrip() + "…"
+        lines.append(f"### {i}. {title}")
+        lines.append(text)
+        lines.append("")
+    if titles:
+        lines.append(" ".join(f"[출처: {t}]" for t in titles if t))
+    return "\n".join(lines).strip()

@@ -22,6 +22,7 @@ load_dotenv(_ENV_PATH, override=False)
 import polars as pl
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.schemas import (
     CapacityResponse,
@@ -252,19 +253,43 @@ def chat_endpoint(body: ChatRequest) -> ChatResponse:
 
 
 @app.post("/security-chat", response_model=SecurityChatResponse)
-def security_chat_endpoint(body: SecurityChatRequest) -> SecurityChatResponse:
+def security_chat_endpoint(body: SecurityChatRequest) -> SecurityChatResponse | JSONResponse:
     """
     Security-tab channel: local vLLM only (CHAT_VLLM_BASE_URL).
     Never routes to Groq/Gemini. Failures return offline template.
+    Unhandled exceptions return JSON 500 with stage/trace (not HTML).
     """
-    out = compose_secure(body.message)
-    return SecurityChatResponse(
-        reply=out["reply"],
-        mode=out.get("mode") or "template",
-        provider=out.get("provider") or "offline",
-        error=out.get("error"),
-        sources=out.get("sources") or [],
-    )
+    try:
+        out = compose_secure(body.message)
+        return SecurityChatResponse(
+            reply=out["reply"],
+            mode=out.get("mode") or "template",
+            provider=out.get("provider") or "offline",
+            error=out.get("error"),
+            sources=out.get("sources") or [],
+            trace=out.get("trace"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        detail = str(exc)[:400]
+        return JSONResponse(
+            status_code=500,
+            content={
+                "reply": "",
+                "mode": "template",
+                "provider": "offline",
+                "error": detail,
+                "sources": [],
+                "stage": "unhandled",
+                "trace": [
+                    {
+                        "stage": "unhandled",
+                        "ms": 0,
+                        "ok": False,
+                        "detail": detail,
+                    }
+                ],
+            },
+        )
 
 
 @app.get("/")
