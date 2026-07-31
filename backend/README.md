@@ -83,6 +83,20 @@ Frontend reaches this via Next rewrite `/api` → `:3001`.
 - 코드: `src/routes/inquiry.routes.ts`, `controllers/inquiry.controller.ts`, `services/inquiry.service.ts`
 - 첨부 업로드는 후속 (미구현)
 
+## Issue API (요약)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/issues` | 미완료 높음·중간 이슈 목록. query: search, date, lotId, riskLevel, status |
+| GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
+| PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
+
+- 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
+- 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
+- 시드는 기존 LOT·이슈를 덮어쓰지 않으며, 목업 담당자와 이름이 같은 실제 사용자가 있을 때만 FK를 연결합니다.
+- SPC 상세 분석, 잔류 Li·여유·불량 확률, 라이브러리 테이블 이관은 후속 범위입니다.
+- 상세 계약: `../docs/references/issue-lot-api.md`
+
 ## 변경·설치 이력 (2026-07-24)
 
 ### 로컬 작업 요약
