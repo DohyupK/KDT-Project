@@ -10,6 +10,8 @@
 | [plans/](./plans/) | 확정된 계획 요약 |
 | [prompts/](./prompts/) | Cursor에 다시 넣을 프롬프트 |
 | [references/](./references/) | 중요 경로 · 참조 |
+| [guides/login-ubuntu-mariadb.md](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 공용 DB 연동 절차 |
+| [references/login-auth-tech-stack.md](./references/login-auth-tech-stack.md) | 로그인 Auth 기술스택·패키지 기록 |
 
 ## docs vs 룰·스킬
 

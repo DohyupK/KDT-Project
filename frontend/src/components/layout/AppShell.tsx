@@ -17,14 +17,26 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
+import ShellHeader from '@/components/layout/ShellHeader'
 import { SelectedLotProvider } from '@/context/SelectedLotContext'
+import { authApi } from '@/api/authApi'
+import { isLoggedIn } from '@/lib/authStorage'
 
 export type UiThemeMode = 0 | 1
 export type UiLanguage = 'ko' | 'en'
+export type UiFontSize = 10 | 12 | 14 | 16 | 18 | 20 | 22 | 24
 
 export const UI_SETTINGS_EVENT = 'kdt-ui-settings-change'
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
+const FONT_SCALE_STYLE_ID = 'kdt-font-scale-style'
+
+export const UI_FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
+export const DEFAULT_UI_FONT_SIZE: UiFontSize = 18
+
+function isUiFontSize(value: unknown): value is UiFontSize {
+  return typeof value === 'number' && (UI_FONT_SIZE_OPTIONS as readonly number[]).includes(value)
+}
 
 export const NAV_MENUS = [
   { name: 'Main', icon: Home, path: '/main' },
@@ -49,10 +61,10 @@ const UI_COPY = {
       '/dashboard': '대시보드',
       '/issue': '이슈 관리',
       '/knowledge': '라이브러리',
-      '/inquiry': '문의',
+      '/inquiry': '문의 게시판',
       '/management': '관리',
       '/security': '보안',
-      '/setting': '설정',
+      '/setting': '환경 설정',
     } as Record<string, string>,
     actions: {
       save: '저장',
@@ -79,7 +91,7 @@ const UI_COPY = {
       '/dashboard': 'Dashboard',
       '/issue': 'Issue Management',
       '/knowledge': 'Library',
-      '/inquiry': 'Inquiry',
+      '/inquiry': 'Inquiry Board',
       '/management': 'Management',
       '/security': 'Security',
       '/setting': 'Settings',
@@ -102,19 +114,29 @@ const UI_COPY = {
 
 export type UiCopy = (typeof UI_COPY)[UiLanguage]
 
-export function readStoredUiSettings(): { themeMode: UiThemeMode; language: UiLanguage } {
-  const fallback = { themeMode: 1 as UiThemeMode, language: 'ko' as UiLanguage }
+export function readStoredUiSettings(): {
+  themeMode: UiThemeMode
+  language: UiLanguage
+  fontSize: UiFontSize
+} {
+  const fallback = {
+    themeMode: 1 as UiThemeMode,
+    language: 'ko' as UiLanguage,
+    fontSize: DEFAULT_UI_FONT_SIZE,
+  }
   if (typeof window === 'undefined') return fallback
 
   let themeMode = fallback.themeMode
   let language = fallback.language
+  let fontSize = fallback.fontSize
 
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     if (raw) {
-      const saved = JSON.parse(raw) as { ThemeMode?: unknown; Language?: unknown }
+      const saved = JSON.parse(raw) as { ThemeMode?: unknown; Language?: unknown; FontSize?: unknown }
       if (saved.ThemeMode === 0 || saved.ThemeMode === 1) themeMode = saved.ThemeMode
       if (saved.Language === 'ko' || saved.Language === 'en') language = saved.Language
+      if (isUiFontSize(saved.FontSize)) fontSize = saved.FontSize
     }
   } catch {
     // keep fallback for this key
@@ -123,15 +145,16 @@ export function readStoredUiSettings(): { themeMode: UiThemeMode; language: UiLa
   try {
     const raw = window.localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
     if (raw) {
-      const config = JSON.parse(raw) as { theme?: unknown; language?: unknown }
+      const config = JSON.parse(raw) as { theme?: unknown; language?: unknown; fontSize?: unknown }
       if (config.theme === 0 || config.theme === 1) themeMode = config.theme
       if (config.language === 'ko' || config.language === 'en') language = config.language
+      if (isUiFontSize(config.fontSize)) fontSize = config.fontSize
     }
   } catch {
     // keep current values
   }
 
-  return { themeMode, language }
+  return { themeMode, language, fontSize }
 }
 
 export function applyDocumentTheme(themeMode: UiThemeMode) {
@@ -144,12 +167,46 @@ export function applyDocumentTheme(themeMode: UiThemeMode) {
   document.body.style.color = isDark ? '#f8fafc' : ''
 }
 
+/** Apply Setting-page font size to the whole shell via --font-scale. */
+export function applyDocumentFontSize(fontSize: number) {
+  if (typeof document === 'undefined') return
+  const size = isUiFontSize(fontSize) ? fontSize : DEFAULT_UI_FONT_SIZE
+  const scale = size / DEFAULT_UI_FONT_SIZE
+
+  document.documentElement.style.fontSize = '16px'
+  document.documentElement.style.setProperty('--font-scale', String(scale))
+
+  let styleEl = document.getElementById(FONT_SCALE_STYLE_ID) as HTMLStyleElement | null
+  if (!styleEl) {
+    styleEl = document.createElement('style')
+    styleEl.id = FONT_SCALE_STYLE_ID
+    document.head.appendChild(styleEl)
+  }
+
+  styleEl.textContent = `
+    html { font-size: 16px !important; }
+    body { font-size: 16px !important; line-height: 1.5 !important; }
+    .text-xs   { font-size: calc(0.75rem  * var(--font-scale, 1)) !important; line-height: 1rem    !important; }
+    .text-sm   { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
+    .text-base { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
+    .text-lg   { font-size: calc(1.125rem * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
+    .text-xl   { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
+    .text-2xl  { font-size: calc(1.5rem   * var(--font-scale, 1)) !important; line-height: 2rem    !important; }
+    .text-3xl  { font-size: calc(1.875rem * var(--font-scale, 1)) !important; line-height: 2.25rem !important; }
+    [data-sidebar] .sidebar-title  { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
+    [data-sidebar] .sidebar-menu   { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
+    [data-sidebar] .sidebar-status { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
+  `
+}
+
 export function notifyUiSettingsChange(settings: {
   themeMode: UiThemeMode
   language: UiLanguage
+  fontSize?: UiFontSize
 }) {
   if (typeof window === 'undefined') return
   applyDocumentTheme(settings.themeMode)
+  if (settings.fontSize !== undefined) applyDocumentFontSize(settings.fontSize)
   document.documentElement.lang = settings.language
   document.documentElement.setAttribute('data-ui-lang', settings.language)
   window.dispatchEvent(new CustomEvent(UI_SETTINGS_EVENT, { detail: settings }))
@@ -158,20 +215,83 @@ export function notifyUiSettingsChange(settings: {
 export function useUiSettings() {
   const [themeMode, setThemeMode] = useState<UiThemeMode>(1)
   const [language, setLanguage] = useState<UiLanguage>('ko')
+  const [fontSize, setFontSize] = useState<UiFontSize>(DEFAULT_UI_FONT_SIZE)
 
   useEffect(() => {
-    const apply = (next: { themeMode: UiThemeMode; language: UiLanguage }) => {
+    const apply = (next: {
+      themeMode: UiThemeMode
+      language: UiLanguage
+      fontSize: UiFontSize
+    }) => {
       setThemeMode(next.themeMode)
       setLanguage(next.language)
+      setFontSize(next.fontSize)
       applyDocumentTheme(next.themeMode)
+      applyDocumentFontSize(next.fontSize)
       document.documentElement.lang = next.language
       document.documentElement.setAttribute('data-ui-lang', next.language)
     }
 
     apply(readStoredUiSettings())
 
+    if (isLoggedIn()) {
+      void authApi
+        .getSettings()
+        .then(({ data }) => {
+          const s = data.settings
+          const next = {
+            themeMode: (s.themeMode === 0 || s.themeMode === 1 ? s.themeMode : 1) as UiThemeMode,
+            language: (s.language === 'en' ? 'en' : 'ko') as UiLanguage,
+            fontSize: (isUiFontSize(s.fontSize) ? s.fontSize : DEFAULT_UI_FONT_SIZE) as UiFontSize,
+          }
+          try {
+            let currentLocal: Record<string, any> = {}
+            let currentSystem: Record<string, any> = {}
+            try {
+              const rawLocal = localStorage.getItem(SETTINGS_STORAGE_KEY)
+              if (rawLocal) currentLocal = JSON.parse(rawLocal)
+            } catch {}
+            try {
+              const rawSystem = localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
+              if (rawSystem) currentSystem = JSON.parse(rawSystem)
+            } catch {}
+
+            localStorage.setItem(
+              SETTINGS_STORAGE_KEY,
+              JSON.stringify({
+                UserId: s.userId,
+                FontSize: s.fontSize,
+                ThemeMode: s.themeMode,
+                Language: s.language ?? currentLocal.Language ?? 'ko',
+                RefreshInterval: s.refreshInterval,
+                UpdateAt: s.updatedAt,
+              }),
+            )
+            localStorage.setItem(
+              SYSTEM_SETTINGS_CONFIG_KEY,
+              JSON.stringify({
+                theme: s.themeMode,
+                language: s.language ?? currentSystem.language ?? 'ko',
+                fontSize: s.fontSize,
+                autoRefreshEnabled: s.autoRefreshEnabled ?? currentSystem.autoRefreshEnabled ?? true,
+                refreshInterval: s.refreshInterval,
+                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? true,
+              }),
+            )
+          } catch {
+            // ignore cache write failures
+          }
+          apply(next)
+        })
+        .catch(() => {
+          // keep localStorage fallback
+        })
+    }
+
     const onCustom = (event: Event) => {
-      const detail = (event as CustomEvent<{ themeMode?: unknown; language?: unknown }>).detail
+      const detail = (
+        event as CustomEvent<{ themeMode?: unknown; language?: unknown; fontSize?: unknown }>
+      ).detail
       if (!detail) {
         apply(readStoredUiSettings())
         return
@@ -181,7 +301,8 @@ export function useUiSettings() {
         detail.themeMode === 0 || detail.themeMode === 1 ? detail.themeMode : current.themeMode
       const nextLang =
         detail.language === 'ko' || detail.language === 'en' ? detail.language : current.language
-      apply({ themeMode: nextTheme, language: nextLang })
+      const nextFont = isUiFontSize(detail.fontSize) ? detail.fontSize : current.fontSize
+      apply({ themeMode: nextTheme, language: nextLang, fontSize: nextFont })
     }
 
     const onStorage = (event: StorageEvent) => {
@@ -207,6 +328,7 @@ export function useUiSettings() {
   return {
     themeMode,
     language,
+    fontSize,
     isDark: themeMode === 0,
     copy: UI_COPY[language],
   }
@@ -295,10 +417,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         <div
           className={`flex h-full min-w-0 flex-1 flex-col ${
-            isDark ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-800'
+            isDark
+              ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100'
+              : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 text-gray-800'
           }`}
         >
-          <main className="h-full min-h-0 w-full overflow-hidden">{children}</main>
+          <ShellHeader />
+          <main className="h-full min-h-0 w-full flex-1 overflow-hidden">{children}</main>
         </div>
       </div>
 

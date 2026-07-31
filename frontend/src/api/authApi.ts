@@ -11,6 +11,8 @@ import type {
   UpdateProfileRequest,
   AuthUser,
   CheckIdResponse,
+  UserSettingsDto,
+  UpdateUserSettingsRequest,
 } from '@/types'
 
 export const authApi = {
@@ -39,4 +41,12 @@ export const authApi = {
 
   withdrawAccount: (password: string) =>
     apiClient.delete<MessageResponse>('/auth/account', { data: { password } }),
+
+  getSettings: () => apiClient.get<{ settings: UserSettingsDto }>('/auth/settings'),
+
+  updateSettings: (payload: UpdateUserSettingsRequest) =>
+    apiClient.put<{ settings: UserSettingsDto; message: string }>('/auth/settings', payload),
+
+  resetSettings: () =>
+    apiClient.post<{ settings: UserSettingsDto; message: string }>('/auth/settings/reset'),
 }

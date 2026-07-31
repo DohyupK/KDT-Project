@@ -22,8 +22,10 @@ copy .env.example .env
 ```
 
 - MariaDB 비밀번호가 없으면 `CHAT_STORE=sqlite`(기본)로 세션·유사질문 카운팅을 영속합니다.
-- MariaDB 사용 시 `CHAT_STORE=mariadb` + `DB_PASSWORD` 설정 후 chat schema 적용.
+- 챗도 공용 MariaDB에 두려면 `CHAT_STORE=mariadb` + `src/sql/schema.sql` 적용.
+- LLM API 키(암호문)는 **`ai-service/DB/llm_keys.sqlite`** (보안 탭). 복호화 마스터: `LLM_KEYS_ENCRYPTION_KEY`(16자 이상, Git 금지).
 - Auth용: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN` 또는 `CORS_ORIGINS` 설정.
+- **팀 공용 DB (Lightsail Ubuntu + MariaDB):** [docs/guides/login-ubuntu-mariadb.md](../docs/guides/login-ubuntu-mariadb.md) · 기술스택 [docs/references/login-auth-tech-stack.md](../docs/references/login-auth-tech-stack.md). `.env`는 Git에 올리지 말고 단톡으로 `DB_*`만 공유.
 
 3. Run:
 

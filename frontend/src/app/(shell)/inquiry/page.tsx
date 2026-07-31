@@ -10,11 +10,29 @@ import type {
   MouseEvent,
 } from 'react';
 import { useUiSettings } from '@/components/layout/AppShell';
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import DateInput from '@/components/DateInput';
 
 type InquiryStatus = '접수' | '답변완료';
 type Visibility = '공개' | '비공개';
 type CategoryFilterKey = 'all' | 'system' | 'feature' | 'business' | 'etc';
 type StatusFilterKey = 'all' | InquiryStatus;
+
+type InquiryFilterState = {
+  category: CategoryFilterKey;
+  status: StatusFilterKey;
+  search: string;
+  startDate: string;
+  endDate: string;
+};
+
+const EMPTY_INQUIRY_FILTERS: InquiryFilterState = {
+  category: 'all',
+  status: 'all',
+  search: '',
+  startDate: '',
+  endDate: '',
+};
 
 type InquiryItem = {
   id: string;
@@ -146,7 +164,7 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 
 const USER_NAME = '홍길동';
 const USER_EMAIL = 'hong@example.com';
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 
 const INITIAL_INQUIRIES: InquiryItem[] = [
   {
@@ -305,6 +323,11 @@ function formatToday() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function formatAnsweredAt(date = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function matchesCategoryFilter(category: string, filter: CategoryFilterKey) {
   if (filter === 'all') return true;
   if (filter === 'system') return category === '시스템 오류 제보';
@@ -397,12 +420,15 @@ export default function InquiryPage() {
   const [inquiries, setInquiries] = useState<InquiryItem[]>(INITIAL_INQUIRIES);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterKey>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [draftFilters, setDraftFilters] = useState<InquiryFilterState>(EMPTY_INQUIRY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<InquiryFilterState>(EMPTY_INQUIRY_FILTERS);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [detailItem, setDetailItem] = useState<InquiryItem | null>(null);
+  const [selectedInquiryId, setSelectedInquiryId] = useState<string | null>(null);
+  const [answerDraft, setAnswerDraft] = useState('');
+  const [answerError, setAnswerError] = useState('');
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [isEditingAnswer, setIsEditingAnswer] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>('공개');
   const [subject, setSubject] = useState('');
@@ -423,13 +449,18 @@ export default function InquiryPage() {
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const nextIdRef = useRef(13);
   const toastTimerRef = useRef<number | null>(null);
+  const answerTimerRef = useRef<number | null>(null);
+  const answerSectionRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollToAnswerRef = useRef(false);
   const dragDepthRef = useRef(0);
 
   const filteredInquiries = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
+    const keyword = appliedFilters.search.trim().toLowerCase();
     return inquiries.filter((item) => {
-      if (!matchesCategoryFilter(item.category, categoryFilter)) return false;
-      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+      if (!matchesCategoryFilter(item.category, appliedFilters.category)) return false;
+      if (appliedFilters.status !== 'all' && item.status !== appliedFilters.status) return false;
+      if (appliedFilters.startDate && item.date < appliedFilters.startDate) return false;
+      if (appliedFilters.endDate && item.date > appliedFilters.endDate) return false;
 
       if (!keyword) return true;
 
@@ -442,7 +473,7 @@ export default function InquiryPage() {
         item.title.toLowerCase().includes(keyword) || item.content.toLowerCase().includes(keyword)
       );
     });
-  }, [inquiries, categoryFilter, statusFilter, searchQuery]);
+  }, [inquiries, appliedFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filteredInquiries.length / PAGE_SIZE));
 
@@ -465,14 +496,61 @@ export default function InquiryPage() {
     return `검색 결과 ${filteredInquiries.length}건 · ${start}-${end} 표시 중`;
   }, [filteredInquiries.length, safePage]);
 
+  const selectedInquiry = useMemo(
+    () => inquiries.find((item) => item.id === selectedInquiryId) ?? null,
+    [inquiries, selectedInquiryId],
+  );
+
+  const showAnswerForm =
+    !!selectedInquiry &&
+    (selectedInquiry.status === '접수' || isEditingAnswer || !selectedInquiry.answer);
+
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (!selectedInquiryId) return;
+    if (!filteredInquiries.some((item) => item.id === selectedInquiryId)) {
+      setSelectedInquiryId(null);
+    }
+  }, [filteredInquiries, selectedInquiryId]);
+
+  useEffect(() => {
+    setAnswerDraft('');
+    setAnswerError('');
+    setIsEditingAnswer(false);
+  }, [selectedInquiryId]);
+
+  useEffect(() => {
+    if (!pendingScrollToAnswerRef.current || !selectedInquiry) return;
+    pendingScrollToAnswerRef.current = false;
+
+    if (selectedInquiry.answer && selectedInquiry.status === '답변완료') {
+      setAnswerDraft(selectedInquiry.answer);
+      setIsEditingAnswer(true);
+    }
+
+    const timer = window.setTimeout(() => {
+      answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const textarea = document.getElementById('admin-answer') as HTMLTextAreaElement | null;
+      textarea?.focus({ preventScroll: true });
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [selectedInquiryId, selectedInquiry]);
 
   const clearToastTimer = () => {
     if (toastTimerRef.current !== null) {
       window.clearTimeout(toastTimerRef.current);
       toastTimerRef.current = null;
+    }
+  };
+
+  const clearAnswerTimer = () => {
+    if (answerTimerRef.current !== null) {
+      window.clearTimeout(answerTimerRef.current);
+      answerTimerRef.current = null;
     }
   };
 
@@ -484,7 +562,7 @@ export default function InquiryPage() {
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage('');
       toastTimerRef.current = null;
-    }, 2500);
+    }, 3000);
   };
 
   const staticInquiryIds = useMemo(
@@ -495,11 +573,6 @@ export default function InquiryPage() {
   const refreshStoredInquiries = () => {
     const stored = readInquiryRecords();
     setInquiries((prev) => mergeInquiryBoardList(prev, stored, staticInquiryIds));
-    setDetailItem((current) => {
-      if (!current) return current;
-      const latest = stored.find((item) => item.id === current.id);
-      return latest ?? current;
-    });
   };
 
   useEffect(() => {
@@ -516,7 +589,10 @@ export default function InquiryPage() {
   }, []);
 
   useEffect(() => {
-    return () => clearToastTimer();
+    return () => {
+      clearToastTimer();
+      clearAnswerTimer();
+    };
   }, []);
 
   const resetForm = () => {
@@ -538,19 +614,19 @@ export default function InquiryPage() {
   };
 
   useEffect(() => {
-    if (!isModalOpen && !detailItem) return;
+    if (!isModalOpen && !selectedInquiryId) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (isModalOpen) {
         resetForm();
         setIsModalOpen(false);
       } else {
-        setDetailItem(null);
+        setSelectedInquiryId(null);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [isModalOpen, detailItem]);
+  }, [isModalOpen, selectedInquiryId]);
 
   const openModal = () => {
     resetForm();
@@ -558,9 +634,13 @@ export default function InquiryPage() {
   };
 
   const resetFilters = () => {
-    setCategoryFilter('all');
-    setStatusFilter('all');
-    setSearchQuery('');
+    setDraftFilters(EMPTY_INQUIRY_FILTERS);
+    setAppliedFilters(EMPTY_INQUIRY_FILTERS);
+    setCurrentPage(1);
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters(draftFilters);
     setCurrentPage(1);
   };
 
@@ -624,16 +704,105 @@ export default function InquiryPage() {
   };
 
   const handleRowClick = (item: InquiryItem) => {
-    if (!canViewInquiry(item)) {
-      window.alert('작성자 본인만 확인 가능한 비공개 문의입니다.');
+    setSelectedInquiryId(item.id);
+  };
+
+  const scrollToAnswerSection = () => {
+    window.setTimeout(() => {
+      answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const textarea = document.getElementById('admin-answer') as HTMLTextAreaElement | null;
+      textarea?.focus({ preventScroll: true });
+    }, 50);
+  };
+
+  const handleArrowClick = (event: MouseEvent<HTMLButtonElement>, item: InquiryItem) => {
+    event.stopPropagation();
+    pendingScrollToAnswerRef.current = true;
+
+    if (selectedInquiryId === item.id) {
+      pendingScrollToAnswerRef.current = false;
+      if (item.answer && item.status === '답변완료') {
+        setAnswerDraft(item.answer);
+        setIsEditingAnswer(true);
+      }
+      scrollToAnswerSection();
       return;
     }
-    refreshStoredInquiries();
-    const latest =
-      readInquiryRecords().find((row) => row.id === item.id) ??
-      inquiries.find((row) => row.id === item.id) ??
-      item;
-    setDetailItem(latest);
+
+    setSelectedInquiryId(item.id);
+  };
+
+  const handleResetAnswer = () => {
+    setAnswerDraft('');
+    setAnswerError('');
+  };
+
+  const handleStartEditAnswer = () => {
+    if (!selectedInquiry) return;
+    setAnswerDraft(selectedInquiry.answer);
+    setAnswerError('');
+    setIsEditingAnswer(true);
+  };
+
+  const handleSubmitAnswer = () => {
+    if (!selectedInquiry || isSubmittingAnswer) return;
+
+    const trimmed = answerDraft.trim();
+    if (!trimmed) {
+      setAnswerError('답변 내용을 입력해 주세요.');
+      return;
+    }
+    if (trimmed.length > 1000) {
+      setAnswerError('답변은 최대 1,000자까지 입력할 수 있습니다.');
+      return;
+    }
+
+    const inquiryId = selectedInquiry.id;
+    const isEdit = selectedInquiry.status === '답변완료' && !!selectedInquiry.answer;
+    setAnswerError('');
+    setIsSubmittingAnswer(true);
+
+    clearAnswerTimer();
+    answerTimerRef.current = window.setTimeout(() => {
+      try {
+        const answeredAt = formatAnsweredAt();
+        setInquiries((prev) =>
+          prev.map((item) =>
+            item.id === inquiryId
+              ? {
+                  ...item,
+                  status: '답변완료',
+                  answer: trimmed,
+                  answeredAt,
+                }
+              : item,
+          ),
+        );
+
+        const stored = readInquiryRecords();
+        const existsInStorage = stored.some((item) => item.id === inquiryId);
+        if (existsInStorage) {
+          writeInquiryRecords(
+            stored.map((item) =>
+              item.id === inquiryId
+                ? { ...item, status: '답변완료', answer: trimmed, answeredAt }
+                : item,
+            ),
+          );
+        }
+
+        setAnswerDraft('');
+        setIsEditingAnswer(false);
+        showSuccessToast(
+          isEdit
+            ? '✅ 문의 답변이 수정되었습니다.'
+            : '✅ 문의 답변이 등록되었습니다.',
+        );
+      } finally {
+        setIsSubmittingAnswer(false);
+        answerTimerRef.current = null;
+      }
+    }, 500);
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -718,12 +887,14 @@ export default function InquiryPage() {
     height: '100%',
     overflowY: 'auto',
     boxSizing: 'border-box',
-    background: isDark ? '#0f172a' : colors.bg,
     color: isDark ? '#f8fafc' : colors.navy,
-    padding: '28px 24px 48px',
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
   };
+
+  const pageBgClass = isDark
+    ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+    : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50';
 
   const card: CSSProperties = {
     background: isDark ? '#1e293b' : colors.card,
@@ -796,8 +967,8 @@ export default function InquiryPage() {
   const readonlyFieldBg = isDark ? '#0f172a' : '#f1f5f9';
 
   return (
-    <div style={page}>
-      <div style={{ maxWidth: 980, margin: '0 auto' }}>
+    <div className={pageBgClass} style={page}>
+      <div className={`${SHELL_CONTENT_CLASS} py-6 pb-12`}>
         <div
           style={{
             display: 'flex',
@@ -808,11 +979,22 @@ export default function InquiryPage() {
             flexWrap: 'wrap',
           }}
         >
-          <div>
-            <h1 style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
+          <div className="flex flex-col gap-1">
+            <p
+              className={`text-sm font-bold tracking-wide ${
+                isDark ? 'text-blue-400' : 'text-blue-600'
+              }`}
+            >
+              Inquiry Board
+            </p>
+            <h1
+              className={`mt-1 text-3xl font-bold tracking-tight ${
+                isDark ? 'text-slate-100' : 'text-gray-900'
+              }`}
+            >
               {language === 'en' ? 'Inquiry Board' : '문의 게시판'}
             </h1>
-            <p style={{ margin: '8px 0 0', color: isDark ? '#94a3b8' : colors.slate, fontSize: 14, lineHeight: 1.6 }}>
+            <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
               {language === 'en'
                 ? 'Review questions and leave requests about the service.'
                 : '서비스 이용 중 궁금한 점이나 요청 사항을 확인하고 문의를 남겨주세요.'}
@@ -827,7 +1009,7 @@ export default function InquiryPage() {
           <div
             role="status"
             aria-live="polite"
-            className="fixed bottom-5 left-1/2 z-[120] max-w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg"
+            className="fixed bottom-5 right-5 z-[120] max-w-[min(420px,calc(100vw-2rem))] rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg"
           >
             {toastMessage}
           </div>
@@ -838,7 +1020,13 @@ export default function InquiryPage() {
             isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
           }`}
         >
-          <div className="flex flex-col gap-3">
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleApplyFilters();
+            }}
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 카테고리
@@ -847,11 +1035,10 @@ export default function InquiryPage() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => {
-                    setCategoryFilter(item.key);
-                    setCurrentPage(1);
-                  }}
-                  className={filterChipClass(categoryFilter === item.key)}
+                  onClick={() =>
+                    setDraftFilters((prev) => ({ ...prev, category: item.key }))
+                  }
+                  className={filterChipClass(draftFilters.category === item.key)}
                 >
                   {item.label}
                 </button>
@@ -865,17 +1052,50 @@ export default function InquiryPage() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => {
-                    setStatusFilter(item.key);
-                    setCurrentPage(1);
-                  }}
-                  className={filterChipClass(statusFilter === item.key)}
+                  onClick={() =>
+                    setDraftFilters((prev) => ({ ...prev, status: item.key }))
+                  }
+                  className={filterChipClass(draftFilters.status === item.key)}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
             <div className="flex flex-wrap items-end gap-2">
+              <div className="w-full min-w-[140px] sm:w-[148px]">
+                <label
+                  htmlFor="inquiry-start-date"
+                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  시작일
+                </label>
+                <DateInput
+                  id="inquiry-start-date"
+                  aria-label="문의 시작일"
+                  value={draftFilters.startDate}
+                  onChange={(startDate) =>
+                    setDraftFilters((prev) => ({ ...prev, startDate }))
+                  }
+                  isDark={isDark}
+                />
+              </div>
+              <div className="w-full min-w-[140px] sm:w-[148px]">
+                <label
+                  htmlFor="inquiry-end-date"
+                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  종료일
+                </label>
+                <DateInput
+                  id="inquiry-end-date"
+                  aria-label="문의 종료일"
+                  value={draftFilters.endDate}
+                  onChange={(endDate) =>
+                    setDraftFilters((prev) => ({ ...prev, endDate }))
+                  }
+                  isDark={isDark}
+                />
+              </div>
               <div className="min-w-[200px] flex-1">
                 <label
                   htmlFor="inquiry-search"
@@ -886,26 +1106,31 @@ export default function InquiryPage() {
                 <input
                   id="inquiry-search"
                   type="search"
-                  value={searchQuery}
-                  onChange={(event) => {
-                    setSearchQuery(event.target.value);
-                    setCurrentPage(1);
-                  }}
+                  value={draftFilters.search}
+                  onChange={(event) =>
+                    setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
+                  }
                   placeholder="제목 또는 내용 검색..."
-                  className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:border-blue-400 ${
+                  className={`h-9 w-full rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
                     isDark
                       ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
-                      : 'border-slate-200 bg-slate-50 text-slate-800'
+                      : 'border-slate-200 bg-white text-slate-800'
                   }`}
                 />
               </div>
               <button
+                type="submit"
+                className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+              >
+                검색
+              </button>
+              <button
                 type="button"
                 onClick={resetFilters}
-                className={`inline-flex h-10 items-center rounded-lg px-3 text-xs font-semibold ${
+                className={`inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   isDark
-                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                    ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
                 초기화
@@ -914,9 +1139,10 @@ export default function InquiryPage() {
             <div className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               검색 결과 {filteredInquiries.length}건
             </div>
-          </div>
+          </form>
         </div>
 
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
         <section style={{ ...card, padding: 0, overflow: 'hidden' }}>
           {visibleInquiries.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: mutedText, fontSize: 14 }}>
@@ -929,63 +1155,80 @@ export default function InquiryPage() {
               {visibleInquiries.map((item) => {
                 const display = getDisplayFields(item);
                 const isPrivate = item.visibility === '비공개';
+                const isSelected = item.id === selectedInquiryId;
                 return (
                   <li key={item.id} style={{ borderBottom: `1px solid ${lineColor}` }}>
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isSelected}
                       onClick={() => handleRowClick(item)}
-                      className={`w-full cursor-pointer border-0 px-[18px] py-4 text-left transition-colors ${
-                        isDark
-                          ? 'bg-slate-800 hover:bg-slate-700/80'
-                          : 'bg-white hover:bg-slate-50/80'
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleRowClick(item);
+                        }
+                      }}
+                      className={`flex w-full cursor-pointer items-start gap-2 border-0 px-[18px] py-4 text-left transition-colors ${
+                        isSelected
+                          ? isDark
+                            ? 'border-l-4 border-l-blue-500 bg-blue-950/40'
+                            : 'border-l-4 border-l-blue-500 bg-blue-50'
+                          : isDark
+                            ? 'bg-slate-800 hover:bg-slate-700/80'
+                            : 'bg-white hover:bg-slate-50/80'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                            <span style={statusBadgeStyle(item.status, isDark)}>{item.status}</span>
-                            <span style={visibilityBadgeStyle(item.visibility, isDark)}>
-                              {isPrivate ? '🔒 비공개' : item.visibility}
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'
-                              }`}
-                            >
-                              {item.category}
-                            </span>
-                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                              {item.id}
-                            </span>
-                          </div>
-                          <div
-                            className={`line-clamp-2 text-[15px] font-extrabold leading-snug ${
-                              isDark ? 'text-slate-100' : 'text-slate-900'
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                          <span style={statusBadgeStyle(item.status, isDark)}>{item.status}</span>
+                          <span style={visibilityBadgeStyle(item.visibility, isDark)}>
+                            {isPrivate ? '🔒 비공개' : item.visibility}
+                          </span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                              isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'
                             }`}
                           >
-                            {display.title}
-                          </div>
-                          {display.showBody ? (
-                            <div
-                              className={`mt-1.5 line-clamp-1 text-xs ${
-                                isDark ? 'text-slate-400' : 'text-slate-500'
-                              }`}
-                            >
-                              {display.content}
-                            </div>
-                          ) : null}
-                          <div className={`mt-1.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                            {display.author} · {item.date}
-                          </div>
+                            {item.category}
+                          </span>
+                          <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {item.id}
+                          </span>
                         </div>
-                        <span
-                          className={`shrink-0 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
-                          aria-hidden
+                        <div
+                          className={`line-clamp-2 text-[15px] font-extrabold leading-snug ${
+                            isDark ? 'text-slate-100' : 'text-slate-900'
+                          }`}
                         >
-                          →
-                        </span>
+                          {display.title}
+                        </div>
+                        {display.showBody ? (
+                          <div
+                            className={`mt-1.5 line-clamp-1 text-xs ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
+                            {display.content}
+                          </div>
+                        ) : null}
+                        <div className={`mt-1.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {display.author} · {item.date}
+                        </div>
                       </div>
-                    </button>
+                      <button
+                        type="button"
+                        aria-label={`${item.id} 답변 작성으로 이동`}
+                        onClick={(event) => handleArrowClick(event, item)}
+                        className={`mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm transition-colors ${
+                          isDark
+                            ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+                        }`}
+                      >
+                        →
+                      </button>
+                    </div>
                   </li>
                 );
               })}
@@ -1048,132 +1291,198 @@ export default function InquiryPage() {
             ) : null}
           </div>
         </section>
-      </div>
 
-      {detailItem && canViewInquiry(detailItem) ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="inquiry-detail-title"
-          onClick={() => setDetailItem(null)}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4"
+        <aside
+          className={`rounded-xl border shadow-sm ${
+            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+          }`}
         >
-          <div
-            onClick={handleModalClick}
-            className={`flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border shadow-2xl ${
-              isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
-            }`}
-          >
-            <div
-              className={`flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4 ${
-                isDark ? 'border-slate-700' : 'border-slate-200'
-              }`}
-            >
-              <h2
-                id="inquiry-detail-title"
-                className={`m-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-              >
-                문의 상세
-              </h2>
-              <button
-                type="button"
-                aria-label="상세 모달 닫기"
-                onClick={() => setDetailItem(null)}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xl ${
-                  isDark
-                    ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-                }`}
-              >
-                ×
-              </button>
+          {!selectedInquiry ? (
+            <div className="px-5 py-16 text-center text-sm text-slate-400">
+              목록에서 문의를 선택하면 상세 내용과 답변을 등록할 수 있습니다.
             </div>
-            <div className="overflow-y-auto px-5 py-4">
-              <div className="mb-3 flex flex-wrap gap-2">
-                <span style={statusBadgeStyle(detailItem.status, isDark)}>{detailItem.status}</span>
-                <span style={visibilityBadgeStyle(detailItem.visibility, isDark)}>
-                  {detailItem.visibility}
-                </span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                    isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  {detailItem.category}
-                </span>
-              </div>
-              <h3 className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                {detailItem.title}
-              </h3>
-              <div className={`mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {detailItem.author} · {detailItem.date} · {detailItem.id}
-              </div>
+          ) : (
+            <div className="flex max-h-[min(80vh,820px)] flex-col">
               <div
-                className={`mt-4 rounded-xl border p-4 ${
-                  isDark ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50/80'
+                className={`flex shrink-0 items-start justify-between gap-3 border-b px-5 py-4 ${
+                  isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-                <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  문의 내용
+                <div className="min-w-0">
+                  <h2
+                    className={`m-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                  >
+                    문의 상세
+                  </h2>
+                  <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {selectedInquiry.id}
+                  </p>
                 </div>
-                <p
-                  className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
-                    isDark ? 'text-slate-200' : 'text-slate-800'
+                <button
+                  type="button"
+                  aria-label="상세 패널 닫기"
+                  onClick={() => setSelectedInquiryId(null)}
+                  className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xl ${
+                    isDark
+                      ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                      : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
                   }`}
                 >
-                  {detailItem.content}
-                </p>
+                  ×
+                </button>
               </div>
-              {detailItem.answer ? (
+
+              <div className="overflow-y-auto px-5 py-4">
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <span style={statusBadgeStyle(selectedInquiry.status, isDark)}>
+                    {selectedInquiry.status}
+                  </span>
+                  <span style={visibilityBadgeStyle(selectedInquiry.visibility, isDark)}>
+                    {selectedInquiry.visibility === '비공개'
+                      ? '🔒 비공개'
+                      : selectedInquiry.visibility}
+                  </span>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {selectedInquiry.category}
+                  </span>
+                </div>
+
+                <h3 className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  {selectedInquiry.title}
+                </h3>
+                <div className={`mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  문의자 {selectedInquiry.author} · 등록일 {selectedInquiry.date}
+                </div>
+
                 <div
                   className={`mt-4 rounded-xl border p-4 ${
-                    isDark
-                      ? 'border-blue-800/60 bg-blue-950/40'
-                      : 'border-blue-200 bg-blue-50/70'
+                    isDark ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50/80'
                   }`}
                 >
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className={`text-xs font-bold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
-                      관리자 답변
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        isDark ? 'bg-blue-900/60 text-blue-300' : 'bg-blue-100 text-blue-700'
-                      }`}
-                    >
-                      관리자
-                    </span>
-                    {detailItem.answeredAt ? (
-                      <span
-                        className={`text-[11px] font-medium ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
-                      >
-                        {detailItem.answeredAt}
-                      </span>
-                    ) : null}
+                  <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    문의 내용
                   </div>
                   <p
                     className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
                       isDark ? 'text-slate-200' : 'text-slate-800'
                     }`}
                   >
-                    {detailItem.answer}
+                    {selectedInquiry.content}
                   </p>
                 </div>
-              ) : (
-                <div
-                  className={`mt-4 rounded-xl border border-dashed px-4 py-3 text-sm ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-900/40 text-slate-400'
-                      : 'border-slate-200 bg-white text-slate-500'
-                  }`}
-                >
-                  아직 등록된 답변이 없습니다.
-                </div>
-              )}
+
+                {selectedInquiry.answer && !isEditingAnswer ? (
+                  <div
+                    className={`mt-4 rounded-xl border p-4 ${
+                      isDark
+                        ? 'border-blue-800/60 bg-blue-950/40'
+                        : 'border-blue-200 bg-blue-50/70'
+                    }`}
+                  >
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span className={`text-xs font-bold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                        관리자 답변
+                      </span>
+                      {selectedInquiry.answeredAt ? (
+                        <span
+                          className={`text-[11px] font-medium ${isDark ? 'text-blue-400' : 'text-blue-600'}`}
+                        >
+                          {selectedInquiry.answeredAt}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p
+                      className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
+                        isDark ? 'text-slate-200' : 'text-slate-800'
+                      }`}
+                    >
+                      {selectedInquiry.answer}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleStartEditAnswer}
+                      className={`mt-3 inline-flex h-9 items-center rounded-lg border px-3 text-xs font-semibold ${
+                        isDark
+                          ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                          : 'border-slate-200 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      답변 수정
+                    </button>
+                  </div>
+                ) : null}
+
+                {showAnswerForm ? (
+                  <div ref={answerSectionRef} id="inquiry-answer-section" className="mt-4 space-y-3">
+                    <div>
+                      <label
+                        htmlFor="admin-answer"
+                        className={`mb-1.5 block text-xs font-bold ${
+                          isDark ? 'text-slate-300' : 'text-slate-600'
+                        }`}
+                      >
+                        {isEditingAnswer ? '답변 수정' : '관리자 답변 등록'}
+                      </label>
+                      <textarea
+                        id="admin-answer"
+                        aria-label="관리자 답변 입력"
+                        placeholder="답변 내용을 입력해 주세요."
+                        value={answerDraft}
+                        maxLength={1000}
+                        onChange={(e) => {
+                          setAnswerDraft(e.target.value);
+                          if (answerError) setAnswerError('');
+                        }}
+                        className={`min-h-[140px] w-full resize-y rounded-xl border px-3 py-2.5 text-sm outline-none ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
+                            : 'border-slate-200 bg-slate-50 text-slate-800 placeholder:text-slate-400'
+                        }`}
+                      />
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <span className={`text-xs ${answerError ? 'font-semibold text-red-500' : 'text-slate-400'}`}>
+                          {answerError || `${answerDraft.length} / 1000자`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetAnswer}
+                        disabled={isSubmittingAnswer}
+                        className={`inline-flex h-10 items-center rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isDark
+                            ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        초기화
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSubmitAnswer}
+                        disabled={isSubmittingAnswer}
+                        className="inline-flex h-10 flex-1 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                      >
+                        {isSubmittingAnswer
+                          ? '등록 중...'
+                          : isEditingAnswer
+                            ? '답변 수정 완료'
+                            : '답변 등록'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
+        </aside>
         </div>
-      ) : null}
+      </div>
 
       {isModalOpen ? (
         <div

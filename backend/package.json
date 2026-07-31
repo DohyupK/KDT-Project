@@ -7,6 +7,9 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "migrate:issue-lots": "tsx scripts/migrate-issue-lots.ts",
+    "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
+    "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -29,5 +32,8 @@
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
   }
 }

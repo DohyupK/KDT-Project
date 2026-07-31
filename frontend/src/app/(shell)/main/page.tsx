@@ -3,17 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import UserAuthMenu from '@/components/layout/UserAuthMenu';
 import { useSelectedLot } from '@/context/SelectedLotContext';
 import { useUiSettings } from '@/components/layout/AppShell';
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import DateInput from '@/components/DateInput';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
 
 type StatusTone = '정상' | '주의' | '경고' | '위험' | '이상';
-type ChartType = 'bar' | 'line' | 'pie';
-type TrendInterval = '1h' | '2h' | 'shift';
+
+type RiskGrade = '높음' | '중간' | '낮음';
 
 type FilterState = {
   startDate: string;
@@ -38,7 +39,7 @@ type LotRecord = {
 type RiskLotView = {
   id: string;
   riskScore: number;
-  status: StatusTone;
+  status: RiskGrade;
   riskReason: string;
   record: LotRecord;
 };
@@ -65,14 +66,6 @@ type ToastItem = {
   variant: 'success' | 'error' | 'info';
 };
 
-type NotificationItem = {
-  id: string;
-  time: string;
-  title: string;
-  message: string;
-  unread: boolean;
-};
-
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -90,10 +83,6 @@ function pad(n: number) {
   return String(n).padStart(2, '0');
 }
 
-function formatDateTime(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
 function toneClass(tone: StatusTone) {
   const base =
     'inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium tracking-normal';
@@ -103,6 +92,108 @@ function toneClass(tone: StatusTone) {
   if (tone === '이상') return `${base} border border-yellow-200 bg-yellow-50 text-yellow-700`;
   return `${base} border border-red-200 bg-red-50 text-red-700`;
 }
+
+function riskGradeClass(grade: RiskGrade) {
+  const base =
+    'inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold';
+  if (grade === '높음') return `${base} bg-red-100 text-red-700`;
+  if (grade === '중간') return `${base} bg-orange-100 text-orange-700`;
+  return `${base} bg-emerald-100 text-emerald-700`;
+}
+
+function formatDisplayDate(iso: string) {
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${y}.${m}.${d}`;
+}
+
+function makeMockLotRecord(
+  partial: Pick<LotRecord, 'id' | 'date' | 'hour'> & Partial<LotRecord>,
+): LotRecord {
+  return {
+    sintering_temp: 810,
+    lithium_input: 2.4,
+    humidity: 45,
+    metal_impurity: 0.015,
+    tank_pressure: 2.1,
+    process_time: 120,
+    additive_ratio: 3.2,
+    quality_defect: 1,
+    production: 24,
+    ...partial,
+  };
+}
+
+/** 위험 LOT Top 테이블 전용 Mock (위험도·위험등급 매칭) */
+const TOP_RISK_LOTS_MOCK: RiskLotView[] = [
+  {
+    id: 'LOT-20260722-N12',
+    riskScore: 0.94,
+    status: '높음',
+    riskReason: '소성 온도 상승, 금속 불순물 농도 초과',
+    record: makeMockLotRecord({
+      id: 'LOT-20260722-N12',
+      date: '2026-07-22',
+      hour: '14:00',
+      sintering_temp: 842,
+      metal_impurity: 0.042,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260721-N08',
+    riskScore: 0.87,
+    status: '높음',
+    riskReason: '공정 습도 과다, 원료 투입비 편차',
+    record: makeMockLotRecord({
+      id: 'LOT-20260721-N08',
+      date: '2026-07-21',
+      hour: '11:00',
+      humidity: 68,
+      lithium_input: 1.52,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260722-N05',
+    riskScore: 0.72,
+    status: '중간',
+    riskReason: '소성 온도 상승',
+    record: makeMockLotRecord({
+      id: 'LOT-20260722-N05',
+      date: '2026-07-22',
+      hour: '09:00',
+      sintering_temp: 828,
+      quality_defect: 1,
+    }),
+  },
+  {
+    id: 'LOT-20260720-N15',
+    riskScore: 0.51,
+    status: '중간',
+    riskReason: '원료 투입비 편차',
+    record: makeMockLotRecord({
+      id: 'LOT-20260720-N15',
+      date: '2026-07-20',
+      hour: '16:00',
+      lithium_input: 3.35,
+      quality_defect: 0,
+    }),
+  },
+  {
+    id: 'LOT-20260721-N03',
+    riskScore: 0.28,
+    status: '낮음',
+    riskReason: '품질 불량 예측',
+    record: makeMockLotRecord({
+      id: 'LOT-20260721-N03',
+      date: '2026-07-21',
+      hour: '08:00',
+      sintering_temp: 808,
+      quality_defect: 1,
+    }),
+  },
+];
 
 function buildLotDataset(seed: number): LotRecord[] {
   const rows: LotRecord[] = [];
@@ -166,10 +257,10 @@ function computeRiskScore(record: LotRecord): number {
   return Math.min(1, Math.round(score * 100) / 100);
 }
 
-function riskStatus(score: number): StatusTone {
-  if (score >= 0.8) return '위험';
-  if (score >= 0.7) return '경고';
-  return '주의';
+function riskStatus(score: number): RiskGrade {
+  if (score >= 0.85) return '높음';
+  if (score >= 0.4) return '중간';
+  return '낮음';
 }
 
 function toRiskLotView(record: LotRecord): RiskLotView {
@@ -195,15 +286,8 @@ function isAnomalous(record: LotRecord) {
   );
 }
 
-function getTrendSlots(interval: TrendInterval) {
-  if (interval === '1h') return Array.from({ length: 15 }, (_, i) => `${pad(8 + i)}:00`);
-  if (interval === 'shift') return ['주간(08-20)', '야간(20-08)'];
-  return ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
-}
-
-function hourToShift(hour: string) {
-  const h = Number(hour.slice(0, 2));
-  return h >= 8 && h < 20 ? '주간(08-20)' : '야간(20-08)';
+function getTrendSlots() {
+  return Array.from({ length: 15 }, (_, i) => `${pad(8 + i)}:00`);
 }
 
 function buildProcessParams(records: LotRecord[]): ProcessParam[] {
@@ -374,96 +458,30 @@ function Modal({
 
 function TrendChart({
   data,
-  chartType,
   isDark = false,
 }: {
   data: TrendPoint[];
-  chartType: ChartType;
   isDark?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const width = 760;
-  const height = 300;
-  const pad = { top: 28, right: 118, bottom: 36, left: 52 };
+  const height = 340;
+  const pad = { top: 30, right: 108, bottom: 38, left: 48 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const prodMax = 60;
   const passMin = 80;
   const passMax = 100;
   const slotW = data.length > 0 ? innerW / data.length : innerW;
-  const barW = Math.max(8, slotW * 0.42);
   const yProd = (v: number) => pad.top + innerH - (Math.min(prodMax, Math.max(0, v)) / prodMax) * innerH;
   const yPass = (v: number) =>
     pad.top + innerH - ((Math.min(passMax, Math.max(passMin, v)) - passMin) / (passMax - passMin)) * innerH;
   const yRisk = (v: number) => pad.top + innerH - Math.min(1, Math.max(0, v)) * innerH;
-  const totalPie = data.reduce((s, d) => s + d.production, 0) || 1;
-  const colors = ['#2563eb', '#0d9488', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#059669', '#ea580c'];
-  const gridStroke = isDark ? '#334155' : '#f1f5f9';
-  const tickFill = isDark ? '#cbd5e1' : '#94a3b8';
-  const pieHole = isDark ? '#1e293b' : '#fff';
-
-  if (chartType === 'pie') {
-    let cursor = -Math.PI / 2;
-    const arcs = data.map((d, i) => {
-      const ratio = d.production / totalPie;
-      const start = cursor;
-      const end = cursor + ratio * Math.PI * 2;
-      cursor = end;
-      const large = end - start > Math.PI ? 1 : 0;
-      const x1 = 160 + Math.cos(start) * 90;
-      const y1 = 140 + Math.sin(start) * 90;
-      const x2 = 160 + Math.cos(end) * 90;
-      const y2 = 140 + Math.sin(end) * 90;
-      return { d, i, path: `M160,140 L${x1},${y1} A90,90 0 ${large} 1 ${x2},${y2} Z`, color: colors[i % colors.length] };
-    });
-    return (
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,280px)_1fr]">
-        <svg viewBox="0 0 320 280" className="mx-auto h-auto w-full max-w-[320px]">
-          {arcs.map((a) => (
-            <path key={a.d.time} d={a.path} fill={a.color} opacity={0.9} />
-          ))}
-          <circle cx="160" cy="140" r="48" fill={pieHole} />
-          <text
-            x="160"
-            y="136"
-            textAnchor="middle"
-            className={`text-[12px] font-bold ${isDark ? '' : 'fill-slate-700'}`}
-            fill={isDark ? '#f1f5f9' : undefined}
-          >
-            생산량
-          </text>
-          <text
-            x="160"
-            y="154"
-            textAnchor="middle"
-            className={`text-[11px] ${isDark ? '' : 'fill-slate-500'}`}
-            fill={isDark ? '#94a3b8' : undefined}
-          >
-            {totalPie}건
-          </text>
-        </svg>
-        <ul className="space-y-2 text-sm">
-          {arcs.map((a) => (
-            <li key={a.d.time} className="flex items-center justify-between gap-3">
-              <span
-                className={`inline-flex items-center gap-2 ${
-                  isDark ? 'text-slate-300' : 'text-slate-700'
-                }`}
-              >
-                <span className="h-3 w-3 rounded-sm" style={{ background: a.color }} />
-                {a.d.time}
-              </span>
-              <span
-                className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-              >
-                {a.d.production}건 ({Math.round((a.d.production / totalPie) * 100)}%)
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
+  const gridStroke = isDark ? '#334155' : '#eef2f7';
+  const tickFill = isDark ? '#94a3b8' : '#94a3b8';
+  const prodColor = '#3b82f6';
+  const passColor = '#10b981';
+  const riskColor = '#f59e0b';
 
   const passPoints = data.map((d, i) => `${pad.left + (i + 0.5) * slotW},${yPass(d.passRate)}`).join(' ');
   const riskPoints = data.map((d, i) => `${pad.left + (i + 0.5) * slotW},${yRisk(d.riskIndex)}`).join(' ');
@@ -472,27 +490,29 @@ function TrendChart({
   const hoverX = hoverIndex !== null ? pad.left + (hoverIndex + 0.5) * slotW : 0;
 
   return (
-    <div className="relative overflow-hidden px-1 pr-2">
+    <div className="relative min-w-0 overflow-hidden">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-auto w-full"
+        className="h-auto w-full max-h-[360px] min-h-[320px]"
+        role="img"
+        aria-label="시간대별 생산량, 합격률, Risk 추이 차트"
         onMouseLeave={() => setHoverIndex(null)}
       >
-        <text x={pad.left} y={14} fill={tickFill} fontSize="10" fontWeight="600">
+        <text x={pad.left} y={14} fill={prodColor} fontSize="10" fontWeight="600">
           생산량
         </text>
-        <text x={width - pad.right + 10} y={14} fill="#10b981" fontSize="10" fontWeight="600">
+        <text x={width - pad.right + 8} y={14} fill={passColor} fontSize="10" fontWeight="600">
           합격률
         </text>
-        <text x={width - 10} y={14} textAnchor="end" fill="#f59e0b" fontSize="10" fontWeight="600">
+        <text x={width - 8} y={14} textAnchor="end" fill={riskColor} fontSize="10" fontWeight="600">
           Risk
         </text>
         {[0, 15, 30, 45, 60].map((tick) => {
           const y = yProd(tick);
           return (
             <g key={tick}>
-              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke={gridStroke} />
-              <text x={pad.left - 8} y={y + 3} textAnchor="end" fill={tickFill} fontSize="11">
+              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke={gridStroke} strokeWidth="1" />
+              <text x={pad.left - 8} y={y + 3} textAnchor="end" fill={prodColor} fontSize="10" opacity="0.75">
                 {tick}
               </text>
             </g>
@@ -503,62 +523,45 @@ function TrendChart({
           const y = yPass(pass);
           return (
             <g key={pass}>
-              <text x={width - pad.right + 10} y={y + 3} fill="#10b981" fontSize="10">
+              <text x={width - pad.right + 8} y={y + 3} fill={passColor} fontSize="10" opacity="0.8">
                 {pass}%
               </text>
-              <text x={width - 10} y={y + 3} textAnchor="end" fill="#d97706" fontSize="10">
+              <text x={width - 8} y={y + 3} textAnchor="end" fill={riskColor} fontSize="10" opacity="0.8">
                 {risk.toFixed(2)}
               </text>
             </g>
           );
         })}
-        {data.map((d, i) => {
-          const x = pad.left + i * slotW + (slotW - barW) / 2;
-          const y = yProd(d.production);
-          return (
-            <g key={d.time} onMouseEnter={() => setHoverIndex(i)}>
-              <rect
-                x={pad.left + i * slotW}
-                y={pad.top}
-                width={slotW}
-                height={innerH}
-                fill={hoverIndex === i ? 'rgba(37,99,235,0.06)' : 'transparent'}
-              />
-              {chartType === 'bar' ? (
-                <rect
-                  x={x}
-                  y={y}
-                  width={barW}
-                  height={Math.max(0, pad.top + innerH - y)}
-                  rx={4}
-                  fill="#3b82f6"
-                  opacity={0.85}
-                />
-              ) : null}
-              <text
-                x={pad.left + (i + 0.5) * slotW}
-                y={height - 10}
-                textAnchor="middle"
-                fill={tickFill}
-                fontSize="10"
-              >
-                {d.time}
-              </text>
-            </g>
-          );
-        })}
-        {chartType === 'line' ? (
-          <polyline fill="none" stroke="#3b82f6" strokeWidth="2.4" points={linePoints} />
-        ) : null}
-        <polyline fill="none" stroke="#10b981" strokeWidth="2" points={passPoints} />
-        <polyline fill="none" stroke="#f59e0b" strokeWidth="2" points={riskPoints} />
+        {data.map((d, i) => (
+          <g key={d.time} onMouseEnter={() => setHoverIndex(i)}>
+            <rect
+              x={pad.left + i * slotW}
+              y={pad.top}
+              width={slotW}
+              height={innerH}
+              fill={hoverIndex === i ? 'rgba(37,99,235,0.06)' : 'transparent'}
+            />
+            <text
+              x={pad.left + (i + 0.5) * slotW}
+              y={height - 12}
+              textAnchor="middle"
+              fill={tickFill}
+              fontSize="10"
+            >
+              {d.time}
+            </text>
+          </g>
+        ))}
+        <polyline fill="none" stroke={prodColor} strokeWidth="2" points={linePoints} />
+        <polyline fill="none" stroke={passColor} strokeWidth="2" points={passPoints} />
+        <polyline fill="none" stroke={riskColor} strokeWidth="2" points={riskPoints} />
         {data.map((d, i) => {
           const x = pad.left + (i + 0.5) * slotW;
           return (
             <g key={`p-${d.time}`} onMouseEnter={() => setHoverIndex(i)}>
-              {chartType === 'line' ? <circle cx={x} cy={yProd(d.production)} r="3" fill="#3b82f6" /> : null}
-              <circle cx={x} cy={yPass(d.passRate)} r="2.8" fill="#10b981" />
-              <circle cx={x} cy={yRisk(d.riskIndex)} r="2.8" fill="#f59e0b" />
+              <circle cx={x} cy={yProd(d.production)} r="2.5" fill={prodColor} />
+              <circle cx={x} cy={yPass(d.passRate)} r="2.5" fill={passColor} />
+              <circle cx={x} cy={yRisk(d.riskIndex)} r="2.5" fill={riskColor} />
             </g>
           );
         })}
@@ -570,38 +573,65 @@ function TrendChart({
             y2={pad.top + innerH}
             stroke="#94a3b8"
             strokeDasharray="4 4"
+            strokeWidth="1"
           />
         ) : null}
       </svg>
       {hover ? (
         <div
-          className={`pointer-events-none absolute top-8 z-10 w-48 rounded-xl border px-3 py-2 text-xs shadow-lg ${
+          className={`pointer-events-none absolute top-8 z-10 w-44 rounded-lg border px-3 py-2.5 text-xs shadow-md ${
             isDark
               ? 'border-slate-700 bg-slate-800 text-slate-200'
-              : 'border-slate-200 bg-white text-slate-700'
+              : 'border-slate-200 bg-white text-slate-600'
           }`}
           style={{
-            left: `${Math.min(68, Math.max(2, (hoverX / width) * 100 - 14))}%`,
-            ...(isDark ? { backgroundColor: '#1e293b', color: '#f1f5f9' } : {}),
+            left: `${Math.min(70, Math.max(2, (hoverX / width) * 100 - 12))}%`,
           }}
         >
-          <div className={`mb-1 font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+          <div className={`mb-1.5 font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
             {hover.time}
           </div>
-          <div>생산량: {hover.production}건</div>
-          <div>합격률: {hover.passRate}%</div>
-          <div>Risk Index: {hover.riskIndex.toFixed(2)}</div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                생산량
+              </span>
+              <span className="tabular-nums font-medium">{hover.production}건</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                합격률
+              </span>
+              <span className="tabular-nums font-medium">{hover.passRate}%</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Risk
+              </span>
+              <span className="tabular-nums font-medium">{hover.riskIndex.toFixed(2)}</span>
+            </div>
+          </div>
         </div>
       ) : null}
-      <div className={`mt-4 flex flex-wrap gap-4 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-blue-500" /> 생산량
+      <div
+        className={`mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs ${
+          isDark ? 'text-slate-400' : 'text-slate-500'
+        }`}
+      >
+        <span className="inline-flex items-center gap-2">
+          <span className="h-0.5 w-3.5 rounded-full bg-blue-500" aria-hidden />
+          생산량
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-3 rounded-full bg-emerald-500" /> 합격률
+        <span className="inline-flex items-center gap-2">
+          <span className="h-0.5 w-3.5 rounded-full bg-emerald-500" aria-hidden />
+          합격률
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-3 rounded-full bg-amber-500" /> Risk
+        <span className="inline-flex items-center gap-2">
+          <span className="h-0.5 w-3.5 rounded-full bg-amber-500" aria-hidden />
+          Risk
         </span>
       </div>
     </div>
@@ -614,44 +644,35 @@ function TrendChart({
 
 export default function MainPage() {
   const { isDark, language } = useUiSettings();
-  // Empty on SSR so server/client HTML match; clock starts after mount.
-  const [now, setNow] = useState('');
-  const [seed, setSeed] = useState(7);
-  const [draftFilter, setDraftFilter] = useState<FilterState>(DEFAULT_FILTER);
-  const [appliedFilter, setAppliedFilter] = useState<FilterState>(DEFAULT_FILTER);
-  const [chartType, setChartType] = useState<ChartType>('bar');
-  const [trendInterval, setTrendInterval] = useState<TrendInterval>('2h');
+  const [seed] = useState(7);
+  /** 생산 추이 차트 전용 날짜 필터 (적용 시에만 반영) */
+  const [trendFilterDraft, setTrendFilterDraft] = useState<FilterState>(DEFAULT_FILTER);
+  const [trendFilterApplied, setTrendFilterApplied] = useState<FilterState>(DEFAULT_FILTER);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
-  const [isNotifyOpen, setIsNotifyOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: 'n1',
-      time: '11:03',
-      title: '위험 LOT 경고',
-      message: '고위험 LOT가 감지되었습니다.',
-      unread: true,
-    },
-    {
-      id: 'n2',
-      time: '10:42',
-      title: '공정 습도',
-      message: '습도 상한 근접 구간이 있습니다.',
-      unread: true,
-    },
-  ]);
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const notifyRef = useRef<HTMLDivElement | null>(null);
 
   const dataset = useMemo(() => buildLotDataset(seed), [seed]);
 
-  const filteredRecords = useMemo(() => {
-    return dataset.filter(
-      (r) => r.date >= appliedFilter.startDate && r.date <= appliedFilter.endDate,
-    );
-  }, [dataset, appliedFilter]);
+  /** KPI·위험 LOT·공정 파라미터용 — 전체 데이터 (최상단 기간 필터 없음) */
+  const filteredRecords = dataset;
+
+  const dataRangeStart = useMemo(
+    () =>
+      dataset.length === 0
+        ? DEFAULT_FILTER.startDate
+        : dataset.reduce((m, r) => (r.date < m ? r.date : m), dataset[0].date),
+    [dataset],
+  );
+  const dataRangeEnd = useMemo(
+    () =>
+      dataset.length === 0
+        ? DEFAULT_FILTER.endDate
+        : dataset.reduce((m, r) => (r.date > m ? r.date : m), dataset[0].date),
+    [dataset],
+  );
 
   const riskLots = useMemo(() => {
     return filteredRecords
@@ -660,7 +681,7 @@ export default function MainPage() {
       .sort((a, b) => b.riskScore - a.riskScore);
   }, [filteredRecords]);
 
-  const topRiskLots = useMemo(() => riskLots.slice(0, 5), [riskLots]);
+  const topRiskLots = TOP_RISK_LOTS_MOCK;
 
   const kpis = useMemo(() => {
     const totalLots = new Set(filteredRecords.map((r) => r.id)).size;
@@ -697,21 +718,20 @@ export default function MainPage() {
 
   const topKpis = kpis;
 
+  /** 생산 추이 차트 전용 — 적용된 날짜 필터 */
+  const trendRecords = useMemo(() => {
+    const { startDate, endDate } = trendFilterApplied;
+    if (startDate > endDate) return [];
+    return dataset.filter((r) => r.date >= startDate && r.date <= endDate);
+  }, [dataset, trendFilterApplied]);
+
   const trendData = useMemo(() => {
-    const slots = getTrendSlots(trendInterval);
+    const slots = getTrendSlots();
     return slots.map((time) => {
-      const rows = filteredRecords.filter((r) => {
-        if (trendInterval === 'shift') return hourToShift(r.hour) === time;
-        if (trendInterval === '2h') {
-          const h = Number(r.hour.slice(0, 2));
-          const slotH = Number(time.slice(0, 2));
-          return h === slotH || h === slotH + 1;
-        }
-        return r.hour === time;
-      });
+      const rows = trendRecords.filter((r) => r.hour === time);
       const production = Math.min(
         60,
-        Math.round(rows.reduce((s, r) => s + r.production, 0) / Math.max(1, trendInterval === '1h' ? 3 : 2)),
+        Math.round(rows.reduce((s, r) => s + r.production, 0) / 3),
       );
       const defects = rows.filter((r) => r.quality_defect === 1).length;
       const passRate =
@@ -733,26 +753,9 @@ export default function MainPage() {
         riskIndex,
       };
     });
-  }, [filteredRecords, trendInterval]);
+  }, [trendRecords]);
 
   const params = useMemo(() => buildProcessParams(filteredRecords), [filteredRecords]);
-  const unreadCount = notifications.filter((n) => n.unread).length;
-
-  useEffect(() => {
-    setNow(formatDateTime(new Date()));
-    const timer = setInterval(() => setNow(formatDateTime(new Date())), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!isNotifyOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (notifyRef.current && !notifyRef.current.contains(target)) setIsNotifyOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [isNotifyOpen]);
 
   useEffect(() => {
     return () => {
@@ -768,20 +771,23 @@ export default function MainPage() {
     toastTimersRef.current.push(timer);
   };
 
-  const handleSearch = () => {
-    if (draftFilter.startDate > draftFilter.endDate) {
-      pushToast('시작일이 종료일보다 늦을 수 없습니다.', 'error');
+  const handleSearchTrendFilters = () => {
+    if (trendFilterDraft.startDate > trendFilterDraft.endDate) {
+      pushToast('생산 추이: 시작일이 종료일보다 늦을 수 없습니다.', 'error');
       return;
     }
-    setAppliedFilter({ ...draftFilter });
-    pushToast('필터가 적용되었습니다.', 'success');
+    setTrendFilterApplied({ ...trendFilterDraft });
+    pushToast('생산 추이 날짜 필터가 적용되었습니다.', 'success');
   };
 
-  const handleReset = () => {
-    setDraftFilter(DEFAULT_FILTER);
-    setAppliedFilter(DEFAULT_FILTER);
-    setSeed(7);
-    pushToast('필터가 초기화되었습니다.', 'info');
+  const handleResetTrendFilters = () => {
+    const reset = {
+      startDate: dataRangeStart,
+      endDate: dataRangeEnd,
+    };
+    setTrendFilterDraft(reset);
+    setTrendFilterApplied(reset);
+    pushToast('생산 추이 날짜 필터가 초기화되었습니다.', 'info');
   };
 
   const { connectLot } = useSelectedLot();
@@ -796,196 +802,53 @@ export default function MainPage() {
     setSelectedLot(lot);
   };
   const cardClass = isDark
-    ? 'rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
-    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
-  const filterClass = isDark
-    ? 'rounded-xl border border-slate-700 bg-slate-900/70 shadow-sm'
-    : 'rounded-xl border border-slate-200/70 bg-white shadow-sm';
+    ? 'min-w-0 rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
+    : 'min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm';
   const subpanelClass = isDark
     ? 'rounded-xl border border-slate-700 bg-slate-900/70'
     : 'rounded-xl border border-slate-200/70 bg-slate-50/40';
+  const detailLinkClass = isDark
+    ? 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-700/60 hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+  const tableDetailBtnClass = isDark
+    ? 'inline-flex h-7 items-center justify-center rounded-md border border-slate-600 px-2.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex h-7 items-center justify-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+  const rowHoverClass = isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50';
+  const tableBorderClass = isDark ? 'border-slate-700' : 'border-slate-100';
+  const appliedPeriodLabel = `${formatDisplayDate(trendFilterApplied.startDate)} ~ ${formatDisplayDate(trendFilterApplied.endDate)}`;
 
   return (
-    <div className={`h-full overflow-y-auto ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-6 pb-40 sm:px-6 lg:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
+    <div
+      className={`h-full overflow-y-auto ${
+        isDark
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
+      }`}
+    >
+      <div className={`${SHELL_CONTENT_CLASS} space-y-5 py-6 pb-40`}>
+        <header className="mb-1 min-w-0">
+          <div className="mb-6 flex flex-col gap-1">
+            <p
+              className={`text-sm font-bold tracking-wide ${
+                isDark ? 'text-blue-400' : 'text-blue-600'
+              }`}
+            >
+              Process Monitoring
+            </p>
             <h1
-              className={`text-xl font-semibold tracking-tight sm:text-2xl ${
-                isDark ? 'text-slate-100' : 'text-slate-900'
+              className={`mt-1 text-3xl font-bold tracking-tight ${
+                isDark ? 'text-slate-100' : 'text-gray-900'
               }`}
             >
               {language === 'en' ? 'Overall Process Monitoring' : '종합 공정 모니터링'}
             </h1>
-            <p className={`mt-1 text-xs sm:text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {now}
+            <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+              {language === 'en'
+                ? 'Monitor production progress and equipment status in real time.'
+                : '생산 공정의 진행 현황과 설비 상태를 실시간으로 확인합니다.'}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSeed((s) => s + 1);
-                pushToast(
-                  language === 'en' ? 'Data has been refreshed.' : '데이터가 갱신되었습니다.',
-                  'success',
-                );
-              }}
-              className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm ${
-                isDark
-                  ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
-                  : 'border-slate-200/60 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {language === 'en' ? 'Refresh' : '새로고침'}
-            </button>
-
-            <div className="relative" ref={notifyRef}>
-              <button
-                type="button"
-                aria-label="알림"
-                onClick={() => setIsNotifyOpen((v) => !v)}
-                className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    : 'border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.1c0 .7-.2 1.4-.6 2L4.7 14.4a1.2 1.2 0 0 0 1 1.9h12.6a1.2 1.2 0 0 0 1-1.9l-1.2-1.8c-.4-.6-.6-1.3-.6-2V8.5A5.5 5.5 0 0 0 12 3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9.2 17.6a2.8 2.8 0 0 0 5.6 0"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                {unreadCount > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                    {unreadCount}
-                  </span>
-                ) : null}
-              </button>
-              {isNotifyOpen ? (
-                <div
-                  className={`absolute right-0 top-11 z-40 w-[min(92vw,320px)] overflow-hidden rounded-xl border shadow-lg ${
-                    isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/60 bg-white'
-                  }`}
-                >
-                  <div
-                    className={`flex items-center justify-between border-b px-4 py-3 ${
-                      isDark ? 'border-slate-700' : 'border-slate-100'
-                    }`}
-                  >
-                    <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                      알림
-                    </strong>
-                    <button
-                      type="button"
-                      className={`text-xs font-medium ${
-                        isDark
-                          ? 'text-slate-400 hover:text-slate-200'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
-                      onClick={() =>
-                        setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
-                      }
-                    >
-                      모두 읽음
-                    </button>
-                  </div>
-                  {notifications.map((n) => (
-                    <button
-                      key={n.id}
-                      type="button"
-                      className={`block w-full border-b px-4 py-3 text-left ${
-                        isDark
-                          ? `border-slate-700/80 hover:bg-slate-800/60 ${
-                              n.unread ? 'bg-blue-950/40' : ''
-                            }`
-                          : `border-slate-50 hover:bg-slate-50 ${n.unread ? 'bg-blue-50/40' : ''}`
-                      }`}
-                      onClick={() =>
-                        setNotifications((prev) =>
-                          prev.map((item) => (item.id === n.id ? { ...item, unread: false } : item)),
-                        )
-                      }
-                    >
-                      <div
-                        className={`flex justify-between gap-2 text-sm font-semibold ${
-                          isDark ? 'text-slate-100' : 'text-slate-800'
-                        }`}
-                      >
-                        <span>{n.title}</span>
-                        <span className="text-xs font-normal text-slate-400">{n.time}</span>
-                      </div>
-                      <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {n.message}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            <UserAuthMenu />
-          </div>
         </header>
-
-        <section className={`${filterClass} px-3 py-2 sm:px-4`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <div
-              className={`inline-flex h-8 w-full max-w-full items-center overflow-hidden rounded-lg border sm:w-auto ${
-                isDark
-                  ? 'border-slate-700 bg-slate-950/40'
-                  : 'border-slate-200 bg-slate-50/80'
-              }`}
-            >
-              <input
-                type="date"
-                aria-label="시작일"
-                value={draftFilter.startDate}
-                onChange={(e) => setDraftFilter((p) => ({ ...p, startDate: e.target.value }))}
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-              <span className="shrink-0 px-1 text-xs text-slate-400">–</span>
-              <input
-                type="date"
-                aria-label="종료일"
-                value={draftFilter.endDate}
-                onChange={(e) => setDraftFilter((p) => ({ ...p, endDate: e.target.value }))}
-                className={`h-8 min-w-0 flex-1 border-0 bg-transparent px-2 text-sm outline-none sm:w-[138px] sm:flex-none sm:px-2.5 ${
-                  isDark ? 'text-slate-100' : 'text-slate-700'
-                }`}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleSearch}
-              className="inline-flex h-8 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              적용
-            </button>
-            <button
-              type="button"
-              onClick={handleReset}
-              className={`inline-flex h-8 items-center rounded-lg px-2.5 text-sm font-medium ${
-                isDark
-                  ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-              }`}
-            >
-              초기화
-            </button>
-          </div>
-        </section>
 
         <section
           className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${
@@ -1070,181 +933,162 @@ export default function MainPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 gap-5 pb-8 xl:grid-cols-12">
-          <div className={`${cardClass} p-4 md:p-5 xl:col-span-7`}>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <section className="grid grid-cols-1 items-stretch gap-5 pb-8 xl:grid-cols-5">
+          <section className={`${cardClass} flex h-full flex-col p-5 md:p-6 xl:col-span-3`} aria-labelledby="trend-heading">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2
-                  className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                  id="trend-heading"
+                  className={`text-base font-semibold tracking-tight ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
                 >
                   생산 추이
                 </h2>
-                <p className="mt-0.5 text-xs text-slate-400">듀얼 Y축 · 집계 주기 선택</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div
-                  className={`inline-flex rounded-lg border p-0.5 ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-900/70'
-                      : 'border-slate-200 bg-slate-50'
-                  }`}
-                >
-                  {(
-                    [
-                      ['bar', '막대', 'M4 14h3v6H4zm6-8h3v14h-3zm6 4h3v10h-3z'],
-                      ['line', '선형', 'M4 16l5-5 4 3 7-8'],
-                      ['pie', '원형', 'M12 3a9 9 0 1 1-9 9h9V3z'],
-                    ] as Array<[ChartType, string, string]>
-                  ).map(([type, label, d]) => (
-                    <button
-                      key={type}
-                      type="button"
-                      title={label}
-                      aria-label={label}
-                      onClick={() => setChartType(type)}
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition ${
-                        chartType === type
-                          ? isDark
-                            ? 'bg-slate-800 text-slate-100 shadow-sm'
-                            : 'bg-white text-slate-900 shadow-sm'
-                          : isDark
-                            ? 'text-slate-500 hover:text-slate-300'
-                            : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path
-                          d={d}
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          fill={type === 'pie' ? 'currentColor' : 'none'}
-                          fillOpacity={type === 'pie' ? 0.2 : 0}
-                        />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-                <select
-                  value={trendInterval}
-                  onChange={(e) => setTrendInterval(e.target.value as TrendInterval)}
-                  className={`h-8 rounded-lg border px-2.5 text-xs font-medium outline-none ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-950/40 text-slate-100 hover:bg-slate-900'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <option value="1h">1시간 단위</option>
-                  <option value="2h">2시간 단위</option>
-                  <option value="shift">Shift (주간·야간)</option>
-                </select>
-                <Link
-                  href="/dashboard"
-                  className={`ml-1 flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  상세보기 →
-                </Link>
-              </div>
-            </div>
-            <TrendChart data={trendData} chartType={chartType} isDark={isDark} />
-          </div>
-
-          <div className={`${cardClass} p-4 md:p-5 xl:col-span-5`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-slate-900">위험 LOT Top</h2>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  행 클릭 → 챗봇 자동 진단 · 「상세」로 공정 데이터
+                <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  시간대별 생산량, 합격률 및 위험도 변화
                 </p>
-                <h2
-                  className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-                >
-                  위험 LOT Top
-                </h2>
-                <p className="mt-0.5 text-xs text-slate-400">위험도 내림차순 · 행 클릭 시 상세</p>
               </div>
-              <Link
-                href="/issue"
-                className={`flex shrink-0 cursor-pointer items-center gap-1 text-xs font-medium transition-colors hover:text-blue-600 md:text-sm ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}
-              >
-                상세보기 ({riskLots.length}) →
+              <Link href="/dashboard" className={detailLinkClass}>
+                상세보기
+                <span aria-hidden="true">→</span>
               </Link>
             </div>
-            <div className="mt-3 -mx-1 overflow-x-auto px-1">
-              <table className="w-full min-w-[520px] border-collapse text-left text-sm">
+
+            <div
+              className={`mt-5 flex flex-wrap items-center gap-2 rounded-lg p-3 ${
+                isDark ? 'bg-slate-900/50' : 'bg-slate-50'
+              }`}
+            >
+              <DateInput
+                aria-label="생산 추이 시작일"
+                value={trendFilterDraft.startDate}
+                onChange={(startDate) => setTrendFilterDraft((p) => ({ ...p, startDate }))}
+                isDark={isDark}
+                className="sm:w-[148px]"
+              />
+              <span className={`shrink-0 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                –
+              </span>
+              <DateInput
+                aria-label="생산 추이 종료일"
+                value={trendFilterDraft.endDate}
+                onChange={(endDate) => setTrendFilterDraft((p) => ({ ...p, endDate }))}
+                isDark={isDark}
+                className="sm:w-[148px]"
+              />
+              <button
+                type="button"
+                onClick={handleSearchTrendFilters}
+                className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+              >
+                적용
+              </button>
+              <button
+                type="button"
+                onClick={handleResetTrendFilters}
+                className={`inline-flex h-9 items-center rounded-md border px-3.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                  isDark
+                    ? 'border-slate-600 text-slate-300 hover:bg-slate-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                초기화
+              </button>
+            </div>
+
+            <p className={`mt-3 mb-2 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              조회 기간: {appliedPeriodLabel}
+            </p>
+
+            <div className="mt-auto min-w-0">
+              <TrendChart data={trendData} isDark={isDark} />
+            </div>
+          </section>
+
+          <section
+            className={`${cardClass} flex h-full min-h-0 flex-col p-5 md:p-6 xl:col-span-2`}
+            aria-labelledby="risk-lot-heading"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2
+                    id="risk-lot-heading"
+                    className={`text-base font-semibold tracking-tight ${
+                      isDark ? 'text-slate-100' : 'text-slate-900'
+                    }`}
+                  >
+                    위험 LOT Top
+                  </h2>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      isDark
+                        ? 'bg-slate-700/80 text-slate-300'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    전체 {riskLots.length}건
+                  </span>
+                </div>
+                <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  위험도가 높은 LOT를 우선순위별로 확인합니다.
+                </p>
+              </div>
+              <Link href="/issue" className={detailLinkClass}>
+                상세보기
+                <span aria-hidden="true">→</span>
+              </Link>
+            </div>
+
+            <div className="mt-5 -mx-1 min-h-0 flex-1 overflow-x-auto overflow-y-auto px-1">
+              <table className="w-full min-w-[480px] border-collapse text-left text-sm">
                 <thead>
-                  <tr className="text-xs text-slate-400">
-                    {['LOT', '위험 원인', '위험도', '상태', ''].map((h) => (
-                      <th
-                        key={h || 'action'}
-                        className={`border-b pb-2 pr-3 font-medium ${
-                          isDark ? 'border-slate-700' : 'border-slate-100'
-                        }`}
-                      >
-                        {h}
-                      </th>
-                    ))}
+                  <tr className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>LOT</th>
+                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>위험 원인</th>
+                    <th className={`border-b pb-2.5 pr-3 text-right ${tableBorderClass}`}>위험도</th>
+                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>등급</th>
+                    <th className={`border-b pb-2.5 pl-1 text-right ${tableBorderClass}`}>상세</th>
                   </tr>
                 </thead>
                 <tbody>
                   {topRiskLots.map((lot) => (
                     <tr
                       key={lot.id}
-                      className="group cursor-pointer transition-colors hover:bg-slate-50/80"
+                      className={`group cursor-pointer transition-colors ${rowHoverClass}`}
                       onClick={() => handleSelectLotForDiagnose(lot)}
                     >
                       <td
-                        className={`whitespace-nowrap border-b py-2.5 pr-3 text-xs font-semibold ${
-                          isDark
-                            ? 'border-slate-700/80 text-slate-100'
-                            : 'border-slate-50 text-slate-800'
+                        className={`whitespace-nowrap border-b py-3 pr-3 text-xs font-medium ${tableBorderClass} ${
+                          isDark ? 'text-slate-100' : 'text-slate-800'
                         }`}
                       >
                         {lot.id}
                       </td>
                       <td
-                        className={`max-w-[160px] truncate border-b py-2.5 pr-3 text-xs ${
-                          isDark
-                            ? 'border-slate-700/80 text-slate-400'
-                            : 'border-slate-50 text-slate-500'
+                        className={`max-w-[140px] truncate border-b py-3 pr-3 text-xs ${tableBorderClass} ${
+                          isDark ? 'text-slate-400' : 'text-slate-500'
                         }`}
                         title={lot.riskReason}
                       >
                         {lot.riskReason}
                       </td>
                       <td
-                        className={`whitespace-nowrap border-b py-2.5 pr-3 text-xs font-semibold tabular-nums ${
-                          isDark
-                            ? 'border-slate-700/80 text-slate-100'
-                            : 'border-slate-50 text-slate-800'
+                        className={`w-16 whitespace-nowrap border-b py-3 pr-3 text-right text-xs font-medium tabular-nums ${tableBorderClass} ${
+                          isDark ? 'text-slate-100' : 'text-slate-800'
                         }`}
                       >
                         {lot.riskScore.toFixed(2)}
                       </td>
-                      <td
-                        className={`border-b py-2.5 pr-3 ${
-                          isDark ? 'border-slate-700/80' : 'border-slate-50'
-                        }`}
-                      >
-                        <span
-                          className={
-                            lot.status === '위험'
-                              ? 'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-rose-100 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600'
-                              : toneClass(lot.status)
-                          }
-                        >
-                          {lot.status}
-                        </span>
+                      <td className={`border-b py-3 pr-3 ${tableBorderClass}`}>
+                        <span className={riskGradeClass(lot.status)}>{lot.status}</span>
                       </td>
-                      <td className="border-b border-slate-50 py-2.5 pr-2 text-right">
+                      <td className={`border-b py-3 pl-1 text-right ${tableBorderClass}`}>
                         <button
                           type="button"
-                          className="rounded-md border border-slate-200/80 px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700"
+                          className={tableDetailBtnClass}
+                          aria-label={`${lot.id} 상세 공정 데이터 보기`}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleOpenLotDetail(lot);
@@ -1257,7 +1101,10 @@ export default function MainPage() {
                   ))}
                   {topRiskLots.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-10 text-center text-sm text-slate-400">
+                      <td
+                        colSpan={5}
+                        className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                      >
                         선택한 기간에 위험 LOT가 없습니다.
                       </td>
                     </tr>
@@ -1265,7 +1112,7 @@ export default function MainPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
         </section>
       </div>
 
@@ -1282,8 +1129,8 @@ export default function MainPage() {
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">상태</div>
-                <span className={toneClass(selectedLot.status)}>{selectedLot.status}</span>
+                <div className="text-xs text-slate-500">위험등급</div>
+                <span className={riskGradeClass(selectedLot.status)}>{selectedLot.status}</span>
               </div>
               <div>
                 <div className="text-xs text-slate-500">위험도</div>

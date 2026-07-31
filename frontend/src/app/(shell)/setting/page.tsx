@@ -1,9 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import dayjs from 'dayjs'
 import {
-  Settings,
   RotateCcw,
   Save,
   Sun,
@@ -18,7 +16,15 @@ import {
   putControlBounds,
   type ControlBounds,
 } from '@/api/settingsApi'
+import { authApi } from '@/api/authApi'
+import { getAuthUser, isLoggedIn } from '@/lib/authStorage'
+import {
+  applyDocumentFontSize,
+  notifyUiSettingsChange,
+} from '@/components/layout/AppShell'
+import type { UserSettingsDto } from '@/types'
 import { notifyUiSettingsChange } from '@/components/layout/AppShell'
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const DEFAULT_FONT_SIZE = 18
@@ -38,8 +44,6 @@ const DEFAULT_N8N_ALERT = true
 
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
-const DEFAULT_USER_ID = 'guest'
-const FONT_SCALE_STYLE_ID = 'kdt-font-scale-style'
 
 const REFRESH_INTERVAL_OPTIONS = [
   { label: '1분', value: 1 },
@@ -71,35 +75,6 @@ type SystemSettingsConfig = {
   autoRefreshEnabled: boolean
   refreshInterval: RefreshInterval
   n8nAlert: boolean
-}
-
-const applyGlobalFontSize = (fontSize: FontSize) => {
-  const scale = fontSize / DEFAULT_FONT_SIZE
-
-  document.documentElement.style.fontSize = '16px'
-  document.documentElement.style.setProperty('--font-scale', String(scale))
-
-  let styleEl = document.getElementById(FONT_SCALE_STYLE_ID) as HTMLStyleElement | null
-  if (!styleEl) {
-    styleEl = document.createElement('style')
-    styleEl.id = FONT_SCALE_STYLE_ID
-    document.head.appendChild(styleEl)
-  }
-
-  styleEl.textContent = `
-    html { font-size: 16px !important; }
-    body { font-size: 16px !important; line-height: 1.5 !important; }
-    .text-xs   { font-size: calc(0.75rem  * var(--font-scale, 1)) !important; line-height: 1rem    !important; }
-    .text-sm   { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
-    .text-base { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
-    .text-lg   { font-size: calc(1.125rem * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    .text-xl   { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    .text-2xl  { font-size: calc(1.5rem   * var(--font-scale, 1)) !important; line-height: 2rem    !important; }
-    .text-3xl  { font-size: calc(1.875rem * var(--font-scale, 1)) !important; line-height: 2.25rem !important; }
-    [data-sidebar] .sidebar-title  { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    [data-sidebar] .sidebar-menu   { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
-    [data-sidebar] .sidebar-status { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
-  `
 }
 
 const parseSavedFontSize = (saved: SavedSettings): FontSize | null => {
@@ -247,46 +222,131 @@ export default function SettingPage() {
   const [boundsLoading, setBoundsLoading] = useState(false)
   const [boundsMessage, setBoundsMessage] = useState('')
 
+  const cacheSettingsLocally = (settings: UserSettingsDto) => {
+    const currentConfig = readSystemSettingsConfig()
+    const local: UserSettings = {
+      UserId: settings.userId,
+      FontSize: settings.fontSize as FontSize,
+      ThemeMode: settings.themeMode,
+      Language: settings.language ?? currentConfig?.language ?? 'ko',
+      RefreshInterval: settings.refreshInterval as RefreshInterval,
+      UpdateAt: settings.updatedAt,
+    }
+    const config: SystemSettingsConfig = {
+      theme: settings.themeMode,
+      language: settings.language ?? currentConfig?.language ?? 'ko',
+      fontSize: settings.fontSize as FontSize,
+      autoRefreshEnabled: settings.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
+      refreshInterval: settings.refreshInterval as RefreshInterval,
+      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+    }
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(local))
+    } catch {
+      // ignore cache write failures
+    }
+    writeSystemSettingsConfig(config)
+  }
+
+  const applySettingsToUi = (settings: {
+    fontSize: FontSize
+    themeMode: ThemeMode
+    language: Language
+    refreshInterval: RefreshInterval
+    autoRefreshEnabled: boolean
+    n8nAlert: boolean
+  }) => {
+    setFontSize(settings.fontSize)
+    setThemeMode(settings.themeMode)
+    setRefreshInterval(settings.refreshInterval)
+    setAutoRefreshEnabled(settings.autoRefreshEnabled)
+    setN8nAlert(settings.n8nAlert)
+    applyDocumentFontSize(settings.fontSize)
+    applyGlobalThemeMode(settings.themeMode)
+    notifyUiSettingsChange({
+      themeMode: settings.themeMode,
+      language: settings.language,
+      fontSize: settings.fontSize,
+    })
+  }
+
   useEffect(() => {
-    const saved = loadSavedSettings()
-    const config = readSystemSettingsConfig()
-
-    let nextFontSize: FontSize = DEFAULT_FONT_SIZE
-    let nextTheme: ThemeMode = DEFAULT_THEME_MODE
-    let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
-
-    if (saved) {
-      const savedFontSize = parseSavedFontSize(saved)
-      if (savedFontSize) nextFontSize = savedFontSize
-      if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
-      if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
-        nextInterval = saved.RefreshInterval
+    let cancelled = false
+    ;(async () => {
+      if (isLoggedIn()) {
+        try {
+          const { data } = await authApi.getSettings()
+          if (cancelled) return
+          const s = data.settings
+          const currentConfig = readSystemSettingsConfig()
+          applySettingsToUi({
+            fontSize: s.fontSize as FontSize,
+            themeMode: s.themeMode,
+            language: s.language ?? currentConfig?.language ?? 'ko',
+            refreshInterval: s.refreshInterval as RefreshInterval,
+            autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
+            n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+          })
+          cacheSettingsLocally(s)
+          return
+        } catch {
+          if (!cancelled) {
+            setSaveMessage('서버 설정을 불러오지 못했습니다. 로컬 설정을 사용합니다.')
+          }
+        }
       }
+
+      if (cancelled) return
+
+      const saved = loadSavedSettings()
+      const config = readSystemSettingsConfig()
+
+      let nextFontSize: FontSize = DEFAULT_FONT_SIZE
+      let nextTheme: ThemeMode = DEFAULT_THEME_MODE
+      let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
+      let nextAutoRefresh = DEFAULT_AUTO_REFRESH_ENABLED
+      let nextN8n = DEFAULT_N8N_ALERT
+      let nextLang: Language = DEFAULT_LANGUAGE
+
+      if (saved) {
+        const savedFontSize = parseSavedFontSize(saved)
+        if (savedFontSize) nextFontSize = savedFontSize
+        if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
+        if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
+          nextInterval = saved.RefreshInterval
+        }
+        if (saved.Language === 'ko' || saved.Language === 'en') nextLang = saved.Language
+      }
+
+      if (config) {
+        if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
+          nextFontSize = config.fontSize as FontSize
+        }
+        if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
+        if (
+          typeof config.refreshInterval === 'number' &&
+          REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
+        ) {
+          nextInterval = config.refreshInterval as RefreshInterval
+        }
+        if (typeof config.autoRefreshEnabled === 'boolean') nextAutoRefresh = config.autoRefreshEnabled
+        if (typeof config.n8nAlert === 'boolean') nextN8n = config.n8nAlert
+        if (config.language === 'ko' || config.language === 'en') nextLang = config.language
+      }
+
+      applySettingsToUi({
+        fontSize: nextFontSize,
+        themeMode: nextTheme,
+        language: nextLang,
+        refreshInterval: nextInterval,
+        autoRefreshEnabled: nextAutoRefresh,
+        n8nAlert: nextN8n,
+      })
+    })()
+
+    return () => {
+      cancelled = true
     }
-
-    if (config) {
-      if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
-        nextFontSize = config.fontSize as FontSize
-      }
-      if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
-      if (
-        typeof config.refreshInterval === 'number' &&
-        REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
-      ) {
-        nextInterval = config.refreshInterval as RefreshInterval
-      }
-      if (typeof config.autoRefreshEnabled === 'boolean') {
-        setAutoRefreshEnabled(config.autoRefreshEnabled)
-      }
-      if (typeof config.n8nAlert === 'boolean') {
-        setN8nAlert(config.n8nAlert)
-      }
-    }
-
-    setFontSize(nextFontSize)
-    setThemeMode(nextTheme)
-    setRefreshInterval(nextInterval)
-    applyGlobalFontSize(nextFontSize)
   }, [])
 
   useEffect(() => {
@@ -311,66 +371,60 @@ export default function SettingPage() {
     setSaveMessage('')
   }
 
-  const handleSaveSettings = () => {
-    const settings: UserSettings = {
-      UserId: DEFAULT_USER_ID,
-      FontSize: fontSize,
-      ThemeMode: themeMode,
-      Language: DEFAULT_LANGUAGE,
-      RefreshInterval: refreshInterval,
-      UpdateAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-    }
-
-    const config: SystemSettingsConfig = {
-      theme: themeMode,
-      language: DEFAULT_LANGUAGE,
-      fontSize,
-      autoRefreshEnabled,
-      refreshInterval,
-      n8nAlert,
+  const handleSaveSettings = async () => {
+    if (!isLoggedIn() || !getAuthUser()) {
+      setSaveMessage('설정 서버 저장에는 로그인이 필요합니다.')
+      showToast('로그인 후 설정을 저장해 주세요.')
+      return
     }
 
     try {
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+      const { data } = await authApi.updateSettings({
+        fontSize,
+        themeMode,
+        language: DEFAULT_LANGUAGE,
+        autoRefreshEnabled,
+        refreshInterval,
+        n8nAlert,
+      })
+      cacheSettingsLocally(data.settings)
+      applyDocumentFontSize(fontSize)
+      notifyUiSettingsChange({
+        themeMode,
+        language: data.settings.language,
+        fontSize,
+      })
+      setSaveMessage(`설정이 저장되었습니다. (${data.settings.updatedAt})`)
+      showToast('✓ 설정이 성공적으로 저장되었습니다.')
     } catch {
-      setSaveMessage('설정 저장에 실패했습니다. 브라우저 저장소 권한을 확인해 주세요.')
-      return
+      setSaveMessage('설정 저장에 실패했습니다. backend(:3001)와 로그인을 확인해 주세요.')
     }
-
-    const configSaved = writeSystemSettingsConfig(config)
-    if (!configSaved) {
-      setSaveMessage('설정 저장에 실패했습니다. 브라우저 저장소 권한을 확인해 주세요.')
-      return
-    }
-
-    applyGlobalFontSize(fontSize)
-    notifyUiSettingsChange({ themeMode, language: DEFAULT_LANGUAGE })
-    setSaveMessage(`설정이 저장되었습니다. (${settings.UpdateAt})`)
-    showToast('✓ 설정이 성공적으로 저장되었습니다.')
   }
 
-  const handleResetSettings = () => {
-    setFontSize(DEFAULT_FONT_SIZE)
-    setThemeMode(DEFAULT_THEME_MODE)
-    setRefreshInterval(DEFAULT_REFRESH_INTERVAL)
-    setAutoRefreshEnabled(DEFAULT_AUTO_REFRESH_ENABLED)
-    setN8nAlert(DEFAULT_N8N_ALERT)
-    setSaveMessage('')
-
-    try {
-      localStorage.removeItem(SETTINGS_STORAGE_KEY)
-      localStorage.removeItem(SYSTEM_SETTINGS_CONFIG_KEY)
-    } catch {
+  const handleResetSettings = async () => {
+    if (!isLoggedIn() || !getAuthUser()) {
+      setSaveMessage('설정 초기화에는 로그인이 필요합니다.')
+      showToast('로그인 후 초기화해 주세요.')
       return
     }
 
-    applyGlobalFontSize(DEFAULT_FONT_SIZE)
-    applyGlobalThemeMode(DEFAULT_THEME_MODE)
-    notifyUiSettingsChange({
-      themeMode: DEFAULT_THEME_MODE,
-      language: DEFAULT_LANGUAGE,
-    })
-    showToast('설정이 기본값으로 초기화되었습니다.')
+    try {
+      const { data } = await authApi.resetSettings()
+      const s = data.settings
+      applySettingsToUi({
+        fontSize: s.fontSize as FontSize,
+        themeMode: s.themeMode,
+        language: s.language,
+        refreshInterval: s.refreshInterval as RefreshInterval,
+        autoRefreshEnabled: s.autoRefreshEnabled,
+        n8nAlert: s.n8nAlert,
+      })
+      cacheSettingsLocally(s)
+      setSaveMessage('')
+      showToast('설정이 기본값으로 초기화되었습니다.')
+    } catch {
+      setSaveMessage('설정 초기화에 실패했습니다. backend(:3001)와 로그인을 확인해 주세요.')
+    }
   }
 
   /** Save admin equipment limits → Express → control_bounds.json (whatif mtime cache). */
@@ -412,8 +466,10 @@ export default function SettingPage() {
 
   return (
     <div
-      className={`h-full w-full overflow-y-auto p-4 md:p-6 font-sans ${textPrimary} ${
-        isDarkMode ? 'bg-slate-900' : 'bg-transparent'
+      className={`h-full w-full overflow-y-auto font-sans ${textPrimary} ${
+        isDarkMode
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
       }`}
     >
       {toastMessage ? (
@@ -426,15 +482,17 @@ export default function SettingPage() {
         </div>
       ) : null}
 
-      <div className="flex w-full flex-col gap-6">
+      <div className={`${SHELL_CONTENT_CLASS} flex flex-col gap-6 py-6`}>
         <header>
-          <div className="mb-1 flex items-center gap-3">
-            <Settings size={28} className="text-blue-500" aria-hidden />
-            <h1 className={`text-2xl font-bold ${textPrimary}`}>설정</h1>
+          <div className="mb-6 flex flex-col gap-1">
+            <p className="text-sm font-bold tracking-wide text-blue-600">
+              System Preferences
+            </p>
+            <h1 className={`mt-1 text-3xl font-bold tracking-tight ${textPrimary}`}>설정</h1>
+            <p className={`mt-2 text-sm ${textSecondary}`}>
+              시스템 환경을 사용자에 맞게 조정합니다.
+            </p>
           </div>
-          <p className={`ml-10 text-sm ${textSecondary}`}>
-            시스템 환경을 사용자에 맞게 조정합니다.
-          </p>
         </header>
 
         <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
