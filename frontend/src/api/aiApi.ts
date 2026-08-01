@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { apiClient } from '@/api/axios'
+import { getAuthUser } from '@/lib/authStorage'
 
 /** Direct ai-service via next.config rewrite (`/ai` → :8800). Health / smoke only. */
 export const aiClient = axios.create({
@@ -7,16 +8,50 @@ export const aiClient = axios.create({
   timeout: 60_000,
 })
 
-const SESSION_KEY = 'kdt_chat_session_id'
+const THREAD_KEY = 'kdt_chat_thread_id'
+const LEGACY_SESSION_KEY = 'kdt_chat_session_id'
 
-export function getChatSessionId(): string | null {
+export function getChatThreadId(): string | null {
   if (typeof window === 'undefined') return null
-  return window.localStorage.getItem(SESSION_KEY)
+  const modern = window.localStorage.getItem(THREAD_KEY)
+  if (modern) return modern
+  const legacy = window.localStorage.getItem(LEGACY_SESSION_KEY)
+  if (legacy) {
+    window.localStorage.setItem(THREAD_KEY, legacy)
+    return legacy
+  }
+  return null
 }
 
-export function setChatSessionId(id: string): void {
+export function setChatThreadId(id: string): void {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(SESSION_KEY, id)
+  window.localStorage.setItem(THREAD_KEY, id)
+  window.localStorage.setItem(LEGACY_SESSION_KEY, id)
+}
+
+export function clearChatThreadId(): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(THREAD_KEY)
+  window.localStorage.removeItem(LEGACY_SESSION_KEY)
+}
+
+export function newChatThreadId(): string {
+  const id =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `gen-${Date.now()}`
+  setChatThreadId(id)
+  return id
+}
+
+/** @deprecated use getChatThreadId */
+export function getChatSessionId(): string | null {
+  return getChatThreadId()
+}
+
+/** @deprecated use setChatThreadId */
+export function setChatSessionId(id: string): void {
+  setChatThreadId(id)
 }
 
 export type ChatFeatures = {
@@ -77,6 +112,9 @@ export type ChatRequest = {
   message: string
   features?: ChatFeatures | null
   fillThreshold?: number | null
+  thread_id?: string | null
+  user_id?: string | null
+  /** @deprecated alias for thread_id */
   session_id?: string | null
   /** "auto" | stored key id from /security vault */
   llm_mode?: string | null
@@ -95,6 +133,7 @@ export type ChatResidualResult = {
 }
 
 export type ChatResponse = {
+  thread_id?: string
   session_id: string
   reply: string
   mode: string
@@ -142,25 +181,85 @@ export type OutcomeControlResponse = {
   control_store?: string
 }
 
-/** Proxied through Express backend: security gate + session + ai-service. */
+/** Proxied through Express backend: security gate + session + ai-service.
+ * Multi-turn (B): message + thread_id + user_id only — never history array.
+ */
 export async function postChat(body: ChatRequest): Promise<ChatResponse> {
-  const session_id = body.session_id ?? getChatSessionId()
+  const thread_id =
+    body.thread_id ?? body.session_id ?? getChatThreadId()
+  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
   const { data } = await apiClient.post<ChatResponse>('/chat', {
     message: body.message,
     features: body.features ?? undefined,
     fillThreshold: body.fillThreshold ?? undefined,
-    session_id: session_id ?? undefined,
+    thread_id: thread_id ?? undefined,
+    user_id: user_id ?? undefined,
     llm_mode: body.llm_mode ?? 'auto',
   })
-  if (data.session_id) setChatSessionId(data.session_id)
+  const tid = data.thread_id || data.session_id
+  if (tid) setChatThreadId(tid)
   return data
+}
+
+export type ChatThreadItem = {
+  id: string
+  user_id: string
+  channel: string
+  title?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ChatThreadMessageItem = {
+  role: string
+  content: string
+  mode?: string | null
+  provider?: string | null
+  sources?: unknown
+  created_at?: string | null
+}
+
+export async function listChatThreads(opts: {
+  channel: 'security' | 'general'
+  user_id?: string
+  limit?: number
+}): Promise<ChatThreadItem[]> {
+  const user_id = opts.user_id ?? getAuthUser()?.userId
+  if (!user_id) return []
+  const { data } = await apiClient.get<{ threads: ChatThreadItem[] }>(
+    '/chat/threads',
+    {
+      params: {
+        user_id,
+        channel: opts.channel,
+        limit: opts.limit ?? 50,
+      },
+    },
+  )
+  return data.threads ?? []
+}
+
+export async function loadChatThreadMessages(opts: {
+  thread_id: string
+  user_id?: string
+  limit?: number
+}): Promise<ChatThreadMessageItem[]> {
+  const user_id = opts.user_id ?? getAuthUser()?.userId
+  if (!user_id) return []
+  const { data } = await apiClient.get<{
+    thread_id: string
+    messages: ChatThreadMessageItem[]
+  }>(`/chat/threads/${encodeURIComponent(opts.thread_id)}/messages`, {
+    params: { user_id, limit: opts.limit ?? 200 },
+  })
+  return data.messages ?? []
 }
 
 /** Log-only control bridge: approve what-if suggestion → optimization_events row. */
 export async function postApproveControl(
   body: ApproveControlRequest,
 ): Promise<ApproveControlResponse> {
-  const session_id = body.session_id ?? getChatSessionId()
+  const session_id = body.session_id ?? getChatThreadId()
   const { data } = await apiClient.post<ApproveControlResponse>('/control/approve', {
     session_id: session_id ?? undefined,
     lot_id: body.lot_id ?? undefined,

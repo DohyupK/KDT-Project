@@ -2,13 +2,8 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint ."
-  },
   "dependencies": {
+    "@prisma/client": "^6.19.0",
     "axios": "^1.18.1",
     "dayjs": "^1.11.21",
     "lucide-react": "^1.24.0",
@@ -25,8 +20,17 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.2.12",
+    "prisma": "^6.19.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "prisma:generate": "prisma generate",
+    "prisma:db-pull": "prisma db pull"
   },
   "allowScripts": {
     "sharp@0.34.5": true,

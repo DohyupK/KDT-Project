@@ -30,7 +30,7 @@
 | [`frontend/`](./frontend/) | Next.js UI · AppShell · GlobalChatbot · Maximize 보안 오버레이 | Main·Dashboard·Management·Setting·Issue·Knowledge·Inquiry · `/security` |
 | [`backend/`](./backend/) | Express API · 세션 · 보안 게이트 · LLM 키(DB) · ai-service 프록시 | chat / security-chat / control·outcome · auth |
 | [`ai-service/`](./ai-service/) | FastAPI · clf/reg/residual · LangGraph · **secure RAG** | `/predict*` · `/chat` · `/security-chat` · `models/` |
-| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | 사용 중 · [오늘 일지](./docs/work-log/2026-07-30.md) |
+| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | 사용 중 · [오늘 일지](./docs/work-log/2026-08-01.md) |
 | [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | 사용 중 |
 
 ```text
@@ -167,7 +167,7 @@ Maximize / /security
 
 ### frontend
 - Next.js (App Router), React, TypeScript, Tailwind CSS  
-- Zustand, Axios, Recharts, Lucide React, Day.js  
+- Zustand, Axios, Recharts, Lucide React, Day.js, Prisma (`@prisma/client`)  
 → [`frontend/README.md`](./frontend/README.md)
 
 ### backend
@@ -178,8 +178,8 @@ Maximize / /security
 ### ai-service
 - Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib  
 - FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
-- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant  
-  (bge-m3 / bge-reranker **CPU** · Self-Query = `VectorIndexAutoRetriever`)  
+- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL
+  (bge-m3 / bge-reranker **CPU** · Self-Query = `VectorIndexAutoRetriever` · docs = repo `Documents/`)  
 → [`ai-service/README.md`](./ai-service/README.md)
 
 ---
@@ -252,7 +252,9 @@ flowchart TD
 | 파일 | 역할 |
 |------|------|
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
-| [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 최근 상세 (보안 RAG · E2E · 발췌 모드) |
+| [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 다문서·거절출처·요약 · 인덱스 정리 |
+| [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |
+| [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 보안 RAG · E2E · 발췌 모드 |
 | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) | 보안 RAG · env · 스모크 |
 | [`docs/references/vllm-setup.md`](./docs/references/vllm-setup.md) | 로컬 LLM(:8001) 수동 기동 |
 | [`.cursor/rules/`](./.cursor/rules/) | Cursor 룰 |

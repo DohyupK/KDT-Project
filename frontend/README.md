@@ -60,6 +60,7 @@ npm run dev
 - React, TypeScript
 - Tailwind CSS
 - Zustand, Axios, Recharts, Lucide React, Day.js
+- Prisma (`@prisma/client`) — MariaDB `user_chat_*` 참조 (users는 참조만)
 
 서버(API)는 루트의 `backend/`에서 다룰 예정이며, 개발 중에는 `next.config.ts`의 `/api` 프록시를 사용합니다.
 
@@ -119,9 +120,9 @@ frontend/
 
 ## 사용할 라이브러리 (참고)
 
-**Dependencies:** axios, zustand, recharts, lucide-react, dayjs  
+**Dependencies:** axios, zustand, recharts, lucide-react, dayjs, @prisma/client  
 
-**DevDependencies:** tailwindcss, @tailwindcss/postcss, eslint, eslint-config-next, typescript  
+**DevDependencies:** prisma, tailwindcss, @tailwindcss/postcss, eslint, eslint-config-next, typescript  
 
 (`next` / `react`는 프레임워크로 기술 스택에만 표기)
 
@@ -136,6 +137,7 @@ frontend/
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
 - [2026-07-23 ai-service ML·챗봇 연동·LLM·시나리오 스모크](../docs/work-log/2026-07-23.md)
 - [2026-07-24 API키·LLM·LOT·What-if·한계치·Undo·보안vLLM](../docs/work-log/2026-07-24.md)
+- [2026-07-31 Documents·Prisma·멀티턴 B](../docs/work-log/2026-07-31.md)
 
 ---
 

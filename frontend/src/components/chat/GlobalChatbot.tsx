@@ -11,8 +11,14 @@ import {
   postRevertControl,
   postChat,
   SAMPLE_CHAT_FEATURES,
+  getChatThreadId,
+  listChatThreads,
+  loadChatThreadMessages,
+  newChatThreadId,
+  setChatThreadId,
   type ChatFeatures,
   type ChatRecommendation,
+  type ChatThreadItem,
 } from '@/api/aiApi'
 import {
   parseOutcomeCapacityInput,
@@ -52,6 +58,13 @@ type UndoSnack = {
 
 const UNDO_SECONDS = 5
 
+const WELCOME_GENERAL: ChatMessage = {
+  id: 1,
+  role: 'ai',
+  text:
+    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 /security 탭을 이용해 주세요.',
+}
+
 export default function GlobalChatbot() {
   const {
     selectedLotId,
@@ -74,14 +87,9 @@ export default function GlobalChatbot() {
   const [outcomeResidual, setOutcomeResidual] = useState('')
   /** Fullscreen overlay with SecurityChatbot (separate from general chat session). */
   const [fullscreenOpen, setFullscreenOpen] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      role: 'ai',
-      text:
-        '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 /security 탭을 이용해 주세요.',
-    },
-  ])
+  const [threads, setThreads] = useState<ChatThreadItem[]>([])
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_GENERAL])
   const idRef = useRef(2)
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -89,6 +97,58 @@ export default function GlobalChatbot() {
   const sendRef = useRef<(raw: string, features?: ChatFeatures | null) => Promise<void>>(
     async () => {},
   )
+
+  const refreshThreads = async () => {
+    try {
+      const list = await listChatThreads({ channel: 'general' })
+      setThreads(list)
+    } catch {
+      /* soft-fail */
+    }
+  }
+
+  const hydrateThread = async (threadId: string) => {
+    try {
+      const rows = await loadChatThreadMessages({ thread_id: threadId })
+      if (!rows.length) {
+        setMessages([WELCOME_GENERAL])
+        idRef.current = 2
+        return
+      }
+      let n = 1
+      const mapped: ChatMessage[] = rows.map((r) => {
+        n += 1
+        return {
+          id: n,
+          role: r.role === 'user' ? 'user' : 'ai',
+          text: r.content || '',
+          mode: r.mode ?? undefined,
+        }
+      })
+      idRef.current = n + 1
+      setMessages(mapped)
+    } catch {
+      setMessages([WELCOME_GENERAL])
+      idRef.current = 2
+    }
+  }
+
+  const startNewThread = () => {
+    abortRef.current?.abort()
+    const tid = newChatThreadId()
+    setActiveThreadId(tid)
+    setMessages([WELCOME_GENERAL])
+    idRef.current = 2
+    void refreshThreads()
+  }
+
+  const selectThread = async (threadId: string) => {
+    if (pending) return
+    abortRef.current?.abort()
+    setActiveThreadId(threadId)
+    setChatThreadId(threadId)
+    await hydrateThread(threadId)
+  }
 
   useEffect(() => {
     if (!chatOpen) return
@@ -99,6 +159,15 @@ export default function GlobalChatbot() {
   useEffect(() => {
     const cached = readLlmProvidersCache()
     if (cached?.keys) setLlmOptions(cached.keys)
+  }, [chatOpen])
+
+  useEffect(() => {
+    if (!chatOpen) return
+    const tid = getChatThreadId()
+    setActiveThreadId(tid)
+    void refreshThreads()
+    if (tid) void hydrateThread(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when panel opens
   }, [chatOpen])
 
   useEffect(() => {
@@ -185,6 +254,7 @@ export default function GlobalChatbot() {
           recommendation: res.recommendation ?? null,
         },
       ])
+      void refreshThreads()
     } catch (err) {
       if (ac.signal.aborted) return
       let detail = '요청에 실패했습니다.'
@@ -457,36 +527,67 @@ export default function GlobalChatbot() {
               aria-label="보안 챗 전체화면"
               title="보안 챗 전체화면"
               onClick={() => setFullscreenOpen(true)}
-              className="mt-0.5 shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
+              className="mt-0.5 rounded-md p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800"
             >
               <Maximize2 size={16} />
             </button>
             <div className="min-w-0 flex-1">
-              <strong className="text-sm text-slate-800">AI 공정 지원 챗봇</strong>
-              {selectedLotId ? (
-                <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-600">
-                  <span className="truncate">연결 LOT: {selectedLotId}</span>
-                  <button
-                    type="button"
-                    onClick={clearLot}
-                    className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-white"
-                  >
-                    해제
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-1 text-[11px] text-slate-400">연결된 LOT 없음</div>
-              )}
+              <strong className="block text-sm text-slate-800">공정 지원 챗봇</strong>
+              <span className="text-[10px] text-slate-400">일반 · Groq/Gemini</span>
             </div>
+            <button
+              type="button"
+              onClick={startNewThread}
+              disabled={pending}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-700 disabled:opacity-50"
+            >
+              새 대화
+            </button>
             <button
               type="button"
               aria-label="챗봇 닫기"
               onClick={() => setChatOpen(false)}
-              className="rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
+              className="rounded-md p-1 text-slate-500 hover:bg-slate-200"
             >
               <X size={16} />
             </button>
           </div>
+          {threads.length > 0 ? (
+            <div className="flex max-h-20 shrink-0 gap-1 overflow-x-auto border-b border-slate-100 bg-white px-2 py-1.5">
+              {threads.map((t) => {
+                const label = (t.title && t.title.trim()) || t.id.slice(0, 8)
+                const active = t.id === activeThreadId
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void selectThread(t.id)}
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                      active
+                        ? 'bg-slate-800 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                    title={t.id}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+          {selectedLotId ? (
+            <div className="flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-1 text-[11px] text-slate-600">
+              <span className="truncate">연결 LOT: {selectedLotId}</span>
+              <button
+                type="button"
+                onClick={clearLot}
+                className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-slate-50"
+              >
+                해제
+              </button>
+            </div>
+          ) : null}
 
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto bg-slate-50/60 p-3">
             {messages.map((m) => (

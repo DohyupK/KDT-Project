@@ -9,6 +9,10 @@ import {
  * Security-tab proxy only.
  * FE SecurityChatbot → POST /api/security-chat → ai-service POST /security-chat
  * → secure RAG + vLLM :8001. Never uses general /api/chat or Groq/Gemini.
+ *
+ * Multi-turn (B): FE sends message + thread_id + user_id only (no history array).
+ * Express pass-through to ai-service; MariaDB history is loaded there.
+ * Legacy chat_sessions store is kept in parallel (not removed).
  */
 
 /** Keep in sync with frontend securityChatApi SECURITY_CHAT_TIMEOUT_MS. */
@@ -16,6 +20,9 @@ const SECURITY_CHAT_TIMEOUT_MS = 180_000
 
 type SecurityChatBody = {
   message?: string
+  thread_id?: string | null
+  user_id?: string | null
+  /** @deprecated alias — mapped to thread_id */
   session_id?: string | null
 }
 
@@ -41,6 +48,7 @@ type AiSecurityChatResponse = {
   mode: string
   provider?: string
   error: string | null
+  thread_id?: string | null
   sources?: AiSecuritySource[]
   trace?: TraceEntry[]
   stage?: string
@@ -61,20 +69,31 @@ function asErrorBody(raw: string): Partial<AiSecurityChatResponse> {
   }
 }
 
-async function proxySecurityChat(
-  message: string,
-): Promise<{ ai: AiSecurityChatResponse; elapsed_ms: number }> {
+async function proxySecurityChat(payload: {
+  message: string
+  thread_id?: string
+  user_id?: string
+}): Promise<{ ai: AiSecurityChatResponse; elapsed_ms: number }> {
   const base = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8800').replace(
     /\/$/,
     '',
   )
   const t0 = Date.now()
-  console.info('[security-chat] proxy_start', { base, timeout_ms: SECURITY_CHAT_TIMEOUT_MS })
+    console.info('[security-chat] proxy_start', {
+      base,
+      timeout_ms: SECURITY_CHAT_TIMEOUT_MS,
+      thread_id: payload.thread_id,
+      message_len: payload.message.length,
+    })
   try {
     const res = await fetch(`${base}/security-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message: payload.message,
+        thread_id: payload.thread_id,
+        user_id: payload.user_id,
+      }),
       signal: AbortSignal.timeout(SECURITY_CHAT_TIMEOUT_MS),
     })
     const elapsed_ms = Date.now() - t0
@@ -127,17 +146,28 @@ async function proxySecurityChat(
       e.stage = 'proxy_timeout'
       e.status = 504
       e.message = `security-chat timed out after ${SECURITY_CHAT_TIMEOUT_MS}ms (local RAG + LLM). ${msg}`
-    } else if (/ECONNREFUSED|ENOTFOUND|fetch failed|network/i.test(msg)) {
+    } else if (
+      /ECONNREFUSED|ENOTFOUND|fetch failed|network|ECONNRESET|other side closed|socket hang up/i.test(
+        msg,
+      )
+    ) {
       e.stage = 'ai_unreachable'
       e.status = 502
+      e.message = `ai-service unreachable or connection reset after ${elapsed_ms}ms: ${msg}`
     } else if (!e.stage) {
       e.stage = 'proxy_error'
+      e.status = e.status && e.status >= 400 ? e.status : 502
     }
+    const cause =
+      e.cause instanceof Error
+        ? { name: e.cause.name, message: e.cause.message }
+        : e.cause
     console.error('[security-chat] proxy_fail', {
       stage: e.stage,
       status: e.status,
       elapsed_ms,
       message: e.message,
+      cause,
     })
     throw e
   }
@@ -159,9 +189,13 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       return
     }
 
+    const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
+    const userId = (body.user_id || undefined) ?? undefined
+
+    // Legacy parallel store (sqlite/mariadb chat_sessions) — keep; do not remove.
     let sessionId: string
     try {
-      sessionId = await ensureSession(body.session_id)
+      sessionId = await ensureSession(threadId ?? body.session_id)
       await insertMessage(sessionId, 'user', message, 'security_user', 'security')
     } catch (storeErr) {
       const detail =
@@ -175,7 +209,13 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       return
     }
 
-    const { ai, elapsed_ms } = await proxySecurityChat(message)
+    const { ai, elapsed_ms } = await proxySecurityChat({
+      message,
+      thread_id: threadId || sessionId,
+      user_id: userId,
+    })
+
+    const outThreadId = ai.thread_id || threadId || sessionId
 
     try {
       await insertMessage(
@@ -189,9 +229,9 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       const detail =
         storeErr instanceof Error ? storeErr.message : String(storeErr)
       console.error('[security-chat] chat_store_assistant', detail)
-      // Still return AI payload; store failure is secondary
       res.status(200).json({
-        session_id: sessionId,
+        session_id: outThreadId,
+        thread_id: outThreadId,
         reply: ai.reply,
         mode: ai.mode,
         provider: ai.provider ?? ai.mode,
@@ -207,7 +247,8 @@ securityChatRouter.post('/security-chat', async (req, res) => {
     }
 
     res.json({
-      session_id: sessionId,
+      session_id: outThreadId,
+      thread_id: outThreadId,
       reply: ai.reply,
       mode: ai.mode,
       provider: ai.provider ?? ai.mode,

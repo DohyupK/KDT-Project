@@ -17,6 +17,8 @@ import { listLlmKeysWithSecrets } from '../services/llmKeyStore.js'
 
 type ChatBody = {
   message?: string
+  thread_id?: string | null
+  user_id?: string | null
   session_id?: string | null
   features?: Record<string, string | number | undefined> | null
   fillThreshold?: number | null
@@ -34,7 +36,9 @@ chatRouter.post('/chat', async (req, res) => {
       return
     }
 
-    const sessionId = await ensureSession(body.session_id)
+    const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
+    const userId = (body.user_id || undefined) ?? undefined
+    const sessionId = await ensureSession(threadId ?? body.session_id)
     const previousUser = await loadRecentUserMessages(sessionId)
     await insertMessage(sessionId, 'user', message)
 
@@ -47,6 +51,7 @@ chatRouter.post('/chat', async (req, res) => {
       )
       res.json({
         session_id: sessionId,
+        thread_id: sessionId,
         reply,
         mode: 'security_redirect',
         provider: 'security_redirect',
@@ -79,6 +84,8 @@ chatRouter.post('/chat', async (req, res) => {
 
     const ai = await proxyChat({
       message,
+      thread_id: threadId || sessionId,
+      user_id: userId,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: guideline,
@@ -103,8 +110,11 @@ chatRouter.post('/chat', async (req, res) => {
       ai.provider ?? ai.mode,
     )
 
+    const outThreadId = ai.thread_id || threadId || sessionId
+
     res.json({
-      session_id: sessionId,
+      session_id: outThreadId,
+      thread_id: outThreadId,
       reply: ai.reply,
       mode: ai.mode,
       provider: ai.provider ?? ai.mode,

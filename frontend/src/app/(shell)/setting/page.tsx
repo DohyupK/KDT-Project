@@ -23,7 +23,6 @@ import {
   notifyUiSettingsChange,
 } from '@/components/layout/AppShell'
 import type { UserSettingsDto } from '@/types'
-import { notifyUiSettingsChange } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const

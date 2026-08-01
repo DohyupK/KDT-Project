@@ -165,7 +165,7 @@ What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 �
 - XGBoost, CatBoost
 - Optuna (SQLite resume)
 - SHAP
-- sentence-transformers, rank-bm25, qdrant-client, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant
+- sentence-transformers, rank-bm25, qdrant-client, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL
 
 ### 예정
 - TS 불량률(기상 데이터 후)
@@ -175,14 +175,14 @@ What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 �
 - 모델: `models/` (clf) · `models/reg/` · `models/residual/` · `models/registry.json`
 - API: `app/main.py` (`/predict`, `/predict-capacity`, `/predict-residual`, `/chat`, `/security-chat`)
 - Agent: `agent/` (`model_registry.py` · tools · graph · whatif · `rag_engine` · `secure_graph`)
-- Secure docs: `data/secure_docs/` · ingest: `ingest_secure.py`
+- Secure docs: repo `Documents/` (`SECURE_DOCS_DIR`) · ingest: `ingest_secure.py` (`.md`/`.txt`/`.pdf`)
 - Secure RAG E2E smoke: `python scripts/smoke_secure_rag_e2e.py` (needs vLLM `:8001`)
 
 ---
 
 ## 사용할 라이브러리 (requirements.txt 기준)
 
-**직접 의존성:** polars, numpy, scikit-learn, xgboost, catboost, optuna, shap, joblib, fastapi, uvicorn[standard], pydantic, langgraph, langchain-core, langchain-openai, langchain-google-genai, python-dotenv, qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant
+**직접 의존성:** polars, numpy, scikit-learn, xgboost, catboost, optuna, shap, joblib, fastapi, uvicorn[standard], pydantic, langgraph, langchain-core, langchain-openai, langchain-google-genai, python-dotenv, qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL
 
 **설치 시 따라온 주요 패키지(참고):** polars-runtime, sqlalchemy, alembic, numba, llvmlite, slicer, cloudpickle, starlette, httptools, watchfiles, websockets, graphviz, plotly, langgraph-checkpoint, langgraph-prebuilt, langgraph-sdk, langsmith, openai, tiktoken, orjson, tenacity, jsonpatch, google-generativeai, transformers, huggingface-hub 등
 

@@ -5,7 +5,13 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import { FileText, Shield, X } from 'lucide-react'
 import {
   formatSecurityChatFailure,
+  getSecurityChatThreadId,
+  listChatThreads,
+  loadChatThreadMessages,
+  newSecurityChatThreadId,
   postSecurityChat,
+  setSecurityChatThreadId,
+  type ChatThreadItem,
   type SecurityChatErrorBody,
   type SecurityChatSource,
 } from '@/api/securityChatApi'
@@ -19,7 +25,23 @@ type ChatMessage = {
   text: string
   mode?: string
   provider?: string
+  /** Wall-clock ms from send click until reply (or error) is shown. */
+  elapsedMs?: number
   sources?: SecurityChatSource[]
+}
+
+function formatWallElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+const WELCOME_SECURITY: ChatMessage = {
+  id: 1,
+  role: 'ai',
+  text:
+    '보안·기밀 전용 챗봇입니다. 이 탭의 메시지는 외부 API(Groq/Gemini 등)로 전송되지 않으며, 로컬 vLLM(CHAT_VLLM_BASE_URL, 기본 :8001)과 보안 문서 RAG만 사용합니다. vLLM이 꺼져 있으면 오프라인 안내만 표시됩니다.',
+  mode: 'template',
+  provider: 'offline',
 }
 
 type Props = {
@@ -28,19 +50,44 @@ type Props = {
   className?: string
 }
 
+function dedupeSourcesByDocId(sources: SecurityChatSource[]): SecurityChatSource[] {
+  const seen = new Set<string>()
+  const out: SecurityChatSource[] = []
+  for (const s of sources) {
+    const key = (s.doc_id || s.title || '').trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
+}
+
+function chunksForDocId(
+  sources: SecurityChatSource[],
+  docId: string,
+): SecurityChatSource[] {
+  return sources.filter((s) => (s.doc_id || s.title || '') === docId)
+}
+
+function uniqueDocIdCount(sources: SecurityChatSource[]): number {
+  return dedupeSourcesByDocId(sources).length
+}
+
 function SourcePanel({
-  source,
+  chunks,
   onClose,
 }: {
-  source: SecurityChatSource
+  chunks: SecurityChatSource[]
   onClose: () => void
 }) {
+  const head = chunks[0]
+  if (!head) return null
   return (
     <aside className="flex h-full min-h-0 w-full flex-col border-slate-200 bg-white md:w-[min(100%,380px)] md:border-l">
       <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
         <FileText size={16} className="shrink-0 text-amber-700" />
         <strong className="min-w-0 flex-1 truncate text-sm text-slate-800">
-          {source.title}
+          {head.title}
         </strong>
         <button
           type="button"
@@ -53,36 +100,47 @@ function SourcePanel({
       </div>
       <div className="space-y-2 overflow-y-auto p-3 text-[11px] text-slate-600">
         <div>
-          <span className="font-medium text-slate-800">doc_id</span>: {source.doc_id}
+          <span className="font-medium text-slate-800">doc_id</span>: {head.doc_id}
         </div>
-        {source.category ? (
+        {head.category ? (
           <div>
-            <span className="font-medium text-slate-800">category</span>: {source.category}
+            <span className="font-medium text-slate-800">category</span>: {head.category}
           </div>
         ) : null}
-        {source.process ? (
+        {head.process ? (
           <div>
-            <span className="font-medium text-slate-800">process</span>: {source.process}
+            <span className="font-medium text-slate-800">process</span>: {head.process}
           </div>
         ) : null}
-        {source.source_path ? (
+        {head.source_path ? (
           <div className="break-all">
-            <span className="font-medium text-slate-800">path</span>: {source.source_path}
+            <span className="font-medium text-slate-800">path</span>: {head.source_path}
           </div>
         ) : null}
-        {source.chunk_index != null ? (
-          <div>
-            <span className="font-medium text-slate-800">chunk</span>: {source.chunk_index}
-          </div>
-        ) : null}
+        <div>
+          <span className="font-medium text-slate-800">chunks</span>: {chunks.length}
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-100 bg-slate-50/80 p-3">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
           가져온 원문 청크
         </p>
-        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-800">
-          {source.text}
-        </pre>
+        <div className="space-y-3">
+          {chunks.map((c, idx) => (
+            <div
+              key={`${c.doc_id}-${c.chunk_index ?? idx}`}
+              className="rounded-lg border border-slate-200 bg-white p-2.5"
+            >
+              <p className="mb-1.5 text-[10px] font-medium text-slate-500">
+                chunk
+                {c.chunk_index != null ? ` #${c.chunk_index}` : ` ${idx + 1}`}
+              </p>
+              <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-800">
+                {c.text}
+              </pre>
+            </div>
+          ))}
+        </div>
       </div>
     </aside>
   )
@@ -98,24 +156,89 @@ export default function SecurityChatbot({
 }: Props) {
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
-  const [activeSource, setActiveSource] = useState<SecurityChatSource | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      role: 'ai',
-      text:
-        '보안·기밀 전용 챗봇입니다. 이 탭의 메시지는 외부 API(Groq/Gemini 등)로 전송되지 않으며, 로컬 vLLM(CHAT_VLLM_BASE_URL, 기본 :8001)과 보안 문서 RAG만 사용합니다. vLLM이 꺼져 있으면 오프라인 안내만 표시됩니다.',
-      mode: 'template',
-      provider: 'offline',
-    },
-  ])
+  /** Active document panel: all chunks for one doc_id from the message sources. */
+  const [activeDocChunks, setActiveDocChunks] = useState<SecurityChatSource[] | null>(
+    null,
+  )
+  const [threads, setThreads] = useState<ChatThreadItem[]>([])
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_SECURITY])
   const idRef = useRef(2)
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  const openDocFromSources = (
+    sources: SecurityChatSource[] | undefined,
+    docId: string,
+  ) => {
+    if (!sources?.length || !docId) return
+    const chunks = chunksForDocId(sources, docId)
+    if (chunks.length) setActiveDocChunks(chunks)
+  }
+
+  const refreshThreads = async () => {
+    try {
+      const list = await listChatThreads({ channel: 'security' })
+      setThreads(list)
+    } catch {
+      /* soft-fail: list optional when logged out / DB down */
+    }
+  }
+
+  const hydrateThread = async (threadId: string) => {
+    try {
+      const rows = await loadChatThreadMessages({ thread_id: threadId })
+      if (!rows.length) {
+        setMessages([WELCOME_SECURITY])
+        idRef.current = 2
+        return
+      }
+      let n = 1
+      const mapped: ChatMessage[] = rows.map((r) => {
+        n += 1
+        const role: ChatRole = r.role === 'user' ? 'user' : 'ai'
+        const sources = Array.isArray(r.sources)
+          ? (r.sources as SecurityChatSource[])
+          : undefined
+        return {
+          id: n,
+          role,
+          text: r.content || '',
+          mode: r.mode ?? undefined,
+          provider: r.provider ?? undefined,
+          sources,
+        }
+      })
+      idRef.current = n + 1
+      setMessages(mapped)
+    } catch {
+      setMessages([WELCOME_SECURITY])
+      idRef.current = 2
+    }
+  }
+
+  const startNewThread = () => {
+    abortRef.current?.abort()
+    const tid = newSecurityChatThreadId()
+    setActiveThreadId(tid)
+    setActiveDocChunks(null)
+    setMessages([WELCOME_SECURITY])
+    idRef.current = 2
+    void refreshThreads()
+  }
+
+  const selectThread = async (threadId: string) => {
+    if (pending) return
+    abortRef.current?.abort()
+    setActiveThreadId(threadId)
+    setSecurityChatThreadId(threadId)
+    setActiveDocChunks(null)
+    await hydrateThread(threadId)
+  }
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pending, activeSource])
+  }, [messages, pending, activeDocChunks])
 
   useEffect(() => {
     return () => {
@@ -123,12 +246,22 @@ export default function SecurityChatbot({
     }
   }, [])
 
+  useEffect(() => {
+    const tid = getSecurityChatThreadId()
+    setActiveThreadId(tid)
+    void refreshThreads()
+    if (tid) void hydrateThread(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once
+  }, [])
+
   const openSourceByTitle = (sources: SecurityChatSource[] | undefined, title: string) => {
     if (!sources?.length) return
     const hit =
       sources.find((s) => s.title === title) ||
       sources.find((s) => title.includes(s.title) || s.title.includes(title))
-    if (hit) setActiveSource(hit)
+    if (!hit) return
+    const docId = hit.doc_id || hit.title
+    openDocFromSources(sources, docId)
   }
 
   const renderReplyText = (m: ChatMessage) => {
@@ -168,10 +301,12 @@ export default function SecurityChatbot({
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
+    const t0 = performance.now()
 
     try {
       const res = await postSecurityChat({ message: text })
       if (ac.signal.aborted) return
+      const elapsedMs = Math.round(performance.now() - t0)
       idRef.current += 1
       const sources = res.sources ?? []
       setMessages((prev) => [
@@ -182,18 +317,23 @@ export default function SecurityChatbot({
           text: res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.'),
           mode: res.mode,
           provider: res.provider,
+          elapsedMs,
           sources,
         },
       ])
-      if (sources.length === 1) {
-        // Soft-open when single hit helps “위치로 이동”
-        setActiveSource(sources[0])
+      if (uniqueDocIdCount(sources) === 1) {
+        // Soft-open when single document helps “위치로 이동”
+        const docId = sources[0].doc_id || sources[0].title
+        openDocFromSources(sources, docId)
       }
+      void refreshThreads()
     } catch (err) {
       if (ac.signal.aborted) return
+      const elapsedMs = Math.round(performance.now() - t0)
       let status: number | undefined
       let data: SecurityChatErrorBody | null = null
       let message = '요청에 실패했습니다.'
+      let code: string | undefined
       if (axios.isAxiosError(err)) {
         status = err.response?.status
         const raw = err.response?.data
@@ -201,11 +341,12 @@ export default function SecurityChatbot({
           data = raw as SecurityChatErrorBody
         }
         message = err.message || message
+        code = err.code
       } else if (err && typeof err === 'object' && 'message' in err) {
         message = String((err as { message?: string }).message || message)
       }
-      console.warn('[security-chat] fail', { status, data, message })
-      const text = formatSecurityChatFailure({ status, data, message })
+      console.warn('[security-chat] fail', { status, data, message, code })
+      const text = formatSecurityChatFailure({ status, data, message, code })
       idRef.current += 1
       setMessages((prev) => [
         ...prev,
@@ -215,6 +356,7 @@ export default function SecurityChatbot({
           text,
           mode: 'template',
           provider: 'offline',
+          elapsedMs,
         },
       ])
     } finally {
@@ -251,9 +393,58 @@ export default function SecurityChatbot({
 
       <div
         className={`flex min-h-0 flex-1 ${
-          activeSource ? 'flex-col md:flex-row' : 'flex-col'
+          activeDocChunks ? 'flex-col md:flex-row' : 'flex-col'
         }`}
       >
+        <aside className="flex max-h-[28%] min-h-[88px] w-full shrink-0 flex-col border-b border-slate-200 bg-white md:max-h-none md:h-auto md:w-44 md:border-b-0 md:border-r">
+          <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1.5">
+            <span className="flex-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              대화
+            </span>
+            <button
+              type="button"
+              onClick={startNewThread}
+              disabled={pending}
+              className="rounded-md bg-amber-800 px-2 py-0.5 text-[10px] font-medium text-white disabled:opacity-50"
+            >
+              새 대화
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-1">
+            {threads.length === 0 ? (
+              <p className="px-2 py-2 text-[10px] text-slate-400">저장된 대화 없음</p>
+            ) : (
+              threads.map((t) => {
+                const label =
+                  (t.title && t.title.trim()) ||
+                  `${t.id.slice(0, 8)}…`
+                const active = t.id === activeThreadId
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void selectThread(t.id)}
+                    className={`mb-0.5 w-full rounded-md px-2 py-1.5 text-left text-[11px] leading-snug ${
+                      active
+                        ? 'bg-amber-50 font-medium text-amber-950'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title={t.id}
+                  >
+                    <span className="block truncate">{label}</span>
+                    {t.updated_at ? (
+                      <span className="block truncate text-[9px] text-slate-400">
+                        {t.updated_at.replace('T', ' ').slice(0, 16)}
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </aside>
+
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto bg-slate-50/60 p-3">
             {messages.map((m) => (
@@ -268,22 +459,28 @@ export default function SecurityChatbot({
                 <div>{renderReplyText(m)}</div>
                 {m.role === 'ai' && m.sources && m.sources.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {m.sources.map((s, idx) => (
-                      <button
-                        key={`${s.doc_id}-${s.chunk_index ?? idx}`}
-                        type="button"
-                        onClick={() => setActiveSource(s)}
-                        className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
-                      >
-                        {s.title}
-                      </button>
-                    ))}
+                    {dedupeSourcesByDocId(m.sources).map((s) => {
+                      const docId = s.doc_id || s.title
+                      return (
+                        <button
+                          key={docId}
+                          type="button"
+                          onClick={() => openDocFromSources(m.sources, docId)}
+                          className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100"
+                        >
+                          {s.title}
+                        </button>
+                      )
+                    })}
                   </div>
                 ) : null}
                 {m.role === 'ai' && m.mode ? (
                   <div className="mt-1 text-[10px] text-slate-400">
                     mode={m.mode}
                     {m.provider ? ` · provider=${m.provider}` : ''}
+                    {m.elapsedMs != null
+                      ? ` · ${formatWallElapsed(m.elapsedMs)}`
+                      : ''}
                   </div>
                 ) : null}
               </div>
@@ -315,9 +512,12 @@ export default function SecurityChatbot({
           </form>
         </div>
 
-        {activeSource ? (
+        {activeDocChunks ? (
           <div className="h-[40%] min-h-[180px] border-t border-slate-200 md:h-auto md:min-h-0 md:w-[min(42%,400px)] md:shrink-0 md:border-t-0">
-            <SourcePanel source={activeSource} onClose={() => setActiveSource(null)} />
+            <SourcePanel
+              chunks={activeDocChunks}
+              onClose={() => setActiveDocChunks(null)}
+            />
           </div>
         ) : null}
       </div>
