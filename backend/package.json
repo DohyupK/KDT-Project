@@ -12,7 +12,8 @@
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "seed:issues": "tsx scripts/seed-issues.ts",
+    "test": "tsx --test tests/issue.validation.test.ts"
   },
   "keywords": [],
   "author": "",

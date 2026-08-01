@@ -11,6 +11,7 @@
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
 - 위험 LOT Top: `GET /api/lots/risk-top`
 - 채점: `lotScore.ts` 잠정 휴리스틱
+- 목록의 `date`, `riskLevel`, `status`는 잘못된 값을 보내면 `400`을 반환
 
 ## 엔드포인트
 
@@ -25,6 +26,15 @@
 | GET | `/api/knowledge/past-issues` | 선택 | **과거 자료** 목록 |
 | GET | `/api/knowledge/past-issues/:issueId` | 선택 | 과거 자료 상세(분석·조치) |
 | GET | `/api/knowledge/handover-history` | 선택 | 인수인계(후속; 완료와 무관) |
+
+## 이슈 페이지 목업 시드
+
+- SQL: [`DB/issues_seed.sql`](../../DB/issues_seed.sql)
+- 실행: 백엔드에서 `npm run seed:issues`
+- 프론트 목업 8건의 현재 스키마 지원 필드만 `lots`와 `issues`에 저장
+- `INSERT IGNORE`를 사용하므로 동일 LOT·이슈 ID의 기존 데이터는 덮어쓰지 않음
+- 담당자는 같은 이름의 실제 `users` 행이 있을 때만 `assignee_user_id`에 연결
+- SPC 시계열·이상 항목 분석·잔류 Li 여유·불량 확률은 계약 확정 전까지 저장하지 않음
 
 ## 과거 자료 목록 (4.1)
 
@@ -68,10 +78,15 @@
 
 ## DDL
 
-- [`DB/issue_lot_tables.sql`](../DB/issue_lot_tables.sql)
-- [`DB/schema.sql`](../DB/schema.sql)
+- [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql)
+- [`DB/schema.sql`](../../DB/schema.sql)
 - AWS 정리: `npm run migrate:schema-cleanup`
+- 이슈 목업 데이터: [`DB/issues_seed.sql`](../../DB/issues_seed.sql) / `npm run seed:issues`
 
 ## FE
 
-과거 자료 컬럼·상세 셸을 위 계약에 맞춤. 인수인계·필터 표 전환은 후속.
+- 이슈 페이지 목록은 `GET /api/issues`의 미완료 높음·중간 데이터를 사용.
+- 행 선택 시 `GET /api/issues/:issueId`, 처리 저장 시 JWT와 `PUT /api/issues/:issueId` 사용.
+- 백엔드에 분석 계약이 없는 항목은 기존 목업 이슈만 목업 분석을 유지하고, 그 외 이슈에는 준비 중 상태를 표시.
+- 완료 저장은 서버 상태만 갱신하며 라이브러리 이관은 후속.
+- 인수인계 연동은 후속.

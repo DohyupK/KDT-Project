@@ -1,18 +1,18 @@
 'use client'
 
+import axios from 'axios';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
+import {
+  issueApi,
+  type IssueDetail as IssueApiDetail,
+  type IssueListItem as IssueApiListItem,
+} from '@/api/issueApi';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import { useSelectedLot } from '@/context/SelectedLotContext';
 import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import DateInput from '@/components/DateInput';
-import {
-  appendCompletedKnowledgeLog as appendKnowledgeLog,
-  readCompletedIssueIds,
-  toTransferredKnowledgeId,
-  type TransferredKnowledgeLog,
-} from '@/lib/completedKnowledgeTransfer';
 
 interface ProcessData {
   time: string;
@@ -111,12 +111,21 @@ interface HeaderHandoverSectionProps {
 
 interface IssueListSectionProps {
   issues: Issue[];
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  pageItems: Array<number | 'ellipsis'>;
+  pageInput: string;
+  rangeLabel: string;
   filters: FilterState;
   lots: string[];
   selectedId: string | null;
   onFilterChange: (key: keyof FilterState, value: string) => void;
   onApplyFilter: () => void;
   onResetFilter: () => void;
+  onPageChange: (page: number) => void;
+  onPageInputChange: (value: string) => void;
+  onPageInputSubmit: () => void;
   onSelect: (id: string) => void;
   /** 메인「위험 LOT Top」과 동일 — 챗봇 features 주입 + 자동 진단 */
   onDiagnose: (issue: Issue) => void;
@@ -812,6 +821,58 @@ const INITIAL_ISSUES: Issue[] = [
     ),
   },
 ];
+
+const MOCK_ISSUES_BY_ID = new Map(INITIAL_ISSUES.map((issue) => [issue.id, issue]));
+const EMPTY_PROCESS_DATA: ProcessData[] = [];
+const EMPTY_SPC_METRICS = buildSpcMetrics();
+
+function mapIssueListItem(item: IssueApiListItem): Issue {
+  const mock = MOCK_ISSUES_BY_ID.get(item.issueId);
+  return {
+    ...(mock ?? {
+      assignee: '미배정',
+      action: '',
+      completed: false,
+      anomaly: '상세 분석 데이터는 준비 중입니다.',
+      processData: EMPTY_PROCESS_DATA,
+      spcMetrics: EMPTY_SPC_METRICS,
+      residualLiMargin: 0,
+      defectProbability: 0,
+    }),
+    id: item.issueId,
+    occurredAt: item.occurredAt,
+    date: item.occurredAt.slice(0, 10),
+    lot: item.lotId,
+    risk: item.riskLevel,
+    status: item.status,
+    title: item.title,
+    completed: item.status === '완료',
+  };
+}
+
+function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
+  return {
+    ...issue,
+    id: detail.issueId,
+    occurredAt: detail.occurredAt,
+    date: detail.occurredAt.slice(0, 10),
+    lot: detail.lotId,
+    risk: detail.riskLevel,
+    status: detail.status,
+    title: detail.title,
+    assignee: detail.assigneeName?.trim() || '미배정',
+    action: detail.actionContent ?? '',
+    completed: detail.completed,
+  };
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string } | undefined;
+    if (data?.message) return data.message;
+  }
+  return fallback;
+}
 
 const HANDOVER_DATA: HandoverData = {
   period: '2026-07-21 08:00 ~ 16:00',
@@ -1740,12 +1801,21 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
 
 const IssueListSection = ({
   issues,
+  totalCount,
+  currentPage,
+  totalPages,
+  pageItems,
+  pageInput,
+  rangeLabel,
   filters,
   lots,
   selectedId,
   onFilterChange,
   onApplyFilter,
   onResetFilter,
+  onPageChange,
+  onPageInputChange,
+  onPageInputSubmit,
   onSelect,
   onDiagnose,
 }: IssueListSectionProps) => {
@@ -1762,7 +1832,7 @@ const IssueListSection = ({
         </p>
       </div>
       <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
-        검색 결과 {issues.length}건
+        검색 결과 {totalCount}건
       </span>
     </div>
     <form
@@ -1905,6 +1975,7 @@ const IssueListSection = ({
         조건에 맞는 이슈가 없습니다.
       </div>
     ) : (
+      <>
       <div className="-mx-1 overflow-x-auto px-1">
         <table className="w-full min-w-[960px] border-collapse text-left">
           <thead>
@@ -2030,9 +2101,132 @@ const IssueListSection = ({
                 </tr>
               );
             })}
+            {Array.from({ length: Math.max(0, ISSUE_PAGE_SIZE - issues.length) }, (_, index) => (
+              <tr
+                key={`issue-empty-row-${index}`}
+                aria-hidden="true"
+                className={isDark ? 'border-b border-slate-700' : 'border-b border-slate-100'}
+              >
+                <td colSpan={7} className="h-[57px] px-4 py-3">
+                  &nbsp;
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      <div
+        className={`mt-3 flex flex-col items-center gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:justify-between ${
+          isDark
+            ? 'border-slate-700 bg-slate-900/70'
+            : 'border-slate-200 bg-slate-50'
+        }`}
+      >
+        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+          {rangeLabel} / 총 {totalCount}건
+        </span>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <nav
+            aria-label="이슈 목록 페이지"
+            className="flex flex-wrap items-center justify-center gap-1.5"
+          >
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage <= 1}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            이전
+          </button>
+          {pageItems.map((item, index) =>
+            item === 'ellipsis' ? (
+              <span
+                key={`issue-page-ellipsis-${index}`}
+                className={`inline-flex min-w-8 items-center justify-center px-1 text-xs ${
+                  isDark ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
+                …
+              </span>
+            ) : (
+              <button
+                key={item}
+                type="button"
+                aria-current={item === currentPage ? 'page' : undefined}
+                onClick={() => onPageChange(item)}
+                className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  item === currentPage
+                    ? 'bg-blue-600 text-white'
+                    : isDark
+                      ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {item}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage >= totalPages}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            다음
+          </button>
+          </nav>
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onPageInputSubmit();
+            }}
+          >
+            <label
+              htmlFor="issue-page-jump"
+              className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+            >
+              페이지
+            </label>
+            <input
+              id="issue-page-jump"
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInput}
+              onChange={(event) => onPageInputChange(event.target.value)}
+              aria-label="이동할 페이지 번호"
+              className={`h-8 w-16 rounded-lg border px-2 text-center text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-slate-200'
+                  : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            />
+            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              / {totalPages}
+            </span>
+            <button
+              type="submit"
+              className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              이동
+            </button>
+          </form>
+        </div>
+      </div>
+      </>
     )}
   </section>
   );
@@ -2444,9 +2638,10 @@ const ManagementSection = ({
             <input
               id="manager-assignee"
               value={form.assignee}
-              onChange={(event) => onChange('assignee', event.target.value)}
-              placeholder="담당자 이름"
-              style={getInputStyle(c)}
+              readOnly
+              title="저장 시 현재 로그인 사용자가 담당자로 지정됩니다."
+              placeholder="저장 시 자동 지정"
+              style={{ ...getInputStyle(c), cursor: 'default' }}
             />
           </div>
           <div>
@@ -2531,6 +2726,17 @@ const EMPTY_FILTERS: FilterState = {
   spc: '',
 };
 
+const ISSUE_PAGE_SIZE = 5;
+
+function buildPaginationItems(current: number, total: number): Array<number | 'ellipsis'> {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, 'ellipsis', total];
+  if (current >= total - 3) {
+    return [1, 'ellipsis', total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total];
+}
+
 const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
 
 type HandoverActionLog = {
@@ -2550,42 +2756,6 @@ function formatKnowledgeDate() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function mapIssueToKnowledgeLog(issue: Issue): TransferredKnowledgeLog {
-  const actionText = issue.action.trim();
-  const anomalyText = issue.anomaly.trim();
-  const detailParts = [
-    `원본 이슈: ${issue.id}`,
-    `제목: ${issue.title}`,
-    issue.lot ? `LOT: ${issue.lot}` : '',
-    issue.assignee ? `담당자: ${issue.assignee}` : '',
-    anomalyText ? `이상 징후: ${anomalyText}` : '',
-    actionText ? `조치 내용: ${actionText}` : '',
-  ].filter(Boolean);
-
-  return {
-    id: toTransferredKnowledgeId(issue.id),
-    sourceIssueId: issue.id,
-    manager: issue.assignee,
-    date: issue.date || formatKnowledgeDate(),
-    title: issue.title,
-    summary: actionText || anomalyText || issue.title,
-    process: '',
-    lot: issue.lot,
-    detail: detailParts.join('\n'),
-    risk: issue.risk,
-    status: '완료',
-    occurredAt: issue.occurredAt,
-    anomaly: issue.anomaly,
-    residualLiMargin: issue.residualLiMargin,
-    defectProbability: issue.defectProbability,
-    spcMetrics: issue.spcMetrics,
-  };
-}
-
-function appendCompletedKnowledgeLog(issue: Issue): 'added' | 'exists' | 'failed' {
-  return appendKnowledgeLog(mapIssueToKnowledgeLog(issue));
 }
 
 function readHandoverActionLogs(): HandoverActionLog[] {
@@ -2666,15 +2836,12 @@ function appendHandoverActionLogs(
 export default function IssuePage() {
   const { isDark } = useUiSettings();
   const { connectLot } = useSelectedLot();
-  const [issues, setIssues] = useState<Issue[]>(() => {
-    const completedIds = new Set(readCompletedIssueIds());
-    return INITIAL_ISSUES.filter(
-      (issue) => !isIssueCompleted(issue) && !completedIds.has(issue.id),
-    );
-  });
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
   const [managementForm, setManagementForm] = useState<ManagementForm>(EMPTY_FORM);
   const [reportNotice, setReportNotice] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
@@ -2686,17 +2853,34 @@ export default function IssuePage() {
   const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
   const [completedHandoverNoteIds, setCompletedHandoverNoteIds] = useState<number[]>([]);
   const prevSelectedIdRef = useRef<string | null>(null);
+  const detailRequestRef = useRef(0);
 
   const refreshCompletedHandoverNoteIds = () => {
     setCompletedHandoverNoteIds(getTransferredHandoverNoteIds());
   };
 
   useEffect(() => {
-    // Mock 완료 이슈를 지식베이스로 이관 (이미 있으면 스킵)
-    INITIAL_ISSUES.filter((issue) => isIssueCompleted(issue)).forEach((issue) => {
-      appendCompletedKnowledgeLog(issue);
-    });
-    refreshCompletedHandoverNoteIds();
+    let cancelled = false;
+
+    const loadIssues = async () => {
+      try {
+        const { data } = await issueApi.list();
+        if (!cancelled) {
+          setIssues(data.issues.map(mapIssueListItem));
+          setCompletedHandoverNoteIds(getTransferredHandoverNoteIds());
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIssues([]);
+        setToastMessage(getApiErrorMessage(error, '이슈 목록을 불러오지 못했습니다.'));
+        setShowToast(true);
+      }
+    };
+
+    void loadIssues();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2716,15 +2900,14 @@ export default function IssuePage() {
   const filteredIssues = useMemo(() => {
     const keyword = appliedFilters.search.trim().toLowerCase();
     return issues.filter((issue) => {
-      // 완료 이슈는 지식베이스로 이관되므로 목록에 표시하지 않음
+      // 완료 이슈는 백엔드의 미완료 목록 정책과 동일하게 표시하지 않음
       if (isIssueCompleted(issue)) return false;
 
       const overallSpc = getOverallSpcStatus(issue.spcMetrics);
-      // 9개 SPC가 모두 안정이면 이슈가 아니므로 목록에서 제외
-      if (overallSpc === '안정') return false;
 
       const matchesSearch =
         !keyword ||
+        issue.id.toLowerCase().includes(keyword) ||
         issue.title.toLowerCase().includes(keyword) ||
         issue.lot.toLowerCase().includes(keyword);
       const matchesDate = !appliedFilters.date || issue.date === appliedFilters.date;
@@ -2742,6 +2925,21 @@ export default function IssuePage() {
       );
     });
   }, [appliedFilters, issues]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredIssues.length / ISSUE_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedIssues = useMemo(() => {
+    const start = (safePage - 1) * ISSUE_PAGE_SIZE;
+    return filteredIssues.slice(start, start + ISSUE_PAGE_SIZE);
+  }, [filteredIssues, safePage]);
+  const pageItems = useMemo(
+    () => buildPaginationItems(safePage, totalPages),
+    [safePage, totalPages],
+  );
+  const pageRangeStart =
+    filteredIssues.length === 0 ? 0 : (safePage - 1) * ISSUE_PAGE_SIZE + 1;
+  const pageRangeEnd = Math.min(safePage * ISSUE_PAGE_SIZE, filteredIssues.length);
+  const pageRangeLabel = `${pageRangeStart}–${pageRangeEnd}`;
 
   useEffect(() => {
     if (!selectedId) return;
@@ -2805,21 +3003,58 @@ export default function IssuePage() {
     return () => window.clearTimeout(timer);
   }, [showToast]);
 
-  const handleSelectIssue = (id: string) => {
+  const handleSelectIssue = async (id: string) => {
+    const requestId = ++detailRequestRef.current;
     setSelectedId(id);
     window.setTimeout(() => {
       document
         .getElementById('issue-detail-analysis')
         ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
+
+    try {
+      const { data } = await issueApi.getById(id);
+      if (requestId !== detailRequestRef.current) return;
+      setIssues((current) =>
+        current.map((issue) => (issue.id === id ? mergeIssueDetail(issue, data.issue) : issue)),
+      );
+      setManagementForm({
+        assignee: data.issue.assigneeName?.trim() || '미배정',
+        status: data.issue.status,
+        action: data.issue.actionContent ?? '',
+        completed: data.issue.completed,
+      });
+      setSaveMessage('');
+    } catch (error) {
+      if (requestId !== detailRequestRef.current) return;
+      setToastMessage(getApiErrorMessage(error, '이슈 상세를 불러오지 못했습니다.'));
+      setShowToast(true);
+    }
   };
 
   const handleFilterChange = (key: keyof FilterState, value: string) => {
     setDraftFilters((current) => ({ ...current, [key]: value }));
   };
 
+  const handlePageChange = (page: number) => {
+    const nextPage = Math.min(totalPages, Math.max(1, Math.trunc(page)));
+    setCurrentPage(nextPage);
+    setPageInput(String(nextPage));
+  };
+
+  const handlePageInputSubmit = () => {
+    const requestedPage = Number(pageInput);
+    if (!Number.isFinite(requestedPage)) {
+      setPageInput(String(safePage));
+      return;
+    }
+    handlePageChange(requestedPage);
+  };
+
   const handleApplyFilter = () => {
     setAppliedFilters(draftFilters);
+    setCurrentPage(1);
+    setPageInput('1');
   };
 
   /** 메인 위험 LOT Top과 동일 — 챗봇 패널 오픈 + 자동 O/X 진단 */
@@ -2833,6 +3068,8 @@ export default function IssuePage() {
   const handleResetFilter = () => {
     setDraftFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
+    setCurrentPage(1);
+    setPageInput('1');
   };
 
   const handleFormChange = <K extends keyof ManagementForm>(
@@ -3064,83 +3301,72 @@ ${issues
     });
   };
 
-  const handleCompleteIssue = () => {
+  const handleCompleteIssue = async () => {
     if (!selectedIssue || !managementForm.completed || isSaving) return;
 
     const issueId = selectedIssue.id;
-    const transferredIssue: Issue = {
-      ...selectedIssue,
-      assignee: managementForm.assignee,
-      status: '완료',
-      action: managementForm.action,
-      completed: true,
-    };
-
     setIsSaving(true);
     try {
-      const result = appendCompletedKnowledgeLog(transferredIssue);
-      if (result === 'failed') {
-        setToastMessage('지식베이스 이관에 실패했습니다. 다시 시도해주세요.');
-        setShowToast(true);
-        return;
-      }
-
+      await issueApi.update(issueId, {
+        status: '완료',
+        actionContent: managementForm.action.trim() || null,
+        completed: true,
+      });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
+      const nextTotalPages = Math.max(
+        1,
+        Math.ceil(Math.max(0, filteredIssues.length - 1) / ISSUE_PAGE_SIZE),
+      );
+      const nextPage = Math.min(safePage, nextTotalPages);
+      setCurrentPage(nextPage);
+      setPageInput(String(nextPage));
       setSelectedId(null);
       setSaveMessage('');
-      setToastMessage(
-        result === 'exists'
-          ? '✅ 이미 이관된 이슈입니다. 이슈 목록에서 제거했습니다.'
-          : '✅ 조치가 완료되어 해당 이슈가 라이브러리 지식베이스로 자동 이관되었습니다.',
-      );
+      setToastMessage('✓ 이슈가 완료 처리되어 목록에서 제거되었습니다.');
+      setShowToast(true);
+    } catch (error) {
+      setToastMessage(getApiErrorMessage(error, '이슈 완료 처리에 실패했습니다.'));
       setShowToast(true);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleSave = (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedIssue || !canSave || isSaving) return;
 
     if (managementForm.completed) {
-      handleCompleteIssue();
+      await handleCompleteIssue();
       return;
     }
 
-    const nextStatus: Issue['status'] = managementForm.status;
-    const nextCompleted = false;
-
-    const savedData = {
-      issueId: selectedIssue.id,
-      assignee: managementForm.assignee,
-      status: nextStatus,
-      action: managementForm.action,
-      completed: nextCompleted,
-    };
-
-    setIssues((current) =>
-      current.map((issue) =>
-        issue.id === selectedIssue.id
-          ? {
-              ...issue,
-              assignee: savedData.assignee,
-              status: savedData.status,
-              action: savedData.action,
-              completed: savedData.completed,
-            }
-          : issue,
-      ),
-    );
-    setManagementForm({
-      assignee: savedData.assignee,
-      status: savedData.status,
-      action: savedData.action,
-      completed: savedData.completed,
-    });
-    setSaveMessage('이슈 처리 내역이 저장되었습니다.');
-    setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
-    setShowToast(true);
+    setIsSaving(true);
+    try {
+      const { data } = await issueApi.update(selectedIssue.id, {
+        status: managementForm.status,
+        actionContent: managementForm.action.trim() || null,
+        completed: false,
+      });
+      const savedIssue = mergeIssueDetail(selectedIssue, data.issue);
+      setIssues((current) =>
+        current.map((issue) => (issue.id === selectedIssue.id ? savedIssue : issue)),
+      );
+      setManagementForm({
+        assignee: savedIssue.assignee,
+        status: savedIssue.status,
+        action: savedIssue.action,
+        completed: savedIssue.completed,
+      });
+      setSaveMessage(data.message || '이슈 처리 내역이 저장되었습니다.');
+      setToastMessage('✓ 이슈 처리 내역이 성공적으로 저장되었습니다.');
+      setShowToast(true);
+    } catch (error) {
+      setToastMessage(getApiErrorMessage(error, '이슈 처리 내역 저장에 실패했습니다.'));
+      setShowToast(true);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -3167,13 +3393,22 @@ ${issues
         />
         <div style={{ display: 'grid', gap: 22, marginTop: 22 }}>
           <IssueListSection
-            issues={filteredIssues}
+            issues={paginatedIssues}
+            totalCount={filteredIssues.length}
+            currentPage={safePage}
+            totalPages={totalPages}
+            pageItems={pageItems}
+            pageInput={pageInput}
+            rangeLabel={pageRangeLabel}
             filters={draftFilters}
             lots={lots}
             selectedId={selectedId}
             onFilterChange={handleFilterChange}
             onApplyFilter={handleApplyFilter}
             onResetFilter={handleResetFilter}
+            onPageChange={handlePageChange}
+            onPageInputChange={setPageInput}
+            onPageInputSubmit={handlePageInputSubmit}
             onSelect={handleSelectIssue}
             onDiagnose={handleDiagnoseIssue}
           />
