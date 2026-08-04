@@ -94,8 +94,8 @@ SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (�
 SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
 SECURE_DOCS_WATCH=1          # FastAPI lifespan dual-engine watcher
 SECURE_DOCS_WATCH_DEBOUNCE=4.0  # coalesce bursts before convert/profile + ingest
-# Tables: Documents CSV/XLSX → move ai-service/data/csv_lake/ → Documents/ai-service/*-profile.md
-# Unstructured: PDF/TXT → Documents/ai-service/*.md → existing full ingest
+# Tables: Documents CSV/XLSX → move ai-service/data/csv_lake/ → Documents/Confidential/Markdown/*-profile.md
+# Unstructured: PDF/TXT under Documents/<Clearance>/ → Markdown/*.md → full ingest
 SECURE_SELF_QUERY_TIMEOUT=20
 SECURE_SELF_QUERY_MAX_TOKENS=256
 # Chunk (ingest defaults): SentenceSplitter chunk_size=400 · overlap=50
@@ -106,12 +106,13 @@ SECURE_SELF_QUERY_MAX_TOKENS=256
 ## 가드레일 (필수) — SelfQuery 교체 후에도 유지
 
 순정 Self-Query는 **과도 필터 시 unfiltered 재시도를 내장하지 않는다.**  
-필터 생성(A)만 LI로 바꿔도, 아래 **외곽 orchestration**은 `retrieve()`에 그대로 둔다.
+필터 생성(A)만 LI로 바꿔도, 아래 **외곽 orchestration**은 `retrieve()`에 그대로 둔다.  
+단 C의 “unfiltered”는 **clearance ACL은 유지**한다 (API=Public+Confidential, Secure=4등급).
 
 ```text
 A. 필터 생성 (VectorIndexAutoRetriever / heuristic 폴백)
-B. hybrid (dense + BM25 + RRF) with filters
-C. (필수) fused empty AND had_filters → unfiltered hybrid 1회
+B. hybrid (dense + BM25 + RRF) with filters + clearance MatchAny
+C. (필수) fused empty AND had_filters → category/process unfiltered hybrid 1회 (clearance 유지)
 D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.15) · soft fallback + max_score 로그
 ```
 
@@ -119,7 +120,7 @@ D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.15) · soft fallback + max_score �
 |--------|------|
 | A | **LI Self-Query** (`VectorIndexAutoRetriever`) · `llm_invoke=None` 또는 실패 시 heuristic |
 | B | 유지 (hybrid) · 보안 챗 호출 `top_k=12` · `rerank_top_n=6` |
-| **C** | **유지 · 제거 금지** |
+| **C** | **유지 · 제거 금지** · clearance ACL 유지 |
 | **D** | **유지 · 제거 금지** · diversify doc당 2 · soft fallback · `rerank_top_n=6` |
 
 ## 정책
@@ -132,9 +133,9 @@ D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.15) · soft fallback + max_score �
 
 ## 듀얼 엔진 문서 유입
 
-- PDF/TXT → `Documents/ai-service/*.md` → ingest
-- CSV/XLSX → `ai-service/data/csv_lake/` + `Documents/ai-service/*-profile.md` → ingest
-- Watch: `SECURE_DOCS_WATCH=1` · debounce `SECURE_DOCS_WATCH_DEBOUNCE`
+- PDF/TXT → `Documents/<Clearance>/Markdown/*.md` → ingest
+- CSV/XLSX → `ai-service/data/csv_lake/` + `Documents/Confidential/Markdown/*-profile.md` → ingest
+- Watch: `SECURE_DOCS_WATCH=1` · debounce `SECURE_DOCS_WATCH_DEBOUNCE` · 4등급 루트
 - 옛 CSV **풀 테이블 MD**는 품질 오염 → `scripts/rebuild_secure_rag_clean.py`로 정리 후 재ingest
 
 ## API E2E 스모크
@@ -173,8 +174,8 @@ vLLM 미기동 시 **가짜 성공 금지** — 스크립트가 FAIL.
 
 ## 코드
 
-- `agent/rag_engine.py`
-- `agent/secure_graph.py`
-- `agent/secure_llm.py` · `secure_prompts.py`
+- `agent/rag_engine.py` · `agent/doc_clearance.py`
+- `agent/secure_llm/graph.py` · `llm.py` · `prompts.py`
+- `agent/api_llm/` (일반 챗 + Public/Confidential RAG)
 - `ingest_secure.py`
 - `scripts/smoke_secure_rag_e2e.py`

@@ -201,7 +201,7 @@ def ensure_thread(
         return tid
     except Exception as exc:  # noqa: BLE001
         logger.error("[chat_history] ensure_thread failed: %s", exc)
-        return thread_id or tid
+        return None
 
 
 def list_threads(

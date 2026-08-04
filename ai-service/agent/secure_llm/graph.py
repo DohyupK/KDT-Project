@@ -16,9 +16,13 @@ from typing import Any, AsyncIterator, Awaitable, Callable, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.rag_engine import NO_DOCS_REPLY, get_engine
-from agent.secure_llm import make_vllm, usable_llm_text
-from agent.secure_prompts import (
+from agent.rag_engine import (
+    NO_DOCS_REPLY,
+    SECURE_ALLOWED_CLEARANCES,
+    get_engine,
+)
+from agent.secure_llm.llm import make_vllm, usable_llm_text
+from agent.secure_llm.prompts import (
     ANALYTICS_GROUNDING_SUFFIX,
     ANALYTICS_RESULT_HEADER,
     EMPTY_RAG_REPLY,
@@ -138,6 +142,7 @@ def node_retrieve(state: SecureState) -> SecureState:
             top_k=12,
             rerank_top_n=6,
             llm_invoke=_llm_text_invoke,
+            allowed_clearances=SECURE_ALLOWED_CLEARANCES,
         )
         # B: prior only for short follow-up; topic switch + 0 hits → no_docs.
         used_prior = False

@@ -21,7 +21,14 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Collection
+
+from agent.doc_clearance import (
+    API_ALLOWED_CLEARANCES,
+    SECURE_ALLOWED_CLEARANCES,
+    clearance_from_path,
+    ensure_clearance_tree,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +46,14 @@ NODES_PATH = SECURE_RAG_DIR / "bm25_nodes.json"
 
 DEFAULT_COLLECTION = "secure_docs"
 NO_DOCS_REPLY = "사내 보안 문서에서 관련 정보를 찾을 수 없습니다."
+
+# Re-export for callers
+__all_clearance__ = (
+    "API_ALLOWED_CLEARANCES",
+    "SECURE_ALLOWED_CLEARANCES",
+    "clearance_from_path",
+    "ensure_clearance_tree",
+)
 
 # Forced CPU — do not override to cuda in this module.
 EMBED_MODEL = os.environ.get("SECURE_EMBED_MODEL", "BAAI/bge-m3").strip()
@@ -93,6 +108,7 @@ def source_dict_from_hit(hit: Any, score: float | None = None) -> dict[str, Any]
         "category": md.get("category"),
         "process": md.get("process"),
         "security_level": md.get("security_level") or "internal",
+        "clearance": md.get("clearance") or "Confidential",
         "source_path": md.get("source_path"),
         "chunk_index": md.get("chunk_index"),
         "text": _text(hit),
@@ -307,21 +323,38 @@ class SecureRagEngine:
         rerank_top_n: int = 6,
         filters: dict[str, str] | None = None,
         llm_invoke: Any | None = None,
+        allowed_clearances: Collection[str] | None = None,
     ) -> list[dict[str, Any]]:
         self.ensure()
         if not self._ready:
             raise RuntimeError(self._init_error or "SecureRagEngine not ready")
 
+        allowed = (
+            frozenset(allowed_clearances)
+            if allowed_clearances is not None
+            else SECURE_ALLOWED_CLEARANCES
+        )
+        if not allowed:
+            return []
+
         filters = filters if filters is not None else self.parse_metadata_filters(
             query, llm_invoke
         )
-        dense_hits = self._dense_search(query, top_k=top_k, filters=filters)
-        bm25_hits = self._bm25_search(query, top_k=top_k, filters=filters)
+        dense_hits = self._dense_search(
+            query, top_k=top_k, filters=filters, allowed_clearances=allowed
+        )
+        bm25_hits = self._bm25_search(
+            query, top_k=top_k, filters=filters, allowed_clearances=allowed
+        )
         fused = _rrf_fuse(dense_hits, bm25_hits, top_k=top_k)
-        # Guardrail C: If Self-Query filters were too strict, retry unfiltered once.
+        # Guardrail C: retry without category/process filters, keep clearance ACL.
         if not fused and filters:
-            dense_hits = self._dense_search(query, top_k=top_k, filters={})
-            bm25_hits = self._bm25_search(query, top_k=top_k, filters={})
+            dense_hits = self._dense_search(
+                query, top_k=top_k, filters={}, allowed_clearances=allowed
+            )
+            bm25_hits = self._bm25_search(
+                query, top_k=top_k, filters={}, allowed_clearances=allowed
+            )
             fused = _rrf_fuse(dense_hits, bm25_hits, top_k=top_k)
         if not fused:
             return []
@@ -333,6 +366,7 @@ class SecureRagEngine:
         *,
         top_k: int,
         filters: dict[str, str],
+        allowed_clearances: frozenset[str],
     ) -> list[tuple[str, dict[str, Any], float]]:
         from qdrant_client.http import models as qm
 
@@ -341,12 +375,7 @@ class SecureRagEngine:
             [query], normalize_embeddings=True
         )[0].tolist()
 
-        must = []
-        for key, val in filters.items():
-            must.append(
-                qm.FieldCondition(key=key, match=qm.MatchValue(value=val))
-            )
-        qfilter = qm.Filter(must=must) if must else None
+        qfilter = _qdrant_filter(filters, allowed_clearances)
 
         try:
             points = self._qdrant.search(
@@ -358,8 +387,6 @@ class SecureRagEngine:
             )
         except Exception:
             # qdrant-client 1.12+ query_points API
-            from qdrant_client.http import models as qm2
-
             res = self._qdrant.query_points(
                 collection_name=collection_name(),
                 query=vector,
@@ -384,6 +411,7 @@ class SecureRagEngine:
         *,
         top_k: int,
         filters: dict[str, str],
+        allowed_clearances: frozenset[str],
     ) -> list[tuple[str, dict[str, Any], float]]:
         with self._bm25_lock:
             if not self._bm25 or not self._nodes:
@@ -396,6 +424,9 @@ class SecureRagEngine:
                     continue
                 node = self._nodes[idx]
                 md = dict(node.get("metadata") or {})
+                cl = str(md.get("clearance") or "Confidential")
+                if cl not in allowed_clearances:
+                    continue
                 if filters:
                     ok = True
                     for k, v in filters.items():
@@ -482,6 +513,25 @@ def get_engine() -> SecureRagEngine:
     if _ENGINE is None:
         _ENGINE = SecureRagEngine()
     return _ENGINE
+
+
+def _qdrant_filter(
+    filters: dict[str, str],
+    allowed_clearances: frozenset[str],
+) -> Any:
+    from qdrant_client.http import models as qm
+
+    must: list[Any] = []
+    for key, val in filters.items():
+        must.append(qm.FieldCondition(key=key, match=qm.MatchValue(value=val)))
+    if allowed_clearances:
+        must.append(
+            qm.FieldCondition(
+                key="clearance",
+                match=qm.MatchAny(any=list(allowed_clearances)),
+            )
+        )
+    return qm.Filter(must=must) if must else None
 
 
 def _tokenize(text: str) -> list[str]:

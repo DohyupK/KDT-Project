@@ -304,6 +304,7 @@ flowchart TD
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
 | [`docs/work-log/2026-08-02.md`](./docs/work-log/2026-08-02.md) | SSE · analytics · soft fallback · **3단계** chunk/min_score · 스택 스냅샷 |
 | [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md) | ai-service 기능 목록 (predict · 보안 RAG · analytics) |
+| [`ai-service/README.md`](./ai-service/README.md#성능-확인-clf--reg--residual) | ML 성능 확인 (metadata + `scripts/evaluate_models.py`) |
 | [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 자연 흐름 · SYS_RAG_EMPTY · 다문서 · 인덱스 |
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |

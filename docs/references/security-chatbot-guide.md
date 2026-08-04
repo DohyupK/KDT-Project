@@ -165,8 +165,9 @@ python train_residual_pipeline.py
 | 파일 | 역할 |
 |------|------|
 | `ai-service/agent/rag_engine.py` | hybrid · diversify rerank |
-| `ai-service/agent/secure_graph.py` | LangGraph retrieve/gate/generate |
-| `ai-service/agent/secure_prompts.py` | 시스템 프롬프트 · `[SYS_RAG_EMPTY_RESULT]` · 출처 |
+| `ai-service/agent/secure_llm/graph.py` | LangGraph retrieve/gate/generate |
+| `ai-service/agent/secure_llm/prompts.py` | 시스템 프롬프트 · `[SYS_RAG_EMPTY_RESULT]` · 출처 |
+| `ai-service/agent/api_llm/` | 일반 챗 · Public/Confidential RAG |
 | `ai-service/ingest_secure.py` | Qdrant + BM25 재구축 |
 | `frontend/.../SecurityChatbot.tsx` | 보안 UI · 칩 · 패널 |
 | `frontend/.../GlobalChatbot.tsx` | 일반 챗 · Maximize→보안 |

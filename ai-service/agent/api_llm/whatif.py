@@ -15,8 +15,8 @@ import copy
 import os
 from typing import Any
 
-from agent.bounds_cache import clip_value, get_control_bounds
-from agent.tools import (
+from agent.api_llm.bounds_cache import clip_value, get_control_bounds
+from agent.api_llm.tools import (
     RAW_FEATURE_KEYS,
     run_capacity_tool,
     run_predict_tool,
@@ -126,7 +126,7 @@ def run_whatif(
     """
     Grid-search humidity / sintering_temp around the current LOT.
 
-    Wiring: bounds from agent.bounds_cache (Setting UI → Express → JSON file).
+    Wiring: bounds from agent.api_llm.bounds_cache (Setting UI → Express → JSON file).
     """
     baseline_features = _clone_features(features)
     base_prob = float(baseline["probability"])

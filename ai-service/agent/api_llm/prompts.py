@@ -21,6 +21,8 @@ SYSTEM_COMPOSE = """당신은 양극재 품질 O/X·용량·리튬 잔여량 진
 12. 한국어로 짧고 명확하게 답한다.
 13. JSON의 need_guideline이 true이면, 답변 본문 뒤에 사용법 가이드를 그대로 덧붙인다.
 14. suggestion에 residual_before/after·capacity_before/after가 있으면 What-if 설명에 전→후를 함께 언급한다(실측이 아닌 예측임을 밝힌다).
+15. rag_sources(공개·대외비 문서 발췌)가 있으면 그 내용만 근거로 문서 질문을 답하고,
+    Secret/TopSecret 문서를 알고 있는 것처럼 말하지 않는다. 없으면 문서 내용을 꾸며내지 않는다.
 """
 
 USAGE_GUIDELINE = """[사용 가이드]

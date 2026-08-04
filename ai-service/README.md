@@ -33,10 +33,37 @@
 
 ---
 
+## 성능 확인 (clf · reg · residual)
+
+학습 시 시간순 holdout(Test 20%) 지표가 `metadata.json`에 들어 있다. **재학습 없이** 같은 분할로 다시 채점하려면 아래 스크립트를 쓴다.
+
+### 1) 학습 당시 숫자 바로 보기
+
+| 헤드 | 파일 | 주요 지표 |
+|------|------|-----------|
+| clf | [`models/metadata.json`](./models/metadata.json) | `metrics.test_roc_auc`, accuracy, F1, PR-AUC, threshold |
+| reg | [`models/reg/metadata.json`](./models/reg/metadata.json) | `test_rmse`, `test_mae`, `test_r2` |
+| residual | [`models/residual/metadata.json`](./models/residual/metadata.json) | `test_rmse`, `test_mae`, `test_r2` |
+
+### 2) 오프라인 holdout 재채점 (재학습·Optuna 없음)
+
+```bash
+cd ai-service
+python scripts/evaluate_models.py
+# 일부만: python scripts/evaluate_models.py --heads clf,reg
+# 리포트: logs/eval_report.json (기본)
+# API alive만: python scripts/evaluate_models.py --api
+```
+
+CSV·산출물이 학습 때와 같으면 `match`가 true여야 한다. hash가 다르면 데이터가 바뀐 것.  
+`train_*.py` 재학습과는 별개이며, **장시간·재튜닝이 필요할 때만** 학습 스크립트를 **승인 후** 실행한다.
+
+---
+
 ## 실행 방법
 
 **권장:** 저장소 루트에서 `npm run dev`  
-([로컬 실행 — 챗봇](../README.md#로컬-실행--챗봇)) — frontend(:3000) + backend(:3001) + 이 서비스(:8800).
+([로컬 실행](../README.md#로컬-실행-권장)) — frontend(:3000) + backend(:3001) + 이 서비스(:8800).
 
 ### 개별 기동
 

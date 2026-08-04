@@ -14,8 +14,8 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.prompts import SYSTEM_COMPOSE, USAGE_GUIDELINE
-from agent.providers import (
+from agent.api_llm.prompts import SYSTEM_COMPOSE, USAGE_GUIDELINE
+from agent.api_llm.providers import (
     invoke_credential,
     resolve_credentials,
     select_auto_order,
@@ -41,6 +41,7 @@ def _build_messages(
     capacity_result: dict[str, Any] | None = None,
     residual_result: dict[str, Any] | None = None,
     head_results: dict[str, Any] | None = None,
+    rag_sources: list[dict[str, Any]] | None = None,
 ) -> list[Any]:
     system = SYSTEM_COMPOSE
     if need_guideline:
@@ -53,6 +54,7 @@ def _build_messages(
         "residual": residual_result,
         "heads": head_results,
         "recommendation": recommendation,
+        "rag_sources": rag_sources or [],
         "error": error,
         "need_guideline": need_guideline,
         "data_note": (
@@ -85,6 +87,7 @@ def compose_with_failover(
     capacity_result: dict[str, Any] | None = None,
     residual_result: dict[str, Any] | None = None,
     head_results: dict[str, Any] | None = None,
+    rag_sources: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """
     Returns (reply_text, provider_label, user_facing_error).
@@ -107,6 +110,7 @@ def compose_with_failover(
         capacity_result=capacity_result,
         residual_result=residual_result,
         head_results=head_results,
+        rag_sources=rag_sources,
     )
 
     if mode != "auto":

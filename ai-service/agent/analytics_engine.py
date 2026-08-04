@@ -79,7 +79,7 @@ def _summarize_csv(path: Path, message: str) -> str:
 
 def _try_xgb_predict_note(message: str, analytics_body: str) -> str:
     """Append predict notice on predict intent; never raises to caller."""
-    from agent.secure_prompts import is_predict_intent
+    from agent.secure_llm.prompts import is_predict_intent
 
     if not is_predict_intent(message):
         return analytics_body
