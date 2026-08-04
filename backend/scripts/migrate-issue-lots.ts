@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import '../src/loadRootEnv.js'
 import fs from 'fs'
 import mariadb from 'mariadb'
 import * as lotService from '../src/services/lot.service.ts'

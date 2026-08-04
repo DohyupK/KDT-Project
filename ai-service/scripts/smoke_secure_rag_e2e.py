@@ -27,7 +27,7 @@ if str(AI_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
-load_dotenv(AI_ROOT / ".env", override=False)
+load_dotenv(AI_ROOT.parent / ".env", override=False)
 
 AI_URL = (os.environ.get("SMOKE_AI_URL") or "http://127.0.0.1:8800").rstrip("/")
 BACKEND_URL = (os.environ.get("SMOKE_BACKEND_URL") or "").rstrip("/")

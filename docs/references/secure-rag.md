@@ -1,24 +1,31 @@
 # 보안 탭 RAG (secure RAG)
 
-최종 갱신: 2026-07-30 (Self-Query A + API E2E 스모크)
+최종 갱신: 2026-08-02 (3단계 chunk/min_score · soft fallback · SSE · analytics)
 
 일반 Knowledge / 일반 `/chat` 과 **완전 분리**.  
-경로: `SecurityChatbot` → `POST /api/security-chat` → `ai-service /security-chat` → LangGraph (`secure_graph`) → `rag_engine` + vLLM `:8001`.
+경로: `SecurityChatbot` → `POST /api/security-chat/stream` (또는 JSON `/api/security-chat`) → `ai-service` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.
+
+운영·스택·이용 요약: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · 기법 총정리: [`LLM 튜닝.md`](./LLM%20튜닝.md)
 
 ## 스택
 
 | 단계 | 구현 |
 |------|------|
-| Orchestration | LangGraph `retrieve` → `gate` → `generate` \| `no_docs` |
-| Chunk / schema | LlamaIndex `SentenceSplitter` (ingest) |
+| Orchestration | LangGraph `analytics`\|`retrieve` → `gate` → `generate` \| `no_docs` · SSE는 동일 노드 수동 실행 |
+| Chunk / schema | LlamaIndex `SentenceSplitter` (**chunk_size=400**, **overlap=50**) |
 | Dense | Qdrant `secure_docs` + `BAAI/bge-m3` (**CPU**) |
 | Sparse | BM25 (`rank_bm25`, nodes in `data/secure_rag/bm25_nodes.json`) |
-| Fusion | Reciprocal Rank Fusion (LlamaIndex QueryFusion과 동일 계열) |
-| Rerank | `BAAI/bge-reranker-v2-m3` via SentenceTransformer CrossEncoder (**CPU**) |
-| Self-Query (A) | LlamaIndex `VectorIndexAutoRetriever` + `VectorStoreInfo` (`category` / `process`) → vLLM OpenAI 호환 · 실패 시 heuristic · **cloud 폴백 없음** |
+| Fusion | Reciprocal Rank Fusion (`k=60`) |
+| Rerank | `BAAI/bge-reranker-v2-m3` CrossEncoder (**CPU**) · **doc당 최대 2청크** · soft fallback |
+| Self-Query (A) | LI `VectorIndexAutoRetriever` 또는 `SECURE_SELF_QUERY=0` heuristic · unfiltered 재시도(C) 유지 |
 | LLM | 로컬 vLLM only · 클라우드 폴백 **없음** |
+| 빈 근거 | 모델 출력에 `[SYS_RAG_EMPTY_RESULT]` 포함 시 고정 문구 + `sources=[]` |
 
-> llama-index-core에는 클래스명 `SelfQueryRetriever`가 없다. Self-Query 경로는 **`VectorIndexAutoRetriever.generate_retrieval_spec`** 이다. 필터만 뽑고, 검색(B)은 기존 hybrid에 둔다.
+## 라우팅 정책 (2026-08-01)
+
+- **자연 흐름:** 요약 의도여도 retrieve를 스킵하지 않음. 짧은 후속/요약어는 쿼리 확장; 0건이면 `prior_sources` 폴백; 주제 전환 0건은 `no_docs`.
+- **출처:** LLM이 붙인 `[출처:]`를 지우고 실제 hits title만 강제 부착. 제어 토큰 시 출처·칩 제거.
+- **요약:** RAG 발췌 + 단답형 suffix (`SECURE_GENERATE=1`). `=0`이면 extractive/compressed.
 
 ## 메타 스키마
 
@@ -46,13 +53,15 @@
 
 ## 환경 변수
 
+모노레포 루트 `.env`에 설정 (패키지별 `.env` 없음):
+
 ```text
 QDRANT_URL=http://127.0.0.1:6333
 SECURE_QDRANT_COLLECTION=secure_docs
 SECURE_DOCS_DIR=  # optional; default repo Documents/
 SECURE_EMBED_MODEL=BAAI/bge-m3
 SECURE_RERANK_MODEL=BAAI/bge-reranker-v2-m3
-SECURE_RERANK_MIN_SCORE=0.05
+SECURE_RERANK_MIN_SCORE=0.15
 CHAT_VLLM_BASE_URL=http://127.0.0.1:8001/v1
 CHAT_VLLM_MODEL=<served-model-name>
 ```
@@ -64,8 +73,13 @@ CHAT_VLLM_MODEL=<served-model-name>
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 cd ai-service
-python ingest_secure.py
-# BM25는 서버 기동 시 로드 → ingest 후 ai-service(:8800) 재시작 권장
+# Full rebuild: deletes Qdrant collection then re-chunks (400/50) + embeds
+python scripts/rebuild_secure_rag_clean.py
+# 또는 (동일 run_ingest, 레거시 MD 정리 없음): python ingest_secure.py
+#
+# BM25 반영:
+# - Documents 워처(`SECURE_DOCS_WATCH=1`) 자동 ingest → 서버 내 `reload_bm25()` 핫리로드 (재시작 불필요)
+# - 터미널 CLI(`ingest_secure.py` / rebuild 스크립트)는 **별 프로세스** → ai-service(:8800) **재시작** 필요
 ```
 
 문서: `Documents/*.{md,txt,pdf}` (`.md` YAML frontmatter, PDF는 선택 `*.meta.json` sidecar).
@@ -84,6 +98,9 @@ SECURE_DOCS_WATCH_DEBOUNCE=4.0  # coalesce bursts before convert/profile + inges
 # Unstructured: PDF/TXT → Documents/ai-service/*.md → existing full ingest
 SECURE_SELF_QUERY_TIMEOUT=20
 SECURE_SELF_QUERY_MAX_TOKENS=256
+# Chunk (ingest defaults): SentenceSplitter chunk_size=400 · overlap=50
+# Retrieve defaults (`SecureRagEngine.retrieve` + `node_retrieve`): top_k=12 · rerank_top_n=6
+# AI_SERVICE_LOG_FILE=logs/ai-service.log   # RotatingFileHandler 10MB × backup 5 (app/main.py)
 ```
 
 ## 가드레일 (필수) — SelfQuery 교체 후에도 유지
@@ -95,22 +112,30 @@ SECURE_SELF_QUERY_MAX_TOKENS=256
 A. 필터 생성 (VectorIndexAutoRetriever / heuristic 폴백)
 B. hybrid (dense + BM25 + RRF) with filters
 C. (필수) fused empty AND had_filters → unfiltered hybrid 1회
-D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.05)
+D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.15) · soft fallback + max_score 로그
 ```
 
 | 레이어 | 상태 |
 |--------|------|
 | A | **LI Self-Query** (`VectorIndexAutoRetriever`) · `llm_invoke=None` 또는 실패 시 heuristic |
-| B | 유지 (hybrid) |
+| B | 유지 (hybrid) · 보안 챗 호출 `top_k=12` · `rerank_top_n=6` |
 | **C** | **유지 · 제거 금지** |
-| **D** | **유지 · 제거 금지** |
+| **D** | **유지 · 제거 금지** · diversify doc당 2 · soft fallback · `rerank_top_n=6` |
 
 ## 정책
 
 - 검색 0건 → `사내 보안 문서에서 관련 정보를 찾을 수 없습니다.` (`mode=security_no_docs`) · vLLM 미호출
-- 리랭크 점수 `< SECURE_RERANK_MIN_SCORE`(기본 0.05) 이면 히트 제외 (환각 방지)
-- 히트 시 답변에 `[출처: {title}]` 필수 · FE에서 클릭 시 청크 패널
-- Qdrant/엔진 실패 → 기존 offline 안내 (클라우드 폴백 없음)
+- 리랭크 점수 `< SECURE_RERANK_MIN_SCORE`(기본 0.15) 이면 히트 제외 · 전량 컷 시 fused 상위 1–2 soft fallback (`max_score` 로그)
+- 히트 후 모델이 `[SYS_RAG_EMPTY_RESULT]`를 내면 → 고정 문구 · `sources=[]` (칩 없음)
+- 정상 히트 답변 → `[출처: {title}]` 강제 · FE 클릭 시 청크 패널 (`doc_id` dedupe)
+- Qdrant/엔진 실패 → offline 안내 (클라우드 폴백 없음)
+
+## 듀얼 엔진 문서 유입
+
+- PDF/TXT → `Documents/ai-service/*.md` → ingest
+- CSV/XLSX → `ai-service/data/csv_lake/` + `Documents/ai-service/*-profile.md` → ingest
+- Watch: `SECURE_DOCS_WATCH=1` · debounce `SECURE_DOCS_WATCH_DEBOUNCE`
+- 옛 CSV **풀 테이블 MD**는 품질 오염 → `scripts/rebuild_secure_rag_clean.py`로 정리 후 재ingest
 
 ## API E2E 스모크
 
