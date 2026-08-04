@@ -16,6 +16,7 @@ import {
   COMPLETED_KNOWLEDGE_UPDATED_EVENT,
   readCompletedKnowledgeLogs,
 } from '@/lib/completedKnowledgeTransfer';
+import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
 
 interface DocumentItem {
   id: string;
@@ -2024,6 +2025,9 @@ export default function KnowledgePage() {
                   </div>
                 ) : null}
               </div>
+
+              {/* 사내 문서 (Documents/ READ-ONLY) */}
+              <DocumentsBrowser />
             </div>
           </section>
         )}
