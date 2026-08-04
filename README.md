@@ -13,8 +13,8 @@
 | 순서 | 할 일 | 바로가기 |
 |------|--------|----------|
 | 1 | 지금 무엇을 만들고 있는지 | [`docs/direction.md`](./docs/direction.md) |
-| 2 | 화면만 돌려보기 | [화면 실행](#화면-실행-frontend) · [`frontend/README.md`](./frontend/README.md) |
-| 3 | **챗봇까지** 실연동 | [로컬 실행 — 챗봇](#로컬-실행--챗봇) |
+| 2 | 화면만 돌려보기 | [화면 실행](#화면-실행-frontend) · 기능·설계 [`frontend/README.md`](./frontend/README.md) |
+| 3 | **챗봇까지** 실연동 | 루트에서 [`npm run dev`](#권장--한-번에-기동) ([로컬 실행 — 챗봇](#로컬-실행--챗봇)) |
 | 4 | 보안 탭 · secure RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
 | 5 | (선택) 문서·AI 규칙 구조 | [문서와 AI 규칙](#문서와-ai-규칙-어떻게-나뉘나) |
 
@@ -25,16 +25,17 @@
 
 ## 이 저장소에 무엇이 있나
 
-| 폴더 / 파일 | 하는 일 | 상태 (요약) |
-|-------------|---------|-------------|
-| [`frontend/`](./frontend/) | Next.js UI · AppShell · GlobalChatbot · Maximize 보안 오버레이 | Main·Dashboard·Management·Setting·Issue·Knowledge·Inquiry · `/security` |
-| [`backend/`](./backend/) | Express API · 세션 · 보안 게이트 · LLM 키(DB) · ai-service 프록시 | chat / security-chat / control·outcome · auth |
-| [`ai-service/`](./ai-service/) | FastAPI · clf/reg/residual · LangGraph · **secure RAG** | `/predict*` · `/chat` · `/security-chat` · `models/` |
-| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | 사용 중 · [오늘 일지](./docs/work-log/2026-08-02.md) |
-| [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | 사용 중 |
+| 폴더 / 파일 | 하는 일 | 기능·설계 |
+|-------------|---------|-----------|
+| [`frontend/`](./frontend/) | UI · AppShell · GlobalChatbot · `/security` | [`frontend/README.md`](./frontend/README.md) |
+| [`backend/`](./backend/) | Express API · 세션 · 게이트 · LLM 키 · 프록시 | [`backend/README.md`](./backend/README.md) |
+| [`ai-service/`](./ai-service/) | FastAPI · predict · LangGraph · secure RAG | [`ai-service/README.md`](./ai-service/README.md) |
+| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-02.md) |
+| [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | — |
 
 ```text
 KDT-Project/
+├── package.json   ← 루트 npm run dev (3서비스)
 ├── docs/          ← 사람·팀 “전체” 문서
 ├── frontend/      ← 화면 (:3000)
 ├── backend/       ← 서버 (:3001)
@@ -64,7 +65,7 @@ npm run dev
 
 브라우저: [http://localhost:3000](http://localhost:3000)
 
-페이지·스택·체크리스트는 **[`frontend/README.md`](./frontend/README.md)** 에만 자세히 둡니다.
+페이지·기능·설계는 **[`frontend/README.md`](./frontend/README.md)**. 기술 스택은 아래 [모노레포 스택](#기술-스택-모노레포).
 
 ---
 
@@ -73,13 +74,13 @@ npm run dev
 실연동은 **frontend · backend · ai-service** 를 켭니다.  
 보안 RAG까지 쓰려면 **Qdrant(:6333)** 와 (요약 LLM 사용 시) **LM Studio / vLLM(:8001)** 도 필요합니다.
 
-| 터미널 | 패키지 | 포트 | 역할 |
-|--------|--------|------|------|
-| 1 | `ai-service/` | **8800** | FastAPI · predict · chat · security-chat |
-| 2 | `backend/` | **3001** | Express · 세션 · 게이트 · 프록시 |
-| 3 | `frontend/` | **3000** | Next.js · GlobalChatbot · 보안 오버레이 |
-| (선택) | Qdrant | **6333** | secure RAG 벡터 인덱스 |
-| (선택) | LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
+| 패키지 | 포트 | 역할 |
+|--------|------|------|
+| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat |
+| `backend/` | **3001** | Express · 세션 · 게이트 · 프록시 |
+| `frontend/` | **3000** | Next.js · GlobalChatbot · 보안 오버레이 |
+| (선택) Qdrant | **6333** | secure RAG 벡터 인덱스 |
+| (선택) LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
 
 ### 0) DB (최초)
 
@@ -94,37 +95,51 @@ mysql -u root -p kdt < DB/chat_schema.sql
 모노레포 루트 `.env`에 필요한 값 설정 (패키지별 `.env.example` 없음).  
 **API 키·시크릿은 커밋하지 마세요.**
 
-### 터미널 1 — ai-service
+### 권장 — 한 번에 기동
+
+최초 1회(패키지별 의존성 + 루트 orchestrator):
 
 ```bash
+cd frontend && npm install
+cd ../backend && npm install
+cd ../ai-service && pip install -r requirements.txt
+cd .. && npm install
+```
+
+이후 매번 저장소 루트에서:
+
+```bash
+npm run dev
+```
+
+`concurrently`가 ai-service(:8800) · backend(:3001) · frontend(:3000)를 함께 띄웁니다.  
+UI: [http://localhost:3000](http://localhost:3000) · backend health: [http://127.0.0.1:3001/api/health](http://127.0.0.1:3001/api/health) · ai health: [http://127.0.0.1:8800/health](http://127.0.0.1:8800/health)
+
+| 루트 명령 | 설명 |
+|-----------|------|
+| `npm run dev` | ai + backend + frontend 동시 (`concurrently -k`) |
+| `npm run dev:ai` | ai-service만 (`python -m uvicorn` · CWD=`ai-service/`) |
+| `npm run dev:backend` | backend만 (`npm --prefix backend run dev`) |
+| `npm run dev:frontend` | frontend만 (`npm --prefix frontend run dev`) |
+
+### 개별 기동 (선택)
+
+패키지별로 따로 켤 때만:
+
+```bash
+# ai-service — CWD는 항상 ai-service/ (models/ 상대 경로)
 cd ai-service
-pip install -r requirements.txt
 # 루트 .env: CHAT_USE_LLM=1 · CHAT_VLLM_* (보안) · SECURE_* (RAG)
 # 보안 문서 인덱싱(승인 후): python ingest_secure.py
-uvicorn app.main:app --host 127.0.0.1 --port 8800
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8800
+
+# backend
+cd backend && npm run dev
+
+# frontend
+cd frontend && npm run dev
 ```
 
-- Health: [http://127.0.0.1:8800/health](http://127.0.0.1:8800/health)  
-- **CWD는 항상 `ai-service/`** (`models/` 상대 경로)
-
-### 터미널 2 — backend
-
-```bash
-cd backend
-npm run dev
-```
-
-Health: [http://127.0.0.1:3001/api/health](http://127.0.0.1:3001/api/health)
-
-### 터미널 3 — frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-UI: [http://localhost:3000](http://localhost:3000)  
 rewrite 변경 후 Next를 **한 번 재시작**합니다.
 
 ### 요청 흐름
@@ -166,36 +181,42 @@ Maximize / /security
 
 ## 기술 스택 (모노레포)
 
-패키지 README와 맞춥니다. **새 의존성 설치 시 해당 README 스택을 반드시 갱신**합니다. (`.cursor/rules/ask-before-run.mdc`)
+**기술 스택의의 단일 출처(SSOT)는 이 섹션입니다.**  
+기능·세부 설계·실행 절차는 각 패키지 README에 둡니다.  
+**새 의존성 설치 시 이 목록을 반드시 갱신**합니다. (`.cursor/rules/ask-before-run.mdc`)
+
+### root (dev orchestrator)
+- concurrently — `npm run dev`로 frontend · backend · ai-service 동시 기동
 
 ### frontend
-- Next.js (App Router), React, TypeScript, Tailwind CSS  
-- Zustand, Axios, Recharts, Lucide React, Day.js, Prisma (`@prisma/client`)  
-→ [`frontend/README.md`](./frontend/README.md)
+- **런타임:** Next.js (App Router), React, React DOM, TypeScript  
+- **UI·상태:** Tailwind CSS, Zustand, Lucide React, Recharts, Day.js  
+- **HTTP·데이터:** Axios, Prisma (`@prisma/client`) — MariaDB `user_chat_*` 참조  
+- **개발:** ESLint, eslint-config-next, prisma CLI, `@tailwindcss/postcss`, `@types/*`  
+→ 기능·설계: [`frontend/README.md`](./frontend/README.md)
 
 ### backend
-- Express, TypeScript (tsx), MariaDB / sqlite 채팅 스토어, CORS, dotenv  
-- Auth: bcryptjs, jsonwebtoken  
-→ [`backend/README.md`](./backend/README.md)
+- **런타임:** Express 5, TypeScript (tsx), Node  
+- **인프라:** MariaDB connector, CORS, dotenv · 채팅/제어는 sqlite 병행 가능 (`CHAT_STORE`)  
+- **Auth:** bcryptjs, jsonwebtoken  
+- **개발:** typescript, tsx, `@types/express` 등  
+→ 기능·설계: [`backend/README.md`](./backend/README.md)
 
 ### ai-service
-- Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib  
-- FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
-- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
-  (bge-m3 / bge-reranker **CPU** · soft fallback · `FOLLOWUP_RE` · SSE `/security-chat/stream` · analytics `csv_lake`)  
-→ [`ai-service/README.md`](./ai-service/README.md)
+- **언어:** Python 3.11+  
+- **API:** FastAPI, Uvicorn, Pydantic, python-dotenv  
+- **ML:** Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib  
+- **Agent · LLM:** LangGraph, LangChain Core, LangChain OpenAI, LangChain Google GenAI  
+- **Secure RAG / 문서:** qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
+  (bge-m3 / bge-reranker **CPU** · SSE `/security-chat/stream` · analytics `csv_lake`)  
+→ 기능·설계: [`ai-service/README.md`](./ai-service/README.md) · 카탈로그 [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md)
 
 ---
 
 ## AI 서비스 실행 (ai-service)
 
-챗봇·진단 API만 단독으로:
-
-```bash
-cd ai-service
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8800
-```
+단독 기동·엔드포인트·학습 설계는 **[`ai-service/README.md`](./ai-service/README.md)**.  
+전체 실연동은 위 [권장 — 한 번에 기동](#권장--한-번에-기동).
 
 | 엔드포인트 | 설명 |
 |------------|------|
@@ -207,17 +228,15 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 | `POST /security-chat` | 보안 · RAG (+ 선택 로컬 LLM) JSON |
 | `POST /security-chat/stream` | 보안 · SSE (`meta`/`delta`/`replace`/`done`/`error`) |
 
-학습·스키마·레지스트리: **[`ai-service/README.md`](./ai-service/README.md)** · [`docs/references/`](./docs/references/).
-
 ---
 
 ## 문서와 AI 규칙, 어떻게 나뉘나
 
 | 구분 | 누구 | 위치 | 무엇을 |
 |------|------|------|--------|
-| **루트 README** | 사람 | `/README.md` | 지도 · 실행 · 모노레포 스택 |
+| **루트 README** | 사람 | `/README.md` | 지도 · 실행 · **모노레포 기술 스택** |
 | **루트 AGENTS** | AI | `/AGENTS.md` | 전 패키지 **짧은** 규칙 |
-| **패키지 README** | 사람 | `frontend/` · `backend/` · `ai-service/` | 각 실행법·스택 |
+| **패키지 README** | 사람 | `frontend/` · `backend/` · `ai-service/` | 기능 · 세부 설계 · 실행 |
 | **docs/** | 사람 (+ AI가 방향 확인) | `/docs/` | 방향 · 일지 · 계획 · 스키마 |
 
 - **README** = 설명서  

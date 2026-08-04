@@ -1,52 +1,58 @@
-# backend
+# Backend — API 패키지
 
-Express + MariaDB API for chat sessions, security keyword gate, ai-service proxy, and auth (login/register).
+Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이슈/문의 · 제어/outcome.
 
-## Setup
+| 보고 싶은 것 | 파일 |
+|--------------|------|
+| 저장소 전체 지도 · 실행 · **기술 스택** | [`../README.md`](../README.md) |
+| DB 스키마 | [`../DB/schema.sql`](../DB/schema.sql) · [`../DB/chat_schema.sql`](../DB/chat_schema.sql) |
+| Auth 기술 메모 | [`../docs/references/login-auth-tech-stack.md`](../docs/references/login-auth-tech-stack.md) |
 
-1. Create DB and apply schemas:
+---
 
-```bash
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt_project CHARACTER SET utf8mb4;"
-mysql -u root -p kdt_project < ../DB/schema.sql
-mysql -u root -p kdt_project < ../DB/chat_schema.sql
-```
+## 한 줄 역할
 
-- `DB/schema.sql` (repo root): `users`, settings, lots, issues, handover, inquiries
-- `DB/inquiries.sql`: inquiries only (or `npm run migrate:inquiries`)
-- `DB/chat_schema.sql`: chat sessions/messages (when using MariaDB chat store)
+브라우저와 ai-service 사이의 **게이트웨이** — JWT auth, 챗/보안 프록시, CRUD(이슈·문의), LLM 키·제어 로그.
 
-2. Env (모노레포 루트 `.env`, 커밋 금지):
+---
 
-```bash
-# 저장소 루트 KDT-Project/.env 에 키 작성
-```
+## 기능 요약
 
-- MariaDB 비밀번호가 없으면 `CHAT_STORE=sqlite`(기본)로 세션·유사질문 카운팅을 영속합니다.
-- 챗도 공용 MariaDB에 두려면 `CHAT_STORE=mariadb` + `DB/chat_schema.sql` 적용.
-- LLM API 키(암호문)는 **`DB/data/llm_keys.sqlite`** (보안 탭). 복호화 마스터: `LLM_KEYS_ENCRYPTION_KEY`(16자 이상, Git 금지).
-- SQLite 기본 경로: `DB/data/chat.sqlite`, `DB/data/control.sqlite`.
-- Auth용: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN` 또는 `CORS_ORIGINS` 설정.
-- **팀 공용 DB (Lightsail Ubuntu + MariaDB):** [docs/guides/login-ubuntu-mariadb.md](../docs/guides/login-ubuntu-mariadb.md) · 기술스택 [docs/references/login-auth-tech-stack.md](../docs/references/login-auth-tech-stack.md). 루트 `.env`는 Git에 올리지 말고 단톡으로 `DB_*`만 공유.
+| 기능 | 경로 prefix | 비고 |
+|------|-------------|------|
+| Health | `GET /api/health` | |
+| Auth | `/api/auth/*` | 로그인·가입·프로필·탈퇴 등 JWT |
+| Chat 프록시 | `POST /api/chat` | 보안 키워드 게이트 → ai-service `/chat` |
+| Security chat | `/api/security-chat`, `/stream` | SSE·JSON 패스스루 · 클라우드 폴백 없음 |
+| Chat threads | `/api/chat-threads` 등 | 멀티턴 스레드 복원 |
+| LLM keys | `/api/llm-keys` | 보안 탭 키 → `DB/data/llm_keys.sqlite` 암호 저장 |
+| Control / outcome | `/api/control/*` | 승인·되돌리기·outcome (하드웨어 미연동 스텁 가능) |
+| Settings | `/api/settings/control-bounds` | 제어 한계치 |
+| Issues | `/api/issues` | 목록·상세·조치 저장 |
+| Inquiries | `/api/inquiries` | 문의·관리자 답변 |
 
-3. Run:
+---
 
-```bash
-npm run dev
-```
+## 세부 설계
 
-- Health: `GET http://127.0.0.1:3001/api/health`
-- Auth: `/api/auth/*` (login, register, profile, …)
-- Chat: `POST http://127.0.0.1:3001/api/chat`
+### 구조
 
-Frontend reaches this via Next rewrite `/api` → `:3001`.
+- 진입: `src/index.ts` · 앱 조립: `src/app.ts`
+- 라우트 → 컨트롤러 → 서비스 분리 (`src/routes` · `controllers` · `services`)
+- 루트 `.env` 로드 (`loadRootEnv`) · **시크릿 커밋 금지**
+- Frontend는 Next rewrite `/api` → `:3001`로 접근
+- ai-service URL: `AI_SERVICE_URL` 또는 `http://127.0.0.1:8800`
 
-## 기술 스택
+### DB · 스토어
 
-- Express 5, TypeScript (tsx), MariaDB connector, CORS, dotenv
-- Auth: bcryptjs, jsonwebtoken
+- DB명은 **루트 `.env`의 `DB_*`** 기준 (예: `kdt` / `kdt_project`)
+- 스키마: `../DB/schema.sql` (users, lots, issues, inquiries, …) · `../DB/chat_schema.sql`
+- 채팅 세션 기본: `CHAT_STORE=sqlite` → `DB/data/chat.sqlite` (MariaDB 없이도 챗 가능)
+- `CHAT_STORE=mariadb`일 때 chat 스키마 적용
+- LLM 키: `DB/data/llm_keys.sqlite` · 마스터 `LLM_KEYS_ENCRYPTION_KEY`
+- 제어 로그: `DB/data/control.sqlite` 등
 
-## Auth API (요약)
+### Auth API
 
 | Method | Path | 설명 |
 |--------|------|------|
@@ -60,78 +66,67 @@ Frontend reaches this via Next rewrite `/api` → `:3001`.
 | GET/PUT | `/api/auth/profile` | 프로필 조회/수정 (JWT) |
 | DELETE | `/api/auth/account` | 회원탈퇴 (JWT) |
 
-관련 코드:
+코드: `src/routes/auth.routes.ts` · `controllers/auth.controller.ts` · `services/auth.service.ts` · `middleware/auth.middleware.ts`
 
-- `src/routes/auth.routes.ts`
-- `src/controllers/auth.controller.ts`
-- `src/services/auth.service.ts`
-- `src/middleware/auth.middleware.ts`
-- `src/db/connection.ts`
-- `../DB/schema.sql`
-
-## Inquiry API (요약)
+### Inquiry API
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/inquiries` | 목록·필터·페이지 (JWT). query: category, status, startDate, endDate, q, page, pageSize |
-| POST | `/api/inquiries` | 문의 접수 (JWT). body: category, visibility, title, content |
-| GET | `/api/inquiries/:id` | 상세 (`:id` = inquiry_code, JWT). 비공개는 작성자·관리자만 |
-| POST/PATCH/PUT | `/api/inquiries/:id/answer` | 관리자 답변 upsert. body: `{ content }`. `ADMIN_USER_IDS` 필요 |
+| GET | `/api/inquiries` | 목록·필터·페이지 (JWT) |
+| POST | `/api/inquiries` | 문의 접수 (JWT) |
+| GET | `/api/inquiries/:id` | 상세 (`inquiry_code`, JWT) |
+| POST/PATCH/PUT | `/api/inquiries/:id/answer` | 관리자 답변 · `ADMIN_USER_IDS` |
 
-- 테이블: `../DB/schema.sql` / `../DB/inquiries.sql` · `npm run migrate:inquiries`
-- 목업 시드: `../DB/inquiries_seed.sql` · `npm run seed:inquiries`
-- 코드: `src/routes/inquiry.routes.ts`, `controllers/inquiry.controller.ts`, `services/inquiry.service.ts`
-- 첨부 업로드는 후속 (미구현)
+시드: `npm run seed:inquiries` · 첨부 업로드는 후속.
 
-## Issue API (요약)
+### Issue API
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/issues` | 미완료 높음·중간 이슈 목록. query: search, date, lotId, riskLevel, status |
-| GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
-| PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
+| GET | `/api/issues` | 미완료 높음·중간 목록 |
+| GET | `/api/issues/:issueId` | 상세·담당자·조치 |
+| PUT | `/api/issues/:issueId` | 상태·조치 저장 (JWT → assignee) |
 
-- 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
-- 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
-- 시드는 기존 LOT·이슈를 덮어쓰지 않으며, 목업 담당자와 이름이 같은 실제 사용자가 있을 때만 FK를 연결합니다.
-- SPC 상세 분석, 잔류 Li·여유·불량 확률, 라이브러리 테이블 이관은 후속 범위입니다.
-- 상세 계약: `../docs/references/issue-lot-api.md`
+상세 계약: [`../docs/references/issue-lot-api.md`](../docs/references/issue-lot-api.md)  
+시드: `npm run seed:issues`
 
-## 변경·설치 이력 (2026-07-24)
+---
 
-### 로컬 작업 요약
+## 실행 방법
 
-1. 로그인 관련 코드를 `C:\Projects\KDT-auth-backup-20260724`에 백업  
-   - FE/BE auth 소스, `users` dump (`users-dump.sql`), 로컬 `.env` 백업
-2. `DohyupK/KDT-Project`의 `feature` 브랜치를 clone → 당시 `KDT-Project-fresh`
-3. 백업한 로그인 기능을 fresh에 이식하고 `/api/auth`를 `src/app.ts`에 연결
-4. DB `kdt_project.users` 스키마 적용 (기존 테스트 계정 유지)
-5. 스모크: `GET /api/health`, `GET /api/auth/check-id` 정상
-6. **폴더 정리 (요청 2번)**  
-   - 옛 충돌 상태 로컬 `C:\Projects\KDT-Project` 삭제  
-   - `KDT-Project-fresh` 내용을 `C:\Projects\KDT-Project`로 이동(리네임 동등 처리)  
-   - 빈 `C:\Projects\KDT-Project-fresh` 디렉터리가 IDE 잠금으로 남을 수 있음 → 수동 삭제 가능
-7. GitHub fork 삭제/재생성/push는 **사용자 직접** 진행 (에이전트 미수행)
+**권장:** 저장소 루트에서 `npm run dev`  
+→ [로컬 실행 — 챗봇](../README.md#로컬-실행--챗봇)
 
-### 설치된 프로그램
+### DB (최초, MariaDB 사용 시)
 
-- GitHub CLI (`gh`) — `winget install GitHub.cli` (버전 확인 예: 2.96.0)  
-  - 경로 예: `C:\Program Files\GitHub CLI\gh.exe`  
-  - 참고: fork 작업은 사용자가 GitHub 웹에서 진행
+```bash
+# DB명은 루트 .env 의 DB_NAME 과 동일하게
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt CHARACTER SET utf8mb4;"
+mysql -u root -p kdt < ../DB/schema.sql
+mysql -u root -p kdt < ../DB/chat_schema.sql
+```
 
-### 주요 경로
+### 개별 기동
 
-| 항목 | 경로 |
-|------|------|
-| 현재 작업 루트 | `C:\Projects\KDT-Project` |
-| 로그인 백업 | `C:\Projects\KDT-auth-backup-20260724` |
-| Auth users 스키마 | `backend/schema.sql` |
-| Chat 스키마 | `backend/src/sql/schema.sql` |
-| 로컬 env (커밋 금지) | 모노레포 루트 `.env` |
+```bash
+cd backend
+npm install
+npm run dev
+```
 
-### 환경 변수 (auth 관련)
+- Health: `GET http://127.0.0.1:3001/api/health`
+- Env: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN`/`CORS_ORIGINS`, `PORT`(기본 3001), `LLM_KEYS_ENCRYPTION_KEY`
+- 팀 공용 DB 가이드: [`../docs/guides/login-ubuntu-mariadb.md`](../docs/guides/login-ubuntu-mariadb.md)
 
-- `JWT_SECRET` — 필수
-- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (기본 DB명 예: `kdt_project`)
-- `CORS_ORIGINS` 또는 `CORS_ORIGIN` (예: `http://localhost:3000`)
-- `PORT` (기본 `3001`)
+---
+
+## 기술 스택
+
+모노레포 스택 SSOT: [루트 README — 기술 스택](../README.md#기술-스택-모노레포)
+
+---
+
+## 관련 메모 (2026-07-24 auth 이식)
+
+로컬 백업·fresh 이식·`gh` 설치 등 일화는 [`../docs/work-log/`](../docs/work-log/)를 본다.  
+Auth 관련 env: `JWT_SECRET`, `DB_*`, `CORS_*`, `PORT`.
