@@ -11,6 +11,9 @@
     "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
+    "migrate:cathode-sources": "tsx scripts/migrate-cathode-sources.ts",
+    "import:cathode-sources": "tsx scripts/import-cathode-sources.ts --dataset=all",
+    "verify:cathode-sources": "tsx scripts/verify-cathode-sources.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
     "test": "tsx --test tests/issue.validation.test.ts"

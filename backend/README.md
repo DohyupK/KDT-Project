@@ -12,7 +12,9 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 ## 한 줄 역할
 
-브라우저와 ai-service 사이의 **게이트웨이** — JWT auth, 챗/보안 프록시, CRUD(이슈·문의), LLM 키·제어 로그.
+- `DB/schema.sql` (repo root): `users`, settings, lots, cathode CSV sources, issues, handover, inquiries
+- `DB/inquiries.sql`: inquiries only (or `npm run migrate:inquiries`)
+- `DB/chat_schema.sql`: chat sessions/messages (when using MariaDB chat store)
 
 ---
 
@@ -83,50 +85,72 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/issues` | 미완료 높음·중간 목록 |
-| GET | `/api/issues/:issueId` | 상세·담당자·조치 |
-| PUT | `/api/issues/:issueId` | 상태·조치 저장 (JWT → assignee) |
+| GET | `/api/issues` | 미완료 높음·중간 이슈 목록. query: search, date, lotId, riskLevel, status |
+| GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
+| PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
 
-상세 계약: [`../docs/references/issue-lot-api.md`](../docs/references/issue-lot-api.md)  
-시드: `npm run seed:issues`
+- 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
+- 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
+- 시드는 기존 LOT·이슈를 덮어쓰지 않으며, 목업 담당자와 이름이 같은 실제 사용자가 있을 때만 FK를 연결합니다.
+- SPC 상세 분석, 잔류 Li·여유·불량 확률, 라이브러리 테이블 이관은 후속 범위입니다.
+- 상세 계약: `../docs/references/issue-lot-api.md`
 
----
+## Cathode CSV 원천 테이블
 
-## 실행 방법
+세 CSV는 서로 다른 결측 패턴을 보존하기 위해 독립 테이블에 적재합니다.
 
-**권장:** 저장소 루트에서 `npm run dev`  
-→ [로컬 실행 — 챗봇](../README.md#로컬-실행--챗봇)
-
-### DB (최초, MariaDB 사용 시)
-
-```bash
-# DB명은 루트 .env 의 DB_NAME 과 동일하게
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt CHARACTER SET utf8mb4;"
-mysql -u root -p kdt < ../DB/schema.sql
-mysql -u root -p kdt < ../DB/chat_schema.sql
-```
-
-### 개별 기동
+| CSV | 테이블 | 타깃 |
+|-----|--------|------|
+| `cathode_clf_data.csv` | `cathode_clf_samples` | `quality_defect` |
+| `cathode_reg_data.csv` | `cathode_capacity_samples` | `capacity` |
+| `cathode_qc_reg_data.csv` | `cathode_residual_samples` | `residual_li` |
 
 ```bash
-cd backend
-npm install
-npm run dev
+npm run migrate:cathode-sources
+npm run import:cathode-sources
+npm run verify:cathode-sources
 ```
 
-- Health: `GET http://127.0.0.1:3001/api/health`
-- Env: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN`/`CORS_ORIGINS`, `PORT`(기본 3001), `LLM_KEYS_ENCRYPTION_KEY`
-- 팀 공용 DB 가이드: [`../docs/guides/login-ubuntu-mariadb.md`](../docs/guides/login-ubuntu-mariadb.md)
+- 공정값 결측치는 삭제·대체하지 않고 `NULL`로 저장합니다.
+- importer는 UPSERT 방식이라 재실행할 수 있으며 운영 `lots`를 수정하지 않습니다.
+- 다른 데이터 경로를 사용할 때는 `CATHODE_DATA_DIR` 환경 변수를 지정합니다.
+- 페이지 조회 API와 프론트 연결은 후속 범위입니다.
 
----
+## 변경·설치 이력 (2026-07-24)
 
-## 기술 스택
+### 로컬 작업 요약
 
-모노레포 스택 SSOT: [루트 README — 기술 스택](../README.md#기술-스택-모노레포)
+1. 로그인 관련 코드를 `C:\Projects\KDT-auth-backup-20260724`에 백업  
+   - FE/BE auth 소스, `users` dump (`users-dump.sql`), 로컬 `.env` 백업
+2. `DohyupK/KDT-Project`의 `feature` 브랜치를 clone → 당시 `KDT-Project-fresh`
+3. 백업한 로그인 기능을 fresh에 이식하고 `/api/auth`를 `src/app.ts`에 연결
+4. DB `kdt_project.users` 스키마 적용 (기존 테스트 계정 유지)
+5. 스모크: `GET /api/health`, `GET /api/auth/check-id` 정상
+6. **폴더 정리 (요청 2번)**  
+   - 옛 충돌 상태 로컬 `C:\Projects\KDT-Project` 삭제  
+   - `KDT-Project-fresh` 내용을 `C:\Projects\KDT-Project`로 이동(리네임 동등 처리)  
+   - 빈 `C:\Projects\KDT-Project-fresh` 디렉터리가 IDE 잠금으로 남을 수 있음 → 수동 삭제 가능
+7. GitHub fork 삭제/재생성/push는 **사용자 직접** 진행 (에이전트 미수행)
 
----
+### 설치된 프로그램
 
-## 관련 메모 (2026-07-24 auth 이식)
+- GitHub CLI (`gh`) — `winget install GitHub.cli` (버전 확인 예: 2.96.0)  
+  - 경로 예: `C:\Program Files\GitHub CLI\gh.exe`  
+  - 참고: fork 작업은 사용자가 GitHub 웹에서 진행
 
-로컬 백업·fresh 이식·`gh` 설치 등 일화는 [`../docs/work-log/`](../docs/work-log/)를 본다.  
-Auth 관련 env: `JWT_SECRET`, `DB_*`, `CORS_*`, `PORT`.
+### 주요 경로
+
+| 항목 | 경로 |
+|------|------|
+| 현재 작업 루트 | `C:\Projects\KDT-Project` |
+| 로그인 백업 | `C:\Projects\KDT-auth-backup-20260724` |
+| Auth users 스키마 | `backend/schema.sql` |
+| Chat 스키마 | `backend/src/sql/schema.sql` |
+| 로컬 env (커밋 금지) | 모노레포 루트 `.env` |
+
+### 환경 변수 (auth 관련)
+
+- `JWT_SECRET` — 필수
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (기본 DB명 예: `kdt_project`)
+- `CORS_ORIGINS` 또는 `CORS_ORIGIN` (예: `http://localhost:3000`)
+- `PORT` (기본 `3001`)
