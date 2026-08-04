@@ -203,13 +203,11 @@ Maximize / /security
 → 기능·설계: [`backend/README.md`](./backend/README.md)
 
 ### ai-service
-- **언어:** Python 3.11+  
-- **API:** FastAPI, Uvicorn, Pydantic, python-dotenv  
-- **ML:** Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib  
-- **Agent · LLM:** LangGraph, LangChain Core, LangChain OpenAI, LangChain Google GenAI  
-- **Secure RAG / 문서:** qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
-  (bge-m3 / bge-reranker **CPU** · SSE `/security-chat/stream` · analytics `csv_lake`)  
-→ 기능·설계: [`ai-service/README.md`](./ai-service/README.md) · 카탈로그 [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md)
+- Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib, openpyxl  
+- FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
+- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
+  (bge-m3 / bge-reranker **CPU** · soft fallback · `FOLLOWUP_RE` · SSE `/security-chat/stream` · analytics `csv_lake`)  
+→ [`ai-service/README.md`](./ai-service/README.md)
 
 ---
 
