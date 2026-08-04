@@ -1947,13 +1947,21 @@ export default function DashBoardPage() {
       <div className={`${SHELL_CONTENT_CLASS} py-6 pb-28`}>
         <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div className="mb-6 flex flex-col gap-1">
-            <p className="text-sm font-bold tracking-wide text-blue-600">
+            <p
+              className={`text-sm font-bold tracking-wide ${
+                isDark ? 'text-blue-400' : 'text-blue-600'
+              }`}
+            >
               Production Operations
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-gray-900">
+            <h1
+              className={`mt-1 text-3xl font-bold tracking-tight ${
+                isDark ? 'text-slate-100' : 'text-gray-900'
+              }`}
+            >
               생산 대시보드
             </h1>
-            <p className="mt-2 text-sm text-gray-500">
+            <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
               생산 KPI, 추이, 불량 분석을 한눈에 확인합니다.
             </p>
           </div>

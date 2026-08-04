@@ -71,7 +71,7 @@ function deriveKey(): Buffer {
   const secret = (process.env.LLM_KEYS_ENCRYPTION_KEY || '').trim()
   if (!secret || secret.length < 16) {
     throw new Error(
-      'LLM_KEYS_ENCRYPTION_KEY missing or too short (min 16 chars). Set in backend/.env',
+      'LLM_KEYS_ENCRYPTION_KEY missing or too short (min 16 chars). Set in monorepo root .env',
     )
   }
   return scryptSync(secret, 'kdt-llm-keys-v1', 32)

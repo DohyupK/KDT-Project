@@ -90,7 +90,7 @@
 | HeidiSQL 등 (선택) | GUI로 원격 DB 조회 (필수는 아님) |
 | GitHub | **코드만** 공유 (`.env` 금지) |
 
-## 환경 변수 (`backend/.env`)
+## 환경 변수 (모노레포 루트 `.env`)
 
 | 변수 | 의미 |
 |------|------|
@@ -103,7 +103,7 @@
 | `CHAT_STORE` | 챗·제어 저장 (`mariadb` 권장 / `sqlite` / `memory`) — 로그인 `users`와 같은 `DB_*` |
 | `LLM_KEYS_ENCRYPTION_KEY` | LLM API 키 AES-GCM 마스터(16자+, Git 금지). 암호문은 `DB/data/llm_keys.sqlite` |
 
-템플릿: `backend/.env.example` (비밀번호 비움).
+키 목록 안내는 [`docs/references/LLM 튜닝.md`](./LLM%20튜닝.md) §4 · 본 문서. 패키지별 `.env.example` 없음.
 
 ## 용어 정리
 
@@ -146,7 +146,7 @@ npm run dev
 
 | 2026-07-28 | 테마: Setting이 저장한 `kdt-user-settings` / `system_settings_config`(localStorage)를 `/login`·`UserAuthMenu`가 `readStoredUiSettings`·`useUiSettings`로 반영. 다크(0)/라이트(1). |
 | 2026-07-28 | FE 패키지: `next` / `eslint-config-next` **16.2.12**. `allowScripts`: frontend `sharp`·`unrs-resolver`, backend `esbuild`. |
-| 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 `backend/.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
+| 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 루트 `.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
 | 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
 | 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |
 | 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/profile-personal-info-modal.mdc`. |

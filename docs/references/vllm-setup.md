@@ -13,7 +13,7 @@
 | FastAPI ai-service | **8800** |
 | vLLM (보안 탭) | **8001** |
 
-환경 변수 (`ai-service/.env`):
+환경 변수 (모노레포 루트 `.env`):
 
 ```text
 CHAT_VLLM_BASE_URL=http://127.0.0.1:8001/v1

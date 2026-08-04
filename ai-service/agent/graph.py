@@ -27,6 +27,7 @@ class ChatState(TypedDict, total=False):
     need_guideline: bool
     llm_mode: str | None
     llm_credentials: list[dict[str, Any]] | None
+    history_text: str
     predict_result: dict[str, Any] | None
     capacity_result: dict[str, Any] | None
     residual_result: dict[str, Any] | None
@@ -245,6 +246,10 @@ def whatif_node(state: ChatState) -> dict[str, Any]:
 
 def compose_node(state: ChatState) -> dict[str, Any]:
     message = state.get("message") or ""
+    history = (state.get("history_text") or "").strip()
+    message_for_llm = (
+        f"이전 대화:\n{history}\n\n현재 질문:\n{message}" if history else message
+    )
     predict_result = state.get("predict_result")
     capacity_result = state.get("capacity_result")
     residual_result = state.get("residual_result")
@@ -254,7 +259,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
 
     if llm_enabled():
         reply, provider, llm_err = compose_with_failover(
-            message,
+            message_for_llm,
             predict_result,
             error,
             need_guideline=need_guideline,
@@ -343,6 +348,7 @@ def run_chat(
     need_guideline: bool = False,
     llm_mode: str | None = "auto",
     llm_credentials: list[dict[str, Any]] | None = None,
+    history_text: str | None = None,
 ) -> dict[str, Any]:
     """Run the chat graph. Returns reply + optional predict/capacity/residual/recommendation."""
     graph = get_graph()
@@ -354,6 +360,7 @@ def run_chat(
             "need_guideline": need_guideline,
             "llm_mode": llm_mode,
             "llm_credentials": llm_credentials,
+            "history_text": (history_text or "").strip(),
         }
     )
     return {

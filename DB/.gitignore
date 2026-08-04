@@ -1,0 +1,7 @@
+# Ignore local DB binaries under monorepo DB/
+*.sqlite
+*.db
+!.gitkeep
+!ai-service/*.sql
+!ai-service/*.py
+!README.md

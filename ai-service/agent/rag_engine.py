@@ -19,13 +19,21 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 AI_ROOT = Path(__file__).resolve().parent.parent
-SECURE_DOCS_DIR = AI_ROOT / "data" / "secure_docs"
+REPO_ROOT = AI_ROOT.parent
+# Prefer env; default = monorepo root Documents/ (not ai-service/data/secure_docs).
+_secure_docs_env = (os.environ.get("SECURE_DOCS_DIR") or "").strip()
+SECURE_DOCS_DIR = (
+    Path(_secure_docs_env).expanduser()
+    if _secure_docs_env
+    else REPO_ROOT / "Documents"
+)
 SECURE_RAG_DIR = AI_ROOT / "data" / "secure_rag"
 NODES_PATH = SECURE_RAG_DIR / "bm25_nodes.json"
 
@@ -102,6 +110,7 @@ class SecureRagEngine:
         self._nodes: list[dict[str, Any]] = []
         self._bm25 = None
         self._tokenized: list[list[str]] = []
+        self._bm25_lock = threading.RLock()
         self._ready = False
         self._init_error: str | None = None
         self._auto_retriever = None  # lazy VectorIndexAutoRetriever (Self-Query)
@@ -145,22 +154,37 @@ class SecureRagEngine:
         self._reranker = CrossEncoder(RERANK_MODEL, device=DEVICE)
 
         if NODES_PATH.exists():
-            self._nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
+            nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
         else:
-            self._nodes = []
+            nodes = []
+        tokenized = [_tokenize(n.get("text") or "") for n in nodes]
+        bm25 = BM25Okapi(tokenized) if tokenized else None
+        with self._bm25_lock:
+            self._nodes = nodes
+            self._tokenized = tokenized
+            self._bm25 = bm25
 
-        self._tokenized = [_tokenize(n.get("text") or "") for n in self._nodes]
-        self._bm25 = BM25Okapi(self._tokenized) if self._tokenized else None
-
-    def reload_bm25_nodes(self) -> None:
-        if NODES_PATH.exists():
-            self._nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
-        else:
-            self._nodes = []
+    def reload_bm25(self) -> None:
+        """Hot-reload BM25 from bm25_nodes.json (no process restart)."""
         from rank_bm25 import BM25Okapi
 
-        self._tokenized = [_tokenize(n.get("text") or "") for n in self._nodes]
-        self._bm25 = BM25Okapi(self._tokenized) if self._tokenized else None
+        if NODES_PATH.exists():
+            nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
+        else:
+            nodes = []
+        if not isinstance(nodes, list):
+            nodes = []
+        tokenized = [_tokenize(n.get("text") or "") for n in nodes]
+        bm25 = BM25Okapi(tokenized) if tokenized else None
+        with self._bm25_lock:
+            self._nodes = nodes
+            self._tokenized = tokenized
+            self._bm25 = bm25
+        logger.info("[secure-rag] bm25 reloaded n=%s", len(nodes))
+
+    def reload_bm25_nodes(self) -> None:
+        """Alias for reload_bm25 (compat)."""
+        self.reload_bm25()
 
     def parse_metadata_filters(self, query: str, llm_invoke: Any | None) -> dict[str, str]:
         """
@@ -279,8 +303,8 @@ class SecureRagEngine:
         self,
         query: str,
         *,
-        top_k: int = 8,
-        rerank_top_n: int = 4,
+        top_k: int = 12,
+        rerank_top_n: int = 6,
         filters: dict[str, str] | None = None,
         llm_invoke: Any | None = None,
     ) -> list[dict[str, Any]]:
@@ -361,30 +385,31 @@ class SecureRagEngine:
         top_k: int,
         filters: dict[str, str],
     ) -> list[tuple[str, dict[str, Any], float]]:
-        if not self._bm25 or not self._nodes:
-            return []
-        scores = self._bm25.get_scores(_tokenize(query))
-        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
-        out: list[tuple[str, dict[str, Any], float]] = []
-        for idx, score in ranked:
-            if score <= 0:
-                continue
-            node = self._nodes[idx]
-            md = dict(node.get("metadata") or {})
-            if filters:
-                ok = True
-                for k, v in filters.items():
-                    if str(md.get(k) or "") != v:
-                        ok = False
-                        break
-                if not ok:
+        with self._bm25_lock:
+            if not self._bm25 or not self._nodes:
+                return []
+            scores = self._bm25.get_scores(_tokenize(query))
+            ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+            out: list[tuple[str, dict[str, Any], float]] = []
+            for idx, score in ranked:
+                if score <= 0:
                     continue
-            text = str(node.get("text") or "")
-            key = _hit_key(md, text)
-            out.append((key, {"text": text, "metadata": md}, float(score)))
-            if len(out) >= top_k:
-                break
-        return out
+                node = self._nodes[idx]
+                md = dict(node.get("metadata") or {})
+                if filters:
+                    ok = True
+                    for k, v in filters.items():
+                        if str(md.get(k) or "") != v:
+                            ok = False
+                            break
+                    if not ok:
+                        continue
+                text = str(node.get("text") or "")
+                key = _hit_key(md, text)
+                out.append((key, {"text": text, "metadata": md}, float(score)))
+                if len(out) >= top_k:
+                    break
+            return out
 
     def _rerank(
         self,
@@ -402,14 +427,50 @@ class SecureRagEngine:
             scores = [float(scores)]
         scored = list(zip(fused, [float(s) for s in scores], strict=False))
         scored.sort(key=lambda x: x[1], reverse=True)
-        min_score = float(os.environ.get("SECURE_RERANK_MIN_SCORE", "0.05"))
+        min_score = float(os.environ.get("SECURE_RERANK_MIN_SCORE", "0.15"))
+        max_score = max((sc for _, sc in scored), default=0.0)
+        # Diversify: at most 2 chunks per doc_id (or title fallback), score order.
+        per_doc_cap = 2
+        per_doc: dict[str, int] = {}
         results: list[dict[str, Any]] = []
-        for (key, node, _rrf), sc in scored[:top_n]:
+        for (key, node, _rrf), sc in scored:
             if sc < min_score:
                 continue
             item = source_dict_from_hit(node, score=sc)
             item["hit_key"] = key
+            doc_key = str(
+                item.get("doc_id") or item.get("title") or key
+            ).strip() or key
+            if per_doc.get(doc_key, 0) >= per_doc_cap:
+                continue
+            per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
             results.append(item)
+            if len(results) >= top_n:
+                break
+        # Soft fallback: min_score wiped all hits → keep top fused (RRF) 1–2.
+        if not results and fused:
+            per_doc = {}
+            take = min(2, top_n)
+            for key, node, rrf_sc in fused:
+                item = source_dict_from_hit(node, score=float(rrf_sc))
+                item["hit_key"] = key
+                doc_key = str(
+                    item.get("doc_id") or item.get("title") or key
+                ).strip() or key
+                if per_doc.get(doc_key, 0) >= per_doc_cap:
+                    continue
+                per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
+                results.append(item)
+                if len(results) >= take:
+                    break
+            logger.info(
+                "[secure-rag] rerank soft_fallback n=%s max_score=%.4f query=%r",
+                len(results),
+                float(max_score),
+                (query or "")[:80],
+            )
+        # Explicit score order after diversify (defensive; append path is already sorted).
+        results.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
         return results
 
 

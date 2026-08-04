@@ -47,7 +47,7 @@ export default function LlmApiKeyVault({ isDark = false }: Props) {
               (err as { response?: { data?: { error?: string } } }).response?.data
                 ?.error || '목록을 불러오지 못했습니다.',
             )
-          : '목록을 불러오지 못했습니다. backend/.env 에 LLM_KEYS_ENCRYPTION_KEY 를 설정했는지 확인하세요.'
+          : '목록을 불러오지 못했습니다. 프로젝트 루트 .env 에 LLM_KEYS_ENCRYPTION_KEY 를 설정했는지 확인하세요.'
       setError(msg)
     }
   }, [])
