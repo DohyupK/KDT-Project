@@ -2,7 +2,7 @@
 Structured CSV/XLSX → short profile markdown only (not full table dump).
 
 Original files live under ai-service/data/csv_lake/.
-Profile MD is written to Documents/ai-service/ for existing ingest_secure rglob.
+Profile MD is written to Documents/Confidential/Markdown/ for ingest.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+
+from agent.doc_clearance import DEFAULT_PROFILE_CLEARANCE, MARKDOWN_DIR_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,8 @@ def csv_lake_dir(ai_root: Path) -> Path:
 
 
 def profile_md_dir(secure_docs_dir: Path) -> Path:
-    """Short meta MD next to other converted docs (ingest picks up all *.md)."""
-    return secure_docs_dir / "ai-service"
+    """Short meta MD under default profile clearance Markdown folder."""
+    return secure_docs_dir / DEFAULT_PROFILE_CLEARANCE / MARKDOWN_DIR_NAME
 
 
 def _load_frame(path: Path):
@@ -41,7 +43,6 @@ def _load_frame(path: Path):
         try:
             return pl.read_excel(str(path))
         except Exception:
-            # Fallback when fastexcel is unavailable — openpyxl
             from openpyxl import load_workbook
 
             wb = load_workbook(str(path), read_only=True, data_only=True)
@@ -65,15 +66,15 @@ def build_profile_markdown(*, path: Path, lake_rel: str) -> str:
     cols = list(df.columns)
     dtypes = [str(df[c].dtype) for c in cols]
     sample = df.head(SAMPLE_ROWS)
-    stem = _safe_stem(path)
 
     lines: list[str] = [
         "---",
-        f"doc_id: csv-profile-{stem}",
+        f"doc_id: csv-profile-{_safe_stem(path)}",
         f"title: 데이터셋 안내 — {path.name}",
         "category: data_profile",
         f"source_path: {lake_rel}",
         "converted_from: profile",
+        f"clearance: {DEFAULT_PROFILE_CLEARANCE}",
         "security_level: internal",
         "---",
         "",

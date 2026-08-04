@@ -51,7 +51,7 @@
 - 보안 문서 경로 → 루트 `Documents/` · PDF/다포맷 ingest  
 - `user_chat_threads` / `user_chat_messages` + Prisma · BigInt JSON 패치  
 - 멀티턴 B: FE는 `message`+`thread_id`+`user_id`만 · Express 패스스루 · ai-service MariaDB 문맥 (`SECURE_GENERATE=0` · `no_docs` 유지)
-- 채팅 스레드 복원 API/UI · Documents pdf/txt/csv/xlsx → `Documents/ai-service/*.md` + watchdog ingest
+- 채팅 스레드 복원 API/UI · Documents pdf/txt/csv/xlsx → `Documents/<Clearance>/Markdown/*.md` + watchdog ingest
 
 ## 다음 우선순위
 

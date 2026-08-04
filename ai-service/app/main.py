@@ -72,8 +72,8 @@ from app.schemas import (
     SecurityChatRequest,
     SecurityChatResponse,
 )
-from agent.graph import run_chat
-from agent.model_registry import list_ready_heads
+from agent.api_llm.graph import run_chat
+from agent.api_llm.model_registry import list_ready_heads
 from agent.secure_llm import compose_secure, compose_secure_stream
 from train_pipeline import MODELS_DIR, predict
 

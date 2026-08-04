@@ -3,7 +3,7 @@ Security-tab LLM: local vLLM OpenAI-compatible only + secure RAG graph.
 
 Wiring:
   SecurityChatbot → Express /api/security-chat → FastAPI /security-chat
-  → agent.secure_graph.run_secure_chat → rag_engine + ChatOpenAI(vLLM)
+  → agent.secure_llm.graph.run_secure_chat → rag_engine + ChatOpenAI(vLLM)
 
 NEVER import or call Groq / Gemini / compose_with_failover here.
 Do NOT load HuggingFace chat LLMs in-process — chat via external vLLM.
@@ -102,7 +102,7 @@ def compose_secure(
     """
     from agent import chat_history_store as store
     from agent import chat_history_vector as vec
-    from agent.secure_graph import run_secure_chat
+    from agent.secure_llm.graph import run_secure_chat
 
     tid = store.ensure_thread(
         thread_id=thread_id,
@@ -183,7 +183,7 @@ async def compose_secure_stream(
     """
     from agent import chat_history_store as store
     from agent import chat_history_vector as vec
-    from agent.secure_graph import stream_secure_chat
+    from agent.secure_llm.graph import stream_secure_chat
 
     tid = store.ensure_thread(
         thread_id=thread_id,

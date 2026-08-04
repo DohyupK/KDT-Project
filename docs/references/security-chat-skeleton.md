@@ -19,7 +19,7 @@
 | [`frontend/src/components/chat/GlobalChatbot.tsx`](../../frontend/src/components/chat/GlobalChatbot.tsx) | 일반 챗봇 (보안 키워드 → redirect) |
 | [`backend/src/services/securityGate.ts`](../../backend/src/services/securityGate.ts) | 키워드 게이트 |
 | [`backend/src/routes/securityChat.ts`](../../backend/src/routes/securityChat.ts) | 보안 프록시 |
-| [`ai-service/agent/secure_llm.py`](../../ai-service/agent/secure_llm.py) | vLLM only compose |
+| [`ai-service/agent/secure_llm/llm.py`](../../ai-service/agent/secure_llm/llm.py) | vLLM only compose |
 | `CHAT_VLLM_BASE_URL` | 기본 `http://127.0.0.1:8001/v1` |
 
 ---

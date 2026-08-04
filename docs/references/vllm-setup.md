@@ -47,6 +47,6 @@ vLLM이 꺼져 있으면 **클라우드 폴백 없음** — offline 안내 문�
 
 ## 관련 코드
 
-- `ai-service/agent/secure_llm.py`
+- `ai-service/agent/secure_llm/llm.py`
 - `frontend/src/components/chat/SecurityChatbot.tsx`
 - `backend/src/routes/securityChat.ts`

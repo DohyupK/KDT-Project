@@ -2,8 +2,9 @@
 doc_id: converted-EDA분석
 title: EDA분석
 category: converted
-source_path: Documents/EDA분석.pdf
+source_path: Documents/Confidential/EDA분석.pdf
 converted_from: pdf
+clearance: Confidential
 security_level: internal
 ---
 

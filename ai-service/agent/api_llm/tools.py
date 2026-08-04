@@ -7,7 +7,7 @@ from typing import Any
 
 import polars as pl
 
-from agent.model_registry import register_builtin, run_all_ready_heads
+from agent.api_llm.model_registry import register_builtin, run_all_ready_heads
 from train_pipeline import MODELS_DIR, predict
 
 RAW_FEATURE_KEYS = (

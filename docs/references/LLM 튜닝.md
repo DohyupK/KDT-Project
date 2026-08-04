@@ -194,7 +194,7 @@ SelfQuery/heuristic → dense(Qdrant+bge-m3) + BM25 → RRF → CrossEncoder
 **ANALYTICS_GROUNDING_SUFFIX:** 집계만 근거 · 추측 금지.  
 `finalize_reply_sources`: SYS 포함 시 hard override · 아니면 LLM `[출처:]` strip 후 실 title 부착.
 
-### 5.3 Generate · 그래프 (`secure_graph.py`)
+### 5.3 Generate · 그래프 (`agent/secure_llm/graph.py`)
 
 | 항목 | 동작 |
 |------|------|
@@ -274,13 +274,14 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 
 | 경로 | 역할 |
 |------|------|
-| `agent/rag_engine.py` | Hybrid · soft fallback · SelfQuery · `reload_bm25` |
-| `agent/secure_graph.py` | LangGraph · SSE · retrieve/generate/analytics |
-| `agent/secure_prompts.py` | 의도 RE · EXPLAIN/SUMMARY · finalize |
-| `agent/secure_llm.py` | vLLM 클라이언트 |
+| `agent/rag_engine.py` · `doc_clearance.py` | Hybrid · clearance ACL · soft fallback · SelfQuery · `reload_bm25` |
+| `agent/secure_llm/graph.py` | LangGraph · SSE · retrieve/generate/analytics |
+| `agent/secure_llm/prompts.py` | 의도 RE · EXPLAIN/SUMMARY · finalize |
+| `agent/secure_llm/llm.py` | vLLM 클라이언트 |
+| `agent/api_llm/` | 클라우드 compose · predict/whatif · Public+Confidential RAG |
 | `agent/analytics_engine.py` | csv_lake Polars |
-| `agent/document_watcher.py` | 듀얼 엔진 · 핫리로드 트리거 |
-| `ingest_secure.py` | chunk 400/50 · Qdrant rebuild |
+| `agent/document_watcher.py` | 4등급 듀얼 엔진 · 핫리로드 트리거 |
+| `ingest_secure.py` | chunk 400/50 · Qdrant rebuild · clearance 메타 |
 | `app/main.py` | API · RotatingFileHandler |
 | `scripts/rebuild_secure_rag_clean.py` | 클린 재인덱싱 |
 

@@ -1,10 +1,11 @@
 """
 Minimal LangGraph chatbot.
 
-Flow: START → predict_node → whatif_node → compose_node → END
+Flow: START → predict → whatif → rag (Public+Confidential) → compose → END
 
 - predict_node: all ready registry heads (clf O/X + reg capacity + residual + future)
 - whatif: O/X + residual + capacity 격자 탐색
+- rag: shared Documents RAG with API clearance filter
 - compose: template / LLM
 """
 
@@ -14,10 +15,11 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from agent.llm import compose_with_failover, llm_enabled
-from agent.prompts import USAGE_GUIDELINE
-from agent.tools import run_registered_heads
-from agent.whatif import run_whatif
+from agent.api_llm.llm import compose_with_failover, llm_enabled
+from agent.api_llm.prompts import USAGE_GUIDELINE
+from agent.api_llm.tools import run_registered_heads
+from agent.api_llm.whatif import run_whatif
+from agent.rag_engine import API_ALLOWED_CLEARANCES, get_engine
 
 
 class ChatState(TypedDict, total=False):
@@ -33,6 +35,7 @@ class ChatState(TypedDict, total=False):
     residual_result: dict[str, Any] | None
     head_results: dict[str, Any] | None
     recommendation: dict[str, Any] | None
+    rag_sources: list[dict[str, Any]] | None
     error: str | None
     reply: str
     mode: Literal["template", "llm"]
@@ -244,6 +247,47 @@ def whatif_node(state: ChatState) -> dict[str, Any]:
         return {"recommendation": None}
 
 
+def _compact_rag_sources(
+    hits: list[dict[str, Any]], *, per_chunk: int = 280
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for h in hits[:4]:
+        text = str(h.get("text") or "")
+        if len(text) > per_chunk:
+            text = text[:per_chunk].rstrip() + "…"
+        out.append(
+            {
+                "title": h.get("title"),
+                "doc_id": h.get("doc_id"),
+                "clearance": h.get("clearance"),
+                "text": text,
+            }
+        )
+    return out
+
+
+def rag_node(state: ChatState) -> dict[str, Any]:
+    """Public+Confidential only — never Secret/TopSecret for cloud API compose."""
+    message = (state.get("message") or "").strip()
+    if not message:
+        return {"rag_sources": []}
+    try:
+        engine = get_engine()
+        engine.ensure()
+        if not engine.ready:
+            return {"rag_sources": []}
+        hits = engine.retrieve(
+            message,
+            top_k=8,
+            rerank_top_n=4,
+            llm_invoke=None,
+            allowed_clearances=API_ALLOWED_CLEARANCES,
+        )
+        return {"rag_sources": _compact_rag_sources(hits)}
+    except Exception:  # noqa: BLE001
+        return {"rag_sources": []}
+
+
 def compose_node(state: ChatState) -> dict[str, Any]:
     message = state.get("message") or ""
     history = (state.get("history_text") or "").strip()
@@ -254,6 +298,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
     capacity_result = state.get("capacity_result")
     residual_result = state.get("residual_result")
     recommendation = state.get("recommendation")
+    rag_sources = state.get("rag_sources") or []
     error = state.get("error")
     need_guideline = bool(state.get("need_guideline"))
 
@@ -267,6 +312,7 @@ def compose_node(state: ChatState) -> dict[str, Any]:
             capacity_result=capacity_result,
             residual_result=residual_result,
             head_results=state.get("head_results"),
+            rag_sources=rag_sources,
             llm_mode=state.get("llm_mode"),
             llm_credentials=state.get("llm_credentials"),
         )
@@ -323,10 +369,12 @@ def build_graph():
     g: StateGraph = StateGraph(ChatState)
     g.add_node("predict", predict_node)
     g.add_node("whatif", whatif_node)
+    g.add_node("rag", rag_node)
     g.add_node("compose", compose_node)
     g.add_edge(START, "predict")
     g.add_edge("predict", "whatif")
-    g.add_edge("whatif", "compose")
+    g.add_edge("whatif", "rag")
+    g.add_edge("rag", "compose")
     g.add_edge("compose", END)
     return g.compile()
 
