@@ -10,6 +10,12 @@ const server = app.listen(port, () => {
   console.log(`[backend] CHAT_STORE=${process.env.CHAT_STORE || 'mariadb'}`)
 })
 
+// Security-chat proxy may wait up to 180s for local RAG+LLM; avoid Node closing early.
+server.requestTimeout = 200_000
+server.headersTimeout = 205_000
+server.keepAliveTimeout = 210_000
+server.timeout = 200_000
+
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.error(

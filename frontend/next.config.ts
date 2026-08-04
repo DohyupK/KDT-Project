@@ -1,6 +1,10 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // Security-chat can wait up to ~180s (RAG + local LLM). Default proxy cut → socket hang up.
+  experimental: {
+    proxyTimeout: 190_000,
+  },
   async rewrites() {
     return [
       {
@@ -16,4 +20,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig;
+export default nextConfig

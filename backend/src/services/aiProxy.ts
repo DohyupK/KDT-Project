@@ -13,6 +13,8 @@ export type AiLlmCredential = {
 
 export type AiChatRequest = {
   message: string
+  thread_id?: string | null
+  user_id?: string | null
   features?: AiChatFeatures | null
   fillThreshold?: number | null
   need_guideline?: boolean
@@ -51,6 +53,7 @@ export type AiChatResponse = {
   reply: string
   mode: string
   provider?: string
+  thread_id?: string | null
   predict: AiPredictResult | null
   capacity?: AiCapacityResult | null
   residual?: AiResidualResult | null
@@ -66,6 +69,8 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message: body.message,
+      thread_id: body.thread_id ?? undefined,
+      user_id: body.user_id ?? undefined,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: body.need_guideline ?? false,

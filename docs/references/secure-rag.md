@@ -31,7 +31,7 @@
 
 ## Fixture (smoke)
 
-`ai-service/data/secure_docs/` — 6건:
+모노레포 루트 `Documents/` — 6건 (구 `ai-service/data/secure_docs/`):
 
 | doc_id | category | process |
 |--------|----------|---------|
@@ -42,11 +42,14 @@
 | rule-lithium-v1 | 규정 | lithium_input |
 | manual-metal-v1 | 매뉴얼 | metal_impurity |
 
+경로 오버라이드: `SECURE_DOCS_DIR` (기본 = `<repo>/Documents`).
+
 ## 환경 변수
 
 ```text
 QDRANT_URL=http://127.0.0.1:6333
 SECURE_QDRANT_COLLECTION=secure_docs
+SECURE_DOCS_DIR=  # optional; default repo Documents/
 SECURE_EMBED_MODEL=BAAI/bge-m3
 SECURE_RERANK_MODEL=BAAI/bge-reranker-v2-m3
 SECURE_RERANK_MIN_SCORE=0.05
@@ -65,14 +68,20 @@ python ingest_secure.py
 # BM25는 서버 기동 시 로드 → ingest 후 ai-service(:8800) 재시작 권장
 ```
 
-문서: `ai-service/data/secure_docs/*.md` (YAML frontmatter).
+문서: `Documents/*.{md,txt,pdf}` (`.md` YAML frontmatter, PDF는 선택 `*.meta.json` sidecar).
 
 환경 (선택):
 
 ```text
 SECURE_SELF_QUERY=0          # heuristic만 (느린 LM Studio 권장)
-SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (관련 질의 500 방지)
+SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (관련 질의 500·빈 content 방지)
+                             # gemma@q2_k 등 초소형 양자화는 chat/completions가 ""/"." 로 stop하는 경우 많음 → 0 유지
+                             # 요약 LLM이 필요하면 채팅용 더 큰 모델 + SECURE_GENERATE=1
 SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
+SECURE_DOCS_WATCH=1          # FastAPI lifespan dual-engine watcher
+SECURE_DOCS_WATCH_DEBOUNCE=4.0  # coalesce bursts before convert/profile + ingest
+# Tables: Documents CSV/XLSX → move ai-service/data/csv_lake/ → Documents/ai-service/*-profile.md
+# Unstructured: PDF/TXT → Documents/ai-service/*.md → existing full ingest
 SECURE_SELF_QUERY_TIMEOUT=20
 SECURE_SELF_QUERY_MAX_TOKENS=256
 ```

@@ -2,6 +2,7 @@ import cors from 'cors'
 import express from 'express'
 import authRoutes from './routes/auth.routes.js'
 import { chatRouter } from './routes/chat.js'
+import { chatThreadsRouter } from './routes/chatThreads.js'
 import { controlRouter } from './routes/control.js'
 import { settingsRouter } from './routes/settings.js'
 import { securityChatRouter } from './routes/securityChat.js'
@@ -42,6 +43,7 @@ export function createApp() {
       handover_history: 'GET /api/knowledge/handover-history (후속)',
       inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',
+      chat_threads: 'GET /api/chat/threads · GET /api/chat/threads/:id/messages',
       security_chat: 'POST /api/security-chat',
       llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',
       control_approve: 'POST /api/control/approve',
@@ -54,6 +56,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes)
   app.use('/api/inquiries', inquiryRoutes)
   app.use('/api', issueRouter)
+  app.use('/api', chatThreadsRouter)
   app.use('/api', chatRouter)
   app.use('/api', securityChatRouter)
   app.use('/api', llmKeysRouter)

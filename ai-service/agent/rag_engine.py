@@ -25,7 +25,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 AI_ROOT = Path(__file__).resolve().parent.parent
-SECURE_DOCS_DIR = AI_ROOT / "data" / "secure_docs"
+REPO_ROOT = AI_ROOT.parent
+# Prefer env; default = monorepo root Documents/ (not ai-service/data/secure_docs).
+_secure_docs_env = (os.environ.get("SECURE_DOCS_DIR") or "").strip()
+SECURE_DOCS_DIR = (
+    Path(_secure_docs_env).expanduser()
+    if _secure_docs_env
+    else REPO_ROOT / "Documents"
+)
 SECURE_RAG_DIR = AI_ROOT / "data" / "secure_rag"
 NODES_PATH = SECURE_RAG_DIR / "bm25_nodes.json"
 
@@ -403,13 +410,26 @@ class SecureRagEngine:
         scored = list(zip(fused, [float(s) for s in scores], strict=False))
         scored.sort(key=lambda x: x[1], reverse=True)
         min_score = float(os.environ.get("SECURE_RERANK_MIN_SCORE", "0.05"))
+        # Diversify: at most 2 chunks per doc_id (or title fallback), score order.
+        per_doc_cap = 2
+        per_doc: dict[str, int] = {}
         results: list[dict[str, Any]] = []
-        for (key, node, _rrf), sc in scored[:top_n]:
+        for (key, node, _rrf), sc in scored:
             if sc < min_score:
                 continue
             item = source_dict_from_hit(node, score=sc)
             item["hit_key"] = key
+            doc_key = str(
+                item.get("doc_id") or item.get("title") or key
+            ).strip() or key
+            if per_doc.get(doc_key, 0) >= per_doc_cap:
+                continue
+            per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
             results.append(item)
+            if len(results) >= top_n:
+                break
+        # Explicit score order after diversify (defensive; append path is already sorted).
+        results.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
         return results
 
 

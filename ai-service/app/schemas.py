@@ -77,6 +77,14 @@ class ChatFeatures(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User chat text")
+    thread_id: str | None = Field(
+        default=None,
+        description="user_chat_threads.id — FE sends this; history loaded server-side",
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="users.user_id — required to persist multi-turn history",
+    )
     features: ChatFeatures | None = Field(
         default=None,
         description=(
@@ -144,6 +152,10 @@ class ChatResponse(BaseModel):
         default="template",
         description="'groq' | 'gemini_flash' | 'gemini_pro' | 'template' | 'security_redirect'",
     )
+    thread_id: str | None = Field(
+        default=None,
+        description="Persisted user_chat_threads.id when multi-turn store is used",
+    )
     predict: PredictResponse | None = None
     capacity: CapacityResponse | None = None
     residual: ResidualResponse | None = None
@@ -157,6 +169,14 @@ class ChatResponse(BaseModel):
 
 class SecurityChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Security-tab user text")
+    thread_id: str | None = Field(
+        default=None,
+        description="user_chat_threads.id — history loaded server-side from MariaDB",
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="users.user_id for per-user thread ownership",
+    )
 
 
 class SecurityChatSource(BaseModel):
@@ -178,9 +198,40 @@ class SecurityChatResponse(BaseModel):
         default="offline",
         description="'vllm' | 'rag' | 'offline'",
     )
+    thread_id: str | None = Field(
+        default=None,
+        description="Persisted user_chat_threads.id",
+    )
     error: str | None = None
     sources: list[SecurityChatSource] = Field(default_factory=list)
     trace: list[dict[str, Any]] | None = Field(
         default=None,
         description="Stage diagnostics: [{stage, ms, ok, detail}, ...]",
     )
+
+
+class ChatThreadItem(BaseModel):
+    id: str
+    user_id: str
+    channel: str
+    title: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ChatThreadListResponse(BaseModel):
+    threads: list[ChatThreadItem] = Field(default_factory=list)
+
+
+class ChatThreadMessageItem(BaseModel):
+    role: str
+    content: str
+    mode: str | None = None
+    provider: str | None = None
+    sources: list[Any] | None = None
+    created_at: str | None = None
+
+
+class ChatThreadMessagesResponse(BaseModel):
+    thread_id: str
+    messages: list[ChatThreadMessageItem] = Field(default_factory=list)
