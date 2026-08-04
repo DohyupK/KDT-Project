@@ -9,7 +9,7 @@ import {
   Type,
   RefreshCw,
   Gauge,
-  Bell, // Bell을 쓰는 경우에만
+  Bell,
 } from 'lucide-react'
 import {
   getControlBounds,
@@ -493,6 +493,7 @@ export default function SettingPage() {
             </p>
           </div>
         </header>
+
 
         <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
           <section className={`rounded-2xl border p-6 shadow-sm ${cardClass}`}>

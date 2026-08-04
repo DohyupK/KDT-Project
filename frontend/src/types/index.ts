@@ -52,6 +52,7 @@ export interface FindUserIdResponse {
 }
 
 export interface UpdateProfileRequest {
+  email?: string
   phone?: string
   password?: string
   currentPassword?: string

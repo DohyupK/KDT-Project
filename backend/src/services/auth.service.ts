@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { isValidPassword, isValidPhone, normalizePhone } from '../utils/validation.js'
+import { isValidEmail, isValidPassword, isValidPhone, normalizePhone } from '../utils/validation.js'
 
 interface UserRow {
   id: number
@@ -139,9 +139,27 @@ export async function resetPassword(
   return { message: '비밀번호가 변경되었습니다.' }
 }
 
+/** 현재 비밀번호 실시간 확인용 — 실패해도 401을 쓰지 않음(세션 유지) */
+export async function verifyCurrentPassword(userId: string, password: string) {
+  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
+  const user = rows[0]
+  if (!user) throw new AppError(404, '사용자를 찾을 수 없습니다.')
+
+  if (!password) {
+    return { valid: false, message: '현재 비밀번호를 입력해주세요.' }
+  }
+
+  const matched = await bcrypt.compare(password, user.password)
+  if (!matched) {
+    return { valid: false, message: '현재 비밀번호가 올바르지 않습니다.' }
+  }
+
+  return { valid: true, message: '현재 비밀번호가 확인되었습니다.' }
+}
+
 export async function updateProfile(
   userId: string,
-  input: { phone?: string; password?: string; currentPassword?: string },
+  input: { email?: string; phone?: string; password?: string; currentPassword?: string },
 ) {
   const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
   const user = rows[0]
@@ -149,6 +167,14 @@ export async function updateProfile(
 
   const updates: string[] = []
   const params: unknown[] = []
+
+  if (input.email !== undefined) {
+    if (!isValidEmail(input.email)) {
+      throw new AppError(400, '이메일 형식이 올바르지 않습니다.')
+    }
+    updates.push('email = ?')
+    params.push(input.email.trim())
+  }
 
   if (input.phone !== undefined) {
     if (!isValidPhone(input.phone)) {
@@ -162,12 +188,14 @@ export async function updateProfile(
     if (!input.currentPassword) {
       throw new AppError(400, '현재 비밀번호를 입력해주세요.')
     }
-    const matched = await bcrypt.compare(input.currentPassword, user.password)
-    if (!matched) {
-      throw new AppError(401, '현재 비밀번호가 올바르지 않습니다.')
-    }
+    // 형식 검증을 먼저 — 잘못된 새 비밀번호로 DB가 갱신되지 않게 함
     if (!isValidPassword(input.password)) {
       throw new AppError(400, '비밀번호는 8자 이상, 대·소문자, 숫자, 특수문자를 포함해야 합니다.')
+    }
+    const matched = await bcrypt.compare(input.currentPassword, user.password)
+    if (!matched) {
+      // 401은 axios가 세션 만료로 로그아웃 처리하므로 400 사용
+      throw new AppError(400, '현재 비밀번호가 올바르지 않습니다.')
     }
     updates.push('password = ?')
     params.push(await bcrypt.hash(input.password, 10))

@@ -88,7 +88,7 @@ MariaDB를 쓸 때만:
 
 ```bash
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt CHARACTER SET utf8mb4;"
-mysql -u root -p kdt < backend/src/sql/schema.sql
+mysql -u root -p kdt < DB/chat_schema.sql
 ```
 
 `backend/.env.example` → `.env` 복사 후 필요한 값 설정.  

@@ -3,6 +3,8 @@ import { AppError } from '../middleware/errorHandler.js'
 import type { RiskLevel } from './lotScore.js'
 
 const OPEN_RISK = `status <> '완료' AND risk_level IN ('높음', '중간')`
+const RISK_LEVELS = new Set(['높음', '중간', '낮음'])
+const STATUSES = new Set(['접수', '분석 중', '조치 중', '완료'])
 
 export type IssueListItem = {
   issueId: string
@@ -88,10 +90,35 @@ export type IssueListQuery = {
   status?: string
 }
 
+function isValidDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+export function validateIssueListQuery(q: IssueListQuery): void {
+  const date = q.date?.trim()
+  if (date && !isValidDate(date)) {
+    throw new AppError(400, '날짜는 YYYY-MM-DD 형식이어야 합니다.')
+  }
+
+  const riskLevel = q.riskLevel?.trim()
+  if (riskLevel && !RISK_LEVELS.has(riskLevel)) {
+    throw new AppError(400, '위험도가 올바르지 않습니다.')
+  }
+
+  const status = q.status?.trim()
+  if (status && !STATUSES.has(status)) {
+    throw new AppError(400, '처리 상태가 올바르지 않습니다.')
+  }
+}
+
 export async function listOpenIssues(q: IssueListQuery): Promise<{
   issues: IssueListItem[]
   total: number
 }> {
+  validateIssueListQuery(q)
+
   const where = [`(${OPEN_RISK})`]
   const params: unknown[] = []
 
@@ -108,11 +135,11 @@ export async function listOpenIssues(q: IssueListQuery): Promise<{
     where.push('lot_id = ?')
     params.push(q.lotId.trim())
   }
-  if (q.riskLevel === '높음' || q.riskLevel === '중간') {
+  if (q.riskLevel?.trim()) {
     where.push('risk_level = ?')
-    params.push(q.riskLevel)
+    params.push(q.riskLevel.trim())
   }
-  if (q.status?.trim() && q.status !== '완료') {
+  if (q.status?.trim()) {
     where.push('status = ?')
     params.push(q.status.trim())
   }
@@ -150,8 +177,6 @@ export async function getIssueById(issueId: string): Promise<IssueDetail> {
   return toDetail(rows[0])
 }
 
-const STATUSES = new Set(['접수', '분석 중', '조치 중', '완료'])
-
 export async function updateIssue(
   issueId: string,
   body: {
@@ -161,9 +186,23 @@ export async function updateIssue(
   },
   actor: { userId: string; name: string },
 ): Promise<IssueDetail> {
+  if (body.status !== undefined && typeof body.status !== 'string') {
+    throw new AppError(400, '처리 상태가 올바르지 않습니다.')
+  }
+  if (
+    body.actionContent !== undefined &&
+    body.actionContent !== null &&
+    typeof body.actionContent !== 'string'
+  ) {
+    throw new AppError(400, '조치 내용은 문자열이어야 합니다.')
+  }
+  if (body.completed !== undefined && typeof body.completed !== 'boolean') {
+    throw new AppError(400, '완료 여부가 올바르지 않습니다.')
+  }
+
   const current = await getIssueById(issueId)
 
-  let status = body.status ?? current.status
+  let status = body.status?.trim() || current.status
   let completed = body.completed ?? current.completed
   if (completed) status = '완료'
   if (status === '완료') completed = true

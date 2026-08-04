@@ -15,7 +15,7 @@ llmKeysRouter.get('/llm-keys', (_req, res) => {
     res.json({
       keys,
       db_path: getLlmKeysDbPathForDocs(),
-      note: 'api_key values are never returned; ciphertext lives under ai-service/DB',
+      note: 'api_key values are never returned; ciphertext lives under DB/data',
     })
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)

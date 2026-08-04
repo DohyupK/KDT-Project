@@ -35,7 +35,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 ### LLM compose — 키는 보안 탭 / DB만
 
 일반 챗 API 키(Groq, Gemini, Claude 등)는 **`ai-service/.env`에 두지 않습니다.**  
-프론트 **`/security`** 에서 저장 → Express가 암호화 → [`DB/llm_keys.sqlite`](./DB/).
+프론트 **`/security`** 에서 저장 → Express가 암호화 → [`DB/data/llm_keys.sqlite`](../DB/data/).
 
 ```text
 CHAT_USE_LLM=1

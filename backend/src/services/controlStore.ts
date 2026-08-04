@@ -53,7 +53,7 @@ type MemEvent = OptimizationEventInput & {
 const mem: MemEvent[] = []
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DEFAULT_SQLITE = path.resolve(__dirname, '../../data/control.sqlite')
+const DEFAULT_SQLITE = path.resolve(__dirname, '../../../DB/data/control.sqlite')
 
 let sqliteDb: DatabaseSync | null = null
 
