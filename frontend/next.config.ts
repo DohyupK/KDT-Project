@@ -4,10 +4,15 @@ import type { NextConfig } from 'next'
 import { loadEnvConfig } from '@next/env'
 
 // Monorepo root `.env` (KDT-Project/.env) — not frontend/.env
-const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
+const repoRoot = path.join(frontendRoot, '..')
 loadEnvConfig(repoRoot)
 
 const nextConfig: NextConfig = {
+  // Root package-lock makes Turbopack pick monorepo root; pin to frontend to avoid RSC manifest 500.
+  turbopack: {
+    root: frontendRoot,
+  },
   // Security-chat can wait up to ~180s (RAG + local LLM). Default proxy cut → socket hang up.
   experimental: {
     proxyTimeout: 190_000,

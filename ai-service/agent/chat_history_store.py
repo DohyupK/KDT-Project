@@ -55,10 +55,24 @@ def history_max_chars() -> int:
         return 2000
 
 
+_ENGINE_ERROR: str | None = None
+_ENGINE_ERROR_LOGGED = False
+
+
+def _normalize_db_url(url: str) -> str:
+    """Force PyMySQL dialect — bare mysql:// defaults to MySQLdb (often missing)."""
+    u = url.strip()
+    if u.startswith("mysql://"):
+        return "mysql+pymysql://" + u[len("mysql://") :]
+    if u.startswith("mariadb://"):
+        return "mariadb+pymysql://" + u[len("mariadb://") :]
+    return u
+
+
 def _db_url() -> str | None:
     explicit = (os.environ.get("DATABASE_URL") or "").strip()
     if explicit:
-        return explicit
+        return _normalize_db_url(explicit)
     host = (os.environ.get("DB_HOST") or "").strip()
     if not host:
         return None
@@ -77,25 +91,60 @@ def _db_url() -> str | None:
     )
 
 
+def chat_history_db_status() -> dict[str, Any]:
+    """For /health — whether MariaDB multi-turn store is usable."""
+    eng = get_engine()
+    if eng is None:
+        return {
+            "ok": False,
+            "error": _ENGINE_ERROR or "engine unavailable (check DATABASE_URL / DB_*)",
+        }
+    try:
+        from sqlalchemy import text
+
+        with eng.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"ok": True, "error": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
 def get_engine():
-    global _ENGINE
+    global _ENGINE, _ENGINE_ERROR, _ENGINE_ERROR_LOGGED
     if _ENGINE is not None:
         return _ENGINE
     url = _db_url()
     if not url:
+        _ENGINE_ERROR = "DATABASE_URL / DB_* not set"
+        if not _ENGINE_ERROR_LOGGED:
+            logger.error("[chat_history] %s — multi-turn MariaDB persistence OFF", _ENGINE_ERROR)
+            _ENGINE_ERROR_LOGGED = True
         return None
     try:
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, text
 
-        _ENGINE = create_engine(
+        eng = create_engine(
             url,
             pool_pre_ping=True,
             pool_recycle=3600,
             future=True,
         )
+        # Fail fast on bad dialect/driver (create_engine alone is lazy).
+        with eng.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        _ENGINE = eng
+        _ENGINE_ERROR = None
+        logger.info("[chat_history] MariaDB engine ready (dialect=%s)", url.split("://", 1)[0])
         return _ENGINE
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] engine init failed: %s", exc)
+        _ENGINE_ERROR = str(exc)
+        if not _ENGINE_ERROR_LOGGED:
+            logger.error(
+                "[chat_history] engine init failed: %s — multi-turn MariaDB persistence OFF "
+                "(use mysql+pymysql:// in DATABASE_URL; PyMySQL must be installed)",
+                exc,
+            )
+            _ENGINE_ERROR_LOGGED = True
         return None
 
 
@@ -151,7 +200,7 @@ def ensure_thread(
             )
         return tid
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] ensure_thread failed: %s", exc)
+        logger.error("[chat_history] ensure_thread failed: %s", exc)
         return thread_id or tid
 
 
@@ -207,7 +256,7 @@ def list_threads(
             )
         return out
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] list_threads failed: %s", exc)
+        logger.error("[chat_history] list_threads failed: %s", exc)
         return []
 
 
@@ -231,7 +280,7 @@ def thread_owned_by(*, thread_id: str | None, user_id: str | None) -> bool:
             ).fetchone()
         return row is not None
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] thread_owned_by failed: %s", exc)
+        logger.error("[chat_history] thread_owned_by failed: %s", exc)
         return False
 
 
@@ -292,7 +341,7 @@ def load_messages(
         messages.reverse()
         return messages
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] load_messages failed: %s", exc)
+        logger.error("[chat_history] load_messages failed: %s", exc)
         return []
 
 
@@ -426,5 +475,5 @@ def insert_message(
                 mid = int(row[0]) if row and row[0] is not None else None
             return int(mid) if mid is not None else None
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[chat_history] insert_message failed: %s", exc)
+        logger.error("[chat_history] insert_message failed: %s", exc)
         return None

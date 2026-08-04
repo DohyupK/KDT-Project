@@ -13,13 +13,13 @@
 | 순서 | 할 일 | 바로가기 |
 |------|--------|----------|
 | 1 | 지금 무엇을 만들고 있는지 | [`docs/direction.md`](./docs/direction.md) |
-| 2 | 화면만 돌려보기 | [화면 실행](#화면-실행-frontend) · 기능·설계 [`frontend/README.md`](./frontend/README.md) |
-| 3 | **챗봇까지** 실연동 | 루트에서 [`npm run dev`](#권장--한-번에-기동) ([로컬 실행 — 챗봇](#로컬-실행--챗봇)) |
-| 4 | 보안 탭 · secure RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
-| 5 | (선택) 문서·AI 규칙 구조 | [문서와 AI 규칙](#문서와-ai-규칙-어떻게-나뉘나) |
+| 2 | **로컬 실행** — frontend + backend + ai-service | 저장소 루트 [`npm run dev`](#3-매번--한-번에-기동) · [로컬 실행](#로컬-실행-권장) |
+| 3 | 보안 탭 · secure RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
+| 4 | (선택) 문서·AI 규칙 구조 | [문서와 AI 규칙](#문서와-ai-규칙-어떻게-나뉘나) |
 
 **사람용 설명** → 이 README · `docs/`  
-**AI용 짧은 규칙** → [`AGENTS.md`](./AGENTS.md)
+**AI용 짧은 규칙** → [`AGENTS.md`](./AGENTS.md)  
+**기능·세부 설계** → 각 패키지 `README.md` · **실행 진입점·기술 스택** → 이 파일
 
 ---
 
@@ -55,92 +55,122 @@ KDT-Project/
 
 ---
 
-## 화면 실행 (frontend)
+## 로컬 실행 (권장)
+
+**실행 진입점은 저장소 루트 `npm run dev` 하나입니다.**  
+frontend(:3000) + backend(:3001) + ai-service(:8800)를 함께 켭니다.  
+보안 RAG까지면 **Qdrant(:6333)** · (요약 LLM 시) **LM Studio / vLLM(:8001)** 도 필요합니다.
+
+| 패키지 | 포트 | 역할 |
+|--------|------|------|
+| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat · **멀티턴 MariaDB** |
+| `backend/` | **3001** | Express · auth · 게이트 · 프록시 · `CHAT_STORE` 세션 |
+| `frontend/` | **3000** | Next.js UI |
+| (선택) Qdrant | **6333** | secure RAG · chat_history 벡터 |
+| (선택) LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
+
+### 0) 사전 요구
+
+- Node.js LTS, npm  
+- Python **3.11+**, `pip`  
+- (선택) Qdrant, 로컬 LLM(:8001)
+
+### 1) 루트 `.env`
+
+패키지별 `.env` 없음. **모노레포 루트 `.env`만** 사용. **시크릿·API 키 커밋 금지.**
+
+| 변수 | 용도 |
+|------|------|
+| `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | backend MariaDB (auth·이슈·문의 등). DB명은 **이 값 기준** |
+| `DATABASE_URL` | ai-service 멀티턴 (`user_chat_*`). **`mysql+pymysql://user:pass@host:port/DB_NAME?charset=utf8mb4`** 권장. 비우면 `DB_*`로 동일 dialect 조합. bare `mysql://` 는 MySQLdb 오류 → 히스토리 안 남음 |
+| `CHAT_STORE` | **backend Express 세션**만 (`sqlite` 기본 / `mariadb`). **챗 멀티턴 SSOT와 무관** |
+| `AI_SERVICE_URL` | 기본 `http://127.0.0.1:8800` |
+| `JWT_SECRET` | auth JWT |
+| `LLM_KEYS_ENCRYPTION_KEY` | 보안 탭 API 키 암호 (16자+) |
+| `CHAT_USE_LLM` · `CHAT_VLLM_*` · `SECURE_*` | 일반/보안 챗 · RAG |
+
+**DB 스키마 (최초, MariaDB 사용 시)** — `DB_NAME`을 `.env`와 맞출 것:
+
+```bash
+# 예: DB_NAME=kdt_project
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt_project CHARACTER SET utf8mb4;"
+mysql -u root -p kdt_project < DB/schema.sql
+mysql -u root -p kdt_project < DB/chat_schema.sql
+# 멀티턴 테이블
+python DB/ai-service/apply_user_chat_tables.py
+```
+
+팀 공용 DB: [`docs/guides/login-ubuntu-mariadb.md`](./docs/guides/login-ubuntu-mariadb.md)
+
+### 2) 최초 1회 — 의존성
+
+PowerShell에서는 `&&` 대신 **줄마다** 실행하거나 `;` 를 쓰세요.
 
 ```bash
 cd frontend
 npm install
-npm run dev
+cd ../backend
+npm install
+cd ../ai-service
+pip install -r requirements.txt
+cd ..
+npm install
 ```
 
-브라우저: [http://localhost:3000](http://localhost:3000)
+### 3) 매번 — 한 번에 기동
 
-페이지·기능·설계는 **[`frontend/README.md`](./frontend/README.md)**. 기술 스택은 아래 [모노레포 스택](#기술-스택-모노레포).
-
----
-
-## 로컬 실행 — 챗봇
-
-실연동은 **frontend · backend · ai-service** 를 켭니다.  
-보안 RAG까지 쓰려면 **Qdrant(:6333)** 와 (요약 LLM 사용 시) **LM Studio / vLLM(:8001)** 도 필요합니다.
-
-| 패키지 | 포트 | 역할 |
-|--------|------|------|
-| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat |
-| `backend/` | **3001** | Express · 세션 · 게이트 · 프록시 |
-| `frontend/` | **3000** | Next.js · GlobalChatbot · 보안 오버레이 |
-| (선택) Qdrant | **6333** | secure RAG 벡터 인덱스 |
-| (선택) LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
-
-### 0) DB (최초)
-
-채팅 세션 기본은 **sqlite** (`CHAT_STORE=sqlite`)라 MariaDB 없이도 챗은 됩니다.  
-MariaDB를 쓸 때만:
-
-```bash
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kdt CHARACTER SET utf8mb4;"
-mysql -u root -p kdt < DB/chat_schema.sql
-```
-
-모노레포 루트 `.env`에 필요한 값 설정 (패키지별 `.env.example` 없음).  
-**API 키·시크릿은 커밋하지 마세요.**
-
-### 권장 — 한 번에 기동
-
-최초 1회(패키지별 의존성 + 루트 orchestrator):
-
-```bash
-cd frontend && npm install
-cd ../backend && npm install
-cd ../ai-service && pip install -r requirements.txt
-cd .. && npm install
-```
-
-이후 매번 저장소 루트에서:
+저장소 **루트** (`KDT-Project/`)에서:
 
 ```bash
 npm run dev
 ```
 
-`concurrently`가 ai-service(:8800) · backend(:3001) · frontend(:3000)를 함께 띄웁니다.  
-UI: [http://localhost:3000](http://localhost:3000) · backend health: [http://127.0.0.1:3001/api/health](http://127.0.0.1:3001/api/health) · ai health: [http://127.0.0.1:8800/health](http://127.0.0.1:8800/health)
+`concurrently -k`가 ai · backend · frontend를 함께 띄웁니다. 다른 터미널에 frontend만 켜 둔 채 중복 기동하지 마세요.
 
 | 루트 명령 | 설명 |
 |-----------|------|
-| `npm run dev` | ai + backend + frontend 동시 (`concurrently -k`) |
+| `npm run dev` | ai + backend + frontend 동시 (**이걸 쓰세요**) |
 | `npm run dev:ai` | ai-service만 (`python -m uvicorn` · CWD=`ai-service/`) |
-| `npm run dev:backend` | backend만 (`npm --prefix backend run dev`) |
-| `npm run dev:frontend` | frontend만 (`npm --prefix frontend run dev`) |
+| `npm run dev:backend` | backend만 |
+| `npm run dev:frontend` | frontend만 (디버그용 · 단독 사용 금지) |
 
-### 개별 기동 (선택)
+### 4) 기동 확인
 
-패키지별로 따로 켤 때만:
+| URL | 기대 |
+|-----|------|
+| [http://localhost:3000/main](http://localhost:3000/main) | UI 200 |
+| [http://127.0.0.1:3001/api/health](http://127.0.0.1:3001/api/health) | backend ok |
+| [http://127.0.0.1:8800/health](http://127.0.0.1:8800/health) | `registry_ready` · **`chat_history_db_ok`: true** (멀티턴 DB) |
+
+`chat_history_db_ok`가 false면 채팅은 될 수 있어도 **히스토리가 MariaDB에 안 남습니다.** `DATABASE_URL` / `DB_*` · PyMySQL을 점검한 뒤 ai(또는 루트 `npm run dev`)를 재시작하세요.
+
+### 5) 개별 기동 (디버그용)
+
+세 터미널을 나눠야 할 때만. 프론트를 단독으로 켜면 `/api`가 `ECONNREFUSED :3001` 납니다 → **루트 `npm run dev`를 쓰세요.**
 
 ```bash
-# ai-service — CWD는 항상 ai-service/ (models/ 상대 경로)
+# 터미널 1 — CWD 항상 ai-service/
 cd ai-service
-# 루트 .env: CHAT_USE_LLM=1 · CHAT_VLLM_* (보안) · SECURE_* (RAG)
-# 보안 문서 인덱싱(승인 후): python ingest_secure.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8800
 
-# backend
-cd backend && npm run dev
+# 터미널 2
+cd backend
+npm run dev
 
-# frontend
-cd frontend && npm run dev
+# 터미널 3
+cd frontend
+npm run dev
 ```
 
-rewrite 변경 후 Next를 **한 번 재시작**합니다.
+### 6) 안 될 때
+
+| 증상 | 원인 | 조치 |
+|------|------|------|
+| `ECONNREFUSED :3001` / Failed to proxy `/api` | frontend만 기동 | 루트 `npm run dev` |
+| `No module named 'MySQLdb'` · 채팅 히스토리 안 남음 · messages 404 | `DATABASE_URL=mysql://` (드라이버 잘못됨) | `mysql+pymysql://...` 로 바꾸거나 `DATABASE_URL` 비우고 `DB_*`만 · `/health`의 `chat_history_db_ok` 확인 |
+| React Client Manifest 500 · multiple lockfiles | Turbopack이 모노레포 루트를 잡음 | `frontend/next.config.ts`의 `turbopack.root` 적용됨 · **루트 `npm run dev` 재시작** |
+| 보안 RAG 빈약 / Qdrant 오류 | Qdrant·인덱스 없음 | Qdrant(:6333) · ingest · [`secure-rag.md`](./docs/references/secure-rag.md) |
+| 보안 요약 실패 | 로컬 LLM 없음 | LM Studio/vLLM(:8001) 또는 `SECURE_GENERATE=0` 발췌 모드 |
 
 ### 요청 흐름
 
@@ -151,7 +181,7 @@ rewrite 변경 후 Next를 **한 번 재시작**합니다.
   → POST /api/chat  (Next rewrite → backend :3001)
   → 보안 키워드? → security_redirect
   → 아니면 ai-service :8800/chat
-  → LangGraph predict + LLM(등록 키) 또는 template
+  → MariaDB user_chat_* (멀티턴) + LangGraph + LLM(등록 키) 또는 template
 ```
 
 **보안 챗**
@@ -159,10 +189,9 @@ rewrite 변경 후 Next를 **한 번 재시작**합니다.
 ```text
 Maximize / /security
   → POST /api/security-chat/stream → :8800/security-chat/stream (SSE)
-  → (스모크) POST /api/security-chat → :8800/security-chat (JSON)
   → RAG (Qdrant + BM25 + RRF + CPU rerank)
   → SECURE_GENERATE=0 → 문서 발췌 + [출처:]
-     또는 =1 → 로컬 LLM(:8001) 요약 (느리면 extractive 폴백)
+     또는 =1 → 로컬 LLM(:8001) 요약
 ```
 
 | 항목 | 경로 |
@@ -171,7 +200,7 @@ Maximize / /security
 | 보안 UI | `frontend/src/components/chat/SecurityChatbot.tsx` |
 | rewrite | `frontend/next.config.ts` — `/api`→`:3001`, `/ai`→`:8800` |
 | 보안 RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
-| LLM·RAG 튜닝 총정리 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) |
+| LLM·RAG 튜닝 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) |
 | 챗봇 가이드 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) |
 | 스모크 | `cd ai-service && python scripts/smoke_secure_rag_e2e.py` |
 
@@ -214,11 +243,11 @@ Maximize / /security
 ## AI 서비스 실행 (ai-service)
 
 단독 기동·엔드포인트·학습 설계는 **[`ai-service/README.md`](./ai-service/README.md)**.  
-전체 실연동은 위 [권장 — 한 번에 기동](#권장--한-번에-기동).
+전체 실연동은 위 [한 번에 기동](#3-매번--한-번에-기동).
 
 | 엔드포인트 | 설명 |
 |------------|------|
-| `GET /health` | 상태 · `registry_ready` 헤드 |
+| `GET /health` | 상태 · `registry_ready` · **`chat_history_db_ok`** (멀티턴 MariaDB) |
 | `POST /predict` | O/X (clf) |
 | `POST /predict-capacity` | 용량 (reg) |
 | `POST /predict-residual` | 잔여 Li |
@@ -232,9 +261,9 @@ Maximize / /security
 
 | 구분 | 누구 | 위치 | 무엇을 |
 |------|------|------|--------|
-| **루트 README** | 사람 | `/README.md` | 지도 · 실행 · **모노레포 기술 스택** |
+| **루트 README** | 사람 | `/README.md` | **실행 진입점** · 지도 · **모노레포 기술 스택** |
 | **루트 AGENTS** | AI | `/AGENTS.md` | 전 패키지 **짧은** 규칙 |
-| **패키지 README** | 사람 | `frontend/` · `backend/` · `ai-service/` | 기능 · 세부 설계 · 실행 |
+| **패키지 README** | 사람 | `frontend/` · `backend/` · `ai-service/` | 기능 · 세부 설계 · 패키지별 실행 보충 |
 | **docs/** | 사람 (+ AI가 방향 확인) | `/docs/` | 방향 · 일지 · 계획 · 스키마 |
 
 - **README** = 설명서  

@@ -56,6 +56,14 @@ class HealthResponse(BaseModel):
         default_factory=list,
         description="Ready model head ids from models/registry.json",
     )
+    chat_history_db_ok: bool = Field(
+        default=False,
+        description="MariaDB user_chat_* store reachable (SQLAlchemy + PyMySQL)",
+    )
+    chat_history_db_error: str | None = Field(
+        default=None,
+        description="Set when chat_history_db_ok is false",
+    )
 
 
 class ChatFeatures(BaseModel):
