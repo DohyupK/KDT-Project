@@ -1,9 +1,8 @@
-# Secrets / env
+# Secrets / env — monorepo root `.env` only (never commit)
 .env
 .env.local
 .env.*.local
 **/.env
-!**/.env.example
 
 # Backend local chat DB
 backend/data/

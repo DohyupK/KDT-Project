@@ -15,17 +15,17 @@ mysql -u root -p kdt_project < src/sql/schema.sql
 - `schema.sql` (repo root of backend): `users` table for auth
 - `src/sql/schema.sql`: chat sessions/messages (when using MariaDB chat store)
 
-2. Copy env:
+2. Env (모노레포 루트 `.env`, 커밋 금지):
 
 ```bash
-copy .env.example .env
+# 저장소 루트 KDT-Project/.env 에 키 작성
 ```
 
 - MariaDB 비밀번호가 없으면 `CHAT_STORE=sqlite`(기본)로 세션·유사질문 카운팅을 영속합니다.
 - 챗도 공용 MariaDB에 두려면 `CHAT_STORE=mariadb` + `src/sql/schema.sql` 적용.
 - LLM API 키(암호문)는 **`ai-service/DB/llm_keys.sqlite`** (보안 탭). 복호화 마스터: `LLM_KEYS_ENCRYPTION_KEY`(16자 이상, Git 금지).
 - Auth용: `JWT_SECRET`, `DB_*`, `CORS_ORIGIN` 또는 `CORS_ORIGINS` 설정.
-- **팀 공용 DB (Lightsail Ubuntu + MariaDB):** [docs/guides/login-ubuntu-mariadb.md](../docs/guides/login-ubuntu-mariadb.md) · 기술스택 [docs/references/login-auth-tech-stack.md](../docs/references/login-auth-tech-stack.md). `.env`는 Git에 올리지 말고 단톡으로 `DB_*`만 공유.
+- **팀 공용 DB (Lightsail Ubuntu + MariaDB):** [docs/guides/login-ubuntu-mariadb.md](../docs/guides/login-ubuntu-mariadb.md) · 기술스택 [docs/references/login-auth-tech-stack.md](../docs/references/login-auth-tech-stack.md). 루트 `.env`는 Git에 올리지 말고 단톡으로 `DB_*`만 공유.
 
 3. Run:
 
@@ -97,7 +97,7 @@ Frontend reaches this via Next rewrite `/api` → `:3001`.
 | 로그인 백업 | `C:\Projects\KDT-auth-backup-20260724` |
 | Auth users 스키마 | `backend/schema.sql` |
 | Chat 스키마 | `backend/src/sql/schema.sql` |
-| 로컬 env (커밋 금지) | `backend/.env` |
+| 로컬 env (커밋 금지) | 모노레포 루트 `.env` |
 
 ### 환경 변수 (auth 관련)
 

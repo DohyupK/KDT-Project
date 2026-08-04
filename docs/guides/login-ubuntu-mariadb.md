@@ -33,7 +33,7 @@
    ```
    → `kdt_project`, `users`
 4. Networking: **Public IPv4 / Static IP** 메모, 방화벽 **TCP 3306** 유지
-5. 로컬 `backend/.env` (Git에 올리지 말 것):
+5. 로컬 모노레포 루트 `.env` (Git에 올리지 말 것):
    ```env
    DB_HOST=<Public_또는_Static_IP>
    DB_PORT=3306
@@ -78,9 +78,9 @@
 
 | 올리는 것 | 올리지 않는 것 |
 |-----------|----------------|
-| 로그인 코드, 이 가이드 | `backend/.env` (비밀번호·IP) |
+| 로그인 코드, 이 가이드 | 루트 `.env` (비밀번호·IP) |
 
-조원에게는 단톡/노션으로 `DB_HOST`, `DB_USER`, `DB_PASSWORD` 등만 전달 → 각자 로컬 `.env` 수정.
+조원에게는 단톡/노션으로 `DB_HOST`, `DB_USER`, `DB_PASSWORD` 등만 전달 → 각자 로컬 루트 `.env` 수정.
 
 ## 실패 시
 

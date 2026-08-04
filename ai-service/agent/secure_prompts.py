@@ -38,6 +38,28 @@ SUMMARY_INSTRUCTION_SUFFIX = (
     "2~3문장 이내로 아주 짧게 핵심만 요약해라."
 )
 
+EXPLAIN_INSTRUCTION_SUFFIX = (
+    "추가 지시: 제공된 발췌만 근거로, 공정·수치·조치 포인트를 "
+    "개조식(명사형 종결) 3줄 이내로 짧게 브리핑하라. "
+    "발췌에 없는 내용은 쓰지 마라."
+)
+
+EXPLAIN_MAX_CHARS = 24
+
+ANALYTICS_INTENT_RE = re.compile(
+    r"(통계|평균|예측|예상|불량률|추이|집계|상관|히스토그램)",
+    re.IGNORECASE,
+)
+
+PREDICT_INTENT_RE = re.compile(r"(예측|예상)", re.IGNORECASE)
+
+ANALYTICS_RESULT_HEADER = "[사내 정형 데이터 집계 결과]"
+
+ANALYTICS_GROUNDING_SUFFIX = (
+    "추가 지시: 위 집계 결과만 근거로 답하라. "
+    "일반 상식·추측으로 숫자를 채우지 마라."
+)
+
 OFFLINE_REPLY = (
     "로컬 vLLM 서버에 연결할 수 없습니다. "
     "보안 채널은 외부 API(Groq/Gemini 등)로 폴백하지 않습니다.\n\n"
@@ -79,8 +101,11 @@ SUMMARY_INTENT_RE = re.compile(
 _CITE_MARKER_RE = re.compile(r"\[출처:\s*[^\]]*\]")
 
 FOLLOWUP_RE = re.compile(
-    r"^(왜|뭐|무엇|그게|그건|그거|저거|이것|그것|목적|조치|이상\s*시|"
-    r"자세히|더\s*알려|그래서|그럼|그러면|관련|이어서)"
+    # Pronoun / context-dependent only. No topic-shift conjunctions
+    # (그럼|그래서|그러면|관련|이어서) — those cause expand pollution.
+    r"^(왜|뭐|무엇|그게|그건|그거|저거|이것|그것|"
+    r"자세히|더\s*알려|이유가|이유\s*가|장단점|"
+    r"목적|조치|이상\s*시)"
     r".{0,40}$",
     re.IGNORECASE | re.DOTALL,
 )
@@ -89,6 +114,30 @@ FOLLOWUP_RE = re.compile(
 def is_summary_intent(message: str) -> bool:
     """Regex-only summary intent (no LLM)."""
     return bool(SUMMARY_INTENT_RE.search((message or "").strip()))
+
+
+def is_explain_intent(message: str) -> bool:
+    """Short non-summary asks that benefit from a brief explain suffix."""
+    t = (message or "").strip()
+    if not t or len(t) > EXPLAIN_MAX_CHARS:
+        return False
+    if is_summary_intent(t):
+        return False
+    return True
+
+
+def wants_explain_suffix(message: str, sources: list[dict[str, Any]]) -> bool:
+    """Inject EXPLAIN suffix only when short explain intent and RAG hits exist."""
+    return is_explain_intent(message) and len(sources or []) >= 1
+
+
+def is_analytics_intent(message: str) -> bool:
+    """Structured analytics route (excludes bare '데이터')."""
+    return bool(ANALYTICS_INTENT_RE.search((message or "").strip()))
+
+
+def is_predict_intent(message: str) -> bool:
+    return bool(PREDICT_INTENT_RE.search((message or "").strip()))
 
 
 def is_no_doc_reply(reply: str) -> bool:
@@ -144,13 +193,16 @@ def finalize_reply_sources(
 
 
 def is_short_followup(message: str, *, max_chars: int = 40) -> bool:
-    """Short pronoun-style / fragment follow-up (no LLM)."""
+    """
+    Pronoun/context-dependent follow-up only (FOLLOWUP_RE).
+    Topic-shift connectors (그럼/그래서/…) are excluded from the regex itself
+    (no domain-noun hardcoding). max_chars kept for call-site compat.
+    """
+    del max_chars  # unused — do not gate on length
     t = (message or "").strip()
-    if not t or len(t) > max_chars:
+    if not t:
         return False
-    if FOLLOWUP_RE.search(t):
-        return True
-    return len(t) <= 20 and ("?" in t or "？" in t or len(t.split()) <= 6)
+    return bool(FOLLOWUP_RE.search(t))
 
 
 def last_user_utterance(history_text: str) -> str:
@@ -227,7 +279,8 @@ def expand_retrieve_query(message: str, history_text: str) -> tuple[str, bool]:
     prev = last_user_utterance(history_text)
     if not prev or prev == msg:
         return msg, False
-    return f"{prev} / {msg}", True
+    merged = f"{prev} / {msg}"
+    return merged, True
 
 
 def format_rag_context(sources: list[dict[str, Any]]) -> str:

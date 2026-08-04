@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import '../src/loadRootEnv.js'
 import mariadb from 'mariadb'
 
 async function columnExists(

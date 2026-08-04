@@ -49,7 +49,7 @@
 | `ai-service/app/` | FastAPI (`/health`, `/predict`, `/predict-capacity`, `/chat`) |
 | `ai-service/agent/` | LangGraph · `model_registry` · tools · LLM |
 | `ai-service/agent/model_registry.py` | registry ready 헤드 일괄 실행 (확장 포인트) |
-| `ai-service/.env.example` | CHAT_USE_LLM · vLLM (회사 API 키 없음) |
+| 루트 `.env` (gitignore) | CHAT_USE_LLM · vLLM · DB_* · JWT 등 (시크릿 미커밋) |
 | `docs/references/cathode-clf-schema.md` | clf CSV 스키마 |
 | `docs/references/cathode-reg-schema.md` | reg CSV 스키마 |
 | `docs/prompts/train-pipeline-ox-classifier.md` | clf 학습 프롬프트 |

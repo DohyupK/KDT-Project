@@ -14,11 +14,12 @@ See docs/references/vllm-setup.md · docs/references/secure-rag.md
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from langchain_openai import ChatOpenAI
 
 ScheduleUpsert = Callable[..., None]
+DisconnectCheck = Callable[[], Awaitable[bool]]
 
 
 def vllm_base_url() -> str:
@@ -38,9 +39,14 @@ def vllm_model() -> str:
     ).strip()
 
 
-def make_vllm() -> ChatOpenAI:
+def make_vllm(*, max_tokens: int | None = None) -> ChatOpenAI:
     # Soft-fail before FE/BE 180s budget; then extractive RAG reply is used.
     timeout_s = float(os.environ.get("SECURE_VLLM_TIMEOUT", "45"))
+    tokens = (
+        int(max_tokens)
+        if max_tokens is not None
+        else int(os.environ.get("SECURE_VLLM_MAX_TOKENS", "256"))
+    )
     return ChatOpenAI(
         base_url=vllm_base_url(),
         api_key="EMPTY",
@@ -48,7 +54,7 @@ def make_vllm() -> ChatOpenAI:
         temperature=0.2,
         timeout=timeout_s,
         max_retries=0,
-        max_tokens=int(os.environ.get("SECURE_VLLM_MAX_TOKENS", "256")),
+        max_tokens=tokens,
     )
 
 
@@ -160,3 +166,120 @@ def compose_secure(
 
     out["thread_id"] = tid
     return out
+
+
+async def compose_secure_stream(
+    message: str,
+    *,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+    schedule_upsert: ScheduleUpsert | None = None,
+    is_disconnected: DisconnectCheck | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Stream compose: MariaDB user insert once before stream;
+    assistant insert once only after done/replace (skip on disconnect).
+    Does not write Express legacy chat_store.
+    """
+    from agent import chat_history_store as store
+    from agent import chat_history_vector as vec
+    from agent.secure_graph import stream_secure_chat
+
+    tid = store.ensure_thread(
+        thread_id=thread_id,
+        user_id=user_id,
+        channel="security",
+    )
+    history = store.load_messages(tid) if tid else []
+    prior = store.last_assistant_sources(history)
+    window_text = store.format_history_text_compact(history)
+    semantic = vec.search_similar(thread_id=tid, query=message) if tid else []
+    history_text = vec.merge_history_with_semantic(
+        window_text,
+        semantic,
+        heuristic_truncate_fn=store.heuristic_truncate,
+        format_compact_fn=store.format_history_text_compact,
+    )
+
+    if tid and user_id:
+        mid = store.insert_message(
+            thread_id=tid,
+            role="user",
+            content=message,
+            mode="security_user",
+            provider="security",
+        )
+        if schedule_upsert is not None:
+            schedule_upsert(
+                thread_id=tid,
+                user_id=user_id,
+                channel="security",
+                role="user",
+                text=message,
+                message_id=mid,
+            )
+
+    final_reply: str | None = None
+    final_mode: str | None = None
+    final_provider: str | None = None
+    final_sources: list[dict[str, Any]] = []
+    finalized = False
+    client_gone = False
+
+    async def _disc() -> bool:
+        nonlocal client_gone
+        if is_disconnected is None:
+            return False
+        gone = bool(await is_disconnected())
+        if gone:
+            client_gone = True
+        return gone
+
+    async for item in stream_secure_chat(
+        message,
+        prior_sources=prior,
+        history_text=history_text,
+        is_disconnected=_disc,
+    ):
+        ev = item.get("event")
+        data = dict(item.get("data") or {})
+        if tid:
+            data["thread_id"] = tid
+        yield {"event": ev, "data": data}
+
+        if ev == "replace":
+            final_reply = data.get("reply") if data.get("reply") is not None else final_reply
+            final_sources = list(data.get("sources") or [])
+            final_mode = data.get("mode") or final_mode or "security_rag"
+            final_provider = data.get("provider") or final_provider or "vllm"
+            finalized = True
+        elif ev == "done":
+            final_reply = (
+                data.get("reply") if data.get("reply") is not None else final_reply
+            )
+            final_sources = list(data.get("sources") or final_sources)
+            final_mode = data.get("mode") or final_mode
+            final_provider = data.get("provider") or final_provider
+            finalized = True
+
+    if client_gone:
+        return
+
+    if finalized and tid and user_id and final_reply is not None:
+        mid_a = store.insert_message(
+            thread_id=tid,
+            role="assistant",
+            content=final_reply,
+            mode=final_mode,
+            provider=final_provider,
+            sources=final_sources or [],
+        )
+        if schedule_upsert is not None:
+            schedule_upsert(
+                thread_id=tid,
+                user_id=user_id,
+                channel="security",
+                role="assistant",
+                text=final_reply,
+                message_id=mid_a,
+            )

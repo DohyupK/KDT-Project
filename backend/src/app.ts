@@ -43,6 +43,7 @@ export function createApp() {
       chat: 'POST /api/chat',
       chat_threads: 'GET /api/chat/threads · GET /api/chat/threads/:id/messages',
       security_chat: 'POST /api/security-chat',
+      security_chat_stream: 'POST /api/security-chat/stream',
       llm_keys: 'GET|POST /api/llm-keys · DELETE /api/llm-keys/:id',
       control_approve: 'POST /api/control/approve',
       control_revert: 'POST /api/control/approve/:id/revert',

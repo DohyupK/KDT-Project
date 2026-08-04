@@ -16,7 +16,7 @@
 ```bash
 cd ai-service
 pip install -r requirements.txt
-# copy .env.example .env 후 CHAT_USE_LLM=1 (회사 API 키는 .env에 두지 않음)
+# 모노레포 루트 .env 에 CHAT_USE_LLM=1 (회사 API 키는 .env에 두지 않음)
 # 학습 (승인 후):
 #   python train_pipeline.py
 #   python train_reg_pipeline.py
@@ -34,7 +34,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 
 ### LLM compose — 키는 보안 탭 / DB만
 
-일반 챗 API 키(Groq, Gemini, Claude 등)는 **`ai-service/.env`에 두지 않습니다.**  
+일반 챗 API 키(Groq, Gemini, Claude 등)는 **루트 `.env`에 두지 않습니다.**  
 프론트 **`/security`** 에서 저장 → Express가 암호화 → [`DB/llm_keys.sqlite`](./DB/).
 
 ```text
@@ -46,8 +46,8 @@ CHAT_VLLM_MODEL=local-model
 - `CHAT_USE_LLM=1` + **등록된 키** → Auto(단가·100자 티어) / 수동
 - 키 없음 → template + 「보안 탭에서 API 키를 저장」안내
 - `CHAT_VLLM_*` 는 **보안 탭 전용**
-- 마스터 암호 키: **`backend/.env`의 `LLM_KEYS_ENCRYPTION_KEY`**
-- 기동 시 `app/main.py`가 `ai-service/.env`를 `load_dotenv`로 읽음
+- 마스터 암호 키: **루트 `.env`의 `LLM_KEYS_ENCRYPTION_KEY`**
+- 기동 시 `app/main.py`가 모노레포 루트 `.env`를 `load_dotenv`로 읽음
 
 ---
 
@@ -157,7 +157,10 @@ What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 �
 - LangChain Google GenAI (Gemini)
 - Anthropic Messages: 표준 라이브러리 HTTP (추가 pip 없음)
 - Auto/수동: 보안 탭 등록 키만 (`.env` API 키 폴백 없음)
-- **Secure RAG:** Qdrant · BM25 · RRF fusion · bge-m3 / bge-reranker-v2-m3 (**CPU**) · LlamaIndex SentenceSplitter
+- Secure RAG: Qdrant · BM25 · RRF · bge-m3 / bge-reranker-v2-m3 (**CPU**) · LlamaIndex SentenceSplitter
+- Secure RAG 운영: doc당 2청크 · soft fallback(+`max_score`) · chunk 400/50 · min_score 0.15 · top_k=12 · `FOLLOWUP_RE` 좁힘 · prior · `[SYS_RAG_EMPTY_RESULT]` · 듀얼 엔진(watchdog)
+- 보안 SSE: `POST /security-chat/stream` · analytics(Polars `csv_lake`) Smart Fallback
+- 가이드: [`docs/references/security-chatbot-guide.md`](../docs/references/security-chatbot-guide.md) · 일지 [`2026-08-02`](../docs/work-log/2026-08-02.md)
 
 ### ML · 데이터
 - Polars
@@ -173,10 +176,11 @@ What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 �
 ### 주요 산출물 경로
 - 학습: `train_pipeline.py` (clf) · `train_reg_pipeline.py` (reg) · `train_residual_pipeline.py` (residual)
 - 모델: `models/` (clf) · `models/reg/` · `models/residual/` · `models/registry.json`
-- API: `app/main.py` (`/predict`, `/predict-capacity`, `/predict-residual`, `/chat`, `/security-chat`)
-- Agent: `agent/` (`model_registry.py` · tools · graph · whatif · `rag_engine` · `secure_graph`)
-- Secure docs: repo `Documents/` (`SECURE_DOCS_DIR`) · ingest: `ingest_secure.py` (`.md`/`.txt`/`.pdf`)
+- API: `app/main.py` (`/predict`, `/predict-capacity`, `/predict-residual`, `/chat`, `/security-chat`, `/security-chat/stream`)
+- Agent: `agent/` (`model_registry.py` · tools · graph · whatif · `rag_engine` · `secure_graph` · `analytics_engine`)
+- Secure docs: repo `Documents/` (`SECURE_DOCS_DIR`) · ingest: `ingest_secure.py` · clean rebuild: `scripts/rebuild_secure_rag_clean.py`
 - Secure RAG E2E smoke: `python scripts/smoke_secure_rag_e2e.py` (needs vLLM `:8001`)
+- 챗봇 스택·이용: [`docs/references/security-chatbot-guide.md`](../docs/references/security-chatbot-guide.md)
 
 ---
 
@@ -191,4 +195,4 @@ What-if 선정: 불량 확률 최소 → 동률 시 residual 최소 → 동률 �
 ## 개발 기록
 
 상세는 루트 일지: [`docs/work-log/`](../docs/work-log/)  
-관련: [`docs/work-log/2026-07-28.md`](../docs/work-log/2026-07-28.md)
+관련: [`docs/work-log/2026-08-02.md`](../docs/work-log/2026-08-02.md) · [`2026-08-01`](../docs/work-log/2026-08-01.md) · [`2026-07-28`](../docs/work-log/2026-07-28.md)

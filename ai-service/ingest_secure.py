@@ -24,7 +24,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 AI_ROOT = Path(__file__).resolve().parent
-load_dotenv(AI_ROOT / ".env", override=False)
+REPO_ROOT = AI_ROOT.parent
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 # Ensure agent imports resolve when run as script
 if str(AI_ROOT) not in sys.path:
@@ -79,7 +80,7 @@ def _load_sidecar_meta(path: Path) -> dict:
         return {}
 
 
-def _chunk_text(text: str, chunk_size: int = 700, overlap: int = 100) -> list[str]:
+def _chunk_text(text: str, chunk_size: int = 400, overlap: int = 50) -> list[str]:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text:
         return []

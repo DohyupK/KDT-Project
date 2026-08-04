@@ -4,26 +4,59 @@ ai-service FastAPI entrypoint.
 Run from ai-service/ (CWD must be ai-service so models/ resolves):
   uvicorn app.main:app --host 0.0.0.0 --port 8800 --reload
 
-API keys: load from ai-service/.env (never commit). See .env.example.
+Env: monorepo root `.env` only (never commit).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load ai-service/.env before reading os.environ in this module / agent.
-_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+# Load repo-root .env before reading os.environ in this module / agent.
+_AI_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _AI_ROOT.parent
+_ENV_PATH = _REPO_ROOT / ".env"
 load_dotenv(_ENV_PATH, override=False)
 
+
+def _configure_file_logging() -> None:
+    """Rotating file log (10MB x 5). Skip if already attached (uvicorn --reload)."""
+    log_path = Path(
+        os.environ.get("AI_SERVICE_LOG_FILE")
+        or str(_AI_ROOT / "logs" / "ai-service.log")
+    )
+    if not log_path.is_absolute():
+        log_path = _AI_ROOT / log_path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, RotatingFileHandler):
+            return
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    handler.setLevel(logging.INFO)
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+    root.addHandler(handler)
+
+
 import polars as pl
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.schemas import (
     CapacityResponse,
@@ -41,12 +74,16 @@ from app.schemas import (
 )
 from agent.graph import run_chat
 from agent.model_registry import list_ready_heads
-from agent.secure_llm import compose_secure
+from agent.secure_llm import compose_secure, compose_secure_stream
 from train_pipeline import MODELS_DIR, predict
+
+# After train_pipeline (which may clear root handlers) attach rotating server log.
+_configure_file_logging()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _configure_file_logging()
     stop_watch = None
     try:
         from agent.document_watcher import start_document_watcher
@@ -436,6 +473,59 @@ def security_chat_endpoint(
         )
 
 
+def _format_sse(event: str, data: dict) -> str:
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+@app.post("/security-chat/stream")
+async def security_chat_stream_endpoint(
+    body: SecurityChatRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> StreamingResponse:
+    """
+    SSE stream: meta/delta/replace/done/error.
+    MariaDB writes only inside compose_secure_stream (not Express).
+    """
+    from agent import chat_history_vector as vec
+
+    def _schedule_upsert(**kwargs: object) -> None:
+        background_tasks.add_task(vec.upsert_chat_message, **kwargs)
+
+    async def event_gen():
+        try:
+            async for item in compose_secure_stream(
+                body.message,
+                thread_id=body.thread_id,
+                user_id=body.user_id,
+                schedule_upsert=_schedule_upsert,
+                is_disconnected=request.is_disconnected,
+            ):
+                if await request.is_disconnected():
+                    break
+                ev = str(item.get("event") or "message")
+                data = item.get("data") or {}
+                yield _format_sse(ev, data)
+        except Exception as exc:  # noqa: BLE001
+            detail = str(exc)[:400]
+            print(f"[security-chat/stream] fail err={detail}")
+            yield _format_sse(
+                "error",
+                {"error": detail, "stage": "unhandled_stream"},
+            )
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -447,4 +537,5 @@ def root() -> dict[str, str]:
         "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
         "security_chat": "POST /security-chat",
+        "security_chat_stream": "POST /security-chat/stream",
     }

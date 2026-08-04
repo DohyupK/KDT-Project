@@ -29,8 +29,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "prisma:generate": "prisma generate",
-    "prisma:db-pull": "prisma db pull"
+    "prisma:generate": "node --env-file=../.env ./node_modules/prisma/build/index.js generate",
+    "prisma:db-pull": "node --env-file=../.env ./node_modules/prisma/build/index.js db pull"
   },
   "allowScripts": {
     "sharp@0.34.5": true,

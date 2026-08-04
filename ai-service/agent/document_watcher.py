@@ -104,6 +104,15 @@ def _request_ingest() -> None:
 
                 code = run_ingest()
                 logger.info("[document_watcher] ingest exit=%s", code)
+                if code in (0, None):
+                    try:
+                        from agent.rag_engine import get_engine
+
+                        get_engine().reload_bm25()
+                    except Exception as reload_exc:  # noqa: BLE001
+                        logger.warning(
+                            "[document_watcher] bm25 reload: %s", reload_exc
+                        )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[document_watcher] ingest: %s", exc)
             with _ingest_lock:
