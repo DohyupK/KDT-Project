@@ -2,7 +2,8 @@ import axios from 'axios'
 import { clearAuthSession, getAuthToken, getAuthUser } from '@/lib/authStorage'
 
 /**
- * Security-tab chat only → POST /api/security-chat → ai-service /security-chat → vLLM :8001 (+ secure RAG).
+ * Security-tab chat → POST /api/security-chat/stream (SSE) → ai-service /security-chat/stream.
+ * JSON POST /api/security-chat kept for smoke/compat.
  * Never uses general /api/chat (Groq/Gemini).
  *
  * Multi-turn (B): send message + thread_id + user_id only — never the history array.
@@ -217,6 +218,129 @@ export async function postSecurityChat(
     console.debug('[security-chat] ok trace', data.trace, 'elapsed_ms', data.elapsed_ms)
   }
   return data
+}
+
+export type SecurityChatStreamHandlers = {
+  onMeta?: (data: Record<string, unknown>) => void
+  onDelta?: (text: string) => void
+  onReplace?: (data: {
+    reply: string
+    sources: SecurityChatSource[]
+    mode?: string
+    provider?: string
+  }) => void
+  onDone?: (data: SecurityChatResponse) => void
+  onError?: (data: SecurityChatErrorBody) => void
+}
+
+function parseSseBlocks(buffer: string): {
+  frames: { event: string; data: string }[]
+  rest: string
+} {
+  const frames: { event: string; data: string }[] = []
+  let rest = buffer
+  let sep: number
+  while ((sep = rest.indexOf('\n\n')) >= 0) {
+    const block = rest.slice(0, sep)
+    rest = rest.slice(sep + 2)
+    let eventName = 'message'
+    const dataLines: string[] = []
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+    if (dataLines.length) {
+      frames.push({ event: eventName, data: dataLines.join('\n') })
+    }
+  }
+  return { frames, rest }
+}
+
+export async function postSecurityChatStream(
+  body: SecurityChatRequest,
+  handlers: SecurityChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const thread_id =
+    body.thread_id ?? body.session_id ?? getSecurityChatThreadId()
+  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
+  const token = getAuthToken()
+
+  const res = await fetch('/api/security-chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message: body.message,
+      thread_id: thread_id ?? undefined,
+      user_id: user_id ?? undefined,
+    }),
+    signal,
+  })
+
+  if (!res.ok || !res.body) {
+    let data: SecurityChatErrorBody | null = null
+    try {
+      data = (await res.json()) as SecurityChatErrorBody
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(data?.error || `HTTP ${res.status}`) as Error & {
+      status?: number
+      data?: SecurityChatErrorBody
+    }
+    err.status = res.status
+    err.data = data ?? undefined
+    throw err
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let acc = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    acc += decoder.decode(value, { stream: true })
+    const parsed = parseSseBlocks(acc)
+    acc = parsed.rest
+    for (const frame of parsed.frames) {
+      let data: Record<string, unknown> = {}
+      try {
+        data = JSON.parse(frame.data) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (frame.event === 'meta') {
+        handlers.onMeta?.(data)
+        const tid = data.thread_id
+        if (typeof tid === 'string' && tid) setSecurityChatThreadId(tid)
+      } else if (frame.event === 'delta') {
+        const t = typeof data.text === 'string' ? data.text : ''
+        if (t) handlers.onDelta?.(t)
+      } else if (frame.event === 'replace') {
+        handlers.onReplace?.({
+          reply: String(data.reply ?? ''),
+          sources: Array.isArray(data.sources)
+            ? (data.sources as SecurityChatSource[])
+            : [],
+          mode: typeof data.mode === 'string' ? data.mode : undefined,
+          provider:
+            typeof data.provider === 'string' ? data.provider : undefined,
+        })
+      } else if (frame.event === 'done') {
+        const doneBody = data as unknown as SecurityChatResponse
+        const tid = doneBody.thread_id || doneBody.session_id
+        if (tid) setSecurityChatThreadId(tid)
+        handlers.onDone?.(doneBody)
+      } else if (frame.event === 'error') {
+        handlers.onError?.(data as SecurityChatErrorBody)
+      }
+    }
+  }
 }
 
 export type ChatThreadItem = {

@@ -9,7 +9,7 @@ import {
   listChatThreads,
   loadChatThreadMessages,
   newSecurityChatThreadId,
-  postSecurityChat,
+  postSecurityChatStream,
   setSecurityChatThreadId,
   type ChatThreadItem,
   type SecurityChatErrorBody,
@@ -147,7 +147,7 @@ function SourcePanel({
 }
 
 /**
- * Security-tab chatbot: local vLLM (+ secure RAG) via /api/security-chat.
+ * Security-tab chatbot: local vLLM (+ secure RAG) via /api/security-chat/stream (SSE).
  * Do not wire Groq / Gemini / general GlobalChatbot providers here.
  */
 export default function SecurityChatbot({
@@ -293,8 +293,10 @@ export default function SecurityChatbot({
     const text = raw.trim()
     if (!text || pending) return
 
-    idRef.current += 1
-    setMessages((prev) => [...prev, { id: idRef.current, role: 'user', text }])
+    // Capture ids BEFORE setState — reading idRef inside updaters races when
+    // React batches user+ai appends (both got the same id → stream overwrote user bubble).
+    const userId = ++idRef.current
+    setMessages((prev) => [...prev, { id: userId, role: 'user', text }])
     setInput('')
     setPending(true)
 
@@ -303,30 +305,125 @@ export default function SecurityChatbot({
     abortRef.current = ac
     const t0 = performance.now()
 
+    const aiId = ++idRef.current
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: aiId,
+        role: 'ai',
+        text: '',
+        mode: 'security_rag',
+        provider: 'vllm',
+        sources: [],
+      },
+    ])
+
+    let sawTerminal = false
+
     try {
-      const res = await postSecurityChat({ message: text })
-      if (ac.signal.aborted) return
-      const elapsedMs = Math.round(performance.now() - t0)
-      idRef.current += 1
-      const sources = res.sources ?? []
-      setMessages((prev) => [
-        ...prev,
+      await postSecurityChatStream(
+        { message: text },
         {
-          id: idRef.current,
-          role: 'ai',
-          text: res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.'),
-          mode: res.mode,
-          provider: res.provider,
-          elapsedMs,
-          sources,
+          onDelta: (piece) => {
+            if (ac.signal.aborted) return
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiId && m.role === 'ai'
+                  ? { ...m, text: (m.text || '') + piece }
+                  : m,
+              ),
+            )
+          },
+          onReplace: ({ reply, sources, mode, provider }) => {
+            if (ac.signal.aborted) return
+            sawTerminal = true
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiId && m.role === 'ai'
+                  ? {
+                      ...m,
+                      text: reply,
+                      sources: sources ?? [],
+                      mode: mode ?? m.mode,
+                      provider: provider ?? m.provider,
+                      elapsedMs: Math.round(performance.now() - t0),
+                    }
+                  : m,
+              ),
+            )
+            setActiveDocChunks(null)
+          },
+          onDone: (res) => {
+            if (ac.signal.aborted) return
+            sawTerminal = true
+            const sources = res.sources ?? []
+            const elapsedMs = Math.round(performance.now() - t0)
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiId && m.role === 'ai'
+                  ? {
+                      ...m,
+                      text:
+                        res.reply ||
+                        m.text ||
+                        (res.error
+                          ? `오류: ${res.error}`
+                          : '응답이 비어 있습니다.'),
+                      mode: res.mode ?? m.mode,
+                      provider: res.provider ?? m.provider,
+                      elapsedMs,
+                      sources,
+                    }
+                  : m,
+              ),
+            )
+            if (uniqueDocIdCount(sources) === 1) {
+              const docId = sources[0].doc_id || sources[0].title
+              openDocFromSources(sources, docId)
+            }
+            void refreshThreads()
+          },
+          onError: (data) => {
+            if (ac.signal.aborted) return
+            sawTerminal = true
+            const elapsedMs = Math.round(performance.now() - t0)
+            const failText = formatSecurityChatFailure({
+              data,
+              message: data.error,
+            })
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiId && m.role === 'ai'
+                  ? {
+                      ...m,
+                      text: failText,
+                      mode: 'template',
+                      provider: 'offline',
+                      elapsedMs,
+                      sources: [],
+                    }
+                  : m,
+              ),
+            )
+          },
         },
-      ])
-      if (uniqueDocIdCount(sources) === 1) {
-        // Soft-open when single document helps “위치로 이동”
-        const docId = sources[0].doc_id || sources[0].title
-        openDocFromSources(sources, docId)
+        ac.signal,
+      )
+      if (!sawTerminal && !ac.signal.aborted) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiId && m.role === 'ai' && !m.text
+              ? {
+                  ...m,
+                  text: '응답이 비어 있습니다.',
+                  mode: 'template',
+                  provider: 'offline',
+                  elapsedMs: Math.round(performance.now() - t0),
+                }
+              : m,
+          ),
+        )
       }
-      void refreshThreads()
     } catch (err) {
       if (ac.signal.aborted) return
       const elapsedMs = Math.round(performance.now() - t0)
@@ -336,29 +433,38 @@ export default function SecurityChatbot({
       let code: string | undefined
       if (axios.isAxiosError(err)) {
         status = err.response?.status
-        const raw = err.response?.data
-        if (raw && typeof raw === 'object') {
-          data = raw as SecurityChatErrorBody
+        const rawBody = err.response?.data
+        if (rawBody && typeof rawBody === 'object') {
+          data = rawBody as SecurityChatErrorBody
         }
         message = err.message || message
         code = err.code
-      } else if (err && typeof err === 'object' && 'message' in err) {
-        message = String((err as { message?: string }).message || message)
+      } else if (err && typeof err === 'object') {
+        const e = err as {
+          message?: string
+          status?: number
+          data?: SecurityChatErrorBody
+        }
+        message = e.message || message
+        status = e.status
+        data = e.data ?? null
       }
-      console.warn('[security-chat] fail', { status, data, message, code })
-      const text = formatSecurityChatFailure({ status, data, message, code })
-      idRef.current += 1
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: idRef.current,
-          role: 'ai',
-          text,
-          mode: 'template',
-          provider: 'offline',
-          elapsedMs,
-        },
-      ])
+      console.warn('[security-chat] stream fail', { status, data, message, code })
+      const failText = formatSecurityChatFailure({ status, data, message, code })
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiId && m.role === 'ai'
+            ? {
+                ...m,
+                text: failText,
+                mode: 'template',
+                provider: 'offline',
+                elapsedMs,
+                sources: [],
+              }
+            : m,
+        ),
+      )
     } finally {
       if (!ac.signal.aborted) setPending(false)
     }
@@ -487,7 +593,7 @@ export default function SecurityChatbot({
             ))}
             {pending ? (
               <div className="mr-auto rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
-                응답 대기 중…
+                응답 생성 중…
               </div>
             ) : null}
             <div ref={endRef} />

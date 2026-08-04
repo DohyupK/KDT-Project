@@ -2,7 +2,7 @@
 Apply user_chat_* DDL to MariaDB (same DB as backend).
 Usage (from ai-service/ or repo root):
   python DB/ai-service/apply_user_chat_tables.py
-Reads DB_* from ai-service/.env (or backend/.env fallback).
+Reads DB_* from monorepo root `.env`.
 """
 from __future__ import annotations
 
@@ -16,8 +16,7 @@ SQL_PATH = Path(__file__).resolve().parent / "user_chat_tables.sql"
 sys.path.insert(0, str(AI))
 from dotenv import load_dotenv
 
-load_dotenv(AI / ".env", override=False)
-load_dotenv(REPO / "backend" / ".env", override=False)
+load_dotenv(REPO / ".env", override=False)
 
 import os
 
@@ -27,7 +26,7 @@ def main() -> int:
 
     host = os.environ.get("DB_HOST", "").strip()
     if not host:
-        print("DB_HOST missing — set ai-service/.env or backend/.env")
+        print("DB_HOST missing — set monorepo root .env")
         return 1
     port = int(os.environ.get("DB_PORT") or "3306")
     user = os.environ.get("DB_USER", "").strip()

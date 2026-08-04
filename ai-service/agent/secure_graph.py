@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, TypedDict
+from typing import Any, AsyncIterator, Awaitable, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,8 +19,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from agent.rag_engine import NO_DOCS_REPLY, get_engine
 from agent.secure_llm import make_vllm, usable_llm_text
 from agent.secure_prompts import (
+    ANALYTICS_GROUNDING_SUFFIX,
+    ANALYTICS_RESULT_HEADER,
+    EMPTY_RAG_REPLY,
     EMPTY_VLLM_REPLY,
+    EXPLAIN_INSTRUCTION_SUFFIX,
     HIT_BUT_LLM_TIMEOUT_REPLY,
+    NO_DOC_TOKEN,
     OFFLINE_REPLY,
     SUMMARY_INSTRUCTION_SUFFIX,
     SYSTEM_SECURE_RAG,
@@ -30,8 +35,10 @@ from agent.secure_prompts import (
     format_extractive_reply,
     format_rag_context_for_generate,
     history_for_generate,
+    is_analytics_intent,
     is_short_followup,
     is_summary_intent,
+    wants_explain_suffix,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +55,9 @@ class SecureState(TypedDict, total=False):
     error: str | None
     trace: list[dict[str, Any]]
     _t0: float
+    analytics_text: str
+    use_analytics: bool
+    fallback_to_rag: bool
 
 
 def _trace_append(
@@ -118,9 +128,14 @@ def node_retrieve(state: SecureState) -> SecureState:
             state.get("message") or "",
             state.get("history_text") or "",
         )
+        if expanded:
+            logger.info(
+                "[secure-chat] retrieve query_expanded=True expand_query=%r",
+                query[:500],
+            )
         hits = engine.retrieve(
             query,
-            top_k=8,
+            top_k=12,
             rerank_top_n=6,
             llm_invoke=_llm_text_invoke,
         )
@@ -143,6 +158,8 @@ def node_retrieve(state: SecureState) -> SecureState:
             f"n_sources={len(hits)} docs={doc_ids} "
             f"query_expanded={expanded}"
         )
+        if expanded:
+            detail = f"{detail} expand_query={query[:220]}"
         if used_prior:
             detail = f"prior_sources {detail}"
         return {
@@ -200,6 +217,77 @@ def node_no_docs(state: SecureState) -> SecureState:
     }
 
 
+def node_route_start(state: SecureState) -> str:
+    if is_analytics_intent(state.get("message") or ""):
+        return "analytics"
+    return "retrieve"
+
+
+def node_analytics(state: SecureState) -> SecureState:
+    from agent.analytics_engine import run_analytics
+
+    state = {
+        **state,
+        "trace": _trace_append(
+            state, "analytics_start", ok=True, detail="polars_csv_lake"
+        ),
+    }
+    try:
+        result = run_analytics(state.get("message") or "")
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)[:300]
+        return {
+            **state,
+            "fallback_to_rag": True,
+            "use_analytics": False,
+            "analytics_text": "",
+            "sources": [],
+            "trace": _trace_append(
+                state, "analytics_done", ok=False, detail=f"exc→rag {err}"
+            ),
+        }
+
+    if result.get("fallback_to_rag"):
+        return {
+            **state,
+            "fallback_to_rag": True,
+            "use_analytics": False,
+            "analytics_text": "",
+            "sources": [],
+            "trace": _trace_append(
+                state,
+                "analytics_done",
+                ok=True,
+                detail=f"fallback_to_rag reason={result.get('error')}",
+            ),
+        }
+
+    text = result.get("analytics_text") or ""
+    sources = list(result.get("sources") or [])
+    return {
+        **state,
+        "fallback_to_rag": False,
+        "use_analytics": True,
+        "analytics_text": text,
+        "sources": sources,
+        "mode": "security_analytics",
+        "provider": "polars",
+        "error": None,
+        "trace": _trace_append(
+            state,
+            "analytics_done",
+            ok=True,
+            detail=f"ok chars={len(text)} n_sources={len(sources)}",
+        ),
+    }
+
+
+def node_after_analytics(state: SecureState) -> str:
+    if state.get("fallback_to_rag"):
+        return "retrieve"
+    return "generate"
+
+
 def node_generate(state: SecureState) -> SecureState:
     import os
 
@@ -215,10 +303,31 @@ def node_generate(state: SecureState) -> SecureState:
     }
     titles = sorted({str(s.get("title") or "") for s in sources if s.get("title")})
     summary_intent = is_summary_intent(state.get("message") or "")
+    use_analytics = bool(
+        state.get("use_analytics") and (state.get("analytics_text") or "").strip()
+    )
 
     # Skip slow LM Studio generate — return cited excerpts (fixes related-query 500).
     gen_flag = os.environ.get("SECURE_GENERATE", "0").strip().lower()
     if gen_flag in ("0", "false", "no", "off"):
+        if use_analytics:
+            reply = (state.get("analytics_text") or "").strip()
+            sources = list(state.get("sources") or [])
+            reply, sources = finalize_reply_sources(reply, sources)
+            return {
+                **state,
+                "reply": reply,
+                "sources": sources,
+                "mode": "security_analytics",
+                "provider": "polars",
+                "error": None,
+                "trace": _trace_append(
+                    state,
+                    "generate_skipped",
+                    ok=True,
+                    detail="SECURE_GENERATE=0 analytics",
+                ),
+            }
         if summary_intent:
             reply = format_compressed_extractive_reply(
                 sources,
@@ -265,18 +374,35 @@ def node_generate(state: SecureState) -> SecureState:
     gen_t0 = time.perf_counter()
     timeout_s = float(os.environ.get("SECURE_VLLM_TIMEOUT", "45"))
     max_tokens = int(os.environ.get("SECURE_VLLM_MAX_TOKENS", "256"))
+    # Short briefing paths: ignore large global max_tokens (e.g. 1024).
+    brief_path = summary_intent or wants_explain_suffix(
+        state.get("message") or "", sources
+    )
+    if brief_path:
+        max_tokens = 256
     context = format_rag_context_for_generate(sources)
     cite_hint = ", ".join(f"[출처: {t}]" for t in titles if t)
     history = history_for_generate(state.get("history_text") or "")
     history_block = f"이전 대화:\n{history}\n\n" if history else ""
-    user_block = (
-        f"{history_block}"
-        f"질문:\n{state['message']}\n\n"
-        f"검색된 사내 문서 발췌:\n{context}\n\n"
-        f"답변 끝에 사용한 문서에 대해 반드시 인용을 붙이세요. 예: {cite_hint}"
-    )
-    if summary_intent:
-        user_block = f"{user_block}\n\n{SUMMARY_INSTRUCTION_SUFFIX}"
+    if use_analytics:
+        user_block = (
+            f"{history_block}"
+            f"질문:\n{state['message']}\n\n"
+            f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
+            f"답변 끝에 사용한 출처를 붙여라. 예: {cite_hint}\n\n"
+            f"{ANALYTICS_GROUNDING_SUFFIX}"
+        )
+    else:
+        user_block = (
+            f"{history_block}"
+            f"질문:\n{state['message']}\n\n"
+            f"검색된 사내 문서 발췌:\n{context}\n\n"
+            f"답변 끝에 사용한 문서에 대해 반드시 인용을 붙이세요. 예: {cite_hint}"
+        )
+        if summary_intent:
+            user_block = f"{user_block}\n\n{SUMMARY_INSTRUCTION_SUFFIX}"
+        elif wants_explain_suffix(state.get("message") or "", sources):
+            user_block = f"{user_block}\n\n{EXPLAIN_INSTRUCTION_SUFFIX}"
     prompt_chars = len(SYSTEM_SECURE_RAG) + len(user_block)
     state = {
         **state,
@@ -287,12 +413,13 @@ def node_generate(state: SecureState) -> SecureState:
             detail=(
                 f"prompt_chars={prompt_chars} history_chars={len(history)} "
                 f"ctx_chars={len(context)} timeout_s={timeout_s} "
-                f"max_tokens={max_tokens} summary={summary_intent}"
+                f"max_tokens={max_tokens} summary={summary_intent} "
+                f"brief_cap={brief_path}"
             ),
         ),
     }
     try:
-        llm = make_vllm()
+        llm = make_vllm(max_tokens=max_tokens)
         out = llm.invoke(
             [
                 SystemMessage(content=SYSTEM_SECURE_RAG),
@@ -317,8 +444,19 @@ def node_generate(state: SecureState) -> SecureState:
                 "빈 문자열·도구호출 금지. "
                 f"답 끝에 인용을 붙여라. 예: {cite_hint}"
             )
-            if summary_intent:
+            if use_analytics:
+                retry_block = (
+                    f"질문:\n{state['message']}\n\n"
+                    f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
+                    "위 집계 결과만 근거로 한국어 2~5문장으로 바로 답하라. "
+                    "빈 문자열·도구호출 금지. "
+                    f"답 끝에 인용을 붙여라. 예: {cite_hint}\n\n"
+                    f"{ANALYTICS_GROUNDING_SUFFIX}"
+                )
+            elif summary_intent:
                 retry_block = f"{retry_block}\n\n{SUMMARY_INSTRUCTION_SUFFIX}"
+            elif wants_explain_suffix(state.get("message") or "", sources):
+                retry_block = f"{retry_block}\n\n{EXPLAIN_INSTRUCTION_SUFFIX}"
             state = {
                 **state,
                 "trace": _trace_append(
@@ -374,8 +512,8 @@ def node_generate(state: SecureState) -> SecureState:
             **state,
             "reply": reply,
             "sources": sources,
-            "mode": "security_rag",
-            "provider": "vllm",
+            "mode": "security_analytics" if use_analytics else "security_rag",
+            "provider": "polars" if use_analytics else "vllm",
             "error": None,
             "trace": _trace_append(
                 state,
@@ -431,11 +569,21 @@ def node_done(state: SecureState) -> SecureState:
 
 def build_secure_graph():
     g: StateGraph = StateGraph(SecureState)
+    g.add_node("analytics", node_analytics)
     g.add_node("retrieve", node_retrieve)
     g.add_node("no_docs", node_no_docs)
     g.add_node("generate", node_generate)
     g.add_node("done", node_done)
-    g.add_edge(START, "retrieve")
+    g.add_conditional_edges(
+        START,
+        node_route_start,
+        {"analytics": "analytics", "retrieve": "retrieve"},
+    )
+    g.add_conditional_edges(
+        "analytics",
+        node_after_analytics,
+        {"retrieve": "retrieve", "generate": "generate"},
+    )
     g.add_conditional_edges(
         "retrieve",
         node_gate,
@@ -451,7 +599,7 @@ def build_secure_graph():
     return g.compile()
 
 
-_GRAPH = None
+_GRAPH = None  # rebuilt on first run_secure_chat after topology changes
 
 
 def run_secure_chat(
@@ -529,3 +677,339 @@ def run_secure_chat(
         "sources": clean,
         "trace": trace,
     }
+
+
+def _token_hold_suffix_len(raw: str, token: str) -> int:
+    """
+    Longest k where raw's suffix of length k is a prefix of token.
+    Reverse scan — holds partial control tokens (e.g. '[SYS_').
+    """
+    if not raw or not token:
+        return 0
+    max_k = min(len(raw), len(token) - 1)
+    for k in range(max_k, 0, -1):
+        if token.startswith(raw[-k:]):
+            return k
+    return 0
+
+
+def _clean_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clean: list[dict[str, Any]] = []
+    for s in sources or []:
+        clean.append(
+            {
+                "doc_id": s.get("doc_id"),
+                "title": s.get("title"),
+                "category": s.get("category"),
+                "process": s.get("process"),
+                "source_path": s.get("source_path"),
+                "chunk_index": s.get("chunk_index"),
+                "text": s.get("text"),
+            }
+        )
+    return clean
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {"event": event, "data": data}
+
+
+def _chunk_text(content: Any) -> str:
+    """Raw incremental text from an astream chunk (do not strip mid-stream)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and "text" in block:
+                parts.append(str(block["text"]))
+        return "".join(parts)
+    return str(content)
+
+
+DisconnectCheck = Callable[[], Awaitable[bool]]
+
+
+async def stream_secure_chat(
+    message: str,
+    *,
+    prior_sources: list[dict[str, Any]] | None = None,
+    history_text: str | None = None,
+    is_disconnected: DisconnectCheck | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    SSE-oriented async generator.
+    Yields dicts: {"event": meta|delta|replace|done|error, "data": {...}}.
+    Preserves retrieve diversify/prior via node_retrieve; SECURE_GENERATE gate unchanged.
+    """
+    import os
+
+    text = (message or "").strip()
+    t0 = time.perf_counter()
+
+    def elapsed_ms() -> int:
+        return int((time.perf_counter() - t0) * 1000)
+
+    async def disconnected() -> bool:
+        if is_disconnected is None:
+            return False
+        try:
+            return bool(await is_disconnected())
+        except Exception:  # noqa: BLE001
+            return False
+
+    if not text:
+        yield _sse_event(
+            "done",
+            {
+                "reply": "메시지가 비어 있습니다.",
+                "mode": "template",
+                "provider": "offline",
+                "error": "empty_message",
+                "sources": [],
+                "trace": [],
+                "elapsed_ms": elapsed_ms(),
+            },
+        )
+        return
+
+    state: SecureState = {
+        "message": text,
+        "sources": [],
+        "prior_sources": list(prior_sources or []),
+        "history_text": (history_text or "").strip(),
+        "trace": [],
+        "_t0": t0,
+    }
+
+    try:
+        used_analytics = False
+
+        if is_analytics_intent(text):
+            yield _sse_event(
+                "meta",
+                {
+                    "stage": "analytics",
+                    "mode": "security_analytics",
+                    "provider": "polars",
+                },
+            )
+            state = node_analytics(state)
+            if await disconnected():
+                return
+            if state.get("use_analytics") and not state.get("fallback_to_rag"):
+                used_analytics = True
+
+        if not used_analytics:
+            # Early meta before heavy retrieve/rerank (TTFB feel).
+            yield _sse_event(
+                "meta",
+                {
+                    "stage": "retrieve",
+                    "mode": "security_rag",
+                    "provider": "vllm",
+                },
+            )
+
+            state = node_retrieve(state)
+            if await disconnected():
+                return
+
+            route = node_gate(state)
+            if route == "done":
+                state = node_done(state)
+                yield _sse_event(
+                    "done",
+                    {
+                        "reply": state.get("reply") or OFFLINE_REPLY,
+                        "mode": state.get("mode") or "template",
+                        "provider": state.get("provider") or "offline",
+                        "error": state.get("error"),
+                        "sources": _clean_sources(list(state.get("sources") or [])),
+                        "trace": list(state.get("trace") or []),
+                        "elapsed_ms": elapsed_ms(),
+                    },
+                )
+                return
+
+            if route == "no_docs":
+                state = node_no_docs(state)
+                yield _sse_event(
+                    "done",
+                    {
+                        "reply": state.get("reply") or NO_DOCS_REPLY,
+                        "mode": state.get("mode") or "security_no_docs",
+                        "provider": state.get("provider") or "rag",
+                        "error": None,
+                        "sources": [],
+                        "trace": list(state.get("trace") or []),
+                        "elapsed_ms": elapsed_ms(),
+                    },
+                )
+                return
+
+        sources = list(state.get("sources") or [])
+        summary_intent = is_summary_intent(text)
+        explain = wants_explain_suffix(text, sources)
+        gen_flag = os.environ.get("SECURE_GENERATE", "0").strip().lower()
+
+        yield _sse_event(
+            "meta",
+            {
+                "stage": "generate",
+                "mode": "security_analytics" if used_analytics else "security_rag",
+                "provider": "polars" if used_analytics else "vllm",
+                "n_sources": len(sources),
+            },
+        )
+
+        if gen_flag in ("0", "false", "no", "off"):
+            gen_state = node_generate(state)
+            yield _sse_event(
+                "done",
+                {
+                    "reply": gen_state.get("reply") or "",
+                    "mode": gen_state.get("mode")
+                    or ("security_analytics" if used_analytics else "security_rag"),
+                    "provider": gen_state.get("provider")
+                    or ("polars" if used_analytics else "rag_extractive"),
+                    "error": gen_state.get("error"),
+                    "sources": _clean_sources(list(gen_state.get("sources") or [])),
+                    "trace": list(gen_state.get("trace") or []),
+                    "elapsed_ms": elapsed_ms(),
+                },
+            )
+            return
+
+        titles = sorted({str(s.get("title") or "") for s in sources if s.get("title")})
+        context = format_rag_context_for_generate(sources)
+        cite_hint = ", ".join(f"[출처: {t}]" for t in titles if t)
+        history = history_for_generate(state.get("history_text") or "")
+        history_block = f"이전 대화:\n{history}\n\n" if history else ""
+        if used_analytics:
+            user_block = (
+                f"{history_block}"
+                f"질문:\n{text}\n\n"
+                f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
+                f"답변 끝에 사용한 출처를 붙여라. 예: {cite_hint}\n\n"
+                f"{ANALYTICS_GROUNDING_SUFFIX}"
+            )
+        else:
+            user_block = (
+                f"{history_block}"
+                f"질문:\n{text}\n\n"
+                f"검색된 사내 문서 발췌:\n{context}\n\n"
+                f"답변 끝에 사용한 문서에 대해 반드시 인용을 붙이세요. 예: {cite_hint}"
+            )
+            if summary_intent:
+                user_block = f"{user_block}\n\n{SUMMARY_INSTRUCTION_SUFFIX}"
+            elif explain:
+                user_block = f"{user_block}\n\n{EXPLAIN_INSTRUCTION_SUFFIX}"
+
+        max_tokens = int(os.environ.get("SECURE_VLLM_MAX_TOKENS", "256"))
+        if (not used_analytics) and (summary_intent or explain):
+            max_tokens = 256
+        llm = make_vllm(max_tokens=max_tokens)
+        raw = ""
+        emitted = ""
+        messages = [
+            SystemMessage(content=SYSTEM_SECURE_RAG),
+            HumanMessage(content=user_block),
+        ]
+
+        async for chunk in llm.astream(messages):
+            if await disconnected():
+                return
+            piece = _chunk_text(getattr(chunk, "content", None))
+            if not piece:
+                continue
+
+            raw += piece
+
+            if NO_DOC_TOKEN in raw:
+                yield _sse_event(
+                    "replace",
+                    {
+                        "reply": EMPTY_RAG_REPLY,
+                        "sources": [],
+                        "mode": "security_rag",
+                        "provider": "vllm",
+                        "error": None,
+                    },
+                )
+                yield _sse_event(
+                    "done",
+                    {
+                        "reply": EMPTY_RAG_REPLY,
+                        "mode": "security_rag",
+                        "provider": "vllm",
+                        "error": None,
+                        "sources": [],
+                        "trace": list(state.get("trace") or []),
+                        "elapsed_ms": elapsed_ms(),
+                    },
+                )
+                return
+
+            hold_k = _token_hold_suffix_len(raw, NO_DOC_TOKEN)
+            safe = raw[:-hold_k] if hold_k else raw
+            if len(safe) > len(emitted):
+                delta = safe[len(emitted) :]
+                emitted = safe
+                if delta:
+                    yield _sse_event("delta", {"text": delta})
+
+        if await disconnected():
+            return
+
+        if len(raw) > len(emitted):
+            tail = raw[len(emitted) :]
+            if tail and not NO_DOC_TOKEN.startswith(tail):
+                yield _sse_event("delta", {"text": tail})
+                emitted = raw
+
+        final_raw = emitted if emitted else raw
+        if not (final_raw or "").strip():
+            reply = format_extractive_reply(
+                sources,
+                notice=EMPTY_VLLM_REPLY + " 아래는 검색된 원문 발췌입니다.",
+            )
+            reply, sources_out = finalize_reply_sources(reply, sources)
+            yield _sse_event(
+                "done",
+                {
+                    "reply": reply,
+                    "mode": "security_rag",
+                    "provider": "rag_extractive",
+                    "error": "empty_vllm_reply",
+                    "sources": _clean_sources(sources_out),
+                    "trace": list(state.get("trace") or []),
+                    "elapsed_ms": elapsed_ms(),
+                },
+            )
+            return
+
+        reply, sources_out = finalize_reply_sources(final_raw, sources)
+        yield _sse_event(
+            "done",
+            {
+                "reply": reply,
+                "mode": "security_analytics" if used_analytics else "security_rag",
+                "provider": "polars" if used_analytics else "vllm",
+                "error": None,
+                "sources": _clean_sources(sources_out),
+                "trace": list(state.get("trace") or []),
+                "elapsed_ms": elapsed_ms(),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)[:400]
+        logger.warning("[secure-chat] stream fail err=%s", err[:200])
+        yield _sse_event(
+            "error",
+            {"error": err, "stage": "stream_secure_chat", "elapsed_ms": elapsed_ms()},
+        )
