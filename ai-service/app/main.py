@@ -151,12 +151,17 @@ def _model_version() -> str | None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    from agent.chat_history_store import chat_history_db_status
+
+    db = chat_history_db_status()
     return HealthResponse(
         status="ok",
         model_version=_model_version(),
         models_dir=str(MODELS_DIR.resolve()),
         chat_requests=_chat_request_count,
         registry_ready=[str(h["id"]) for h in list_ready_heads()],
+        chat_history_db_ok=bool(db.get("ok")),
+        chat_history_db_error=db.get("error"),
     )
 
 
