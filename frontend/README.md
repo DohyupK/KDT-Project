@@ -1,92 +1,78 @@
 # Frontend — 화면(UI) 패키지
 
-이 폴더는 **웹 화면만** 담당합니다. (Next.js App Router)
-
-저장소 전체(서버·AI·문서·AI 규칙 구조)를 보려면 위로 돌아가세요.
+이 폴더는 **웹 화면**만 담당합니다. (Next.js App Router)
 
 | 보고 싶은 것 | 파일 |
 |--------------|------|
-| 저장소 전체 지도 | [`../README.md`](../README.md) |
+| 저장소 전체 지도 · 실행 · **기술 스택** | [`../README.md`](../README.md) |
 | 지금 프로젝트 방향 | [`../docs/direction.md`](../docs/direction.md) |
 | 날짜별 작업 기록 | [`../docs/work-log/`](../docs/work-log/) |
 | AI용 FE 추가 규칙 | [`AGENTS.md`](./AGENTS.md) |
 
 ---
 
-## 이 패키지가 하는 일
+## 한 줄 역할
 
-양극재 품질 AI 예측 시스템의 **프론트엔드**입니다.  
-사용자는 브라우저에서 LOT·품질·관리·설정 화면을 사용합니다.
-
-이미 화면이 있는 페이지: **Main** (`/main`), **Dashboard**, **Management**, **Setting**, **Issue**, **Knowledge**, **Inquiry**  
-이름만 있는 페이지: Login  
-공통: 좌측 네비 (`AppShell`, Login 제외). `/`는 `/main`으로 이동.  
-헤더 유저 아이콘 → `/login` (UI는 추후 작성).  
-**AI 챗봇:** AppShell 전역 플로팅 (`src/components/chat/GlobalChatbot.tsx`) — Main만이 아님.
+양극재 품질 AI 예측 시스템의 **브라우저 UI** — LOT·품질·관리·설정·챗봇·로그인.
 
 ---
 
-## 실행 방법
+## 기능 요약
 
-Node.js LTS 권장.
-
-```bash
-npm install
-npm run dev
-```
-
-브라우저: [http://localhost:3000](http://localhost:3000)
-
-| 명령 | 설명 |
-|------|------|
-| `npm run dev` | 개발 서버 |
-| `npm run build` | 프로덕션 빌드 |
-| `npm run lint` | 린트 |
-
-### 챗봇 실연동 (ai-service와 함께)
-
-전역 챗봇(`AppShell` → `GlobalChatbot`)은 **ai-service(:8000)** 가 켜져 있어야 합니다.  
-루트 README의 **[로컬 실행 — 챗봇 (터미널 2개)](../README.md#로컬-실행--챗봇-터미널-2개)** 를 따릅니다.
-
-- rewrite: `next.config.ts` — `/ai` → `127.0.0.1:8000` (변경 후 Next 재시작)
-- 클라이언트: `src/api/aiApi.ts` → `POST /ai/chat`
+| 기능 | 경로 / 진입 | 비고 |
+|------|-------------|------|
+| Main | `/main` | LOT·요약 홈 |
+| Dashboard | `/dashboard` | 차트·지표 |
+| Management | `/management` | 제어·한계치·승인 흐름 |
+| Setting | `/setting` | **시스템 환경만** (폰트·테마·새로고침·알림·제어 한계치) |
+| Issue | `/issue` | 이슈 목록·상세·조치 |
+| Knowledge | `/knowledge` | 지식/문서 UI |
+| Inquiry | `/inquiry` | 문의 목록·접수·답변 |
+| Login | `/login` | 로그인·회원가입 등 auth UI |
+| 보안 챗 | `/security` · Maximize | 전체화면 보안 오버레이 · SSE |
+| 일반 챗 | AppShell → `GlobalChatbot` | 우하단 플로팅 · `POST /api/chat` |
+| 내 정보 | 헤더 프로필 → 모달 | `PersonalInfoModal` · `/setting#personal`로 가지 않음 |
 
 ---
 
-## 기술 스택
+## 세부 설계
 
-- Next.js (App Router)
-- React, TypeScript
-- Tailwind CSS
-- Zustand, Axios, Recharts, Lucide React, Day.js
+### 라우팅 · 레이아웃
 
-서버(API)는 루트의 `backend/`에서 다룰 예정이며, 개발 중에는 `next.config.ts`의 `/api` 프록시를 사용합니다.
+- App Router: `src/app/(shell)/` — 공통 `AppShell`(사이드바·헤더). Login·`/security`는 셸 밖.
+- `/` → `/main` 리다이렉트.
+- 페이지 ↔ API 모듈 분리: `src/app/**/page.tsx` · `src/api/*Api.ts` · `src/types`.
 
----
+### 프록시 · 연동
 
-## 폴더 구조 (frontend 안)
+- `next.config.ts` rewrite: `/api/*` → `http://localhost:3001`, `/ai/*` → `http://127.0.0.1:8800`
+- 일반 챗: `src/api/aiApi.ts` 등 → backend → ai-service
+- Auth 프로필: `GET/PUT /api/auth/profile` · 저장 후 `saveAuthSession` + `AUTH_CHANGED_EVENT`
+- `AppData.fillThreshold` 필드명·의미 변경 금지
+
+### 설정 vs 개인정보
+
+- `/setting` = 시스템 환경만
+- 「내 정보」= `PersonalInfoModal` (이메일·연락처·비밀번호 편집, 아이디·성명 읽기 전용)
+
+### 폴더 구조
 
 ```
 frontend/
 ├── src/
 │   ├── app/
-│   │   ├── (shell)/       # 공통 AppShell (사이드바·헤더)
-│   │   │   ├── main/
-│   │   │   ├── dashboard/
-│   │   │   └── …
-│   │   ├── login/         # 셸 밖
-│   │   └── page.tsx       # / → /main 리다이렉트
-│   ├── components/layout/ # AppShell
+│   │   ├── (shell)/       # AppShell (사이드바·헤더)
+│   │   ├── login/
+│   │   ├── security/
+│   │   └── page.tsx       # / → /main
+│   ├── components/        # layout · chat · …
 │   ├── api/
 │   ├── data/
 │   ├── types/
 │   └── assets/
-├── docs/                  # 안내만 (본문 기록은 루트 ../docs/)
 ├── AGENTS.md
 └── package.json
 ```
-
-주요 주소:
 
 | 주소 | 파일 |
 |------|------|
@@ -99,48 +85,58 @@ frontend/
 | `/knowledge` | `src/app/(shell)/knowledge/page.tsx` |
 | `/management` | `src/app/(shell)/management/page.tsx` |
 | `/setting` | `src/app/(shell)/setting/page.tsx` |
+| `/security` | 보안 챗 전체화면 |
 
 ---
 
-## 진행 상황
+## 실행 방법
 
-- [x] Next.js + TypeScript 구성
-- [x] 페이지 라우트 연결
-- [x] API · 타입 · 데이터 뼈대
-- [x] Main / Management / Setting UI
-- [x] Issue / Knowledge / Inquiry UI
-- [x] Dashboard UI
-- [x] 공통 레이아웃(AppShell 사이드바·헤더)
-- [ ] Login UI
-- [ ] backend API 연동
+**권장:** 저장소 루트에서 `npm run dev`  
+→ [로컬 실행 — 챗봇](../README.md#로컬-실행--챗봇) (frontend + backend + ai-service)
+
+UI만 단독:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+브라우저: [http://localhost:3000](http://localhost:3000)
+
+| 명령 | 설명 |
+|------|------|
+| `npm run dev` | 개발 서버 (이 패키지만) |
+| `npm run build` | 프로덕션 빌드 |
+| `npm run lint` | 린트 |
+
+챗봇·로그인·이슈 등 API 연동은 backend(:3001) · ai-service(:8800)가 필요합니다.
 
 ---
 
-## 사용할 라이브러리 (참고)
+## 기술 스택
 
-**Dependencies:** axios, zustand, recharts, lucide-react, dayjs  
+모노레포 스택 SSOT: [루트 README — 기술 스택](../README.md#기술-스택-모노레포)
 
-**DevDependencies:** tailwindcss, @tailwindcss/postcss, eslint, eslint-config-next, typescript  
+---
 
-(`next` / `react`는 프레임워크로 기술 스택에만 표기)
+## 진행 상황 · 다음에 할 일
+
+- [x] Next.js + 페이지 라우트 · AppShell
+- [x] Main / Dashboard / Management / Setting / Issue / Knowledge / Inquiry UI
+- [x] 전역 챗봇 · `/api`·`/ai` rewrite · 보안 탭
+- [x] Login · auth API 연동 · 내 정보 모달
+- [ ] LOT → chat features 자동 주입 고도화
 
 ---
 
 ## 개발 기록
 
-상세는 루트 일지를 봅니다. (README에는 링크만)
+상세는 루트 일지(README에는 링크만).
 
 - [2026-07-15 프로젝트 생성 및 초기 구성](../docs/work-log/2026-07-15.md)
 - [2026-07-21 React(Vite) → Next.js 마이그레이션](../docs/work-log/2026-07-21.md)
 - [2026-07-22 docs·룰·스킬·README/AGENTS 정리](../docs/work-log/2026-07-22.md)
-- [2026-07-23 ai-service ML·챗봇 연동 작업서](../docs/work-log/2026-07-23.md)
-- [2026-07-23 PC 재시작 체크포인트](../docs/plans/2026-07-23-session-handoff.md)
-
----
-
-## 다음에 할 일 (Frontend)
-
-- [x] 챗봇 전역 UI + `/ai` rewrite 실연동 (2026-07-23)
-- LoginPage UI
-- Express backend 연동
-- LOT → chat features 자동 주입
+- [2026-07-23 ai-service ML·챗봇 연동·LLM·시나리오 스모크](../docs/work-log/2026-07-23.md)
+- [2026-07-24 API키·LLM·LOT·What-if·한계치·Undo·보안vLLM](../docs/work-log/2026-07-24.md)
+- [2026-07-31 Documents·Prisma·멀티턴 B](../docs/work-log/2026-07-31.md)

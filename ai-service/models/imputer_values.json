@@ -1,0 +1,35 @@
+{
+  "numeric": {
+    "d50": 4.505517928035679,
+    "d90": 9.00864866559738,
+    "metal_impurity": 0.02406112857303384,
+    "lithium_input": 2.4956308380407792,
+    "additive_ratio": 0.14791129236676862,
+    "process_time": 72.1401314921188,
+    "sintering_temp": 799.8024701579332,
+    "humidity": 50.07382568848826,
+    "tank_pressure": 100.0321438860819,
+    "temp_dev_from_800": 19.668795183439997,
+    "temp_dev_from_800_sq": 603.6560326833987,
+    "particle_span": 4.506227904445109,
+    "temp_x_humidity": 40049.2186100459,
+    "flag_temp_low_ge5pct": 0.14492753623188406,
+    "flag_temp_high_ge5pct": 0.2277799153520585,
+    "flag_temp_low_ge20pct": 0.020520713094780044,
+    "flag_temp_high_ge20pct": 0.06348595613697576,
+    "flag_temp_high_ge25pct": 0.03090932409901244,
+    "flag_humidity_ge5pct": 0.5641157556270097,
+    "flag_humidity_ge10pct": 0.35485530546623795,
+    "flag_humidity_ge20pct": 0.05697749196141479,
+    "flag_humidity_ge30pct": 0.021864951768488745,
+    "flag_metal_ge5pct": 0.4314936318023929,
+    "flag_metal_ge10pct": 0.2907500321626142,
+    "flag_metal_ge20pct": 0.08786826193232986,
+    "flag_metal_ge40pct": 0.02341438312106008,
+    "flag_lithium_ge10pct": 0.1374340496718569,
+    "flag_temp_humidity_danger_zone": 0.006904343459703741
+  },
+  "categorical_fill": {
+    "operator_id": "__MISSING__"
+  }
+}

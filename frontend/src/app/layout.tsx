@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import '@/lib/bigintJson'
 import './globals.css'
 
 export const metadata: Metadata = {

@@ -5,11 +5,13 @@ __pycache__/
 venv/
 .env
 
-# Training artifacts / local data (keep CSV locally; do not force-commit large files)
+# Local Optuna / logs (models/ is tracked for team share)
 optuna.db
 optuna.db-*
-models/*
-!models/.gitkeep
+optuna_reg.db
+optuna_reg.db-*
+optuna_residual.db
+optuna_residual.db-*
 logs/
 
 # OS / IDE

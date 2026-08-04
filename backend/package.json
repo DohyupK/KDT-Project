@@ -2,25 +2,44 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "migrate:issue-lots": "tsx scripts/migrate-issue-lots.ts",
+    "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
+    "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
+    "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
+    "migrate:cathode-sources": "tsx scripts/migrate-cathode-sources.ts",
+    "import:cathode-sources": "tsx scripts/import-cathode-sources.ts --dataset=all",
+    "verify:cathode-sources": "tsx scripts/verify-cathode-sources.ts",
+    "seed:inquiries": "tsx scripts/seed-inquiries.ts",
+    "seed:issues": "tsx scripts/seed-issues.ts",
+    "test": "tsx --test tests/issue.validation.test.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "mariadb": "^3.5.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
   }
 }
