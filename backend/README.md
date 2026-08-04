@@ -12,7 +12,7 @@ mysql -u root -p kdt_project < ../DB/schema.sql
 mysql -u root -p kdt_project < ../DB/chat_schema.sql
 ```
 
-- `DB/schema.sql` (repo root): `users`, settings, lots, issues, handover, inquiries
+- `DB/schema.sql` (repo root): `users`, settings, lots, cathode CSV sources, issues, handover, inquiries
 - `DB/inquiries.sql`: inquiries only (or `npm run migrate:inquiries`)
 - `DB/chat_schema.sql`: chat sessions/messages (when using MariaDB chat store)
 
@@ -96,6 +96,27 @@ Frontend reaches this via Next rewrite `/api` → `:3001`.
 - 시드는 기존 LOT·이슈를 덮어쓰지 않으며, 목업 담당자와 이름이 같은 실제 사용자가 있을 때만 FK를 연결합니다.
 - SPC 상세 분석, 잔류 Li·여유·불량 확률, 라이브러리 테이블 이관은 후속 범위입니다.
 - 상세 계약: `../docs/references/issue-lot-api.md`
+
+## Cathode CSV 원천 테이블
+
+세 CSV는 서로 다른 결측 패턴을 보존하기 위해 독립 테이블에 적재합니다.
+
+| CSV | 테이블 | 타깃 |
+|-----|--------|------|
+| `cathode_clf_data.csv` | `cathode_clf_samples` | `quality_defect` |
+| `cathode_reg_data.csv` | `cathode_capacity_samples` | `capacity` |
+| `cathode_qc_reg_data.csv` | `cathode_residual_samples` | `residual_li` |
+
+```bash
+npm run migrate:cathode-sources
+npm run import:cathode-sources
+npm run verify:cathode-sources
+```
+
+- 공정값 결측치는 삭제·대체하지 않고 `NULL`로 저장합니다.
+- importer는 UPSERT 방식이라 재실행할 수 있으며 운영 `lots`를 수정하지 않습니다.
+- 다른 데이터 경로를 사용할 때는 `CATHODE_DATA_DIR` 환경 변수를 지정합니다.
+- 페이지 조회 API와 프론트 연결은 후속 범위입니다.
 
 ## 변경·설치 이력 (2026-07-24)
 

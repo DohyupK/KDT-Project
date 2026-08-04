@@ -176,7 +176,7 @@ Maximize / /security
 → [`backend/README.md`](./backend/README.md)
 
 ### ai-service
-- Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib  
+- Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib, openpyxl  
 - FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
 - Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant  
   (bge-m3 / bge-reranker **CPU** · Self-Query = `VectorIndexAutoRetriever`)  
