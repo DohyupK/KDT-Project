@@ -1,10 +1,10 @@
--- Issue / LOT / handover (shared ops data). Requires users table.
--- Risk Top = query on lots (no separate top table).
--- issue_analyses removed. handover_history kept for later.
+-- Slim process LOT + analysis_lots (scores). Sync with DB/schema.sql.
+-- lots PK = id (CSV); child tables keep column name lot_id → REFERENCES lots(id).
+-- Issue IDs: ISS-yyMMdd-001 daily sequence.
 
 CREATE TABLE IF NOT EXISTS lots (
-  lot_id            VARCHAR(64)  NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME     NOT NULL,
+  id                VARCHAR(64)  NOT NULL PRIMARY KEY,
+  `timestamp`       DATETIME     NOT NULL,
   d50               DOUBLE       NULL,
   d90               DOUBLE       NULL,
   metal_impurity    DOUBLE       NULL,
@@ -15,22 +15,41 @@ CREATE TABLE IF NOT EXISTS lots (
   humidity          DOUBLE       NULL,
   tank_pressure     DOUBLE       NULL,
   operator_id       VARCHAR(32)  NULL,
-  quality_defect    TINYINT(1)   NOT NULL DEFAULT 0,
-  defect_prob       DOUBLE       NULL COMMENT '불량확률(잠정/채점)',
-  residual_lithium  DOUBLE       NULL COMMENT '잔류리튬 예측(ppm)',
-  spc_status        VARCHAR(32)  NULL COMMENT '이탈|주의|안정|이탈, 주의',
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '안정'
+  INDEX idx_lots_recorded (`timestamp`)
+);
+
+CREATE TABLE IF NOT EXISTS analysis_lots (
+  lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
+  defect_prob              DOUBLE       NULL COMMENT '불량확률(잠정/채점)',
+  spc_status               VARCHAR(32)  NULL COMMENT '이탈|주의|안정|이탈, 주의',
+  risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정'
     COMMENT '심각|주의|안정',
-  risk_reason       VARCHAR(255) NULL,
-  scored_at         DATETIME     NULL,
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_lots_recorded (recorded_at),
-  INDEX idx_lots_risk (risk_level)
+  risk_reason              VARCHAR(255) NULL,
+  clf_model_version        VARCHAR(64)  NULL,
+  residual_model_version   VARCHAR(64)  NULL,
+  spc_limit_version        VARCHAR(64)  NULL,
+  scored_at                DATETIME     NULL,
+  created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_analysis_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE,
+  INDEX idx_analysis_risk (risk_level),
+  INDEX idx_analysis_scored (scored_at)
+);
+
+CREATE TABLE IF NOT EXISTS judgment_lots (
+  lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,
+  quality_defect  TINYINT(1)   NOT NULL,
+  capacity        DOUBLE       NULL COMMENT 'mAh/g',
+  residual_li     DOUBLE       NULL COMMENT '잔류리튬(ppm) · API residualLithium',
+  CONSTRAINT fk_judgment_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS issues (
-  issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY COMMENT 'ISS-yyMMdd-seq',
+  issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY COMMENT 'ISS-yyMMdd-001',
   lot_id            VARCHAR(64)  NOT NULL,
   occurred_at       DATETIME     NOT NULL,
   risk_level        VARCHAR(10)  NOT NULL COMMENT '심각|주의|안정',
@@ -40,7 +59,7 @@ CREATE TABLE IF NOT EXISTS issues (
   action_content    TEXT         NULL COMMENT '조치 내용(목록 미노출)',
   assignee_user_id  VARCHAR(50)  NULL,
   completed_at      DATETIME     NULL COMMENT '처리날짜 (완료 시)',
-  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(lot_id),
+  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
   INDEX idx_issues_status (status),
@@ -69,7 +88,7 @@ CREATE TABLE IF NOT EXISTS handover_history (
     FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
     ON DELETE RESTRICT,
   CONSTRAINT fk_handover_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(lot_id)
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE RESTRICT,
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)

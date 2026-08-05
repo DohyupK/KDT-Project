@@ -2878,7 +2878,7 @@ export default function DashBoardPage() {
               생산 상세 테이블
             </h2>
             <p className={`mt-0.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              cathode_clf_data 기반 일별 생산·불량 집계
+              cathode_clf_data.csv 기반 일별 생산·불량 집계
             </p>
           </div>
 

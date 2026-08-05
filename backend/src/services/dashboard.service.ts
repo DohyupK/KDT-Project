@@ -153,67 +153,69 @@ export async function listLotRisks(q: LotRiskListQuery) {
   const pageSize = Math.min(Math.max(Number(q.pageSize) || 5, 1), 50)
   const page = Math.max(Number(q.page) || 1, 1)
   const where: string[] = [
-    'scored_at IS NOT NULL',
-    `risk_level IN ('심각', 'A', '높음', '주의', 'B', '중간')`,
+    'a.scored_at IS NOT NULL',
+    `a.risk_level IN ('심각', 'A', '높음', '주의', 'B', '중간')`,
   ]
   const params: unknown[] = []
 
   if (q.search?.trim()) {
-    where.push('lot_id LIKE ?')
+    where.push('l.id LIKE ?')
     params.push(`%${q.search.trim()}%`)
   }
   if (q.riskLevel && q.riskLevel !== 'all') {
     const risk = normalizeRiskLevel(q.riskLevel)
-    where.push(`risk_level IN (?, ?, ?)`)
+    where.push(`a.risk_level IN (?, ?, ?)`)
     if (risk === '심각') params.push('심각', '높음', 'A')
     else if (risk === '주의') params.push('주의', '중간', 'B')
     else params.push('안정', '낮음', 'C')
   }
   if (q.spc && q.spc !== 'all') {
     if (q.spc === '이탈') {
-      where.push(`spc_status LIKE '%이탈%'`)
+      where.push(`a.spc_status LIKE '%이탈%'`)
     } else if (q.spc === '주의') {
-      where.push(`(spc_status LIKE '%주의%' OR spc_status = '주의')`)
+      where.push(`(a.spc_status LIKE '%주의%' OR a.spc_status = '주의')`)
     } else if (q.spc === '안정') {
-      where.push(`(spc_status = '안정' OR spc_status = '정상' OR spc_status IS NULL)`)
+      where.push(`(a.spc_status = '안정' OR a.spc_status = '정상' OR a.spc_status IS NULL)`)
     }
   }
   if (q.minProb != null && Number.isFinite(q.minProb)) {
-    where.push('defect_prob >= ?')
+    where.push('a.defect_prob >= ?')
     params.push(q.minProb)
   }
   if (q.maxProb != null && Number.isFinite(q.maxProb)) {
-    where.push('defect_prob < ?')
+    where.push('a.defect_prob < ?')
     params.push(q.maxProb)
   }
   if (q.marginLevel === 'low') {
-    where.push('residual_lithium IS NOT NULL AND (? - residual_lithium) <= 500')
+    where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) <= 500')
     params.push(RESIDUAL_USL)
   } else if (q.marginLevel === 'caution') {
     where.push(
-      'residual_lithium IS NOT NULL AND (? - residual_lithium) > 500 AND (? - residual_lithium) <= 1000',
+      'j.residual_li IS NOT NULL AND (? - j.residual_li) > 500 AND (? - j.residual_li) <= 1000',
     )
     params.push(RESIDUAL_USL, RESIDUAL_USL)
   } else if (q.marginLevel === 'sufficient') {
-    where.push('residual_lithium IS NOT NULL AND (? - residual_lithium) > 1000')
+    where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) > 1000')
     params.push(RESIDUAL_USL)
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const fromJoin = `FROM lots l INNER JOIN analysis_lots a ON a.lot_id = l.id LEFT JOIN judgment_lots j ON j.lot_id = l.id`
   const countRows = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM lots ${whereSql}`,
+    `SELECT COUNT(*) AS c ${fromJoin} ${whereSql}`,
     params,
   )
   const total = Number(countRows[0]?.c || 0)
   const offset = (page - 1) * pageSize
 
   const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, quality_defect, defect_prob, residual_lithium,
-            spc_status, risk_level, risk_reason, d50, d90, metal_impurity, lithium_input,
-            additive_ratio, process_time, sintering_temp, humidity, tank_pressure,
-            operator_id, scored_at
-     FROM lots ${whereSql}
-     ORDER BY recorded_at DESC, lot_id DESC
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, 0 AS quality_defect, a.defect_prob,
+            j.residual_li AS residual_lithium,
+            a.spc_status, a.risk_level, a.risk_reason, l.d50, l.d90, l.metal_impurity, l.lithium_input,
+            l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure,
+            l.operator_id, a.scored_at
+     ${fromJoin} ${whereSql}
+     ORDER BY l.\`timestamp\` DESC, l.id DESC
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset],
   )
@@ -244,11 +246,15 @@ export async function listLotRisks(q: LotRiskListQuery) {
 
 export async function getLotRiskDetail(lotId: string) {
   const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, quality_defect, defect_prob, residual_lithium,
-            spc_status, risk_level, risk_reason, d50, d90, metal_impurity, lithium_input,
-            additive_ratio, process_time, sintering_temp, humidity, tank_pressure,
-            operator_id, scored_at
-     FROM lots WHERE lot_id = ? LIMIT 1`,
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, 0 AS quality_defect, a.defect_prob,
+            j.residual_li AS residual_lithium,
+            a.spc_status, a.risk_level, a.risk_reason, l.d50, l.d90, l.metal_impurity, l.lithium_input,
+            l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure,
+            l.operator_id, a.scored_at
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     WHERE l.id = ? LIMIT 1`,
     [lotId],
   )
   if (!rows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
@@ -273,10 +279,11 @@ export async function getLotRiskDetail(lotId: string) {
 
 async function getAllProductionPoints() {
   const rows = await query<LotAggRow[]>(
-    `SELECT recorded_at, quality_defect, defect_prob,
-            metal_impurity, sintering_temp, humidity
-     FROM lots
-     ORDER BY recorded_at ASC`,
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, a.defect_prob,
+            l.metal_impurity, l.sintering_temp, l.humidity
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     ORDER BY l.\`timestamp\` ASC`,
   )
 
   const byDate = new Map<
@@ -338,8 +345,10 @@ export async function getProductionDaily(page = 1, pageSize = 5) {
   // Enrich FI averages for the page dates
   const dateSet = new Set(slice.map((p) => p.date))
   const rows = await query<LotAggRow[]>(
-    `SELECT recorded_at, quality_defect, metal_impurity, sintering_temp, humidity, scored_at
-     FROM lots ORDER BY recorded_at ASC`,
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, l.metal_impurity, l.sintering_temp, l.humidity, a.scored_at
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     ORDER BY l.\`timestamp\` ASC`,
   )
   const byDate = new Map<string, LotAggRow[]>()
   for (const r of rows) {
@@ -392,12 +401,14 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
     throw new AppError(400, 'date는 YYYY-MM-DD 형식이어야 합니다.')
   }
   const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, d50, d90, metal_impurity, lithium_input, additive_ratio,
-            process_time, sintering_temp, humidity, tank_pressure, operator_id,
-            quality_defect, defect_prob, residual_lithium, spc_status, risk_level, risk_reason
-     FROM lots
-     WHERE DATE(recorded_at) = ?
-     ORDER BY recorded_at ASC, lot_id ASC`,
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
+            l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
+            0 AS quality_defect, a.defect_prob, j.residual_li AS residual_lithium, a.spc_status, a.risk_level, a.risk_reason
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     WHERE DATE(l.\`timestamp\`) = ?
+     ORDER BY l.\`timestamp\` ASC, l.id ASC`,
     [date],
   )
 
