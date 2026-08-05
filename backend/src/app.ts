@@ -8,6 +8,7 @@ import { settingsRouter } from './routes/settings.js'
 import { securityChatRouter } from './routes/securityChat.js'
 import { llmKeysRouter } from './routes/llmKeys.js'
 import { issueRouter } from './routes/issue.routes.js'
+import { dashboardRouter } from './routes/dashboard.routes.js'
 import inquiryRoutes from './routes/inquiry.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
@@ -37,7 +38,9 @@ export function createApp() {
       health: '/api/health',
       auth: '/api/auth',
       auth_settings: 'GET|PUT /api/auth/settings · POST /api/auth/settings/reset',
-      lots: 'GET /api/lots/risk-top · GET /api/lots/:lotId · POST /api/lots/import',
+      lots: 'GET /api/lots/risk-top · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
+      dashboard:
+        'GET /api/dashboard/lot-risks · /lot-risks/:lotId · /production-trend · /production-daily · /lots.csv · /feature-importance',
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
       past_issues: 'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId',
       handover_history: 'GET /api/knowledge/handover-history (후속)',
@@ -57,6 +60,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes)
   app.use('/api/inquiries', inquiryRoutes)
   app.use('/api', issueRouter)
+  app.use('/api', dashboardRouter)
   app.use('/api', chatThreadsRouter)
   app.use('/api', chatRouter)
   app.use('/api', securityChatRouter)

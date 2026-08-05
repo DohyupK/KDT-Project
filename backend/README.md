@@ -81,19 +81,35 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 시드: `npm run seed:inquiries` · 첨부 업로드는 후속.
 
-### Issue API
+### Issue / LOT / Dashboard API
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/issues` | 미완료 높음·중간 이슈 목록. query: search, date, lotId, riskLevel, status |
+| GET | `/api/issues` | 미완료 심각·주의 이슈 목록. query: search, date, lotId, riskLevel, status |
 | GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
 | PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
+| GET | `/api/lots/risk-top` | 심각·주의 LOT Top |
+| POST | `/api/lots/import` | CSV 공정값 적재 (`?score=1` 시 채점) |
+| POST | `/api/lots/score` | AI+SPC 재채점 (JWT) |
+| GET | `/api/dashboard/*` | LOT 위험·생산추이·상세·CSV·SHAP |
+
+```bash
+cd backend
+# 잘못된 전량 채점 롤백
+npm run rollback:score-lots
+# ai-service(:8800) ready 후 샘플 SSOT 재채점
+npm run score:lots
+npm run score:lots -- --limit=100 --concurrency=4
+```
+
+- 위험등급: `심각` \| `주의` \| `안정` · SPC: `이탈` \| `주의` \| `안정` \| `이탈, 주의`
+- 여유량 = `4000 - residual_lithium` (API 계산)
+- 채점 입력: `cathode_clf_samples` → 불량확률, `cathode_residual_samples` → 잔류리튬, SPC는 완전사례만
+- 상세 계약: `../docs/references/issue-lot-api.md`
+- 챗봇 인수인계: `../docs/references/chatbot-handoff-2026-08-04.md`
 
 - 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
 - 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
-- 시드는 기존 LOT·이슈를 덮어쓰지 않으며, 목업 담당자와 이름이 같은 실제 사용자가 있을 때만 FK를 연결합니다.
-- SPC 상세 분석, 잔류 Li·여유·불량 확률, 라이브러리 테이블 이관은 후속 범위입니다.
-- 상세 계약: `../docs/references/issue-lot-api.md`
 
 ## Cathode CSV 원천 테이블
 

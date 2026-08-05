@@ -62,9 +62,78 @@ export type AiChatResponse = {
   error: string | null
 }
 
+function aiServiceBase(): string {
+  return (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8800').replace(/\/$/, '')
+}
+
+export type PredictFeatureBody = {
+  d50?: number | null
+  d90?: number | null
+  metal_impurity?: number | null
+  lithium_input?: number | null
+  additive_ratio?: number | null
+  process_time?: number | null
+  sintering_temp?: number | null
+  humidity?: number | null
+  tank_pressure?: number | null
+  operator_id?: string | null
+  id?: string | null
+  timestamp?: string | null
+  fillThreshold?: number | null
+}
+
+async function postAiJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${aiServiceBase()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`ai-service ${path} ${res.status}: ${text.slice(0, 300)}`)
+  }
+  return (await res.json()) as T
+}
+
+function sanitizePredictBody(features: PredictFeatureBody): Record<string, string | number> {
+  const keys = [
+    'd50',
+    'd90',
+    'metal_impurity',
+    'lithium_input',
+    'additive_ratio',
+    'process_time',
+    'sintering_temp',
+    'humidity',
+    'tank_pressure',
+  ] as const
+  const out: Record<string, string | number> = {
+    operator_id: features.operator_id?.trim() || 'OP_A',
+  }
+  for (const k of keys) {
+    const v = features[k]
+    if (v != null && Number.isFinite(Number(v))) out[k] = Number(v)
+  }
+  if (features.id) out.id = String(features.id)
+  if (features.timestamp) out.timestamp = String(features.timestamp)
+  if (features.fillThreshold != null) out.fillThreshold = Number(features.fillThreshold)
+  return out
+}
+
+/** Single-row O/X defect probability (same contract as chatbot clf head). */
+export async function predictDefect(features: PredictFeatureBody): Promise<AiPredictResult> {
+  return postAiJson<AiPredictResult>('/predict', sanitizePredictBody(features))
+}
+
+/** Single-row residual lithium ppm (same contract as chatbot residual head). */
+export async function predictResidual(features: PredictFeatureBody): Promise<AiResidualResult> {
+  const body = sanitizePredictBody(features)
+  delete body.fillThreshold
+  return postAiJson<AiResidualResult>('/predict-residual', body)
+}
+
 export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
-  const base = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8800').replace(/\/$/, '')
-  const res = await fetch(`${base}/chat`, {
+  const res = await fetch(`${aiServiceBase()}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

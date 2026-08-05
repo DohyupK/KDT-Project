@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import {
   issueApi,
+  normalizeIssueRiskLevel,
   type IssueDetail as IssueApiDetail,
   type IssueListItem as IssueApiListItem,
 } from '@/api/issueApi';
@@ -58,7 +59,7 @@ interface Issue {
   occurredAt: string;
   date: string;
   lot: string;
-  risk: '높음' | '중간' | '낮음';
+  risk: '심각' | '주의' | '안정';
   status: '접수' | '분석 중' | '조치 중' | '완료';
   title: string;
   assignee: string;
@@ -254,7 +255,7 @@ const getLabelStyle = (c: UiColors): CSSProperties => ({
 });
 
 const riskStyle = (risk: Issue['risk'], isDark = false): CSSProperties => {
-  if (risk === '높음') {
+  if (risk === '심각' || risk === ('높음' as Issue['risk'])) {
     return isDark
       ? {
           background: 'rgba(76, 5, 25, 0.4)',
@@ -269,7 +270,7 @@ const riskStyle = (risk: Issue['risk'], isDark = false): CSSProperties => {
           fontWeight: 700,
         };
   }
-  if (risk === '중간') {
+  if (risk === '주의' || risk === ('중간' as Issue['risk'])) {
     return isDark
       ? {
           background: 'rgba(69, 26, 3, 0.4)',
@@ -575,7 +576,7 @@ function issueToLotSensorRecord(issue: Issue): LotSensorRecord {
     ? issue.occurredAt.split(' ')[1] ?? '00:00'
     : '00:00';
   const hour = timePart.length >= 5 ? timePart.slice(0, 5) : timePart;
-  const riskBoost = issue.risk === '높음' ? 1 : issue.risk === '중간' ? 0.5 : 0;
+  const riskBoost = issue.risk === '심각' ? 1 : issue.risk === '주의' ? 0.5 : 0;
 
   return {
     id: issue.lot,
@@ -597,7 +598,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-21 15:42',
     date: '2026-07-21',
     lot: 'LOT-CA-260721-08',
-    risk: '높음',
+    risk: '심각',
     status: '조치 중',
     title: '소성로 2호기 온도 상한 지속 초과',
     assignee: '김현수',
@@ -626,7 +627,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-21 14:18',
     date: '2026-07-21',
     lot: 'LOT-CA-260721-07',
-    risk: '중간',
+    risk: '주의',
     status: '분석 중',
     title: '리튬 투입 속도 편차 증가',
     assignee: '박서연',
@@ -654,7 +655,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-21 11:05',
     date: '2026-07-21',
     lot: 'LOT-CA-260721-05',
-    risk: '낮음',
+    risk: '안정',
     status: '완료',
     title: '혼합기 습도 센서 일시 이상',
     assignee: '이도윤',
@@ -682,7 +683,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-20 23:36',
     date: '2026-07-20',
     lot: 'LOT-CA-260720-12',
-    risk: '높음',
+    risk: '심각',
     status: '접수',
     title: '냉각 구간 압력 급상승',
     assignee: '미배정',
@@ -711,7 +712,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-20 18:12',
     date: '2026-07-20',
     lot: 'LOT-CA-260720-09',
-    risk: '중간',
+    risk: '주의',
     status: '완료',
     title: '입도 분포 D50 기준치 접근',
     assignee: '최유진',
@@ -739,7 +740,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-19 16:48',
     date: '2026-07-19',
     lot: 'LOT-CA-260719-06',
-    risk: '낮음',
+    risk: '안정',
     status: '완료',
     title: '검사 장비 이미지 수집 지연',
     assignee: '정민재',
@@ -762,7 +763,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-19 09:22',
     date: '2026-07-19',
     lot: 'LOT-CA-260719-02',
-    risk: '중간',
+    risk: '주의',
     status: '조치 중',
     title: '전구체 수분 함량 변동 감지',
     assignee: '한지우',
@@ -790,7 +791,7 @@ const INITIAL_ISSUES: Issue[] = [
     occurredAt: '2026-07-18 21:10',
     date: '2026-07-18',
     lot: 'LOT-CA-260718-11',
-    risk: '높음',
+    risk: '심각',
     status: '분석 중',
     title: '예측 불량률 2.5% 초과',
     assignee: '김현수',
@@ -843,7 +844,7 @@ function mapIssueListItem(item: IssueApiListItem): Issue {
     occurredAt: item.occurredAt,
     date: item.occurredAt.slice(0, 10),
     lot: item.lotId,
-    risk: item.riskLevel,
+    risk: normalizeIssueRiskLevel(item.riskLevel),
     status: item.status,
     title: item.title,
     completed: item.status === '완료',
@@ -857,7 +858,7 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
     occurredAt: detail.occurredAt,
     date: detail.occurredAt.slice(0, 10),
     lot: detail.lotId,
-    risk: detail.riskLevel,
+    risk: normalizeIssueRiskLevel(detail.riskLevel),
     status: detail.status,
     title: detail.title,
     assignee: detail.assigneeName?.trim() || '미배정',
@@ -1004,8 +1005,8 @@ const HandoverReportModal = ({
   const completedCount = issues.filter((issue) => issue.completed || issue.status === '완료').length;
   const openIssues = issues.filter((issue) => !issue.completed && issue.status !== '완료');
   const criticalOpenIssues = openIssues
-    .filter((issue) => issue.risk === '높음')
-    .concat(openIssues.filter((issue) => issue.risk !== '높음'))
+    .filter((issue) => issue.risk === '심각')
+    .concat(openIssues.filter((issue) => issue.risk !== '심각'))
     .slice(0, 2);
 
   const shiftLabel = '2026-07-21 주간 조 (08:00 ~ 16:00)';
@@ -1900,9 +1901,9 @@ const IssueListSection = ({
           style={getFilterControlStyle(c)}
         >
           <option value="">전체 위험도</option>
-          <option value="높음">높음</option>
-          <option value="중간">중간</option>
-          <option value="낮음">낮음</option>
+          <option value="심각">심각</option>
+          <option value="주의">주의</option>
+          <option value="안정">안정</option>
         </select>
       </div>
       <div className="w-[130px]">
@@ -2054,11 +2055,11 @@ const IssueListSection = ({
                   <td className="whitespace-nowrap px-4 py-3">
                     <span
                       className={
-                        issue.risk === '높음'
+                        issue.risk === '심각'
                           ? isDark
                             ? 'inline-flex items-center rounded-full border border-rose-800 bg-rose-950/40 px-2.5 py-0.5 text-xs font-bold text-rose-300'
                             : 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700'
-                          : issue.risk === '중간'
+                          : issue.risk === '주의'
                             ? isDark
                               ? 'inline-flex items-center rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-bold text-amber-300'
                               : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700'
@@ -3144,7 +3145,7 @@ export default function IssuePage() {
     const data = HANDOVER_DATA;
     const openIssues = issues.filter((issue) => !issue.completed);
     const riskColor = (risk: Issue['risk']) =>
-      risk === '높음' ? colors.red : risk === '중간' ? colors.amber : colors.green;
+      risk === '심각' ? colors.red : risk === '주의' ? colors.amber : colors.green;
     const noteColor = (category: HandoverNote['category']) =>
       category === '주의사항' ? colors.red : category === '전달사항' ? colors.blue : colors.amber;
 
