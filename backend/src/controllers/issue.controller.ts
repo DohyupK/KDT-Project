@@ -56,15 +56,45 @@ export const updateIssue = asyncHandler(async (req, res) => {
       status: req.body?.status,
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
+      handoverFrom: req.body?.handoverFrom,
+      handoverTo: req.body?.handoverTo,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )
   res.status(200).json({ issue, message: '이슈가 저장되었습니다.' })
 })
 
-export const listHandoverHistory = asyncHandler(async (_req, res) => {
-  const result = await issueService.listHandoverHistory()
+export const listHandoverHistory = asyncHandler(async (req, res) => {
+  const raw = req.query.status != null ? String(req.query.status) : 'completed'
+  const status = raw === 'pending' ? 'pending' : 'completed'
+  const result = await issueService.listHandoverHistory(status)
   res.status(200).json(result)
+})
+
+export const createHandover = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+
+  const item = await issueService.createHandoverNote(
+    {
+      category: req.body?.category,
+      content: req.body?.content,
+      shiftStart: req.body?.shiftStart,
+      shiftEnd: req.body?.shiftEnd,
+    },
+    { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
+  )
+  res.status(201).json({ item, message: '인수인계 사항이 등록되었습니다.' })
+})
+
+export const completeHandover = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+
+  const historyId = Number(req.params.historyId)
+  const item = await issueService.completeHandoverNote(historyId, {
+    userId: req.auth.userId,
+    name: req.auth.name || req.auth.userId,
+  })
+  res.status(200).json({ item, message: '인수인계 사항이 완료 처리되었습니다.' })
 })
 
 export const listPastIssues = asyncHandler(async (_req, res) => {

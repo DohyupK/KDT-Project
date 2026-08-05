@@ -32,6 +32,36 @@ export type UpdateIssueBody = {
   status: IssueStatus
   actionContent: string | null
   completed: boolean
+  handoverFrom?: string | null
+  handoverTo?: string | null
+}
+
+export type HandoverHistoryItem = {
+  historyId: number
+  issueId: string
+  lotId: string
+  riskLevel: IssueRiskLevel
+  situation: string
+  action: string | null
+  cause: string | null
+  handoverFrom: string | null
+  handoverTo: string | null
+  manager: string | null
+  eventDate: string
+  date: string
+  category: string | null
+  archivedAt: string
+  shiftStart?: string | null
+  shiftEnd?: string | null
+}
+
+export type HandoverListStatus = 'pending' | 'completed'
+
+export type CreateHandoverBody = {
+  category: '특이사항' | '전달사항' | '주의사항'
+  content: string
+  shiftStart?: string | null
+  shiftEnd?: string | null
 }
 
 export const issueApi = {
@@ -45,5 +75,22 @@ export const issueApi = {
     apiClient.put<{ issue: IssueDetail; message: string }>(
       `/issues/${encodeURIComponent(issueId)}`,
       body,
+    ),
+
+  listHandoverHistory: (status: HandoverListStatus = 'completed') =>
+    apiClient.get<{ items: HandoverHistoryItem[]; total: number }>(
+      '/knowledge/handover-history',
+      { params: { status } },
+    ),
+
+  createHandover: (body: CreateHandoverBody) =>
+    apiClient.post<{ item: HandoverHistoryItem; message: string }>(
+      '/knowledge/handover',
+      body,
+    ),
+
+  completeHandover: (historyId: number) =>
+    apiClient.patch<{ item: HandoverHistoryItem; message: string }>(
+      `/knowledge/handover/${encodeURIComponent(String(historyId))}/complete`,
     ),
 }

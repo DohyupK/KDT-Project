@@ -17,6 +17,7 @@ import {
   readCompletedKnowledgeLogs,
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
+import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
 
 interface DocumentItem {
   id: string;
@@ -205,10 +206,24 @@ function getHeadCellStyle(c: UiColors): CSSProperties {
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
-const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
 
 function isSpcMetricArray(value: unknown): value is SpcMetric[] {
   return Array.isArray(value) && value.length > 0;
+}
+
+function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
+  const from = item.handoverFrom?.trim() || item.manager?.trim() || '';
+  return {
+    id: item.historyId,
+    situation: item.situation,
+    action: item.action ?? '',
+    cause: item.cause ?? '',
+    manager: from,
+    date: item.date || item.eventDate,
+    ...(item.category ? { category: item.category } : {}),
+    ...(from ? { handoverFrom: from } : {}),
+    ...(item.handoverTo?.trim() ? { handoverTo: item.handoverTo.trim() } : {}),
+  };
 }
 
 function readTransferredKnowledgeDocuments(): DocumentItem[] {
@@ -247,46 +262,6 @@ function readTransferredKnowledgeDocuments(): DocumentItem[] {
     });
   }
   return result;
-}
-
-function readHandoverActionItems(): ActionHistoryItem[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(HANDOVER_ACTION_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    const result: ActionHistoryItem[] = [];
-    const seen = new Set<number>();
-    for (const item of parsed) {
-      if (!item || typeof item !== 'object') continue;
-      const row = item as Record<string, unknown>;
-      if (typeof row.id !== 'number' || !Number.isFinite(row.id)) continue;
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      result.push({
-        id: row.id,
-        situation: typeof row.situation === 'string' ? row.situation : '',
-        action: typeof row.action === 'string' ? row.action : '',
-        cause: typeof row.cause === 'string' ? row.cause : '',
-        manager: typeof row.manager === 'string' ? row.manager : '',
-        date: typeof row.date === 'string' ? row.date : '',
-        ...(typeof row.category === 'string' && row.category
-          ? { category: row.category }
-          : {}),
-        ...(typeof row.handoverFrom === 'string' && row.handoverFrom
-          ? { handoverFrom: row.handoverFrom }
-          : {}),
-        ...(typeof row.handoverTo === 'string' && row.handoverTo
-          ? { handoverTo: row.handoverTo }
-          : {}),
-      });
-    }
-    return result;
-  } catch {
-    return [];
-  }
 }
 
 const DOCUMENTS: DocumentItem[] = [
@@ -501,49 +476,6 @@ const DOCUMENTS: DocumentItem[] = [
         process_time: [118, 120, 124, 128, 130, 131],
       },
     ),
-  },
-];
-
-const INITIAL_ACTIONS: ActionHistoryItem[] = [
-  {
-    id: 1,
-    situation: '소성로 2호기 온도 상한(750°C) 3회 연속 초과',
-    action: '목표 온도 742°C 하향 및 냉각 계통 긴급 점검',
-    cause: '온도 센서 열화로 인한 제어 지연',
-    manager: '김현수',
-    date: '2026-07-18',
-  },
-  {
-    id: 2,
-    situation: '리튬 투입량 편차 급증으로 조성 불균일 경보 발생',
-    action: '계량기 즉시 재교정 및 투입 속도 수동 제어 전환',
-    cause: '계량기 로드셀 드리프트',
-    manager: '박서연',
-    date: '2026-07-15',
-  },
-  {
-    id: 3,
-    situation: '냉각수 압력 2.7bar 급상승',
-    action: '바이패스 밸브 개방 후 열교환기 세정',
-    cause: '열교환기 스케일 축적',
-    manager: '김현수',
-    date: '2026-07-08',
-  },
-  {
-    id: 4,
-    situation: '표면 검사 오검출률 3% 초과',
-    action: '검사 부스 조도 상향 및 카메라 노출 재조정',
-    cause: '조명 열화로 인한 조도 저하',
-    manager: '정민재',
-    date: '2026-07-05',
-  },
-  {
-    id: 5,
-    situation: '전구체 수분 함량 상승으로 잔류 리튬 증가 우려',
-    action: '보관 습도 기준 강화 및 건조 시간 10% 연장',
-    cause: '장마철 보관 창고 습도 상승',
-    manager: '한지우',
-    date: '2026-07-02',
   },
 ];
 
@@ -865,7 +797,7 @@ export default function KnowledgePage() {
   });
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
-  const [actions] = useState<ActionHistoryItem[]>(INITIAL_ACTIONS);
+  const [actions, setActions] = useState<ActionHistoryItem[]>([]);
   const [actionSearch, setActionSearch] = useState('');
   const [appliedActionSearch, setAppliedActionSearch] = useState('');
   const [, setActionForm] = useState<ActionFormState>(EMPTY_ACTION_FORM);
@@ -885,7 +817,6 @@ export default function KnowledgePage() {
   const [docPage, setDocPage] = useState(1);
   const [actionPage, setActionPage] = useState(1);
   const [transferredDocuments, setTransferredDocuments] = useState<DocumentItem[]>([]);
-  const [handoverActions, setHandoverActions] = useState<ActionHistoryItem[]>([]);
   const analysisTimerRef = useRef<number | null>(null);
 
   const refreshTransferredDocuments = () => {
@@ -893,26 +824,31 @@ export default function KnowledgePage() {
     setDocPage(1);
   };
 
-  const refreshHandoverActions = () => {
-    setHandoverActions(readHandoverActionItems());
+  const refreshHandoverActions = async () => {
+    try {
+      const { data } = await issueApi.listHandoverHistory('completed');
+      setActions(data.items.map(mapHandoverHistoryItem));
+    } catch {
+      setActions([]);
+    }
   };
 
   useEffect(() => {
     refreshTransferredDocuments();
-    refreshHandoverActions();
+    void refreshHandoverActions();
   }, []);
 
   useEffect(() => {
     if (pathname.includes('/knowledge')) {
       refreshTransferredDocuments();
-      refreshHandoverActions();
+      void refreshHandoverActions();
     }
   }, [pathname]);
 
   useEffect(() => {
     if (activeTab === 'knowledge') {
       refreshTransferredDocuments();
-      refreshHandoverActions();
+      void refreshHandoverActions();
     }
   }, [activeTab]);
 
@@ -926,7 +862,7 @@ export default function KnowledgePage() {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       refreshTransferredDocuments();
-      refreshHandoverActions();
+      void refreshHandoverActions();
     };
 
     window.addEventListener(COMPLETED_KNOWLEDGE_UPDATED_EVENT, onUpdated);
@@ -952,11 +888,7 @@ export default function KnowledgePage() {
     return [...uniqueTransferred, ...DOCUMENTS];
   }, [transferredDocuments]);
 
-  const allActions = useMemo(() => {
-    const staticIds = new Set(actions.map((item) => item.id));
-    const uniqueHandover = handoverActions.filter((item) => !staticIds.has(item.id));
-    return [...uniqueHandover, ...actions];
-  }, [actions, handoverActions]);
+  const allActions = useMemo(() => actions, [actions]);
 
   const libraryTotalCount = allDocuments.length + allActions.length;
 

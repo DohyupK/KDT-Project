@@ -41,7 +41,8 @@ export function createApp() {
       lots: 'GET /api/lots/risk-top · GET /api/lots/:lotId · POST /api/lots/import',
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
       past_issues: 'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId',
-      handover_history: 'GET /api/knowledge/handover-history (후속)',
+      handover_history:
+        'GET /api/knowledge/handover-history?status=pending|completed · POST /api/knowledge/handover (auth)',
       docs: 'GET /api/docs/tree · GET /api/docs/file?path= (READ-ONLY, auth)',
       inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',
