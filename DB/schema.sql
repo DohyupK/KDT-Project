@@ -137,18 +137,17 @@ CREATE TABLE IF NOT EXISTS handover_history (
   issue_id          VARCHAR(32)  NOT NULL,
   lot_id            VARCHAR(64)  NOT NULL,
   risk_level        VARCHAR(10)  NOT NULL,
-  situation         VARCHAR(255) NOT NULL COMMENT '발생 상황 ← issues.title',
-  action            TEXT         NULL COMMENT '대응/조치 ← action_content',
+  situation         VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
+  action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
   cause             VARCHAR(255) NULL,
-  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← 담당자 성명',
+  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← users.name',
   handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
   manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
   event_date        DATE         NOT NULL COMMENT '날짜 ← issues.occurred_at 일자',
-  category          VARCHAR(32)  NULL COMMENT '분류 ← 처리상태 status',
+  category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
   snapshot_json     JSON         NULL,
   archived_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_handover_issue (issue_id),
   CONSTRAINT fk_handover_issue
     FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
     ON DELETE RESTRICT,
@@ -158,8 +157,10 @@ CREATE TABLE IF NOT EXISTS handover_history (
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
+  INDEX idx_handover_issue (issue_id),
   INDEX idx_handover_lot (lot_id),
-  INDEX idx_handover_date (event_date)
+  INDEX idx_handover_date (event_date),
+  INDEX idx_handover_action (action(32))
 );
 
 -- Unified per-user chat threads (general + security). users DDL unchanged — FK only.
