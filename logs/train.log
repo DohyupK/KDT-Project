@@ -1,2 +1,0 @@
-2026-08-04 14:02:59,319 [WARNING] [chat_history] engine init failed: No module named 'MySQLdb'
-2026-08-04 14:03:33,238 [INFO] [chat_history] MariaDB engine ready (dialect=mysql+pymysql)

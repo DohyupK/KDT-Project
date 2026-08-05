@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate:issue-lots": "tsx scripts/migrate-issue-lots.ts",
+    "score:lots": "tsx scripts/score-lots.ts",
+    "rollback:score-lots": "tsx scripts/rollback-score-lots.ts",
     "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
@@ -16,7 +18,7 @@
     "verify:cathode-sources": "tsx scripts/verify-cathode-sources.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
-    "test": "tsx --test tests/issue.validation.test.ts"
+    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts"
   },
   "keywords": [],
   "author": "",

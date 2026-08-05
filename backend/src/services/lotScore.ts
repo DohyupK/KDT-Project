@@ -1,13 +1,71 @@
-/** Provisional scoring until defect_prob / residual Li / SPC pipeline is ready. */
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { predictDefect, predictResidual } from './aiProxy.js'
+import {
+  evaluateLotSpc,
+  isProcessComplete,
+  spcStatusToRiskTier,
+  SPC_PARAM_KEYS,
+  type SpcParamKey,
+} from './spcEngine.js'
 
-export type RiskLevel = '높음' | '중간' | '낮음'
+/** Dashboard / lots / issues risk vocabulary (replaces 높음|중간|낮음). */
+export type RiskLevel = '심각' | '주의' | '안정'
 
-export type LotScoreInput = {
-  quality_defect: number
-  sintering_temp: number | null
-  humidity: number | null
+export const RESIDUAL_USL = 4000
+
+export const DEFECT_PROB_SEVERE = 0.4
+export const DEFECT_PROB_CAUTION = 0.2
+export const RESIDUAL_SEVERE = 3500
+export const RESIDUAL_CAUTION = 3000
+
+const RAW_NUMERIC_KEYS = [
+  'd50',
+  'd90',
+  'metal_impurity',
+  'lithium_input',
+  'additive_ratio',
+  'process_time',
+  'sintering_temp',
+  'humidity',
+  'tank_pressure',
+] as const
+
+export type ProcessFeatures = {
+  d50: number | null
+  d90: number | null
   metal_impurity: number | null
   lithium_input: number | null
+  additive_ratio: number | null
+  process_time: number | null
+  sintering_temp: number | null
+  humidity: number | null
+  tank_pressure: number | null
+  operator_id: string | null
+  id?: string
+  timestamp?: string
+}
+
+let imputerNumeric: Record<string, number> | null = null
+
+function loadImputerNumeric(): Record<string, number> {
+  if (imputerNumeric) return imputerNumeric
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    path.resolve(here, '../../../../ai-service/models/imputer_values.json'),
+    path.resolve(here, '../../../ai-service/models/imputer_values.json'),
+    path.resolve(process.cwd(), '../ai-service/models/imputer_values.json'),
+    path.resolve(process.cwd(), 'ai-service/models/imputer_values.json'),
+  ]
+  for (const c of candidates) {
+    if (!fs.existsSync(c)) continue
+    const raw = JSON.parse(fs.readFileSync(c, 'utf8')) as { numeric?: Record<string, number> }
+    imputerNumeric = raw.numeric || {}
+    return imputerNumeric
+  }
+  imputerNumeric = {}
+  return imputerNumeric
 }
 
 export type LotScoreResult = {
@@ -18,54 +76,153 @@ export type LotScoreResult = {
   risk_reason: string
 }
 
-/** Heuristic: defect flag → 높음; temp/humidity/impurity excursions → 중간; else 낮음. */
-export function scoreLot(input: LotScoreInput): LotScoreResult {
-  const defect = Number(input.quality_defect) === 1
-  const temp = input.sintering_temp
-  const hum = input.humidity
-  const impurity = input.metal_impurity
-  const li = input.lithium_input
+export function residualMargin(residualLithium: number, usl = RESIDUAL_USL): number {
+  return usl - residualLithium
+}
 
-  let defectProb = defect ? 0.85 : 0.12
-  let residualLi = li != null ? Math.max(0, li - 1.8) : 0.2
-  let spc = '정상'
-  const reasons: string[] = []
+export function defectProbTier(prob: number): RiskLevel {
+  if (prob >= DEFECT_PROB_SEVERE) return '심각'
+  if (prob >= DEFECT_PROB_CAUTION) return '주의'
+  return '안정'
+}
 
-  if (defect) {
-    defectProb = 0.9
-    reasons.push('품질 불량 플래그')
-  }
-  if (temp != null && (temp < 720 || temp > 840)) {
-    spc = '이탈'
-    defectProb = Math.max(defectProb, 0.55)
-    reasons.push(`소성온도 이탈(${temp.toFixed(1)}°C)`)
-  }
-  if (hum != null && (hum < 10 || hum > 55)) {
-    spc = spc === '정상' ? '주의' : spc
-    defectProb = Math.max(defectProb, 0.4)
-    reasons.push(`습도 이탈(${hum.toFixed(1)}%)`)
-  }
-  if (impurity != null && impurity > 0.04) {
-    defectProb = Math.max(defectProb, 0.5)
-    reasons.push(`금속 불순물 높음(${impurity.toFixed(4)})`)
-  }
+export function residualTier(residualLi: number): RiskLevel {
+  if (residualLi >= RESIDUAL_SEVERE) return '심각'
+  if (residualLi >= RESIDUAL_CAUTION) return '주의'
+  return '안정'
+}
 
-  let risk_level: RiskLevel = '낮음'
-  if (defect || defectProb >= 0.7) risk_level = '높음'
-  else if (defectProb >= 0.35 || spc !== '정상') risk_level = '중간'
+const TIER_RANK: Record<RiskLevel, number> = { 안정: 0, 주의: 1, 심각: 2 }
 
-  if (reasons.length === 0) reasons.push('기준 범위 내')
-
-  return {
-    defect_prob: Math.round(defectProb * 1000) / 1000,
-    residual_lithium: Math.round(residualLi * 1000) / 1000,
-    spc_status: spc,
-    risk_level,
-    risk_reason: reasons.join(', '),
+export function worstRisk(...tiers: RiskLevel[]): RiskLevel {
+  let best: RiskLevel = '안정'
+  for (const t of tiers) {
+    if (TIER_RANK[t] > TIER_RANK[best]) best = t
   }
+  return best
+}
+
+/** Normalize legacy DB/API labels into the new vocabulary. */
+export function normalizeRiskLevel(level: string | null | undefined): RiskLevel {
+  const v = (level || '').trim()
+  if (v === '심각' || v === 'A' || v === '높음') return '심각'
+  if (v === '주의' || v === 'B' || v === '중간') return '주의'
+  return '안정'
 }
 
 export function buildIssueTitle(riskReason: string, lotId: string): string {
   const short = riskReason.length > 80 ? `${riskReason.slice(0, 77)}…` : riskReason
   return `${lotId}: ${short}`
+}
+
+/** Fill null numerics with clf train means so /predict pydantic accepts the body. */
+export function featuresToPredictBody(features: ProcessFeatures): Record<string, string | number> {
+  const means = loadImputerNumeric()
+  const out: Record<string, string | number> = {
+    operator_id: features.operator_id?.trim() || '__MISSING__',
+  }
+  for (const k of RAW_NUMERIC_KEYS) {
+    const v = features[k]
+    if (v != null && Number.isFinite(Number(v))) out[k] = Number(v)
+    else if (means[k] != null) out[k] = means[k]
+    else out[k] = 0
+  }
+  if (features.id) out.id = features.id
+  if (features.timestamp) out.timestamp = features.timestamp
+  return out
+}
+
+/**
+ * Combine AI predictions + SPC label into stored lot score fields.
+ * `historyByParam` must end with the current LOT values for complete lots.
+ */
+export function combineLotScore(input: {
+  defectProb: number
+  residualLi: number
+  spcStatus: string | null
+  incompleteProcess?: boolean
+}): LotScoreResult {
+  const defect_prob = Math.round(input.defectProb * 10000) / 10000
+  const residual_lithium = Math.round(input.residualLi * 1000) / 1000
+  const spc_status = input.incompleteProcess ? null : input.spcStatus || '안정'
+  const reasons: string[] = []
+
+  const dTier = defectProbTier(defect_prob)
+  const rTier = residualTier(residual_lithium)
+  const sTier = input.incompleteProcess
+    ? ('안정' as RiskLevel)
+    : spcStatusToRiskTier(spc_status)
+
+  if (dTier !== '안정') reasons.push(`불량확률 ${(defect_prob * 100).toFixed(1)}%`)
+  if (rTier !== '안정') reasons.push(`잔류리튬 ${residual_lithium.toFixed(1)}ppm`)
+  if (sTier !== '안정' && spc_status) reasons.push(`SPC ${spc_status}`)
+  if (input.incompleteProcess) reasons.push('공정 결측(SPC 제외)')
+  if (reasons.length === 0) reasons.push('기준 범위 내')
+
+  return {
+    defect_prob,
+    residual_lithium,
+    spc_status: spc_status ?? '안정',
+    risk_level: worstRisk(dTier, rTier, sTier),
+    risk_reason: reasons.join(', ').slice(0, 255),
+  }
+}
+
+export function evaluateSpcForFeatures(
+  features: ProcessFeatures,
+  historyByParam: Record<SpcParamKey, number[]>,
+): { complete: boolean; status: string } {
+  const bag: Partial<Record<SpcParamKey, number | null>> = {}
+  for (const k of SPC_PARAM_KEYS) {
+    bag[k] = features[k]
+  }
+  if (!isProcessComplete(bag)) {
+    return { complete: false, status: '안정' }
+  }
+  const evaled = evaluateLotSpc(historyByParam)
+  return { complete: true, status: evaled.status }
+}
+
+/** Call ai-service using clf_samples features for O/X and residual_samples for residual Li. */
+export async function scoreLotWithAi(
+  clfFeatures: ProcessFeatures,
+  residualFeatures: ProcessFeatures,
+  historyByParam: Record<SpcParamKey, number[]>,
+  /** SPC completeness is judged on ops/complete-case process features (usually clf). */
+  spcFeatures?: ProcessFeatures,
+): Promise<LotScoreResult> {
+  const spcInput = spcFeatures ?? clfFeatures
+  const clfBody = featuresToPredictBody(clfFeatures)
+  const residualBody = featuresToPredictBody(residualFeatures)
+  const [clf, residual] = await Promise.all([
+    predictDefect(clfBody),
+    predictResidual(residualBody),
+  ])
+  const spc = evaluateSpcForFeatures(spcInput, historyByParam)
+  return combineLotScore({
+    defectProb: clf.probability,
+    residualLi: residual.residual_li,
+    spcStatus: spc.status,
+    incompleteProcess: !spc.complete,
+  })
+}
+
+/** Append current complete-lot values onto running SPC histories (mutates). */
+export function pushCompleteLotHistory(
+  historyByParam: Record<SpcParamKey, number[]>,
+  features: ProcessFeatures,
+): boolean {
+  const bag: Partial<Record<SpcParamKey, number | null>> = {}
+  for (const k of SPC_PARAM_KEYS) bag[k] = features[k]
+  if (!isProcessComplete(bag)) return false
+  for (const k of SPC_PARAM_KEYS) {
+    historyByParam[k].push(Number(features[k]))
+  }
+  return true
+}
+
+export function emptySpcHistory(): Record<SpcParamKey, number[]> {
+  const h = {} as Record<SpcParamKey, number[]>
+  for (const k of SPC_PARAM_KEYS) h[k] = []
+  return h
 }

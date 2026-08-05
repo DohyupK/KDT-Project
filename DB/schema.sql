@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS lots (
   defect_prob       DOUBLE       NULL,
   residual_lithium  DOUBLE       NULL,
   spc_status        VARCHAR(32)  NULL,
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '낮음',
+  risk_level        VARCHAR(10)  NOT NULL DEFAULT '안정',
   risk_reason       VARCHAR(255) NULL,
   scored_at         DATETIME     NULL,
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,

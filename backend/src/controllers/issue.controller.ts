@@ -20,13 +20,43 @@ export const getLot = asyncHandler(async (req, res) => {
   res.status(200).json({ lot })
 })
 
-export const importLots = asyncHandler(async (_req, res) => {
+export const importLots = asyncHandler(async (req, res) => {
   const result = await lotService.importLotsFromCsv()
-  const issuesCreated = await lotService.ensureIssuesForRiskLots()
+  const doScore = String(req.query.score ?? '0') === '1'
+  let scoring: Awaited<ReturnType<typeof lotService.scoreAllLots>> | null = null
+  let issuesCreated = 0
+  if (doScore) {
+    const limit = req.query.limit != null ? Number(req.query.limit) : undefined
+    scoring = await lotService.scoreAllLots({
+      limit: Number.isFinite(limit) ? limit : undefined,
+      concurrency: 4,
+    })
+    issuesCreated = await lotService.ensureIssuesForRiskLots()
+  }
   res.status(200).json({
-    message: 'LOT 적재·채점 완료',
+    message: doScore
+      ? 'LOT 적재·AI/SPC 채점 완료'
+      : 'LOT 공정값 적재 완료. 채점은 npm run score:lots 또는 ?score=1',
     imported: result.imported,
     csvPath: result.path,
+    scoring,
+    issuesCreated,
+  })
+})
+
+export const scoreLots = asyncHandler(async (req, res) => {
+  const limit = req.query.limit != null ? Number(req.query.limit) : undefined
+  const offset = req.query.offset != null ? Number(req.query.offset) : 0
+  const concurrency = req.query.concurrency != null ? Number(req.query.concurrency) : 4
+  const scoring = await lotService.scoreAllLots({
+    limit: Number.isFinite(limit) ? limit : undefined,
+    offset: Number.isFinite(offset) ? offset : 0,
+    concurrency: Number.isFinite(concurrency) ? concurrency : 4,
+  })
+  const issuesCreated = await lotService.ensureIssuesForRiskLots()
+  res.status(200).json({
+    message: 'AI/SPC 채점 완료',
+    scoring,
     issuesCreated,
   })
 })
