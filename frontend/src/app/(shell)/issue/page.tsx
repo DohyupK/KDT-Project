@@ -6,6 +6,7 @@ import type { CSSProperties, FormEvent } from 'react';
 import {
   issueApi,
   normalizeIssueRiskLevel,
+  type HandoverHistoryItem,
   type IssueDetail as IssueApiDetail,
   type IssueListItem as IssueApiListItem,
 } from '@/api/issueApi';
@@ -14,6 +15,7 @@ import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import { useSelectedLot } from '@/context/SelectedLotContext';
 import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import DateInput from '@/components/DateInput';
+import { getAuthUser } from '@/lib/authStorage';
 
 interface ProcessData {
   time: string;
@@ -157,11 +159,12 @@ interface HandoverNote {
   shiftStart: string;
   /** 근무 종료 시각 (HH:mm) */
   shiftEnd: string;
+  issueId?: string;
 }
 
 interface HandoverNoteSectionProps {
   notes: HandoverNote[];
-  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt'>) => void;
+  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => void | Promise<void>;
   onRemove: (id: number) => void;
   onClose: () => void;
 }
@@ -997,9 +1000,23 @@ const HandoverReportModal = ({
   isCompleting = false,
 }: HandoverReportModalProps) => {
   const { isDark } = useUiSettings();
-  const [handoverFrom, setHandoverFrom] = useState('김현수');
-  const [handoverTo, setHandoverTo] = useState('박서연');
+  const loginName = getLoggedInUserName();
+  const noteAuthor =
+    notes.map((n) => n.author.trim()).find((name) => name && name !== UNAUTH_USER_LABEL) ||
+    loginName;
+  const [handoverFrom, setHandoverFrom] = useState(noteAuthor);
+  const [handoverTo, setHandoverTo] = useState(loginName);
   const [partyError, setPartyError] = useState('');
+
+  useEffect(() => {
+    const nextFrom =
+      notes.map((n) => n.author.trim()).find((name) => name && name !== UNAUTH_USER_LABEL) ||
+      getLoggedInUserName();
+    const nextTo = getLoggedInUserName();
+    setHandoverFrom(nextFrom);
+    setHandoverTo(nextTo);
+    setPartyError('');
+  }, [notes]);
 
   const totalCount = issues.length;
   const completedCount = issues.filter((issue) => issue.completed || issue.status === '완료').length;
@@ -1137,14 +1154,11 @@ const HandoverReportModal = ({
                   <input
                     id="handover-from"
                     value={handoverFrom}
-                    onChange={(event) => {
-                      setHandoverFrom(event.target.value);
-                      if (partyError) setPartyError('');
-                    }}
-                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 ${
+                    readOnly
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
                       isDark
                         ? 'border-slate-600 bg-slate-950/40 text-slate-100'
-                        : 'border-slate-200 bg-white text-slate-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-900'
                     }`}
                     placeholder="인계자 이름"
                   />
@@ -1161,14 +1175,11 @@ const HandoverReportModal = ({
                   <input
                     id="handover-to"
                     value={handoverTo}
-                    onChange={(event) => {
-                      setHandoverTo(event.target.value);
-                      if (partyError) setPartyError('');
-                    }}
-                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 ${
+                    readOnly
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
                       isDark
                         ? 'border-slate-600 bg-slate-950/40 text-slate-100'
-                        : 'border-slate-200 bg-white text-slate-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-900'
                     }`}
                     placeholder="인수자 이름"
                   />
@@ -1482,23 +1493,29 @@ const HandoverReportModal = ({
   );
 };
 
-const CURRENT_USER_STORAGE_KEY = 'kdt-current-user';
-/** 로그인 미연동 시 데모용 기본 로그인 사용자 */
-const FALLBACK_LOGGED_IN_USER = '김현수';
+const UNAUTH_USER_LABEL = '—(로그인 필요)';
 
+/** users.name from login session (kdt-auth-user). */
 function getLoggedInUserName(): string {
-  if (typeof window === 'undefined') return FALLBACK_LOGGED_IN_USER;
-  try {
-    const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { name?: string; userName?: string };
-      const name = parsed.name?.trim() || parsed.userName?.trim();
-      if (name) return name;
-    }
-  } catch {
-    // ignore parse errors — fall through to default
-  }
-  return FALLBACK_LOGGED_IN_USER;
+  const name = getAuthUser()?.name?.trim();
+  return name || UNAUTH_USER_LABEL;
+}
+
+function mapHandoverItemToNote(item: HandoverHistoryItem): HandoverNote {
+  const category: HandoverNote['category'] =
+    item.category === '전달사항' || item.category === '주의사항' || item.category === '특이사항'
+      ? item.category
+      : '특이사항';
+  return {
+    id: item.historyId,
+    author: item.handoverFrom || item.manager || '',
+    category,
+    content: item.situation,
+    createdAt: item.archivedAt || item.date,
+    shiftStart: item.shiftStart || '',
+    shiftEnd: item.shiftEnd || '',
+    issueId: item.issueId,
+  };
 }
 
 function formatShiftRange(start: string, end: string): string {
@@ -1506,7 +1523,12 @@ function formatShiftRange(start: string, end: string): string {
   return `${start || '--:--'} ~ ${end || '--:--'}`;
 }
 
-const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSectionProps) => {
+const HandoverNoteSection = ({
+  notes,
+  onAdd,
+  onRemove,
+  onClose,
+}: HandoverNoteSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
   const [author] = useState(() => getLoggedInUserName());
@@ -1515,10 +1537,11 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
   const [shiftEnd, setShiftEnd] = useState('16:00');
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!author.trim()) {
+    if (!author.trim() || author === UNAUTH_USER_LABEL) {
       setError('로그인 사용자 정보를 확인할 수 없습니다.');
       return;
     }
@@ -1530,15 +1553,22 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
       setError('인수인계 내용을 입력해주세요.');
       return;
     }
-    onAdd({
-      author: author.trim(),
-      category,
-      content: content.trim(),
-      shiftStart,
-      shiftEnd,
-    });
-    setContent('');
+    setSubmitting(true);
     setError('');
+    try {
+      await onAdd({
+        author: author.trim(),
+        category,
+        content: content.trim(),
+        shiftStart,
+        shiftEnd,
+      });
+      setContent('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '인수인계 등록에 실패했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -1724,6 +1754,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
           </div>
           <button
             type="submit"
+            disabled={submitting}
             style={{
               border: 0,
               borderRadius: 10,
@@ -1732,10 +1763,11 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               padding: '11px 18px',
               fontSize: 14,
               fontWeight: 800,
-              cursor: 'pointer',
+              cursor: submitting ? 'wait' : 'pointer',
+              opacity: submitting ? 0.7 : 1,
             }}
           >
-            인수인계 사항 등록
+            {submitting ? '등록 중…' : '인수인계 사항 등록'}
           </button>
         </form>
 
@@ -2740,97 +2772,13 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
 
 const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
 
-type HandoverActionLog = {
-  id: number;
-  sourceNoteId: number;
-  situation: string;
-  action: string;
-  cause: string;
-  manager: string;
-  date: string;
-  category: HandoverNote['category'];
-  handoverFrom: string;
-  handoverTo: string;
-};
-
-function formatKnowledgeDate() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function readHandoverActionLogs(): HandoverActionLog[] {
-  if (typeof window === 'undefined') return [];
+/** Clear legacy localStorage handover logs once (Knowledge now uses DB). */
+function clearLegacyHandoverActionLogs() {
+  if (typeof window === 'undefined') return;
   try {
-    const raw = window.localStorage.getItem(HANDOVER_ACTION_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is HandoverActionLog => {
-      if (!item || typeof item !== 'object') return false;
-      const row = item as Record<string, unknown>;
-      return typeof row.id === 'number' && Number.isFinite(row.id);
-    });
+    window.localStorage.removeItem(HANDOVER_ACTION_STORAGE_KEY);
   } catch {
-    return [];
-  }
-}
-
-function mapHandoverNoteToActionLog(
-  note: HandoverNote,
-  _relatedIssue: Issue | null,
-  party: { from: string; to: string },
-): HandoverActionLog {
-  const datePart = note.createdAt.slice(0, 10);
-  return {
-    id: note.id,
-    sourceNoteId: note.id,
-    situation: note.content.trim(),
-    action: '',
-    cause: '',
-    manager: party.from,
-    date: /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : formatKnowledgeDate(),
-    category: note.category,
-    handoverFrom: party.from,
-    handoverTo: party.to,
-  };
-}
-
-function getTransferredHandoverNoteIds(): number[] {
-  const logs = readHandoverActionLogs();
-  const ids = new Set<number>();
-  for (const item of logs) {
-    if (typeof item.sourceNoteId === 'number' && Number.isFinite(item.sourceNoteId)) {
-      ids.add(item.sourceNoteId);
-    } else if (typeof item.id === 'number' && Number.isFinite(item.id)) {
-      ids.add(item.id);
-    }
-  }
-  return Array.from(ids);
-}
-
-/** @returns 'added' | 'exists' | 'failed' | 'empty' */
-function appendHandoverActionLogs(
-  notes: HandoverNote[],
-  relatedIssue: Issue | null,
-  party: { from: string; to: string },
-): 'added' | 'exists' | 'failed' | 'empty' {
-  if (typeof window === 'undefined') return 'failed';
-  if (notes.length === 0) return 'empty';
-  try {
-    const current = readHandoverActionLogs();
-    const existingIds = new Set(
-      current.flatMap((item) => [item.id, item.sourceNoteId].filter((id) => typeof id === 'number')),
-    );
-    const toAdd = notes
-      .filter((note) => !existingIds.has(note.id))
-      .map((note) => mapHandoverNoteToActionLog(note, relatedIssue, party));
-    if (toAdd.length === 0) return 'exists';
-    const next = [...toAdd, ...current];
-    window.localStorage.setItem(HANDOVER_ACTION_STORAGE_KEY, JSON.stringify(next));
-    return 'added';
-  } catch {
-    return 'failed';
+    /* ignore */
   }
 }
 
@@ -2856,8 +2804,17 @@ export default function IssuePage() {
   const prevSelectedIdRef = useRef<string | null>(null);
   const detailRequestRef = useRef(0);
 
-  const refreshCompletedHandoverNoteIds = () => {
-    setCompletedHandoverNoteIds(getTransferredHandoverNoteIds());
+  useEffect(() => {
+    clearLegacyHandoverActionLogs();
+  }, []);
+
+  const refreshPendingHandovers = async () => {
+    try {
+      const { data } = await issueApi.listHandoverHistory('pending');
+      setHandoverNotes(data.items.map(mapHandoverItemToNote));
+    } catch {
+      /* keep current notes on transient errors */
+    }
   };
 
   useEffect(() => {
@@ -2868,7 +2825,6 @@ export default function IssuePage() {
         const { data } = await issueApi.list();
         if (!cancelled) {
           setIssues(data.issues.map(mapIssueListItem));
-          setCompletedHandoverNoteIds(getTransferredHandoverNoteIds());
         }
       } catch (error) {
         if (cancelled) return;
@@ -2879,14 +2835,28 @@ export default function IssuePage() {
     };
 
     void loadIssues();
+    void refreshPendingHandovers();
     return () => {
       cancelled = true;
     };
   }, []);
 
   useEffect(() => {
-    if (isReportOpen) refreshCompletedHandoverNoteIds();
-  }, [isReportOpen]);
+    if (!isNoteOpen && !isReportOpen) return;
+    void refreshPendingHandovers();
+  }, [isNoteOpen, isReportOpen]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshPendingHandovers();
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,
@@ -3090,45 +3060,67 @@ export default function IssuePage() {
     setSaveMessage('');
   };
 
-  const handleAddNote = (note: Omit<HandoverNote, 'id' | 'createdAt'>) => {
-    const now = new Date();
-    const pad = (value: number) => String(value).padStart(2, '0');
-    const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    const newNote: HandoverNote = { ...note, id: Date.now(), createdAt };
-    setHandoverNotes((current) => [newNote, ...current]);
+  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => {
+    try {
+      await issueApi.createHandover({
+        category: note.category,
+        content: note.content,
+        shiftStart: note.shiftStart,
+        shiftEnd: note.shiftEnd,
+      });
+      await refreshPendingHandovers();
+      setToastMessage('✓ 인수인계 사항이 등록되었습니다. (ISS 번호 자동 발급)');
+      setShowToast(true);
+    } catch (error) {
+      throw new Error(getApiErrorMessage(error, '인수인계 등록에 실패했습니다.'));
+    }
   };
 
-  const handleCompleteOneHandover = (noteId: number, party: { from: string; to: string }) => {
-    const target = handoverNotes.find((note) => note.id === noteId);
-    if (!target) return;
-    const transferResult = appendHandoverActionLogs([target], selectedIssue, party);
-    if (transferResult === 'added') {
-      refreshCompletedHandoverNoteIds();
-      setToastMessage(
-        '✓ 선택한 인수인계 사항이 라이브러리의 인수인계 이력으로 저장되었습니다.',
+  const handleCompleteOneHandover = async (
+    noteId: number,
+    party: { from: string; to: string },
+  ) => {
+    void party;
+    try {
+      await issueApi.completeHandover(noteId);
+      await refreshPendingHandovers();
+      setCompletedHandoverNoteIds((current) =>
+        current.includes(noteId) ? current : [...current, noteId],
       );
+      setToastMessage('✓ 인수인계 사항을 완료 처리했습니다. Knowledge에서 확인할 수 있습니다.');
+      setShowToast(true);
+    } catch (error) {
+      setToastMessage(getApiErrorMessage(error, '인수인계 완료 처리에 실패했습니다.'));
       setShowToast(true);
     }
   };
 
-  const handleCompleteAllHandover = (party: { from: string; to: string }) => {
+  const handleCompleteAllHandover = async (party: { from: string; to: string }) => {
+    void party;
     const pending = handoverNotes.filter((note) => !completedHandoverNoteIds.includes(note.id));
-    const transferResult = appendHandoverActionLogs(pending, selectedIssue, party);
-    if (transferResult === 'added') {
-      refreshCompletedHandoverNoteIds();
-      setToastMessage(
-        '✓ 인수인계 사항이 등록되어 라이브러리의 인수인계 이력으로 저장되었습니다.',
-      );
+    if (pending.length === 0) return;
+    try {
+      for (const note of pending) {
+        await issueApi.completeHandover(note.id);
+      }
+      await refreshPendingHandovers();
+      setCompletedHandoverNoteIds((current) => {
+        const next = new Set(current);
+        pending.forEach((note) => next.add(note.id));
+        return Array.from(next);
+      });
+      setToastMessage('✓ 대기 중인 인수인계를 모두 완료 처리했습니다.');
       setShowToast(true);
-      return;
-    }
-    if (transferResult === 'exists') {
-      refreshCompletedHandoverNoteIds();
+    } catch (error) {
+      await refreshPendingHandovers();
+      setToastMessage(getApiErrorMessage(error, '인수인계 일괄 완료에 실패했습니다.'));
+      setShowToast(true);
     }
   };
 
-  const handleRemoveNote = (id: number) => {
-    setHandoverNotes((current) => current.filter((note) => note.id !== id));
+  const handleRemoveNote = (_id: number) => {
+    setToastMessage('등록된 인수인계는 서버에서 삭제할 수 없습니다.');
+    setShowToast(true);
   };
 
   const handleGenerateReport = () => {
@@ -3306,12 +3298,22 @@ ${issues
     if (!selectedIssue || !managementForm.completed || isSaving) return;
 
     const issueId = selectedIssue.id;
+    const loginName = getLoggedInUserName();
+    const handoverFrom =
+      handoverNotes
+        .map((n) => n.author.trim())
+        .find((name) => name && name !== UNAUTH_USER_LABEL) ||
+      (loginName !== UNAUTH_USER_LABEL ? loginName : '');
+    const handoverTo = loginName !== UNAUTH_USER_LABEL ? loginName : '';
+
     setIsSaving(true);
     try {
       await issueApi.update(issueId, {
         status: '완료',
         actionContent: managementForm.action.trim() || null,
         completed: true,
+        handoverFrom: handoverFrom || null,
+        handoverTo: handoverTo || null,
       });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(
@@ -3325,6 +3327,7 @@ ${issues
       setSaveMessage('');
       setToastMessage('✓ 이슈가 완료 처리되어 목록에서 제거되었습니다.');
       setShowToast(true);
+      void refreshPendingHandovers();
     } catch (error) {
       setToastMessage(getApiErrorMessage(error, '이슈 완료 처리에 실패했습니다.'));
       setShowToast(true);

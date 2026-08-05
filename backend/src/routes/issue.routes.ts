@@ -17,7 +17,13 @@ router.put('/issues/:issueId', authMiddleware, issueController.updateIssue)
 
 router.get('/knowledge/past-issues', issueController.listPastIssues)
 router.get('/knowledge/past-issues/:issueId', issueController.getPastIssue)
-/** 인수인계 이력 — 후속(이슈 완료와 무관) */
+/** 인수인계: 등록 POST · 완료 PATCH · 목록 GET(?status=pending|completed) */
 router.get('/knowledge/handover-history', issueController.listHandoverHistory)
+router.post('/knowledge/handover', authMiddleware, issueController.createHandover)
+router.patch(
+  '/knowledge/handover/:historyId/complete',
+  authMiddleware,
+  issueController.completeHandover,
+)
 
 export const issueRouter = router
