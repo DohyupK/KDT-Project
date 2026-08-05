@@ -1654,7 +1654,7 @@ const HandoverNoteSection = ({
           >
             <div>
               <label htmlFor="note-author" style={getLabelStyle(c)}>
-                작성자 (로그인)
+                작성자
               </label>
               <input
                 id="note-author"
