@@ -1,9 +1,9 @@
 import { query, withTransaction } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
-import type { RiskLevel } from './lotScore.js'
+import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
 
-const OPEN_RISK = `status <> '완료' AND risk_level IN ('높음', '중간')`
-const RISK_LEVELS = new Set(['높음', '중간', '낮음'])
+const OPEN_RISK = `status <> '완료' AND risk_level IN ('심각', '주의', '높음', '중간', 'A', 'B')`
+const RISK_LEVELS = new Set(['심각', '주의', '안정', '높음', '중간', '낮음', 'A', 'B', 'C'])
 const STATUSES = new Set(['접수', '분석 중', '조치 중', '완료'])
 const SYS_HANDOVER_LOT_ID = 'LOT-SYS-HANDOVER'
 
@@ -53,8 +53,7 @@ function formatDate(value: Date | string): string {
 }
 
 function toRisk(level: string): RiskLevel {
-  if (level === '높음' || level === '중간') return level
-  return '낮음'
+  return normalizeRiskLevel(level)
 }
 
 function isCompleted(row: { status: string; completed_at: Date | string | null }): boolean {

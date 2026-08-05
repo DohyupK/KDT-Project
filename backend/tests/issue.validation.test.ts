@@ -11,7 +11,7 @@ test('accepts supported issue list filters', () => {
   assert.doesNotThrow(() =>
     validateIssueListQuery({
       date: '2026-07-21',
-      riskLevel: '낮음',
+      riskLevel: '안정',
       status: '완료',
     }),
   )

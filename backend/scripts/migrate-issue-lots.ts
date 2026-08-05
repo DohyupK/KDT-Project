@@ -22,6 +22,7 @@ async function main() {
 
   const imported = await lotService.importLotsFromCsv()
   console.log('IMPORT', JSON.stringify(imported))
+  console.log('NOTE: run npm run score:lots (ai-service required) then issues will seed from 심각/주의')
   const issuesCreated = await lotService.ensureIssuesForRiskLots()
   console.log('ISSUES_CREATED', issuesCreated)
 }

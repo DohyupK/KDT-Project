@@ -1,7 +1,15 @@
 import { apiClient } from './axios'
 
 export type IssueStatus = '접수' | '분석 중' | '조치 중' | '완료'
-export type IssueRiskLevel = '높음' | '중간' | '낮음'
+/** Canonical ops risk labels (legacy 높음|중간|낮음 still accepted from older rows). */
+export type IssueRiskLevel = '심각' | '주의' | '안정'
+
+export function normalizeIssueRiskLevel(level: string | null | undefined): IssueRiskLevel {
+  const v = (level || '').trim()
+  if (v === '심각' || v === '높음' || v === 'A') return '심각'
+  if (v === '주의' || v === '중간' || v === 'B') return '주의'
+  return '안정'
+}
 
 export type IssueListItem = {
   issueId: string

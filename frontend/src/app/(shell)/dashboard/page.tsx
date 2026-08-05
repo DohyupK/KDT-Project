@@ -1,5 +1,6 @@
 'use client'
 
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import {
   useCallback,
@@ -12,6 +13,7 @@ import {
 } from 'react';
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -40,6 +42,44 @@ type DailyAggregate = {
   production: number;
   defectCount: number;
   targetProduction: number;
+};
+
+type ProductionDailyRow = {
+  date: string;
+  production: number;
+  goodCount: number;
+  defectCount: number;
+  defectRate: number | null;
+  metalImpurity: number | null;
+  tempDevFrom800: number | null;
+  humidity: number | null;
+  tempXHumidity: number | null;
+  dataStatus: string;
+};
+
+type SpcMetric = {
+  key: string;
+  label: string;
+  status: string;
+  currentValue: number;
+  centerLine: number;
+  upperControlLimit: number;
+  lowerControlLimit: number;
+  data: Array<{ timestamp: string; value: number }>;
+};
+
+type LotRiskApiDetail = {
+  lotId: string;
+  recordedAt: string;
+  defectProb: number | null;
+  residualLithium: number | null;
+  residualMargin: number | null;
+  residualUsl: number;
+  spcStatus: string | null;
+  riskLevel: '심각' | '주의' | '안정';
+  riskReason: string | null;
+  actionContent: string | null;
+  spc?: { metrics?: SpcMetric[] };
 };
 
 type KpiSummary = {
@@ -179,10 +219,14 @@ type DailyDetailRow = {
   goodCount: number;
   defectCount: number;
   defectRate: number;
-  avgCapacity: number;
-  avgMetalImpurity: number;
-  avgSinteringTemp: number;
-  status: '수집 중' | '집계 완료';
+  metalImpurity?: number | null;
+  tempDevFrom800?: number | null;
+  humidity?: number | null;
+  tempXHumidity?: number | null;
+  avgCapacity?: number;
+  avgMetalImpurity?: number;
+  avgSinteringTemp?: number;
+  status: string;
 };
 
 type LiveConnectionStatus = 'connected' | 'updating' | 'error';
@@ -197,30 +241,30 @@ const LIVE_POLL_INTERVAL_MS = 30_000;
 type LotRiskRow = {
   lot: string;
   prob: number;
-  predLi: string;
-  margin: number;
+  predLi: number | string | null;
+  margin: number | null;
   spc: string;
   grade: string;
   action: string;
+  reason?: string | null;
   isCritical: boolean;
 };
 
 
 type LotRiskFilterState = {
   lotQuery: string;
-  grade: 'all' | '높음' | '중간' | '낮음';
-  spc: 'all' | '정상' | '이탈';
-  critical: 'all' | 'critical' | 'normal';
-  /** high ≥50%, mid 15~50%, low <15% */
+  grade: 'all' | '심각' | '주의';
+  spc: 'all' | '안정' | '주의' | '이탈';
   probLevel: 'all' | 'high' | 'mid' | 'low';
+  marginLevel: 'all' | 'low' | 'caution' | 'sufficient';
 };
 
 const EMPTY_LOT_RISK_FILTER: LotRiskFilterState = {
   lotQuery: '',
   grade: 'all',
   spc: 'all',
-  critical: 'all',
   probLevel: 'all',
+  marginLevel: 'all',
 };
 
 /** LOT 위험등급 목록 페이지당 행 수 */
@@ -231,26 +275,10 @@ function isLotRiskFilterActive(filter: LotRiskFilterState): boolean {
     filter.lotQuery.trim() !== '' ||
     filter.grade !== 'all' ||
     filter.spc !== 'all' ||
-    filter.critical !== 'all' ||
-    filter.probLevel !== 'all'
+    filter.probLevel !== 'all' ||
+    filter.marginLevel !== 'all'
   );
 }
-
-function filterLotRiskRows(rows: LotRiskRow[], filter: LotRiskFilterState): LotRiskRow[] {
-  const q = filter.lotQuery.trim().toLowerCase();
-  return rows.filter((row) => {
-    if (q && !row.lot.toLowerCase().includes(q)) return false;
-    if (filter.grade !== 'all' && row.grade !== filter.grade) return false;
-    if (filter.spc !== 'all' && row.spc !== filter.spc) return false;
-    if (filter.critical === 'critical' && !row.isCritical) return false;
-    if (filter.critical === 'normal' && row.isCritical) return false;
-    if (filter.probLevel === 'high' && row.prob < 0.5) return false;
-    if (filter.probLevel === 'mid' && (row.prob < 0.15 || row.prob >= 0.5)) return false;
-    if (filter.probLevel === 'low' && row.prob >= 0.15) return false;
-    return true;
-  });
-}
-
 
 /** Mock 분석 데이터 — 기존 생산 LOT/KPI와 합치지 않음 */
 const LOT_RISK_MOCK: LotRiskRow[] = [
@@ -606,10 +634,18 @@ function lotRiskSignalTone(status: LotRiskProcessSignal['status'], isDark: boole
 }
 
 
-function lotRiskMarginClass(margin: number, isDark: boolean): string {
+function lotRiskMarginClass(margin: number | null, isDark: boolean): string {
+  if (margin == null) return isDark ? 'text-slate-400' : 'text-slate-500';
   if (margin < 100) return 'text-red-600';
   if (margin < 300) return 'text-orange-500';
   return isDark ? 'text-slate-100' : 'text-gray-900';
+}
+
+function formatSpecDistance(margin: number | null, includeUnit = false): string {
+  if (margin == null) return '-';
+  const amount = formatNumber(Math.round(Math.abs(margin)));
+  const unit = includeUnit ? ' ppm' : '';
+  return `${amount}${unit} ${margin < 0 ? '초과' : '이내'}`;
 }
 
 function lotRiskProbPercent(prob: number): number {
@@ -694,7 +730,7 @@ function buildCathodeLots(): CathodeLot[] {
   }
   const weightSum = weights.reduce((s, w) => s + w, 0);
   const dayCounts: number[] = weights.map((w) => Math.floor((totalLots * w) / weightSum));
-  let assigned = dayCounts.reduce((s, n) => s + n, 0);
+  const assigned = dayCounts.reduce((s, n) => s + n, 0);
   dayCounts[peakDay] += totalLots - assigned;
 
   // 불량 LOT 개수를 정확히 851개로 고정 (셔플)
@@ -846,14 +882,11 @@ function formatClock(d: Date): string {
 
 function buildPaginationItems(current: number, total: number): Array<number | 'ellipsis'> {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const items: Array<number | 'ellipsis'> = [1];
-  const start = Math.max(2, current - 1);
-  const end = Math.min(total - 1, current + 1);
-  if (start > 2) items.push('ellipsis');
-  for (let p = start; p <= end; p += 1) items.push(p);
-  if (end < total - 1) items.push('ellipsis');
-  items.push(total);
-  return items;
+  if (current <= 4) return [1, 2, 3, 4, 5, 'ellipsis', total];
+  if (current >= total - 3) {
+    return [1, 'ellipsis', total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total];
 }
 
 function lotsToProductionRecords(lots: CathodeLot[]): ProductionRecord[] {
@@ -1177,13 +1210,12 @@ function EmptyState({ message }: { message: string }) {
 function ProductionTrendChart({
   daily,
   dailyRates = [],
-  forecastRates,
+  forecastRates = [],
   isDark = false,
 }: {
   daily: DailyAggregate[];
   dailyRates?: Array<{ date: string; rate: number | null }>;
-  /** 실측 이후 AI 예측 불량률 (없으면 데모 값 사용) — API 연동 시 주입 */
-  forecastRates?: Array<{ date: string; rate: number }> | null;
+  forecastRates?: Array<{ date: string; rate: number }>;
   isDark?: boolean;
 }) {
   const width = 720;
@@ -1199,30 +1231,16 @@ function ProductionTrendChart({
   const rateByDate = new Map(
     dailyRates.filter((d) => d.rate !== null).map((d) => [d.date, d.rate as number]),
   );
-  const lastMeasured = daily[daily.length - 1];
-  // 데모용 AI 예측 Mock — 불량률(%) 기준. 실측 배열은 변경하지 않음
-  const demoForecastPercents = [11.2, 9.5, 12.1] as const;
-  const forecastMock: Array<{ date: string; rate: number }> =
-    forecastRates && forecastRates.length > 0
-      ? forecastRates
-      : demoForecastPercents.map((ratePercent, i) => ({
-          date: addDays(lastMeasured.date, i + 1),
-          rate: ratePercent / 100,
-        }));
-
   const rawMaxY = Math.max(...daily.map((d) => d.production), 1);
   const tickCount = 5;
   const maxY = niceChartMax(rawMaxY, tickCount);
-  const lastMeasuredRate = rateByDate.get(lastMeasured.date) ?? null;
   const maxRate = Math.max(
     ...Array.from(rateByDate.values()),
-    ...forecastMock.map((d) => d.rate),
-    lastMeasuredRate ?? 0,
+    ...forecastRates.map((point) => point.rate),
     0.001,
   );
-  const measuredCount = daily.length;
-  const n = measuredCount + forecastMock.length;
-  const barW = Math.max(4, (innerW / n) * 0.65);
+  const n = daily.length + forecastRates.length;
+  const barW = Math.min(34, Math.max(12, (innerW / n) * 0.52));
   const slotX = (i: number) => pad.left + (innerW / n) * i + (innerW / n) / 2;
 
   const points = daily.map((d, i) => {
@@ -1234,11 +1252,11 @@ function ProductionTrendChart({
     return { ...d, x, y, rate, rateY };
   });
 
-  const forecastPoints = forecastMock.map((d, i) => {
-    const x = slotX(measuredCount + i);
-    const rateY = pad.top + innerH - (d.rate / maxRate) * innerH;
-    return { date: d.date, x, rate: d.rate, rateY };
-  });
+  const forecastPoints = forecastRates.map((point, index) => ({
+    ...point,
+    x: slotX(daily.length + index),
+    rateY: pad.top + innerH - (point.rate / maxRate) * innerH,
+  }));
 
   const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => {
     const v = (maxY / tickCount) * i;
@@ -1252,29 +1270,27 @@ function ProductionTrendChart({
   }));
 
   const defectPoints = points.filter((p) => p.rateY !== null);
+  const lastActualRatePoint = [...points].reverse().find((point) => point.rateY !== null);
   const forecastLinePoints = [
-    ...(lastMeasuredRate !== null
-      ? [
-          {
-            x: points[points.length - 1].x,
-            rateY: points[points.length - 1].rateY as number,
-          },
-        ]
+    ...(lastActualRatePoint
+      ? [{ x: lastActualRatePoint.x, rateY: lastActualRatePoint.rateY as number }]
       : []),
     ...forecastPoints.map((p) => ({ x: p.x, rateY: p.rateY })),
   ];
-  const labelStep = Math.max(1, Math.ceil(n / 8));
+  const chartDates = [...daily.map((point) => point.date), ...forecastRates.map((point) => point.date)];
   const gridStroke = isDark ? '#334155' : '#e2e8f0';
   const tickFill = isDark ? '#cbd5e1' : undefined;
   const labelFill = isDark ? '#cbd5e1' : undefined;
   const pointStroke = isDark ? '#1e293b' : '#ffffff';
 
   return (
+    <div className="overflow-x-auto pb-1">
     <svg
       viewBox={`0 0 ${width} ${height}`}
       className="h-[280px] w-full"
+      style={{ minWidth: `${width}px` }}
       role="img"
-      aria-label="날짜별 생산량, 불량률 및 AI 예측 이중 축 차트"
+      aria-label="최근 5일 양품량과 실측 불량률, 미래 2일 예측 불량률 차트"
     >
       {yTicks.map((t) => (
         <g key={`prod-${t.v}`}>
@@ -1316,9 +1332,9 @@ function ProductionTrendChart({
           width={barW}
           height={pad.top + innerH - p.y}
           fill="#2563eb"
-          rx={2}
+          rx={1.5}
         >
-          <title>{`${p.date}: ${formatNumber(p.production)}`}</title>
+          <title>{`${p.date}: 양품량 ${formatNumber(p.production)} LOT`}</title>
         </rect>
       ))}
       {defectPoints.length > 0 ? (
@@ -1336,7 +1352,7 @@ function ProductionTrendChart({
               key={`rate-${p.date}`}
               cx={p.x}
               cy={p.rateY as number}
-              r={4.5}
+              r={3}
               fill="#ea580c"
               stroke={pointStroke}
               strokeWidth={2}
@@ -1362,21 +1378,19 @@ function ProductionTrendChart({
               key={`ai-${p.date}`}
               cx={p.x}
               cy={p.rateY}
-              r={3.5}
+              r={2.5}
               fill="#7c3aed"
               stroke={pointStroke}
               strokeWidth={1.5}
             >
-              <title>{`${p.date}: AI 예측 불량률 ${formatPercent(p.rate)}`}</title>
+              <title>{`${p.date}: 예측 불량률 ${formatPercent(p.rate)}`}</title>
             </circle>
           ))}
         </>
       ) : null}
       {Array.from({ length: n }, (_, i) => {
-        const date =
-          i < measuredCount ? daily[i].date : forecastMock[i - measuredCount].date;
+        const date = chartDates[i];
         const x = slotX(i);
-        if (!(i % labelStep === 0 || i === n - 1)) return null;
         return (
           <text
             key={`label-${date}`}
@@ -1391,6 +1405,7 @@ function ProductionTrendChart({
         );
       })}
     </svg>
+    </div>
   );
 }
 
@@ -1463,6 +1478,82 @@ function FeatureImportancePanel({
   );
 }
 
+function SpcChartCard({ metric, isDark }: { metric: SpcMetric; isDark: boolean }) {
+  const width = 420;
+  const height = 132;
+  const pad = { top: 14, right: 12, bottom: 22, left: 38 };
+  const data = metric.data.slice(-24);
+  const values = [
+    ...data.map((point) => point.value),
+    metric.lowerControlLimit,
+    metric.centerLine,
+    metric.upperControlLimit,
+  ];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 0.000001);
+  const x = (index: number) =>
+    pad.left + (index / Math.max(data.length - 1, 1)) * (width - pad.left - pad.right);
+  const y = (value: number) =>
+    pad.top + ((max - value) / range) * (height - pad.top - pad.bottom);
+  const tone =
+    metric.status.includes('이탈') ? '#dc2626' : metric.status.includes('주의') ? '#d97706' : '#2563eb';
+
+  return (
+    <div
+      className={`rounded-lg border p-2.5 ${
+        isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'
+      }`}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className={isDark ? 'text-xs font-semibold text-slate-200' : 'text-xs font-semibold text-slate-700'}>
+          {metric.label}
+        </span>
+        <span className="text-[11px] font-semibold" style={{ color: tone }}>
+          {metric.status}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[132px] w-full" role="img" aria-label={`${metric.label} SPC 관리도`}>
+        {[
+          { label: 'UCL', value: metric.upperControlLimit, color: '#dc2626' },
+          { label: 'CL', value: metric.centerLine, color: '#64748b' },
+          { label: 'LCL', value: metric.lowerControlLimit, color: '#dc2626' },
+        ].map((line) => (
+          <g key={line.label}>
+            <line
+              x1={pad.left}
+              x2={width - pad.right}
+              y1={y(line.value)}
+              y2={y(line.value)}
+              stroke={line.color}
+              strokeWidth={1}
+              strokeDasharray={line.label === 'CL' ? '3 3' : '5 4'}
+              opacity={0.8}
+            />
+            <text x={pad.left - 4} y={y(line.value) + 3} textAnchor="end" fill={line.color} fontSize="9">
+              {line.label}
+            </text>
+          </g>
+        ))}
+        {data.length > 1 ? (
+          <polyline
+            fill="none"
+            stroke={tone}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            points={data.map((point, index) => `${x(index)},${y(point.value)}`).join(' ')}
+          />
+        ) : null}
+        {data.map((point, index) => (
+          <circle key={`${point.timestamp}-${index}`} cx={x(index)} cy={y(point.value)} r={index === data.length - 1 ? 3.5 : 2} fill={tone}>
+            <title>{`${point.timestamp}: ${point.value}`}</title>
+          </circle>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 
 export default function DashBoardPage() {
   const { isDark } = useUiSettings();
@@ -1470,41 +1561,48 @@ export default function DashBoardPage() {
   const toastIdRef = useRef(0);
 
   /** 생산 원천 — KPI / 차트 / 상세 테이블 공유 */
-  const [liveLots, setLiveLots] = useState<CathodeLot[]>(() => MOCK_LOTS);
+  const [liveLots] = useState<CathodeLot[]>([]);
   const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('connected');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const fetchingRef = useRef(false);
-  const liveVersionRef = useRef(0);
+  const [lotRiskRows, setLotRiskRows] = useState<LotRiskRow[]>([]);
+  const [lotRiskTotal, setLotRiskTotal] = useState(0);
+  const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
+  const [selectedLotRiskDetail, setSelectedLotRiskDetail] = useState<LotRiskApiDetail | null>(null);
+  const [trendPoints, setTrendPoints] = useState<Array<{
+    date: string;
+    production: number;
+    goodCount: number;
+    defectCount: number;
+    defectRate: number | null;
+    aiDefectRate: number | null;
+  }>>([]);
+  const [trendForecastPoints, setTrendForecastPoints] = useState<Array<{
+    date: string;
+    defectRate: number;
+  }>>([]);
+  const [dailyApiRows, setDailyApiRows] = useState<ProductionDailyRow[]>([]);
+  const [dailyTotal, setDailyTotal] = useState(0);
+  const [dailyTotalPages, setDailyTotalPages] = useState(1);
+  const [featureImportanceItems, setFeatureImportanceItems] = useState<FeatureImportanceItem[]>([]);
 
   const [tablePage, setTablePage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSizeOption>(10);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
-  const [selectedLotRiskId, setSelectedLotRiskId] = useState<string | null>(
-    () => LOT_RISK_MOCK[0]?.lot ?? null,
-  );
+  const [selectedLotRiskId, setSelectedLotRiskId] = useState<string | null>(null);
   const [lotRiskFilterDraft, setLotRiskFilterDraft] =
     useState<LotRiskFilterState>(EMPTY_LOT_RISK_FILTER);
   const [lotRiskFilterApplied, setLotRiskFilterApplied] =
     useState<LotRiskFilterState>(EMPTY_LOT_RISK_FILTER);
   const [lotRiskPage, setLotRiskPage] = useState(1);
+  const [lotRiskPageInput, setLotRiskPageInput] = useState('1');
 
-  const filteredLotRiskRows = useMemo(
-    () => filterLotRiskRows(LOT_RISK_MOCK, lotRiskFilterApplied),
-    [lotRiskFilterApplied],
-  );
+  const filteredLotRiskRows = lotRiskRows;
   const lotRiskFilterActive = isLotRiskFilterActive(lotRiskFilterApplied);
-  const lotRiskTotalPages = Math.max(
-    1,
-    Math.ceil(filteredLotRiskRows.length / LOT_RISK_PAGE_SIZE),
-  );
   const lotRiskSafePage = Math.min(lotRiskPage, lotRiskTotalPages);
-  const pagedLotRiskRows = useMemo(() => {
-    const start = (lotRiskSafePage - 1) * LOT_RISK_PAGE_SIZE;
-    return filteredLotRiskRows.slice(start, start + LOT_RISK_PAGE_SIZE);
-  }, [filteredLotRiskRows, lotRiskSafePage]);
+  const pagedLotRiskRows = filteredLotRiskRows;
   /** 페이지당 5행 고정 슬롯 (부족분은 null placeholder) */
   const lotRiskTableSlots = useMemo(() => {
     const slots: Array<LotRiskRow | null> = [...pagedLotRiskRows];
@@ -1512,15 +1610,15 @@ export default function DashBoardPage() {
     return slots;
   }, [pagedLotRiskRows]);
   const lotRiskPageNumbers = useMemo(
-    () => Array.from({ length: lotRiskTotalPages }, (_, i) => i + 1),
-    [lotRiskTotalPages],
+    () => buildPaginationItems(lotRiskSafePage, lotRiskTotalPages),
+    [lotRiskSafePage, lotRiskTotalPages],
   );
   const lotRiskRangeLabel = useMemo(() => {
-    if (filteredLotRiskRows.length === 0) return null;
+    if (lotRiskTotal === 0) return null;
     const start = (lotRiskSafePage - 1) * LOT_RISK_PAGE_SIZE + 1;
-    const end = Math.min(lotRiskSafePage * LOT_RISK_PAGE_SIZE, filteredLotRiskRows.length);
+    const end = Math.min(lotRiskSafePage * LOT_RISK_PAGE_SIZE, lotRiskTotal);
     return `${start}-${end}`;
-  }, [filteredLotRiskRows.length, lotRiskSafePage]);
+  }, [lotRiskSafePage, lotRiskTotal]);
 
   useEffect(() => {
     setSelectedLotRiskId((prev) => {
@@ -1530,17 +1628,54 @@ export default function DashBoardPage() {
   }, [filteredLotRiskRows]);
 
   useEffect(() => {
-    if (lotRiskPage > lotRiskTotalPages) setLotRiskPage(lotRiskTotalPages);
+    if (lotRiskPage > lotRiskTotalPages) {
+      setLotRiskPage(lotRiskTotalPages);
+      setLotRiskPageInput(String(lotRiskTotalPages));
+    }
   }, [lotRiskPage, lotRiskTotalPages]);
 
   const selectedLotRisk = useMemo(
     () => filteredLotRiskRows.find((r) => r.lot === selectedLotRiskId) ?? null,
     [filteredLotRiskRows, selectedLotRiskId],
   );
-  const selectedLotRiskDetail = useMemo(
-    () => (selectedLotRisk ? buildLotRiskDetail(selectedLotRisk) : null),
-    [selectedLotRisk],
-  );
+  useEffect(() => {
+    if (!selectedLotRiskId) {
+      setSelectedLotRiskDetail(null);
+      return;
+    }
+    let cancelled = false;
+    dashboardApi.getLotRiskDetail(selectedLotRiskId)
+      .then(({ data }) => {
+        if (!cancelled) setSelectedLotRiskDetail(data.item as unknown as LotRiskApiDetail);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedLotRiskDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLotRiskId]);
+
+  const selectedSpcCounts = useMemo(() => {
+    const metrics = selectedLotRiskDetail?.spc?.metrics || [];
+    return {
+      out: metrics.filter((metric) => metric.status.includes('이탈')).length,
+      caution: metrics.filter((metric) => metric.status.includes('주의')).length,
+    };
+  }, [selectedLotRiskDetail]);
+
+  const selectedRiskSummary = useMemo(() => {
+    if (!selectedLotRisk || !selectedLotRiskDetail) return '';
+    const probability = selectedLotRiskDetail.defectProb ?? selectedLotRisk.prob;
+    const margin = selectedLotRiskDetail.residualMargin ?? selectedLotRisk.margin;
+    const marginText =
+      margin == null
+        ? '규격 대비 산출 불가'
+        : margin < 0
+          ? `USL 대비 ${formatNumber(Math.round(Math.abs(margin)))} ppm 초과`
+          : `규격까지 ${formatNumber(Math.round(margin))} ppm`;
+    return `불량확률 ${(probability * 100).toFixed(1)}%, ${marginText}, SPC 이탈 ${selectedSpcCounts.out}개, 주의 ${selectedSpcCounts.caution}개`;
+  }, [selectedLotRisk, selectedLotRiskDetail, selectedSpcCounts]);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -1555,6 +1690,7 @@ export default function DashBoardPage() {
   const applyLotRiskFilters = useCallback(() => {
     setLotRiskFilterApplied({ ...lotRiskFilterDraft });
     setLotRiskPage(1);
+    setLotRiskPageInput('1');
     pushToast('LOT 위험등급 검색 결과가 적용되었습니다.', 'success');
   }, [lotRiskFilterDraft, pushToast]);
 
@@ -1562,8 +1698,24 @@ export default function DashBoardPage() {
     setLotRiskFilterDraft(EMPTY_LOT_RISK_FILTER);
     setLotRiskFilterApplied(EMPTY_LOT_RISK_FILTER);
     setLotRiskPage(1);
+    setLotRiskPageInput('1');
     pushToast('LOT 위험등급 필터가 초기화되었습니다.', 'info');
   }, [pushToast]);
+
+  const handleLotRiskPageChange = (page: number) => {
+    const nextPage = Math.min(lotRiskTotalPages, Math.max(1, Math.trunc(page)));
+    setLotRiskPage(nextPage);
+    setLotRiskPageInput(String(nextPage));
+  };
+
+  const handleLotRiskPageInputSubmit = () => {
+    const requestedPage = Number(lotRiskPageInput);
+    if (!Number.isFinite(requestedPage)) {
+      setLotRiskPageInput(String(lotRiskSafePage));
+      return;
+    }
+    handleLotRiskPageChange(requestedPage);
+  };
 
   const liveToday = useMemo(() => {
     if (liveLots.length === 0) return formatDate(new Date());
@@ -1587,42 +1739,44 @@ export default function DashBoardPage() {
   const periodLots = liveLots;
 
   const filteredRecords = useMemo(() => lotsToProductionRecords(periodLots), [periodLots]);
-  const hasData = periodLots.length > 0;
+  const hasData = (trendPoints?.length ?? 0) > 0 || dailyApiRows.length > 0;
   const detailedKpis = useMemo(() => computeDetailedKpis(periodLots), [periodLots]);
 
-  const dailyDetailRows = useMemo(
-    () => aggregateDailyDetailRows(periodLots, liveToday),
-    [periodLots, liveToday],
+  const dailyDetailRows: DailyDetailRow[] = useMemo(
+    () => dailyApiRows.map((row) => ({
+      date: row.date,
+      totalProduction: row.production,
+      goodCount: row.goodCount,
+      defectCount: row.defectCount,
+      defectRate: row.defectRate ?? 0,
+      metalImpurity: row.metalImpurity,
+      tempDevFrom800: row.tempDevFrom800,
+      humidity: row.humidity,
+      tempXHumidity: row.tempXHumidity,
+      status: row.dataStatus,
+    })),
+    [dailyApiRows],
   );
 
   const dailyAggregates: DailyAggregate[] = useMemo(
-    () =>
-      [...dailyDetailRows]
-        .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((r) => ({
-          date: r.date,
-          production: r.totalProduction,
-          defectCount: r.defectCount,
-          targetProduction: Math.max(1, Math.round(r.totalProduction * 1.05)),
-        })),
-    [dailyDetailRows],
+    () => (trendPoints || []).map((row) => ({
+      date: row.date,
+      production: row.goodCount,
+      defectCount: row.defectCount,
+      targetProduction: row.goodCount,
+    })),
+    [trendPoints],
   );
 
   const trendHasData = dailyAggregates.length > 0;
   const trendDailyAggregates = dailyAggregates;
   const trendDailyRates = useMemo(
-    () =>
-      dailyAggregates.map((d) => ({
-        date: d.date,
-        rate: safeRate(d.defectCount, d.production),
-      })),
-    [dailyAggregates],
+    () => (trendPoints || []).map((row) => ({ date: row.date, rate: row.defectRate })),
+    [trendPoints],
   );
-
-  /** 전체 LOT 기준 Feature Importance (liveLots 갱신 시 변동) */
-  const featureImportanceItems = useMemo(
-    () => resolveFeatureImportance(computeFeatureImportanceFromLots(periodLots)),
-    [periodLots],
+  const trendForecastRates = useMemo(
+    () => (trendForecastPoints || []).map((row) => ({ date: row.date, rate: row.defectRate })),
+    [trendForecastPoints],
   );
 
   const kpi: KpiSummary = useMemo(() => {
@@ -1662,12 +1816,9 @@ export default function DashBoardPage() {
 
   const searchedDetailRows = dailyDetailRows;
 
-  const tableTotalPages = Math.max(1, Math.ceil(searchedDetailRows.length / pageSize));
+  const tableTotalPages = dailyTotalPages;
   const tableSafePage = Math.min(tablePage, tableTotalPages);
-  const pagedDetailRows = useMemo(() => {
-    const start = (tableSafePage - 1) * pageSize;
-    return searchedDetailRows.slice(start, start + pageSize);
-  }, [searchedDetailRows, tableSafePage, pageSize]);
+  const pagedDetailRows = searchedDetailRows;
   const visibleDetailIds = useMemo(
     () => pagedDetailRows.map((r) => r.date),
     [pagedDetailRows],
@@ -1684,12 +1835,12 @@ export default function DashBoardPage() {
   );
 
   const tableRangeStart =
-    searchedDetailRows.length === 0 ? 0 : (tableSafePage - 1) * pageSize + 1;
-  const tableRangeEnd = Math.min(tableSafePage * pageSize, searchedDetailRows.length);
+    dailyTotal === 0 ? 0 : (tableSafePage - 1) * 5 + 1;
+  const tableRangeEnd = Math.min(tableSafePage * 5, dailyTotal);
   const tableStatusText =
-    searchedDetailRows.length === 0
+    dailyTotal === 0
       ? '표시할 데이터가 없습니다.'
-      : `총 ${formatNumber(searchedDetailRows.length)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
+      : `총 ${formatNumber(dailyTotal)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
 
   useEffect(() => {
     if (tablePage > tableTotalPages) setTablePage(tableTotalPages);
@@ -1710,17 +1861,61 @@ export default function DashBoardPage() {
     fetchingRef.current = true;
     setLiveStatus('updating');
     try {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 220);
-      });
-      liveVersionRef.current += 1;
-      // Mock 실시간 데모: 최초는 기준 Mock 유지, 이후 최신일 LOT 누적
-      if (liveVersionRef.current === 1) {
-        setLiveLots(MOCK_LOTS);
-      } else {
-        const addCount = 1 + (liveVersionRef.current % 2);
-        setLiveLots((prev) => appendLiveDemoLots(prev, addCount));
-      }
+      const probParams =
+        lotRiskFilterApplied.probLevel === 'high'
+          ? { minProb: 0.4 }
+          : lotRiskFilterApplied.probLevel === 'mid'
+            ? { minProb: 0.2, maxProb: 0.4 }
+            : lotRiskFilterApplied.probLevel === 'low'
+              ? { maxProb: 0.2 }
+              : {};
+      const [lotResponse, trendResponse, dailyResponse, fiResponse] = await Promise.all([
+        dashboardApi.listLotRisks({
+          page: lotRiskPage,
+          pageSize: LOT_RISK_PAGE_SIZE,
+          search: lotRiskFilterApplied.lotQuery || undefined,
+          riskLevel: lotRiskFilterApplied.grade,
+          spc: lotRiskFilterApplied.spc,
+          marginLevel:
+            lotRiskFilterApplied.marginLevel === 'all'
+              ? undefined
+              : lotRiskFilterApplied.marginLevel,
+          ...probParams,
+        }),
+        dashboardApi.getProductionTrend(),
+        dashboardApi.getProductionDaily(tablePage, 5),
+        dashboardApi.getFeatureImportance(4),
+      ]);
+      const mappedLots = lotResponse.data.items.map((row: DashboardLotRiskItem): LotRiskRow => ({
+        lot: row.lotId,
+        prob: row.defectProb ?? 0,
+        predLi: row.residualLithium,
+        margin: row.residualMargin,
+        spc: row.spcStatus || '안정',
+        grade: row.riskLevel,
+        action: '',
+        reason: row.riskReason,
+        isCritical: row.riskLevel === '심각',
+      }));
+      setLotRiskRows(mappedLots);
+      setLotRiskTotal(lotResponse.data.total);
+      setLotRiskTotalPages(lotResponse.data.totalPages);
+      setTrendPoints(trendResponse.data.actualPoints || []);
+      setTrendForecastPoints(trendResponse.data.forecastPoints || []);
+      setDailyApiRows(dailyResponse.data.items as unknown as ProductionDailyRow[]);
+      setDailyTotal(dailyResponse.data.total);
+      setDailyTotalPages(dailyResponse.data.totalPages);
+      const importanceTotal = fiResponse.data.items.reduce(
+        (sum, item) => sum + Math.max(0, Number(item.importance) || 0),
+        0,
+      );
+      setFeatureImportanceItems(
+        fiResponse.data.items.map((item) => ({
+          label: item.label,
+          importance:
+            importanceTotal > 0 ? Math.max(0, Number(item.importance) || 0) / importanceTotal : 0,
+        })),
+      );
       setLastUpdatedAt(new Date());
       setLiveStatus('connected');
     } catch {
@@ -1729,14 +1924,10 @@ export default function DashBoardPage() {
       fetchingRef.current = false;
       setInitialLoading(false);
     }
-  }, []);
+  }, [lotRiskFilterApplied, lotRiskPage, tablePage]);
 
   useEffect(() => {
     void refreshDashboardData();
-    const id = window.setInterval(() => {
-      void refreshDashboardData();
-    }, LIVE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
   }, [refreshDashboardData]);
 
   const defectAnalysis: DefectAnalysis = useMemo(() => {
@@ -1876,53 +2067,15 @@ export default function DashBoardPage() {
       alert('다운로드할 항목을 체크박스로 선택해주세요.');
       return;
     }
-    const rowsToExport = searchedDetailRows.filter((r) =>
-      selectedItems.includes(r.date),
-    );
-    if (rowsToExport.length === 0) {
-      pushToast('내보낼 데이터가 없습니다.', 'error');
-      return;
-    }
-    const headers = [
-      '날짜',
-      '총생산량',
-      '양품 수',
-      '불량품 수',
-      '불량률',
-      '평균 방전 용량',
-      '금속 불순물 농도',
-      '평균 소성 온도',
-      '데이터 상태',
-    ];
-    const lines = [
-      headers.map(escapeCsvCell).join(','),
-      ...rowsToExport.map((r) =>
-        [
-          r.date,
-          r.totalProduction,
-          r.goodCount,
-          r.defectCount,
-          (r.defectRate * 100).toFixed(1) + '%',
-          r.avgCapacity.toFixed(1),
-          r.avgMetalImpurity.toFixed(3),
-          r.avgSinteringTemp.toFixed(1),
-          r.status,
-        ]
-          .map(escapeCsvCell)
-          .join(','),
-      ),
-    ];
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `production-detail_${liveToday}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    pushToast('CSV 파일이 다운로드되었습니다.', 'success');
+    selectedItems.forEach((date) => {
+      const link = document.createElement('a');
+      link.href = dashboardApi.lotsCsvPath(date);
+      link.download = `lots_${date}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+    pushToast(`${selectedItems.length}개 날짜의 LOT CSV 다운로드를 시작했습니다.`, 'success');
   };
 
   const cardClass = isDark
@@ -1934,7 +2087,7 @@ export default function DashBoardPage() {
       ? '업데이트 중'
       : liveStatus === 'error'
         ? '업데이트 지연'
-        : '실시간 데모';
+        : 'API 연결됨';
 
   return (
     <div
@@ -2010,22 +2163,6 @@ export default function DashBoardPage() {
           </div>
         </header>
 
-        {/* KPI — 6 detailed data-driven cards */}
-        <section className="mb-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
-          {detailedKpis.map((card) => (
-            <KpiCard
-              key={card.key}
-              label={card.label}
-              value={card.value}
-              unit={card.unit}
-              sub={card.sub}
-              badge={card.badge}
-            />
-          ))}
-        </section>
-
-
-
         {/* LOT 위험등급 — 좌측 목록 / 우측 핵심 상세 (생산 추이 위) */}
         <section className={`col-span-full mb-6 w-full p-5 ${cardClass}`}>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
@@ -2037,15 +2174,6 @@ export default function DashBoardPage() {
               </h2>
               <span className="text-sm font-normal text-gray-400">
                 분류확률 + 잔류Li 여유 + SPC 결합
-              </span>
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                  isDark
-                    ? 'bg-slate-800 text-slate-400 ring-1 ring-slate-600'
-                    : 'bg-slate-50 text-slate-500 ring-1 ring-slate-200'
-                }`}
-              >
-                Mock 분석 데이터
               </span>
             </div>
           </div>
@@ -2079,14 +2207,14 @@ export default function DashBoardPage() {
             </label>
 
             <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>불량확률</span>
               <select
-                aria-label="위험등급 필터"
-                value={lotRiskFilterDraft.grade}
+                aria-label="불량확률 필터"
+                value={lotRiskFilterDraft.probLevel}
                 onChange={(e) =>
                   setLotRiskFilterDraft((prev) => ({
                     ...prev,
-                    grade: e.target.value as LotRiskFilterState['grade'],
+                    probLevel: e.target.value as LotRiskFilterState['probLevel'],
                   }))
                 }
                 className={`h-9 rounded-lg border px-2 text-sm ${
@@ -2096,9 +2224,33 @@ export default function DashBoardPage() {
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="높음">높음</option>
-                <option value="중간">중간</option>
-                <option value="낮음">낮음</option>
+                <option value="high">40% 이상</option>
+                <option value="mid">20~40%</option>
+                <option value="low">20% 미만</option>
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>규격 대비</span>
+              <select
+                aria-label="여유량 필터"
+                value={lotRiskFilterDraft.marginLevel}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    marginLevel: e.target.value as LotRiskFilterState['marginLevel'],
+                  }))
+                }
+                className={`h-9 rounded-lg border px-2 text-sm ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <option value="all">전체</option>
+                <option value="low">500ppm 이하</option>
+                <option value="caution">500ppm 초과~1,000ppm</option>
+                <option value="sufficient">1,000ppm 초과</option>
               </select>
             </label>
 
@@ -2120,20 +2272,21 @@ export default function DashBoardPage() {
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="정상">정상</option>
+                <option value="안정">안정</option>
+                <option value="주의">주의</option>
                 <option value="이탈">이탈</option>
               </select>
             </label>
 
             <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>불량확률</span>
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
               <select
-                aria-label="불량확률 필터"
-                value={lotRiskFilterDraft.probLevel}
+                aria-label="위험등급 필터"
+                value={lotRiskFilterDraft.grade}
                 onChange={(e) =>
                   setLotRiskFilterDraft((prev) => ({
                     ...prev,
-                    probLevel: e.target.value as LotRiskFilterState['probLevel'],
+                    grade: e.target.value as LotRiskFilterState['grade'],
                   }))
                 }
                 className={`h-9 rounded-lg border px-2 text-sm ${
@@ -2143,32 +2296,8 @@ export default function DashBoardPage() {
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="high">50% 이상</option>
-                <option value="mid">15~50%</option>
-                <option value="low">15% 미만</option>
-              </select>
-            </label>
-
-            <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>긴급</span>
-              <select
-                aria-label="긴급 LOT 필터"
-                value={lotRiskFilterDraft.critical}
-                onChange={(e) =>
-                  setLotRiskFilterDraft((prev) => ({
-                    ...prev,
-                    critical: e.target.value as LotRiskFilterState['critical'],
-                  }))
-                }
-                className={`h-9 rounded-lg border px-2 text-sm ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
-                    : 'border-slate-200 bg-white text-slate-700'
-                }`}
-              >
-                <option value="all">전체</option>
-                <option value="critical">긴급만</option>
-                <option value="normal">일반만</option>
+                <option value="심각">심각</option>
+                <option value="주의">주의</option>
               </select>
             </label>
 
@@ -2187,8 +2316,8 @@ export default function DashBoardPage() {
                 lotRiskFilterDraft.lotQuery === '' &&
                 lotRiskFilterDraft.grade === 'all' &&
                 lotRiskFilterDraft.spc === 'all' &&
-                lotRiskFilterDraft.critical === 'all' &&
-                lotRiskFilterDraft.probLevel === 'all'
+                lotRiskFilterDraft.probLevel === 'all' &&
+                lotRiskFilterDraft.marginLevel === 'all'
               }
               className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 isDark
@@ -2206,8 +2335,8 @@ export default function DashBoardPage() {
               }`}
             >
               {lotRiskFilterActive
-                ? `검색 결과 ${filteredLotRiskRows.length}건 / 전체 ${LOT_RISK_MOCK.length}건`
-                : `총 ${filteredLotRiskRows.length}건`}
+                ? `검색 결과 ${lotRiskTotal}건`
+                : `총 ${lotRiskTotal}건`}
               {lotRiskRangeLabel
                 ? ` · ${lotRiskRangeLabel} 표시 · ${lotRiskSafePage}/${lotRiskTotalPages}페이지`
                 : ''}
@@ -2215,28 +2344,31 @@ export default function DashBoardPage() {
           </div>
 
           <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-12">
-            <div className="flex min-w-0 flex-col xl:col-span-7">
+            <div className="flex min-w-0 flex-col xl:col-span-8">
               <div
                 className={`flex h-[356px] min-h-0 flex-col overflow-hidden rounded-lg border ${
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-              <div className="min-h-0 flex-1 overflow-hidden">
-              <table className="w-full table-fixed border-collapse text-sm">
+              <div className="min-h-0 flex-1 overflow-x-auto">
+              <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
                 <thead
                   className={`text-sm font-normal text-gray-500 ${
                     isDark ? 'bg-slate-900/80' : 'bg-slate-100/70'
                   }`}
                 >
                   <tr className="h-[44px]">
-                    <th scope="col" className="px-3 py-3 text-left font-normal">
-                      LOT
+                    <th scope="col" className="w-[190px] px-3 py-3 text-left font-normal">
+                      LOT ID
                     </th>
                     <th scope="col" className="px-3 py-3 text-left font-normal">
                       불량확률
                     </th>
                     <th scope="col" className="px-3 py-3 text-right font-normal">
-                      잔류Li 여유
+                      잔류리튬
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-right font-normal">
+                      규격 대비
                     </th>
                     <th scope="col" className="px-3 py-3 text-center font-normal">
                       SPC
@@ -2251,7 +2383,7 @@ export default function DashBoardPage() {
                     <>
                       <tr className={`h-[52px] border-b ${isDark ? 'border-slate-700/80' : 'border-slate-100'}`}>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           rowSpan={LOT_RISK_PAGE_SIZE}
                           className={`px-4 text-center text-sm align-middle ${
                             isDark ? 'text-slate-400' : 'text-slate-500'
@@ -2281,17 +2413,18 @@ export default function DashBoardPage() {
                           }`}
                           aria-hidden="true"
                         >
-                          <td className="px-3 py-3" colSpan={5} />
+                          <td className="px-3 py-3" colSpan={6} />
                         </tr>
                       );
                     }
                     const pct = lotRiskProbPercent(row.prob);
-                    const spcOut = row.spc === '이탈';
+                    const spcOut = row.spc.includes('이탈');
+                    const spcWarn = row.spc.includes('주의');
                     const isSelected = row.lot === selectedLotRiskId;
                     return (
                       <tr
                         key={row.lot}
-                        role="button"
+                        role="row"
                         tabIndex={0}
                         aria-selected={isSelected}
                         onClick={() => setSelectedLotRiskId(row.lot)}
@@ -2316,7 +2449,7 @@ export default function DashBoardPage() {
                         }`}
                       >
                         <td
-                          className={`whitespace-nowrap px-3 py-3 font-medium ${
+                          className={`min-w-[190px] whitespace-nowrap px-3 py-3 font-medium ${
                             isDark ? 'text-slate-200' : 'text-slate-700'
                           }`}
                         >
@@ -2347,24 +2480,35 @@ export default function DashBoardPage() {
                           </div>
                         </td>
                         <td
+                          className={`whitespace-nowrap px-3 py-3 text-right tabular-nums ${
+                            isDark ? 'text-slate-200' : 'text-slate-700'
+                          }`}
+                        >
+                          {typeof row.predLi === 'number'
+                            ? formatNumber(Math.round(row.predLi))
+                            : row.predLi || '-'}
+                        </td>
+                        <td
                           className={`whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums ${lotRiskMarginClass(
                             row.margin,
                             isDark,
                           )}`}
                         >
-                          {row.margin}
+                          {formatSpecDistance(row.margin)}
                         </td>
                         <td className="px-3 py-3 text-center">
                           <span
                             className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
                               spcOut
                                 ? 'bg-red-100 text-red-600'
-                                : 'bg-green-100 text-green-700'
+                                : spcWarn
+                                  ? 'bg-orange-100 text-orange-700'
+                                  : 'bg-green-100 text-green-700'
                             }`}
                           >
                             <span
                               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                spcOut ? 'bg-red-500' : 'bg-green-600'
+                                spcOut ? 'bg-red-500' : spcWarn ? 'bg-orange-500' : 'bg-green-600'
                               }`}
                               aria-hidden="true"
                             />
@@ -2374,18 +2518,18 @@ export default function DashBoardPage() {
                         <td className="px-3 py-3 text-center">
                           <span
                             className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                              row.grade === '높음'
+                              row.grade === '심각'
                                 ? 'bg-red-50 text-red-600'
-                                : row.grade === '중간'
+                                : row.grade === '주의'
                                   ? 'bg-orange-50 text-orange-600'
                                   : 'bg-green-50 text-green-600'
                             }`}
                           >
                             <span
                               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                row.grade === '높음'
+                                row.grade === '심각'
                                   ? 'bg-red-500'
-                                  : row.grade === '중간'
+                                  : row.grade === '주의'
                                     ? 'bg-orange-500'
                                     : 'bg-green-600'
                               }`}
@@ -2403,7 +2547,7 @@ export default function DashBoardPage() {
               </div>
 
               <div
-                className={`flex h-[52px] shrink-0 items-center justify-between gap-2 border-t px-3 ${
+                className={`flex min-h-[52px] shrink-0 flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
@@ -2412,19 +2556,17 @@ export default function DashBoardPage() {
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  {filteredLotRiskRows.length > 0 && lotRiskRangeLabel
-                    ? `${lotRiskRangeLabel} / 총 ${filteredLotRiskRows.length}건`
-                    : `0 / 총 ${filteredLotRiskRows.length}건`}
+                  {lotRiskTotal > 0 && lotRiskRangeLabel
+                    ? `${lotRiskRangeLabel} / 총 ${lotRiskTotal}건`
+                    : `0 / 총 ${lotRiskTotal}건`}
                 </span>
-                <nav
-                  aria-label="LOT 위험등급 목록 페이지"
-                  className="flex flex-wrap items-center justify-center gap-1.5"
-                >
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                <nav aria-label="LOT 위험등급 목록 페이지" className="flex w-[440px] shrink-0 items-center justify-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setLotRiskPage((p) => Math.max(1, p - 1))}
+                    onClick={() => handleLotRiskPageChange(lotRiskSafePage - 1)}
                     disabled={lotRiskSafePage <= 1 || filteredLotRiskRows.length === 0}
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`min-w-12 shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       isDark
                         ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -2432,16 +2574,23 @@ export default function DashBoardPage() {
                   >
                     이전
                   </button>
-                  {lotRiskPageNumbers.map((page) => {
+                  {lotRiskPageNumbers.map((page, index) => {
+                    if (page === 'ellipsis') {
+                      return (
+                        <span key={`lot-ellipsis-${index}`} className={`inline-flex w-10 shrink-0 items-center justify-center text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                          …
+                        </span>
+                      );
+                    }
                     const active = page === lotRiskSafePage;
                     return (
                       <button
                         key={page}
                         type="button"
                         aria-current={active ? 'page' : undefined}
-                        onClick={() => setLotRiskPage(page)}
+                        onClick={() => handleLotRiskPageChange(page)}
                         disabled={filteredLotRiskRows.length === 0}
-                        className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        className={`w-10 shrink-0 rounded-lg px-1 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                           active
                             ? 'bg-blue-600 text-white'
                             : isDark
@@ -2455,14 +2604,12 @@ export default function DashBoardPage() {
                   })}
                   <button
                     type="button"
-                    onClick={() =>
-                      setLotRiskPage((p) => Math.min(lotRiskTotalPages, p + 1))
-                    }
+                    onClick={() => handleLotRiskPageChange(lotRiskSafePage + 1)}
                     disabled={
                       lotRiskSafePage >= lotRiskTotalPages ||
                       filteredLotRiskRows.length === 0
                     }
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`min-w-12 shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       isDark
                         ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -2471,12 +2618,54 @@ export default function DashBoardPage() {
                     다음
                   </button>
                 </nav>
+                <form
+                  className="flex items-center gap-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    handleLotRiskPageInputSubmit();
+                  }}
+                >
+                  <label
+                    htmlFor="lot-risk-page-jump"
+                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+                  >
+                    페이지
+                  </label>
+                  <input
+                    id="lot-risk-page-jump"
+                    type="number"
+                    min={1}
+                    max={lotRiskTotalPages}
+                    value={lotRiskPageInput}
+                    onChange={(event) => setLotRiskPageInput(event.target.value)}
+                    aria-label="이동할 LOT 위험등급 페이지 번호"
+                    className={`h-8 w-16 rounded-lg border px-2 text-center text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-200'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  />
+                  <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    / {lotRiskTotalPages}
+                  </span>
+                  <button
+                    type="submit"
+                    className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    이동
+                  </button>
+                </form>
+                </div>
               </div>
               </div>
             </div>
 
             <aside
-              className={`flex h-[356px] min-h-0 flex-col overflow-hidden rounded-lg border p-4 xl:col-span-5 ${
+              className={`flex h-[356px] min-h-0 flex-col overflow-hidden rounded-lg border p-4 xl:col-span-4 ${
                 isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50/60'
               }`}
             >
@@ -2511,14 +2700,14 @@ export default function DashBoardPage() {
                     </div>
                     <span
                       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        selectedLotRisk.grade === '높음'
+                        selectedLotRisk.grade === '심각'
                           ? 'bg-red-50 text-red-600'
-                          : selectedLotRisk.grade === '중간'
+                          : selectedLotRisk.grade === '주의'
                             ? 'bg-orange-50 text-orange-600'
                             : 'bg-green-50 text-green-600'
                       }`}
                     >
-                      등급 {selectedLotRisk.grade}
+                      {selectedLotRisk.grade}
                     </span>
                   </div>
 
@@ -2533,7 +2722,7 @@ export default function DashBoardPage() {
                           : 'border-amber-400 bg-amber-50 text-amber-950'
                     }`}
                   >
-                    {selectedLotRiskDetail.summary}
+                    {selectedRiskSummary}
                   </p>
 
                   <div className="mb-3 grid grid-cols-2 gap-2">
@@ -2542,10 +2731,15 @@ export default function DashBoardPage() {
                         label: '불량확률',
                         value: `${Math.round(lotRiskProbPercent(selectedLotRisk.prob))}%`,
                       },
-                      { label: '예측 잔류Li', value: selectedLotRisk.predLi },
                       {
-                        label: '잔류Li 여유',
-                        value: `${selectedLotRisk.margin}`,
+                        label: '예측 잔류리튬',
+                        value: typeof selectedLotRisk.predLi === 'number'
+                          ? `${formatNumber(Math.round(selectedLotRisk.predLi))} ppm`
+                          : selectedLotRisk.predLi || '-',
+                      },
+                      {
+                        label: '규격 대비',
+                        value: formatSpecDistance(selectedLotRisk.margin, true),
                         valueClass: lotRiskMarginClass(selectedLotRisk.margin, isDark),
                       },
                       { label: 'SPC', value: selectedLotRisk.spc },
@@ -2576,62 +2770,26 @@ export default function DashBoardPage() {
                     ))}
                   </div>
 
-                  <div className="mb-3">
+                  <div className="mb-3 space-y-2">
                     <p
                       className={`mb-1.5 text-xs font-semibold ${
                         isDark ? 'text-slate-300' : 'text-slate-700'
                       }`}
                     >
-                      핵심 요인
+                      SPC 관리도
                     </p>
-                    <ul className="space-y-1.5">
-                      {selectedLotRiskDetail.riskFactors.slice(0, 2).map((f) => {
-                        const pct = Math.round(Math.min(1, Math.max(0, f.impact)) * 100);
-                        return (
-                          <li
-                            key={f.label}
-                            className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs ${
-                              isDark ? 'bg-slate-800/70' : 'bg-white'
-                            }`}
-                          >
-                            <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
-                              {f.label}
-                            </span>
-                            <span
-                              className={`shrink-0 font-semibold tabular-nums ${
-                                isDark ? 'text-slate-200' : 'text-slate-800'
-                              }`}
-                            >
-                              {pct}%
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-
-                  <div className="mb-3">
-                    <p
-                      className={`mb-1.5 text-xs font-semibold ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      판정
-                    </p>
-                    <ul className="space-y-1.5">
-                      {selectedLotRiskDetail.analysisSteps.map((step) => (
-                        <li
-                          key={step}
-                          className={`rounded-md px-2.5 py-1.5 text-xs leading-relaxed ${
-                            isDark
-                              ? 'bg-slate-800/70 text-slate-300'
-                              : 'bg-white text-slate-600'
-                          }`}
-                        >
-                          {step}
-                        </li>
+                    {(selectedLotRiskDetail.spc?.metrics || [])
+                      .filter((metric) => metric.status.includes('이탈') || metric.status.includes('주의'))
+                      .map((metric) => (
+                        <SpcChartCard key={metric.key} metric={metric} isDark={isDark} />
                       ))}
-                    </ul>
+                    {(selectedLotRiskDetail.spc?.metrics || []).every(
+                      (metric) => !metric.status.includes('이탈') && !metric.status.includes('주의'),
+                    ) ? (
+                      <p className={`rounded-md px-2.5 py-2 text-xs ${isDark ? 'bg-slate-800/70 text-slate-300' : 'bg-white text-slate-600'}`}>
+                        이탈 또는 주의 파라미터가 없습니다.
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="mt-auto pt-1">
@@ -2647,7 +2805,7 @@ export default function DashBoardPage() {
                         isDark ? 'text-slate-100' : 'text-slate-900'
                       }`}
                     >
-                      {renderLotRiskAction(selectedLotRisk.action)}
+                      &nbsp;
                     </p>
                   </div>
                 </div>
@@ -2663,7 +2821,7 @@ export default function DashBoardPage() {
               <h2
                 className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
               >
-                생산 추이
+                일별 품질 동향
               </h2>
               <div
                 className={`mt-2 flex flex-wrap items-center gap-3 text-[11px] font-medium ${
@@ -2672,7 +2830,7 @@ export default function DashBoardPage() {
               >
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-blue-600" />
-                  생산량 (좌측)
+                  양품량 (좌측)
                 </span>
                 <span className={isDark ? 'text-slate-600' : 'text-slate-300'} aria-hidden>
                   |
@@ -2689,7 +2847,7 @@ export default function DashBoardPage() {
                     className="inline-block h-0.5 w-4 border-t-2 border-dashed border-violet-600"
                     aria-hidden
                   />
-                  AI 예측
+                  예측 불량률
                 </span>
               </div>
             </div>
@@ -2698,6 +2856,7 @@ export default function DashBoardPage() {
               <ProductionTrendChart
                 daily={trendDailyAggregates}
                 dailyRates={trendDailyRates}
+                forecastRates={trendForecastRates}
                 isDark={isDark}
               />
             ) : (
@@ -2719,37 +2878,12 @@ export default function DashBoardPage() {
               생산 상세 테이블
             </h2>
             <p className={`mt-0.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              일별 집계 · KPI·차트와 동일 원천 · Mock 실시간 데모
+              cathode_clf_data 기반 일별 생산·불량 집계
             </p>
           </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
-              <label
-                className={`inline-flex items-center gap-1.5 text-[11px] ${
-                  isDark ? 'text-slate-500' : 'text-slate-400'
-                }`}
-              >
-                페이지당
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value) as PageSizeOption);
-                    setTablePage(1);
-                  }}
-                  className={`h-8 rounded-md border px-1.5 text-xs ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-950/40 text-slate-300'
-                      : 'border-slate-200 bg-white text-slate-600'
-                  }`}
-                >
-                  {PAGE_SIZE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <button
                 type="button"
                 onClick={handleExportCsv}
@@ -2778,7 +2912,7 @@ export default function DashBoardPage() {
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-                <table className="w-full min-w-[960px] border-collapse text-sm">
+                <table className="w-full min-w-[1220px] border-collapse text-sm">
                   <thead
                     className={`text-xs font-semibold uppercase tracking-wider ${
                       isDark
@@ -2803,9 +2937,10 @@ export default function DashBoardPage() {
                       <th className="px-3 py-3 text-right">양품 수</th>
                       <th className="px-3 py-3 text-right">불량품 수</th>
                       <th className="px-3 py-3 text-right">불량률</th>
-                      <th className="px-3 py-3 text-right">평균 방전 용량</th>
-                      <th className="px-3 py-3 text-right">금속 불순물 농도</th>
-                      <th className="px-3 py-3 text-right">평균 소성 온도</th>
+                      <th className="px-3 py-3 text-right">금속 불순물</th>
+                      <th className="px-3 py-3 text-right">소성온도 이탈</th>
+                      <th className="px-3 py-3 text-right">습도</th>
+                      <th className="px-3 py-3 text-right">소성온도×습도</th>
                       <th className="px-3 py-3 text-center">데이터 상태</th>
                     </tr>
                   </thead>
@@ -2880,26 +3015,33 @@ export default function DashBoardPage() {
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgCapacity.toFixed(1)}
+                            {r.metalImpurity == null ? '-' : r.metalImpurity.toFixed(3)}
                           </td>
                           <td
                             className={`px-3 py-3 text-right tabular-nums ${
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgMetalImpurity.toFixed(3)}
+                            {r.tempDevFrom800 == null ? '-' : r.tempDevFrom800.toFixed(2)}
                           </td>
                           <td
                             className={`px-3 py-3 text-right tabular-nums ${
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgSinteringTemp.toFixed(1)}
+                            {r.humidity == null ? '-' : r.humidity.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tempXHumidity == null ? '-' : r.tempXHumidity.toFixed(1)}
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span
                               className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                                r.status === '수집 중'
+                                r.status === '수집 중' || r.status === '부분 채점'
                                   ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
                                   : isDark
                                     ? 'bg-slate-800 text-slate-300 ring-1 ring-slate-600'

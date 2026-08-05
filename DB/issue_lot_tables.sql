@@ -17,10 +17,10 @@ CREATE TABLE IF NOT EXISTS lots (
   operator_id       VARCHAR(32)  NULL,
   quality_defect    TINYINT(1)   NOT NULL DEFAULT 0,
   defect_prob       DOUBLE       NULL COMMENT '불량확률(잠정/채점)',
-  residual_lithium  DOUBLE       NULL COMMENT '잔여리튬(잠정/채점)',
-  spc_status        VARCHAR(32)  NULL COMMENT 'SPC 상태(잠정/채점)',
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '낮음'
-    COMMENT '높음|중간|낮음',
+  residual_lithium  DOUBLE       NULL COMMENT '잔류리튬 예측(ppm)',
+  spc_status        VARCHAR(32)  NULL COMMENT '이탈|주의|안정|이탈, 주의',
+  risk_level        VARCHAR(10)  NOT NULL DEFAULT '안정'
+    COMMENT '심각|주의|안정',
   risk_reason       VARCHAR(255) NULL,
   scored_at         DATETIME     NULL,
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS issues (
   issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY COMMENT 'ISS-yyMMdd-seq',
   lot_id            VARCHAR(64)  NOT NULL,
   occurred_at       DATETIME     NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL COMMENT '높음|중간|낮음',
+  risk_level        VARCHAR(10)  NOT NULL COMMENT '심각|주의|안정',
   status            VARCHAR(20)  NOT NULL DEFAULT '접수'
     COMMENT '접수|분석 중|조치 중|완료',
   title             VARCHAR(255) NOT NULL COMMENT '이슈 내용',
