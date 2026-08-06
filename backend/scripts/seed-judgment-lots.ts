@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   quality_defect  TINYINT(1)   NOT NULL,
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
+  probability     DOUBLE       NULL,
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE

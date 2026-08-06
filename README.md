@@ -30,7 +30,7 @@
 | [`frontend/`](./frontend/) | UI · AppShell · GlobalChatbot · `/security` | [`frontend/README.md`](./frontend/README.md) |
 | [`backend/`](./backend/) | Express API · 세션 · 게이트 · LLM 키 · 프록시 | [`backend/README.md`](./backend/README.md) |
 | [`ai-service/`](./ai-service/) | FastAPI · predict · LangGraph · secure RAG | [`ai-service/README.md`](./ai-service/README.md) |
-| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-05.md) |
+| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-06.md) |
 | [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | — |
 
 ```text
@@ -302,7 +302,8 @@ flowchart TD
 | 파일 | 역할 |
 |------|------|
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
-| [`docs/work-log/2026-08-05.md`](./docs/work-log/2026-08-05.md) | `cathode_*_data` 테이블 제거(임시) · score→`lots` · 후속 데이터 끼워넣기 메모 |
+| [`docs/work-log/2026-08-06.md`](./docs/work-log/2026-08-06.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
+| [`docs/work-log/2026-08-05.md`](./docs/work-log/2026-08-05.md) | lots/judgment/SPC 폴링 · 대시보드 residual 3컬럼 · 네모칸 후속 |
 | [`docs/work-log/2026-08-04.md`](./docs/work-log/2026-08-04.md) | Documents READ-ONLY · 인수인계 DB · ISS-yyMMdd-001 자동발급 |
 | [`docs/work-log/2026-08-02.md`](./docs/work-log/2026-08-02.md) | SSE · analytics · soft fallback · **3단계** chunk/min_score · 스택 스냅샷 |
 | [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md) | ai-service 기능 목록 (predict · 보안 RAG · analytics) |

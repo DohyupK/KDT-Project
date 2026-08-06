@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   quality_defect  TINYINT(1)   NOT NULL,
   capacity        DOUBLE       NULL COMMENT 'mAh/g',
   residual_li     DOUBLE       NULL COMMENT '잔류리튬(ppm) · API residualLithium',
+  probability     DOUBLE       NULL COMMENT '불량확률 0~1 · API defectProb',
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE

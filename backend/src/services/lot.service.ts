@@ -310,17 +310,19 @@ async function updateLotScore(
     )
   }
   await query(
-    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        quality_defect = COALESCE(judgment_lots.quality_defect, VALUES(quality_defect)),
        capacity = COALESCE(judgment_lots.capacity, VALUES(capacity)),
-       residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li))`,
+       residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li)),
+       probability = COALESCE(judgment_lots.probability, VALUES(probability))`,
     [
       lotId,
       scored.quality_defect === 1 ? 1 : 0,
       scored.capacity,
       scored.residual_lithium,
+      scored.defect_prob,
     ],
   )
   await upsertAnalysisScore(lotId, scored)

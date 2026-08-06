@@ -8,6 +8,8 @@
 - **추가 (2026-08-05):** `judgment_lots` — quality/capacity 시드 + residual API JOIN · [`DB/judgment_lots.sql`](../../DB/judgment_lots.sql)
 - **갱신 (2026-08-05):** `lots` = QC CSV 공정만 · `lots.residual_li` DROP · API `residualLithium` ← `judgment_lots`
 - **싱크 (2026-08-05):** `SPC_LOT` → `lots` 미러 + score · `judgment_lots` NULL-fill AI · `npm run sync:spc-lots`
+- **대시보드 (2026-08-05):** LOT 위험등급 = `judgment_lots` LOT/probability/잔류/규격대비 · SPC·위험·상세차트 후속
+- **추가 (2026-08-05):** `judgment_lots.probability` (0~1) · score NULL-fill · 대시보드 불량확률
 
 ## 표식 범례
 
@@ -57,7 +59,7 @@
 | ~~8~~ | ~~`lot_results`~~ | **제거됨** | — | — |
 | ~~9~~ | ~~`lot_spc_results`~~ | **제거됨** | — | — |
 | 10 | `lots` | R+W | `/dashboard`, `/issue`, score API | score · QC reload · sync:spc-lots · import · `/issue` |
-| 10b | `judgment_lots` | R+W | `/dashboard`, `/issue` (JOIN residual) | score (NULL-fill) · seed · rollback |
+| 10b | `judgment_lots` | R+W | `/dashboard`(prob·residual), `/issue` JOIN | score (NULL-fill) · seed · rollback |
 | ~~11~~ | ~~`spc_limits`~~ | **제거됨** | — | — |
 | 12 | `SPC_LOT` | R (sync) | *(피더 + sync:spc-lots)* | *(피더)* |
 | 13 | `SPC_LOT_results` | — | *(피더)* | *(피더)* |
@@ -88,6 +90,7 @@ score는 `lots` 공정 컬럼 → `/predict`·`/predict-residual`. CSV(`*.csv`)�
 | `quality_defect` | W† | W | — | — | score(`/predict`) †NULL만 · seed |
 | `capacity` | W† | W | — | — | score(`/predict-capacity`) †NULL만 · seed |
 | `residual_li` | R · W† | R · W | — | `/dashboard`, `/issue` | score(`/predict-residual`) †NULL만 · rollback · seed |
+| `probability` | R · W† | R · W | — | `/dashboard` 불량확률 | score(`/predict`) †NULL만 · rollback · backfill |
 
 † UPSERT: `COALESCE(existing, VALUES(...))` — 값이 있으면 유지.
 

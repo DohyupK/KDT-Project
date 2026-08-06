@@ -37,7 +37,7 @@ async function main() {
       : delResult
   console.log('ISSUES_DELETED', deleted)
 
-  await query(`UPDATE judgment_lots SET residual_li = NULL`)
+  await query(`UPDATE judgment_lots SET residual_li = NULL, probability = NULL`)
   await query(
     `UPDATE analysis_lots SET
       defect_prob = NULL,
@@ -49,7 +49,7 @@ async function main() {
       spc_limit_version = NULL,
       scored_at = NULL`,
   )
-  console.log('JUDGMENT_RESIDUAL_CLEARED')
+  console.log('JUDGMENT_RESIDUAL_PROB_CLEARED')
   console.log('ANALYSIS_LOTS_SCORES_CLEARED')
 
   const afterScores = await query<{ c: number }[]>(

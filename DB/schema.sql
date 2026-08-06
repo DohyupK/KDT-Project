@@ -58,12 +58,13 @@ CREATE TABLE IF NOT EXISTS analysis_lots (
   INDEX idx_analysis_scored (scored_at)
 );
 
--- Judgment outcomes: clf quality_defect + reg capacity + residual_li (API residualLithium)
+-- Judgment outcomes: clf quality_defect + reg capacity + residual_li + probability (0~1)
 CREATE TABLE IF NOT EXISTS judgment_lots (
   lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,
   quality_defect  TINYINT(1)   NOT NULL,
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
+  probability     DOUBLE       NULL,
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE

@@ -9,7 +9,7 @@ export type DashboardLotRiskItem = {
   residualLithium: number | null
   residualMargin: number | null
   spcStatus: string | null
-  riskLevel: '심각' | '주의' | '안정'
+  riskLevel: '심각' | '주의' | '안정' | null
   riskReason: string | null
 }
 
@@ -40,21 +40,23 @@ export const dashboardApi = {
     )
   },
 
-  getProductionTrend() {
+  getProductionTrend(params: {
+    from?: string
+    to?: string
+    grain?: 'day' | 'week' | 'month'
+  } = {}) {
     return apiClient.get<{
-      actualPoints: Array<{
+      grain: 'day' | 'week' | 'month'
+      from: string
+      to: string
+      points: Array<{
         date: string
         production: number
         goodCount: number
         defectCount: number
         defectRate: number | null
-        aiDefectRate: number | null
       }>
-      forecastPoints: Array<{
-        date: string
-        defectRate: number
-      }>
-    }>('/dashboard/production-trend')
+    }>('/dashboard/production-trend', { params })
   },
 
   getProductionDaily(page = 1, pageSize = 5) {

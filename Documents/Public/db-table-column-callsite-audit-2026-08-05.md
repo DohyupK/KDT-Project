@@ -25,7 +25,7 @@
 | ~~8~~ | ~~`lot_results`~~ | **제거됨** | 피더 결과는 `SPC_LOT_results` |
 | ~~9~~ | ~~`lot_spc_results`~~ | **제거됨** | |
 | 10 | `lots` | Dashboard · Issue · score · sync | 공정만 (+ `analysis_lots` JOIN) |
-| 10b | `judgment_lots` | Dashboard · Issue · score | residual/capacity/defect · NULL-fill AI |
+| 10b | `judgment_lots` | Dashboard · Issue · score | probability·residual · NULL-fill AI · quality/capacity 시드 |
 | ~~11~~ | ~~`spc_limits`~~ | **제거됨** | 앱은 `spcPhase1Limits.json` |
 | 12 | `SPC_LOT` | 피더 · sync:spc-lots | → `lots` 미러 |
 | 13 | `SPC_LOT_results` | 피더 | 기본 `RESULTS_TABLE` |
@@ -49,10 +49,10 @@
 
 ## 10b. `judgment_lots`
 
-**라이브 컬럼:** `lot_id`, `quality_defect`, `capacity`, `residual_li`  
+**라이브 컬럼:** `lot_id`, `quality_defect`, `capacity`, `residual_li`, `probability`  
 **FK:** `lot_id` → `lots.id`  
-**적재:** `seed:judgment-lots` · score UPSERT **NULL만** (`/predict` · `/predict-capacity` · `/predict-residual`)  
-**앱:** `LEFT JOIN judgment_lots j` → `j.residual_li AS residual_lithium`.
+**적재:** `seed:judgment-lots` · score UPSERT **NULL만** (`/predict`→probability · `/predict-capacity` · `/predict-residual`)  
+**앱:** dashboard `j.probability`→`defectProb`, `j.residual_li`→`residualLithium`.
 
 ---
 

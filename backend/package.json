@@ -16,6 +16,7 @@
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
     "seed:judgment-lots": "tsx scripts/seed-judgment-lots.ts",
+    "migrate:judgment-probability": "tsx scripts/add-judgment-probability.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",
     "sync:spc-lots": "tsx scripts/sync-spc-lots.ts",
     "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts"
