@@ -75,28 +75,10 @@ export const dashboardApi = {
     return `/api/dashboard/lots.csv?date=${encodeURIComponent(date)}`
   },
 
-  getFeatureImportance(params: {
-    topK?: number
-    grain?: 'day' | 'week' | 'month'
-    from?: string
-    to?: string
-    bucket?: string
-    mode?: 'default' | 'selected'
-  } = {}) {
+  getFeatureImportance(topK = 4) {
     return apiClient.get<{
       source: string
-      grain?: string
-      from?: string
-      to?: string
-      label?: string
-      mode?: string
-      defectCount?: number
-      items: Array<{
-        feature: string
-        label: string
-        importance: number
-        primary?: boolean
-      }>
-    }>('/dashboard/feature-importance', { params })
+      items: Array<{ feature: string; label: string; importance: number }>
+    }>('/dashboard/feature-importance', { params: { topK } })
   },
 }

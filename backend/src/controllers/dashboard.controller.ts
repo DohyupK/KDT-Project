@@ -51,13 +51,7 @@ export const exportLotsCsv = asyncHandler(async (req, res) => {
 })
 
 export const getFeatureImportance = asyncHandler(async (req, res) => {
-  const result = await dashboardService.getFeatureImportance({
-    topK: req.query.topK != null ? Number(req.query.topK) : undefined,
-    grain: req.query.grain != null ? String(req.query.grain) : undefined,
-    from: req.query.from != null ? String(req.query.from) : undefined,
-    to: req.query.to != null ? String(req.query.to) : undefined,
-    bucket: req.query.bucket != null ? String(req.query.bucket) : undefined,
-    mode: req.query.mode != null ? String(req.query.mode) : undefined,
-  })
+  const topK = req.query.topK != null ? Number(req.query.topK) : 4
+  const result = dashboardService.getFeatureImportance(Number.isFinite(topK) ? topK : 4)
   res.status(200).json(result)
 })
