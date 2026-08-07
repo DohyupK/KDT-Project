@@ -23,6 +23,7 @@ import {
   saveAuthSession,
 } from '@/lib/authStorage';
 import type { AuthUser } from '@/types';
+import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 function getApiErrorMessage(err: unknown, fallback: string) {
   if (axios.isAxiosError(err)) {
@@ -403,6 +404,10 @@ export default function InquiryPage() {
     window.addEventListener(AUTH_CHANGED_EVENT, syncLocalUser);
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, syncLocalUser);
   }, []);
+
+  useShellRefresh(() => {
+    void loadInquiriesFromApi();
+  });
 
   useEffect(() => {
     return () => {

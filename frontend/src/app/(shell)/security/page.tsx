@@ -1,12 +1,19 @@
 'use client'
 
+import { useState } from 'react'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 export default function SecurityPage() {
   const { isDark, language, copy } = useUiSettings()
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useShellRefresh(() => {
+    setRefreshKey((key) => key + 1)
+  })
 
   return (
     <div
@@ -39,7 +46,7 @@ export default function SecurityPage() {
           </p>
         </div>
 
-        <LlmApiKeyVault isDark={isDark} />
+        <LlmApiKeyVault key={`vault-${refreshKey}`} isDark={isDark} />
 
         <div
           className={`mt-10 max-w-xl ${
@@ -51,7 +58,7 @@ export default function SecurityPage() {
           <h2 className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
             {language === 'en' ? 'Secure chat (local vLLM)' : '보안 챗 (로컬 vLLM)'}
           </h2>
-          <SecurityChatbot />
+          <SecurityChatbot key={`chat-${refreshKey}`} />
         </div>
         <p className={`mt-6 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
           참고: docs/references/security-chat-skeleton.md · docs/references/vllm-setup.md ·

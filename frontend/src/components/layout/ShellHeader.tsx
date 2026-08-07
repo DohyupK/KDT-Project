@@ -3,40 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Bell, RefreshCw } from 'lucide-react'
-import { useUiSettings } from '@/components/layout/AppShell'
+import { SHELL_REFRESH_EVENT, useUiSettings } from '@/components/layout/AppShell'
 import UserAuthMenu from '@/components/layout/UserAuthMenu'
-
-type HeaderNotification = {
-  id: string
-  time: string
-  title: string
-  message: string
-  unread: boolean
-}
-
-const MOCK_NOTIFICATIONS: HeaderNotification[] = [
-  {
-    id: 'n1',
-    time: '방금 전',
-    title: '고위험 LOT 감지',
-    message: '위험도가 높은 LOT가 감지되었습니다. 이슈 관리에서 확인해 주세요.',
-    unread: true,
-  },
-  {
-    id: 'n2',
-    time: '12분 전',
-    title: '문의 답변 대기',
-    message: '접수된 문의 중 미답변 항목이 있습니다.',
-    unread: true,
-  },
-  {
-    id: 'n3',
-    time: '1시간 전',
-    title: '야간 인수인계 알림',
-    message: '미완료 이슈가 인수인계 보고서에 포함되었습니다.',
-    unread: false,
-  },
-]
+import { MOCK_HEADER_NOTIFICATIONS } from '@/config/headerNotificationMocks'
+import type { HeaderNotification } from '@/config/headerNotificationSpec'
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')
@@ -44,6 +14,10 @@ function pad2(n: number) {
 
 function formatHeaderDateTime(date: Date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
+}
+
+function formatLastRefreshTime(date: Date) {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
 }
 
 export default function ShellHeader() {
@@ -54,11 +28,14 @@ export default function ShellHeader() {
   const [now, setNow] = useState('')
 
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+  const [refreshToast, setRefreshToast] = useState(false)
   const [isNotifyOpen, setIsNotifyOpen] = useState(false)
-  const [notifications, setNotifications] = useState<HeaderNotification[]>(MOCK_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState<HeaderNotification[]>(MOCK_HEADER_NOTIFICATIONS)
 
   const notifyRef = useRef<HTMLDivElement | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
 
   const unreadCount = notifications.filter((item) => item.unread).length
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
@@ -100,13 +77,26 @@ export default function ShellHeader() {
       if (refreshTimerRef.current !== null) {
         window.clearTimeout(refreshTimerRef.current)
       }
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current)
+      }
     }
   }, [])
 
   const handleRefresh = () => {
     if (isRefreshing) return
     setIsRefreshing(true)
+    setLastRefreshedAt(new Date())
+    setRefreshToast(true)
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setRefreshToast(false)
+      toastTimerRef.current = null
+    }, 2000)
     router.refresh()
+    window.dispatchEvent(new Event(SHELL_REFRESH_EVENT))
     refreshTimerRef.current = window.setTimeout(() => {
       setIsRefreshing(false)
       refreshTimerRef.current = null
@@ -117,11 +107,20 @@ export default function ShellHeader() {
     setIsNotifyOpen((prev) => !prev)
   }
 
+  const openNotification = (item: HeaderNotification) => {
+    setNotifications((prev) =>
+      prev.map((row) => (row.id === item.id ? { ...row, unread: false } : row)),
+    )
+    setIsNotifyOpen(false)
+    if (item.href) router.push(item.href)
+  }
+
   const iconBtnClass = isDark
     ? 'inline-flex items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800 text-slate-100 shadow-sm transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
     : 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
 
   return (
+    <>
     <header
       className={`sticky top-0 z-50 flex h-16 w-full items-center justify-between gap-4 border-b px-6 ${
         isDark
@@ -140,7 +139,17 @@ export default function ShellHeader() {
         {now || '\u00A0'}
       </time>
 
-      <div className="flex shrink-0 items-center gap-4">
+      <div className="flex shrink-0 items-center gap-3 sm:gap-4">
+        {lastRefreshedAt ? (
+          <span
+            className={`hidden text-xs tabular-nums md:inline ${
+              isDark ? 'text-slate-500' : 'text-slate-400'
+            }`}
+            title="마지막 새로고침 시각"
+          >
+            갱신 {formatLastRefreshTime(lastRefreshedAt)}
+          </span>
+        ) : null}
         <button
           type="button"
           onClick={handleRefresh}
@@ -226,11 +235,7 @@ export default function ShellHeader() {
                         ? `border-slate-800 hover:bg-slate-800 ${item.unread ? 'bg-blue-950/40' : ''}`
                         : `border-gray-50 hover:bg-gray-50 ${item.unread ? 'bg-blue-50/50' : ''}`
                     }`}
-                    onClick={() =>
-                      setNotifications((prev) =>
-                        prev.map((row) => (row.id === item.id ? { ...row, unread: false } : row)),
-                      )
-                    }
+                    onClick={() => openNotification(item)}
                   >
                     <div
                       className={`flex justify-between gap-2 text-sm font-semibold ${
@@ -259,5 +264,20 @@ export default function ShellHeader() {
         <UserAuthMenu />
       </div>
     </header>
+
+    {refreshToast ? (
+      <div
+        role="status"
+        aria-live="polite"
+        className={`fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-lg ${
+          isDark
+            ? 'border-slate-600 bg-slate-800 text-slate-100'
+            : 'border-slate-200 bg-white text-slate-800'
+        }`}
+      >
+        페이지 데이터를 새로고침했습니다.
+      </div>
+    ) : null}
+    </>
   )
 }

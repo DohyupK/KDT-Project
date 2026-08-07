@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAxiosError } from 'axios'
 import { useUiSettings } from '@/components/layout/AppShell'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 import {
   fetchDocFileBlob,
   fetchDocsTree,
@@ -241,6 +242,10 @@ export default function DocumentsBrowser() {
   useEffect(() => {
     void loadTree()
   }, [loadTree])
+
+  useShellRefresh(() => {
+    void loadTree()
+  })
 
   useEffect(() => {
     return () => {
