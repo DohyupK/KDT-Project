@@ -49,16 +49,15 @@ const GRAFANA_PANEL_URLS: Record<SpcCardTitle, string> = {
 function GrafanaEmbed({
   src,
   isDark,
-  className,
-  compact = false,
+  title,
+  variant = 'card',
   refreshKey = 0,
 }: {
   src: string
   isDark: boolean
-  className?: string
-  /** 카드처럼 좁은 영역에 맞출 때 Preset을 확대해서 그린 뒤 축소 */
-  compact?: boolean
-  /** ShellHeader 새로고침 시 embed 재마운트 */
+  title: string
+  variant?: 'card' | 'modal'
+  /** ShellHeader 새로고침 시 iframe 재마운트 */
   refreshKey?: number
 }) {
   if (!src.trim()) {
@@ -75,14 +74,21 @@ function GrafanaEmbed({
     )
   }
 
-    return () => {
-      cancelled = true
-      el.innerHTML = ''
-    }
-  }, [dashboardId, compact, refreshKey])
+  if (variant === 'modal') {
+    return (
+      <iframe
+        key={refreshKey}
+        src={src}
+        title={title}
+        scrolling="no"
+        className="block h-full min-h-0 w-full rounded-lg border-0 bg-white"
+      />
+    )
+  }
 
   return (
     <iframe
+      key={refreshKey}
       src={src}
       title={title}
       scrolling="no"
@@ -141,21 +147,18 @@ function SpcGraphCard({
           확대
         </button>
       </div>
-      <div className="relative h-[360px] overflow-hidden">
-        {embedId ? (
-          <PresetEmbed
-            dashboardId={embedId}
-            isDark={isDark}
-            compact
-            refreshKey={embedRefreshKey}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center px-5 py-8">
-            <p className={`m-0 text-base ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              그래프가 들어갈 자리
-            </p>
-          </div>
-        )}
+      <div
+        className={`relative h-[360px] w-full flex-none overflow-hidden ${
+          isDark ? 'bg-slate-900' : 'bg-white'
+        }`}
+      >
+        <GrafanaEmbed
+          src={panelUrl}
+          isDark={isDark}
+          title={`${label} 미리보기`}
+          variant="card"
+          refreshKey={embedRefreshKey}
+        />
       </div>
     </article>
   )
@@ -360,12 +363,17 @@ export default function SpcManagementPage() {
                 닫기
               </button>
             </div>
-            <div className="relative h-[70vh] overflow-hidden">
-              {expandedEmbedId ? (
-                <PresetEmbed
-                  dashboardId={expandedEmbedId}
+            <div
+              className={`min-h-0 min-w-0 w-full flex-1 overflow-hidden p-4 ${
+                isDark ? 'bg-slate-950/40' : 'bg-slate-50'
+              }`}
+            >
+              {expandedPanelUrl !== undefined ? (
+                <GrafanaEmbed
+                  src={expandedPanelUrl}
                   isDark={isDark}
-                  className="h-full"
+                  title={`${SPC_CARD_LABELS[expandedTitle]} 확대 그래프`}
+                  variant="modal"
                   refreshKey={embedRefreshKey}
                 />
               ) : (
