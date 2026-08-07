@@ -18,6 +18,7 @@ import {
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
 import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
+import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 interface DocumentItem {
   id: string;
@@ -837,6 +838,11 @@ export default function KnowledgePage() {
     refreshTransferredDocuments();
     void refreshHandoverActions();
   }, []);
+
+  useShellRefresh(() => {
+    refreshTransferredDocuments();
+    void refreshHandoverActions();
+  });
 
   useEffect(() => {
     if (pathname.includes('/knowledge')) {

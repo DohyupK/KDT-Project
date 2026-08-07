@@ -16,6 +16,7 @@ import { useSelectedLot } from '@/context/SelectedLotContext';
 import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import DateInput from '@/components/DateInput';
 import { getAuthUser } from '@/lib/authStorage';
+import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 interface ProcessData {
   time: string;
@@ -115,6 +116,7 @@ interface HeaderHandoverSectionProps {
 interface IssueListSectionProps {
   issues: Issue[];
   totalCount: number;
+  isRefreshing?: boolean;
   currentPage: number;
   totalPages: number;
   pageItems: Array<number | 'ellipsis'>;
@@ -1835,6 +1837,7 @@ const HandoverNoteSection = ({
 const IssueListSection = ({
   issues,
   totalCount,
+  isRefreshing = false,
   currentPage,
   totalPages,
   pageItems,
@@ -1865,7 +1868,7 @@ const IssueListSection = ({
         </p>
       </div>
       <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
-        검색 결과 {totalCount}건
+        {isRefreshing ? '목록 불러오는 중…' : `검색 결과 ${totalCount}건`}
       </span>
     </div>
     <form
@@ -2786,6 +2789,7 @@ export default function IssuePage() {
   const { isDark } = useUiSettings();
   const { connectLot } = useSelectedLot();
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -2817,29 +2821,29 @@ export default function IssuePage() {
     }
   };
 
+  const loadIssues = async () => {
+    setIsListRefreshing(true);
+    try {
+      const { data } = await issueApi.list();
+      setIssues(data.issues.map(mapIssueListItem));
+    } catch (error) {
+      setIssues([]);
+      setToastMessage(getApiErrorMessage(error, '이슈 목록을 불러오지 못했습니다.'));
+      setShowToast(true);
+    } finally {
+      setIsListRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    let cancelled = false;
-
-    const loadIssues = async () => {
-      try {
-        const { data } = await issueApi.list();
-        if (!cancelled) {
-          setIssues(data.issues.map(mapIssueListItem));
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setIssues([]);
-        setToastMessage(getApiErrorMessage(error, '이슈 목록을 불러오지 못했습니다.'));
-        setShowToast(true);
-      }
-    };
-
     void loadIssues();
     void refreshPendingHandovers();
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useShellRefresh(() => {
+    void loadIssues();
+    void refreshPendingHandovers();
+  });
 
   useEffect(() => {
     if (!isNoteOpen && !isReportOpen) return;
@@ -3399,6 +3403,7 @@ ${issues
           <IssueListSection
             issues={paginatedIssues}
             totalCount={filteredIssues.length}
+            isRefreshing={isListRefreshing}
             currentPage={safePage}
             totalPages={totalPages}
             pageItems={pageItems}
