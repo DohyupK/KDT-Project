@@ -65,7 +65,6 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
   probability     DOUBLE       NULL,
-  spc             VARCHAR(16)  NULL,
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE
@@ -179,5 +178,3 @@ CREATE TABLE IF NOT EXISTS inquiries (
   INDEX idx_inquiries_created (created_at),
   INDEX idx_inquiries_visibility (visibility)
 );
-
--- See also DB/spc_limits_and_standard.sql (spc_limits, standard, judgment_lots.spc)
