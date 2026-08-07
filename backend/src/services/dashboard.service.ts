@@ -318,7 +318,7 @@ export async function getLotRiskDetail(lotId: string) {
             a.risk_level, a.risk_reason,
             (SELECT i.action_content FROM issues i
              WHERE i.lot_id = j.lot_id
-             ORDER BY i.occurred_at DESC LIMIT 1) AS action_content,
+             ORDER BY i.created_at DESC LIMIT 1) AS action_content,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
      FROM judgment_lots j

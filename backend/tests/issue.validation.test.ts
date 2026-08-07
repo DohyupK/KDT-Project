@@ -12,7 +12,6 @@ test('accepts supported issue list filters', () => {
     validateIssueListQuery({
       date: '2026-07-21',
       riskLevel: '안정',
-      status: '완료',
     }),
   )
 })
@@ -22,18 +21,13 @@ test('rejects invalid issue list date', () => {
   assert.throws(() => validateIssueListQuery({ date: '07/21/2026' }), isBadRequest)
 })
 
-test('rejects unsupported risk and status filters', () => {
+test('rejects unsupported risk filters', () => {
   assert.throws(() => validateIssueListQuery({ riskLevel: '긴급' }), isBadRequest)
-  assert.throws(() => validateIssueListQuery({ status: '대기' }), isBadRequest)
 })
 
 test('rejects malformed issue update values before querying the database', async () => {
   const actor = { userId: 'tester', name: '테스터' }
 
-  await assert.rejects(
-    updateIssue('ISS-TEST', { status: 1 as unknown as string }, actor),
-    isBadRequest,
-  )
   await assert.rejects(
     updateIssue('ISS-TEST', { actionContent: 1 as unknown as string }, actor),
     isBadRequest,

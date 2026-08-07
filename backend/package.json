@@ -27,6 +27,8 @@
     "migrate:ai-library-analysis": "tsx scripts/migrate-ai-library-analysis.ts",
     "migrate:spc-standard": "tsx scripts/migrate-spc-standard.ts",
     "migrate:align-schema": "tsx scripts/migrate-align-schema.ts",
+    "migrate:issues-refactor": "tsx scripts/migrate-issues-refactor.ts",
+    "smoke:issue-content": "tsx scripts/smoke-issue-content.ts",
     "inspect:schema": "tsx scripts/inspect-schema.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",
     "sync:spc-lots": "tsx scripts/sync-spc-lots.ts",

@@ -571,7 +571,10 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.lithium_input IS NOT NULL AND l.additive_ratio IS NOT NULL AND l.process_time IS NOT NULL
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
-/** Create open issues for complete-case 심각/주의 lots only. */
+/**
+ * Create open issues when analysis_lots is 심각 AND spc_status is 주의|이탈.
+ * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
+ */
 export async function ensureIssuesForRiskLots(): Promise<number> {
   const lots = await query<
     { lot_id: string; recorded_at: Date | string; risk_level: string; risk_reason: string | null }[]
@@ -579,7 +582,8 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.risk_reason
      FROM lots l
      INNER JOIN analysis_lots a ON a.lot_id = l.id
-     WHERE a.risk_level IN ('심각', '주의')
+     WHERE a.risk_level = '심각'
+       AND a.spc_status IN ('주의', '이탈')
        AND (${COMPLETE_PROCESS_SQL_L})`,
   )
 
@@ -587,13 +591,13 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
   for (const lot of lots) {
     const existing = await query<{ c: number }[]>(
       `SELECT COUNT(*) AS c FROM issues
-       WHERE lot_id = ? AND status <> '완료'`,
+       WHERE lot_id = ? AND completed_at IS NULL`,
       [lot.lot_id],
     )
     if (Number(existing[0]?.c) > 0) continue
 
-    const occurred = formatDateTime(lot.recorded_at)
-    const day = occurred.slice(2, 10).replace(/-/g, '')
+    const createdAt = formatDateTime(lot.recorded_at)
+    const day = createdAt.slice(2, 10).replace(/-/g, '')
     const last = await query<{ issue_id: string }[]>(
       `SELECT issue_id FROM issues
        WHERE issue_id REGEXP ?
@@ -604,13 +608,14 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     const seq = last[0]?.issue_id ? Number(last[0].issue_id.slice(-3)) + 1 : 1
     const issueId = `ISS-${day}-${String(seq).padStart(3, '0')}`
     const risk = normalizeRiskLevel(lot.risk_level)
-    const title = buildIssueTitle(lot.risk_reason || risk, lot.lot_id)
+    // TODO: risk_reason → API_LLM short summary → issue_content (deferred until risk_reason stable)
+    const issueContent = buildIssueTitle(lot.risk_reason || risk, lot.lot_id)
 
     await query(
-      `INSERT INTO issues (issue_id, lot_id, occurred_at, risk_level, status, title)
-       VALUES (?, ?, ?, ?, '접수', ?)
+      `INSERT INTO issues (issue_id, lot_id, issue_content, created_at)
+       VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE lot_id = lot_id`,
-      [issueId, lot.lot_id, occurred, risk, title.slice(0, 255)],
+      [issueId, lot.lot_id, issueContent.slice(0, 255), createdAt],
     )
     created++
   }

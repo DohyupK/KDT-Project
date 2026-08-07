@@ -74,7 +74,6 @@ export const listIssues = asyncHandler(async (req, res) => {
     date: req.query.date != null ? String(req.query.date) : undefined,
     lotId: req.query.lotId != null ? String(req.query.lotId) : undefined,
     riskLevel: req.query.riskLevel != null ? String(req.query.riskLevel) : undefined,
-    status: req.query.status != null ? String(req.query.status) : undefined,
   })
   res.status(200).json(result)
 })
@@ -90,7 +89,6 @@ export const updateIssue = asyncHandler(async (req, res) => {
   const issue = await issueService.updateIssue(
     String(req.params.issueId),
     {
-      status: req.body?.status,
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
     },

@@ -797,10 +797,10 @@ export default function KnowledgePage() {
       setDocuments(
         data.items.map((item) => ({
           id: item.issueId,
-          title: item.title,
+          title: item.issueContent,
           lot: item.lotId,
-          date: item.completedAt || item.occurredAt,
-          occurredAt: item.occurredAt,
+          date: item.completedAt || item.createdAt,
+          occurredAt: item.createdAt,
         })),
       );
     } catch {
@@ -1077,16 +1077,16 @@ export default function KnowledgePage() {
       const item = data.item;
       const detailedDoc: DocumentItem = {
         id: item.issueId,
-        title: item.title,
+        title: item.issueContent,
         lot: item.lotId,
-        date: item.completedAt || item.occurredAt,
-        occurredAt: item.occurredAt,
+        date: item.completedAt || item.createdAt,
+        occurredAt: item.createdAt,
         detail: item.actionContent || undefined,
       };
       setDetailTarget({ kind: 'document', item: detailedDoc });
       try {
         const response = await postChat({
-          message: `완료 이슈 "${item.title}"(이슈 ID: ${item.issueId}, LOT: ${item.lotId})를 검토해 주세요. 다른 완료 이슈와의 유사 가능성과 대안 조치 방안을 한국어로 간결하게 설명하세요. 이슈 상세: ${item.actionContent || '기록 없음'}`,
+          message: `완료 이슈 "${item.issueContent}"(이슈 ID: ${item.issueId}, LOT: ${item.lotId})를 검토해 주세요. 다른 완료 이슈와의 유사 가능성과 대안 조치 방안을 한국어로 간결하게 설명하세요. 이슈 상세: ${item.actionContent || '기록 없음'}`,
         });
         if (response.error) {
           console.error('[knowledge-diagnose] ai.error', response.error);

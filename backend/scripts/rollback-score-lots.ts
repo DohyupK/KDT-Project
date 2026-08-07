@@ -4,7 +4,7 @@ import { query } from '../src/db/connection.js'
 /**
  * Rollback AI/SPC scores on analysis_lots (+ residual_li/probability on judgment_lots)
  * and remove auto-seeded open issues created by ensureIssuesForRiskLots
- * (심각/주의, 접수, no assignee/action).
+ * (no assignee/action, not completed).
  */
 async function main() {
   const beforeScores = await query<{ c: number }[]>(
@@ -12,9 +12,7 @@ async function main() {
   )
   const beforeIssues = await query<{ c: number }[]>(
     `SELECT COUNT(*) AS c FROM issues
-     WHERE risk_level IN ('심각', '주의')
-       AND status = '접수'
-       AND assignee_user_id IS NULL
+     WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,
   )
@@ -25,9 +23,7 @@ async function main() {
 
   const delResult = await query<unknown>(
     `DELETE FROM issues
-     WHERE risk_level IN ('심각', '주의')
-       AND status = '접수'
-       AND assignee_user_id IS NULL
+     WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,
   )
@@ -53,9 +49,7 @@ async function main() {
   )
   const afterIssues = await query<{ c: number }[]>(
     `SELECT COUNT(*) AS c FROM issues
-     WHERE risk_level IN ('심각', '주의')
-       AND status = '접수'
-       AND assignee_user_id IS NULL
+     WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,
   )
