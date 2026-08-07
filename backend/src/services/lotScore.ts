@@ -15,6 +15,9 @@ export type RiskLevel = '심각' | '주의' | '안정'
 
 export const RESIDUAL_USL = 4000
 
+/** O/X defect judge cutoff (matches ensemble_config.default_threshold). */
+export const DEFECT_JUDGE_THRESHOLD = 0.8
+
 export const DEFECT_PROB_SEVERE = 0.4
 export const DEFECT_PROB_CAUTION = 0.2
 export const RESIDUAL_SEVERE = 3500

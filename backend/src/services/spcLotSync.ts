@@ -4,6 +4,7 @@
  */
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
+import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
@@ -20,6 +21,7 @@ export type SyncSpcLotsResult = {
   scored: number
   failed: number
   issuesCreated: number
+  reasonsUpdated: number
   errors: string[]
 }
 
@@ -71,6 +73,7 @@ export async function syncSpcLotsToApp(
     scored: 0,
     failed: 0,
     issuesCreated: 0,
+    reasonsUpdated: 0,
     errors: [],
   }
   if (running) {
@@ -137,6 +140,7 @@ export async function syncSpcLotsToApp(
         scored: 0,
         failed: 0,
         issuesCreated: 0,
+        reasonsUpdated: 0,
         errors: [],
       }
     }
@@ -167,6 +171,7 @@ export async function syncSpcLotsToApp(
         scored: 0,
         failed: 0,
         issuesCreated: 0,
+        reasonsUpdated: 0,
         errors: [],
       }
     }
@@ -200,6 +205,20 @@ export async function syncSpcLotsToApp(
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
 
+    let reasonsUpdated = 0
+    try {
+      const reasonResult = await fillRiskReasonsForLots(scoreIds, {
+        concurrency: 2,
+        quiet,
+      })
+      reasonsUpdated = reasonResult.updated
+      log(quiet, '[spc-sync] risk_reasons', reasonResult)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.error('[spc-sync] risk_reason_failed', detail)
+      result.errors.push(`risk_reason: ${detail}`)
+    }
+
     return {
       skipped: false,
       table,
@@ -207,6 +226,7 @@ export async function syncSpcLotsToApp(
       scored: result.scored,
       failed: result.failed,
       issuesCreated,
+      reasonsUpdated,
       errors: result.errors,
     }
   } finally {

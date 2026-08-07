@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import axios from 'axios';
+import { mainApi, RISK_TOP_PAGE_SIZE, type RiskTopLot } from '@/api/mainApi';
 import { useSelectedLot } from '@/context/SelectedLotContext';
+import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import {
   useRefreshSettings,
   useUiSettings,
@@ -17,27 +20,12 @@ import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 type RiskGrade = '심각' | '주의' | '안정';
 
-type LotRecord = {
-  id: string;
-  date: string;
-  hour: string;
-  sintering_temp: number;
-  lithium_input: number;
-  humidity: number;
-  metal_impurity: number;
-  tank_pressure: number;
-  process_time: number;
-  additive_ratio: number;
-  quality_defect: 0 | 1;
-  production: number;
-};
-
 type RiskLotView = {
   id: string;
   riskScore: number;
   status: RiskGrade;
   riskReason: string;
-  record: LotRecord;
+  record: LotSensorRecord & { quality_defect: 0 | 1 };
 };
 
 type SummaryKpi = {
@@ -65,127 +53,100 @@ function riskGradeClass(grade: RiskGrade) {
   return `${base} bg-emerald-100 text-emerald-700`;
 }
 
-function riskGradeRank(grade: RiskGrade) {
-  if (grade === '심각') return 2;
-  if (grade === '주의') return 1;
-  return 0;
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; error?: string } | undefined;
+    if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+    if (typeof data?.error === 'string' && data.error.trim()) return data.error;
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
 }
 
-function makeMockLotRecord(
-  partial: Pick<LotRecord, 'id' | 'date' | 'hour'> & Partial<LotRecord>,
-): LotRecord {
+function splitRecordedAt(recordedAt: string): { date: string; hour: string } {
+  const trimmed = (recordedAt || '').trim();
+  if (!trimmed) return { date: '—', hour: '' };
+  const [datePart, timePart = ''] = trimmed.split(/\s+/);
+  const hour = timePart.slice(0, 5) || timePart;
+  return { date: datePart || trimmed, hour };
+}
+
+function numOrZero(value: number | null | undefined): number {
+  return value != null && Number.isFinite(value) ? value : 0;
+}
+
+function toRiskLotView(lot: RiskTopLot): RiskLotView {
+  const { date, hour } = splitRecordedAt(lot.recordedAt);
   return {
-    sintering_temp: 810,
-    lithium_input: 2.4,
-    humidity: 45,
-    metal_impurity: 0.015,
-    tank_pressure: 2.1,
-    process_time: 120,
-    additive_ratio: 3.2,
-    quality_defect: 1,
-    production: 24,
-    ...partial,
+    id: lot.lotId,
+    riskScore: lot.defectProb ?? 0,
+    status: lot.riskLevel,
+    riskReason: lot.riskReason?.trim() || '—',
+    record: {
+      id: lot.lotId,
+      date,
+      hour,
+      sintering_temp: numOrZero(lot.sinteringTemp),
+      lithium_input: numOrZero(lot.lithiumInput),
+      humidity: numOrZero(lot.humidity),
+      metal_impurity: numOrZero(lot.metalImpurity),
+      tank_pressure: numOrZero(lot.tankPressure),
+      process_time: numOrZero(lot.processTime),
+      additive_ratio: numOrZero(lot.additiveRatio),
+      quality_defect: lot.qualityDefect ? 1 : 0,
+    },
   };
 }
 
-/** 위험 LOT Top 테이블 전용 Mock (위험등급: 심각/주의/안정) */
-const TOP_RISK_LOTS_MOCK: RiskLotView[] = [
-  {
-    id: 'LOT-20260722-N12',
-    riskScore: 0.94,
-    status: '심각',
-    riskReason: '소성 온도 상승, 금속 불순물 농도 초과',
-    record: makeMockLotRecord({
-      id: 'LOT-20260722-N12',
-      date: '2026-07-22',
-      hour: '14:00',
-      sintering_temp: 842,
-      metal_impurity: 0.042,
-      quality_defect: 1,
-    }),
-  },
-  {
-    id: 'LOT-20260721-N08',
-    riskScore: 0.87,
-    status: '심각',
-    riskReason: '공정 습도 과다, 원료 투입비 편차',
-    record: makeMockLotRecord({
-      id: 'LOT-20260721-N08',
-      date: '2026-07-21',
-      hour: '11:00',
-      humidity: 68,
-      lithium_input: 1.52,
-      quality_defect: 1,
-    }),
-  },
-  {
-    id: 'LOT-20260722-N05',
-    riskScore: 0.72,
-    status: '주의',
-    riskReason: '소성 온도 상승',
-    record: makeMockLotRecord({
-      id: 'LOT-20260722-N05',
-      date: '2026-07-22',
-      hour: '09:00',
-      sintering_temp: 828,
-      quality_defect: 1,
-    }),
-  },
-  {
-    id: 'LOT-20260720-N15',
-    riskScore: 0.51,
-    status: '주의',
-    riskReason: '원료 투입비 편차',
-    record: makeMockLotRecord({
-      id: 'LOT-20260720-N15',
-      date: '2026-07-20',
-      hour: '16:00',
-      lithium_input: 3.35,
-      quality_defect: 0,
-    }),
-  },
-  {
-    id: 'LOT-20260721-N03',
-    riskScore: 0.28,
-    status: '안정',
-    riskReason: '품질 불량 예측',
-    record: makeMockLotRecord({
-      id: 'LOT-20260721-N03',
-      date: '2026-07-21',
-      hour: '08:00',
-      sintering_temp: 808,
-      quality_defect: 1,
-    }),
-  },
-];
+function buildPaginationItems(current: number, total: number): Array<number | 'ellipsis'> {
+  if (total <= 5) return Array.from({ length: total }, (_, index) => index + 1);
+  if (current <= 3) return [1, 2, 3, 'ellipsis', total];
+  if (current >= total - 2) return [1, 'ellipsis', total - 2, total - 1, total];
+  return [1, 'ellipsis', current, 'ellipsis', total];
+}
 
-/** 금일 00시 기준 실시간 집계용 KPI — 값은 API 연동 전 공란 */
-const SUMMARY_KPIS: SummaryKpi[] = [
+/** 금일 00시 기준 · analysis_lots.probability · 임계 0.8 */
+const SUMMARY_KPI_META: Omit<SummaryKpi, 'value'>[] = [
   {
     id: 'yield-rate',
     title: '실시간 양품률',
-    value: '—',
-    description: '금일 00시부터 양품 LOT 비율',
+    description: '금일 00시~ · probability < 0.8 비율',
   },
   {
     id: 'yield-count',
     title: '양품수',
-    value: '—',
-    description: '금일 00시부터 양품 LOT 건수',
+    description: '금일 00시~ · probability < 0.8 건수',
   },
   {
     id: 'defect-rate',
     title: '불량률',
-    value: '—',
-    description: '금일 00시부터 불량 LOT 비율',
+    description: '금일 00시~ · probability ≥ 0.8 비율',
   },
   {
     id: 'defect-count',
     title: '불량수',
-    value: '—',
-    description: '금일 00시부터 불량 LOT 건수',
+    description: '금일 00시~ · probability ≥ 0.8 건수',
   },
 ];
+
+function formatDailyKpis(kpi: {
+  total: number
+  goodCount: number
+  defectCount: number
+  goodRate: number | null
+  defectRate: number | null
+} | null): SummaryKpi[] {
+  const empty = (id: string) => SUMMARY_KPI_META.find((m) => m.id === id)!
+  if (!kpi || kpi.total <= 0) {
+    return SUMMARY_KPI_META.map((m) => ({ ...m, value: '—' }))
+  }
+  return [
+    { ...empty('yield-rate'), value: `${kpi.goodRate ?? 0}%` },
+    { ...empty('yield-count'), value: String(kpi.goodCount) },
+    { ...empty('defect-rate'), value: `${kpi.defectRate ?? 0}%` },
+    { ...empty('defect-count'), value: String(kpi.defectCount) },
+  ]
+}
 
 /* -------------------------------------------------------------------------- */
 /* Small UI pieces                                                            */
@@ -297,44 +258,94 @@ export default function MainPage() {
   const { autoRefreshEnabled, refreshInterval } = useRefreshSettings();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
-  /** Placeholder refresh token — swap body for API fetch later */
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [topRiskLots, setTopRiskLots] = useState<RiskLotView[]>([]);
+  const [riskLotsLoading, setRiskLotsLoading] = useState(true);
+  const [riskTopPage, setRiskTopPage] = useState(1);
+  const [riskTopTotal, setRiskTopTotal] = useState(0);
+  const [riskTopTotalPages, setRiskTopTotalPages] = useState(1);
+  const [summaryKpis, setSummaryKpis] = useState<SummaryKpi[]>(() => formatDailyKpis(null));
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const loadSeqRef = useRef(0);
 
-  const loadMainData = () => {
-    setRefreshKey((k) => k + 1);
-  };
+  const pushToast = useCallback((message: string, variant: ToastItem['variant'] = 'info') => {
+    toastIdRef.current += 1;
+    const id = toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, variant }]);
+    const timer = setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2600);
+    toastTimersRef.current.push(timer);
+  }, []);
 
-  /** 심각·주의만 노출, 위험등급 높은 순 → 최신 LOT 순 */
-  const topRiskLots = useMemo(() => {
-    return TOP_RISK_LOTS_MOCK.filter((lot) => lot.status === '심각' || lot.status === '주의').sort(
-      (a, b) => {
-        const gradeDiff = riskGradeRank(b.status) - riskGradeRank(a.status);
-        if (gradeDiff !== 0) return gradeDiff;
-        const aTime = `${a.record.date}T${a.record.hour}`;
-        const bTime = `${b.record.date}T${b.record.hour}`;
-        if (aTime < bTime) return 1;
-        if (aTime > bTime) return -1;
-        return b.riskScore - a.riskScore;
-      },
-    );
-    // refreshKey reserved for when mock is replaced by API data
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  const loadMainData = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
+    setRiskLotsLoading(true);
+    const [riskSettled, kpiSettled] = await Promise.allSettled([
+      mainApi.getRiskTop({
+        page: riskTopPage,
+        pageSize: RISK_TOP_PAGE_SIZE,
+      }),
+      mainApi.getDailyKpi(),
+    ]);
+    if (seq !== loadSeqRef.current) return;
+
+    if (riskSettled.status === 'fulfilled') {
+      const data = riskSettled.value.data;
+      setTopRiskLots((data.lots ?? []).map(toRiskLotView));
+      setRiskTopTotal(data.total ?? 0);
+      const pages = Math.max(1, data.totalPages ?? 1);
+      setRiskTopTotalPages(pages);
+      if (data.page != null && data.page !== riskTopPage) {
+        setRiskTopPage(data.page);
+      } else if (riskTopPage > pages) {
+        setRiskTopPage(pages);
+      }
+    } else {
+      setTopRiskLots([]);
+      setRiskTopTotal(0);
+      setRiskTopTotalPages(1);
+      pushToast(
+        getApiErrorMessage(riskSettled.reason, '위험 LOT 목록을 불러오지 못했습니다.'),
+        'error',
+      );
+    }
+
+    if (kpiSettled.status === 'fulfilled') {
+      setSummaryKpis(formatDailyKpis(kpiSettled.value.data));
+    } else {
+      setSummaryKpis(formatDailyKpis(null));
+      pushToast(
+        getApiErrorMessage(kpiSettled.reason, '당일 KPI를 불러오지 못했습니다.'),
+        'error',
+      );
+    }
+
+    if (seq === loadSeqRef.current) setRiskLotsLoading(false);
+  }, [pushToast, riskTopPage]);
 
   useEffect(() => {
-    loadMainData();
-  }, []);
+    void loadMainData();
+  }, [loadMainData]);
 
   useShellRefresh(loadMainData);
 
   useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const timer = window.setInterval(loadMainData, refreshInterval * 60_000);
+    const timer = window.setInterval(() => {
+      void loadMainData();
+    }, refreshInterval * 60_000);
     return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, refreshInterval]);
+  }, [autoRefreshEnabled, refreshInterval, loadMainData]);
+
+  const riskTopPageItems = useMemo(
+    () => buildPaginationItems(riskTopPage, riskTopTotalPages),
+    [riskTopPage, riskTopTotalPages],
+  );
+
+  const handleRiskTopPageChange = (next: number) => {
+    const clamped = Math.min(riskTopTotalPages, Math.max(1, next));
+    setRiskTopPage(clamped);
+  };
 
   useEffect(() => {
     return () => {
@@ -342,17 +353,9 @@ export default function MainPage() {
     };
   }, []);
 
-  const pushToast = (message: string, variant: ToastItem['variant'] = 'info') => {
-    toastIdRef.current += 1;
-    const id = toastIdRef.current;
-    setToasts((prev) => [...prev, { id, message, variant }]);
-    const timer = setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 2600);
-    toastTimersRef.current.push(timer);
-  };
-
   const { connectLot } = useSelectedLot();
 
-  /** Risk LOT 행 선택 → 챗봇 features 주입 + 패널 오픈 + 자동 O/X 진단 */
+  /** 「챗봇으로 진단」→ features 주입 + 패널 오픈 + 자동 O/X 진단 */
   const handleSelectLotForDiagnose = (lot: RiskLotView) => {
     connectLot(lot.record, { openChat: true, diagnose: true });
     pushToast(`${lot.id} 연결 · 챗봇 진단 시작`, 'info');
@@ -373,6 +376,9 @@ export default function MainPage() {
   const tableDetailBtnClass = isDark
     ? 'inline-flex h-7 items-center justify-center rounded-md border border-slate-600 px-2.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
     : 'inline-flex h-7 items-center justify-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+  const tableDiagnoseBtnClass = isDark
+    ? 'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-700 bg-blue-950/40 px-2.5 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
   const rowHoverClass = isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50';
   const tableBorderClass = isDark ? 'border-slate-700' : 'border-slate-100';
 
@@ -421,7 +427,7 @@ export default function MainPage() {
             className={`mt-4 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
           >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4 lg:gap-5">
-              {SUMMARY_KPIS.map((kpi) => (
+              {summaryKpis.map((kpi) => (
                 <div key={kpi.id} className={`${subpanelClass} p-4 md:p-5`}>
                   <div
                     className={`mb-3 text-sm font-medium ${
@@ -432,7 +438,13 @@ export default function MainPage() {
                   </div>
                   <div
                     className={`text-xl font-bold tabular-nums tracking-tight sm:text-2xl lg:text-3xl ${
-                      isDark ? 'text-slate-500' : 'text-slate-300'
+                      kpi.value === '—'
+                        ? isDark
+                          ? 'text-slate-500'
+                          : 'text-slate-300'
+                        : isDark
+                          ? 'text-slate-100'
+                          : 'text-slate-900'
                     }`}
                   >
                     {kpi.value}
@@ -496,11 +508,11 @@ export default function MainPage() {
                         : 'bg-slate-100 text-slate-600'
                     }`}
                   >
-                    전체 {topRiskLots.length}건
+                    전체 {riskTopTotal}건
                   </span>
                 </div>
                 <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  위험등급이 심각·주의인 LOT를 우선순위별로 확인합니다.
+                  최근 3일 · SPC 이탈 · 위험등급 심각 LOT를 확인합니다.
                 </p>
               </div>
               <Link href="/issue" className={detailLinkClass}>
@@ -510,22 +522,18 @@ export default function MainPage() {
             </div>
 
             <div className="mt-5 -mx-1 min-h-0 flex-1 overflow-x-auto overflow-y-auto px-1">
-              <table className="w-full min-w-[420px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[480px] border-collapse text-left text-sm">
                 <thead>
                   <tr className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>LOT</th>
                     <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>위험 원인</th>
-                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>위험등급</th>
-                    <th className={`border-b pb-2.5 pl-1 text-right ${tableBorderClass}`}>상세</th>
+                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>챗봇으로 진단</th>
+                    <th className={`border-b pb-2.5 pl-1 text-right ${tableBorderClass}`}>상세보기</th>
                   </tr>
                 </thead>
                 <tbody>
                   {topRiskLots.map((lot) => (
-                    <tr
-                      key={lot.id}
-                      className={`group cursor-pointer transition-colors ${rowHoverClass}`}
-                      onClick={() => handleSelectLotForDiagnose(lot)}
-                    >
+                    <tr key={lot.id} className={`group transition-colors ${rowHoverClass}`}>
                       <td
                         className={`whitespace-nowrap border-b py-3 pr-3 text-xs font-medium ${tableBorderClass} ${
                           isDark ? 'text-slate-100' : 'text-slate-800'
@@ -542,36 +550,127 @@ export default function MainPage() {
                         {lot.riskReason}
                       </td>
                       <td className={`border-b py-3 pr-3 ${tableBorderClass}`}>
-                        <span className={riskGradeClass(lot.status)}>{lot.status}</span>
+                        <button
+                          type="button"
+                          className={tableDiagnoseBtnClass}
+                          aria-label={`${lot.id} 챗봇으로 진단`}
+                          onClick={() => handleSelectLotForDiagnose(lot)}
+                        >
+                          챗봇으로 진단
+                        </button>
                       </td>
                       <td className={`border-b py-3 pl-1 text-right ${tableBorderClass}`}>
                         <button
                           type="button"
                           className={tableDetailBtnClass}
                           aria-label={`${lot.id} 상세 공정 데이터 보기`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenLotDetail(lot);
-                          }}
+                          onClick={() => handleOpenLotDetail(lot)}
                         >
-                          상세
+                          상세보기
                         </button>
                       </td>
                     </tr>
                   ))}
-                  {topRiskLots.length === 0 ? (
+                  {riskLotsLoading && topRiskLots.length === 0 ? (
                     <tr>
                       <td
                         colSpan={4}
                         className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
                       >
-                        심각·주의 등급의 위험 LOT가 없습니다.
+                        불러오는 중…
+                      </td>
+                    </tr>
+                  ) : null}
+                  {!riskLotsLoading && topRiskLots.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                      >
+                        표시할 위험 LOT가 없습니다.
                       </td>
                     </tr>
                   ) : null}
                 </tbody>
               </table>
             </div>
+
+            {riskTopTotalPages > 1 ? (
+              <div
+                className={`mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {riskTopTotal === 0
+                    ? '0건'
+                    : `${(riskTopPage - 1) * RISK_TOP_PAGE_SIZE + 1}–${Math.min(
+                        riskTopPage * RISK_TOP_PAGE_SIZE,
+                        riskTopTotal,
+                      )} / ${riskTopTotal}건`}
+                </span>
+                <nav
+                  aria-label="위험 LOT Top 페이지"
+                  className="flex flex-wrap items-center justify-end gap-1"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleRiskTopPageChange(riskTopPage - 1)}
+                    disabled={riskTopPage <= 1 || riskLotsLoading}
+                    className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    이전
+                  </button>
+                  {riskTopPageItems.map((item, index) =>
+                    item === 'ellipsis' ? (
+                      <span
+                        key={`risk-top-ellipsis-${index}`}
+                        className={`inline-flex min-w-6 items-center justify-center px-0.5 text-[11px] ${
+                          isDark ? 'text-slate-500' : 'text-slate-400'
+                        }`}
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        aria-current={item === riskTopPage ? 'page' : undefined}
+                        disabled={riskLotsLoading}
+                        onClick={() => handleRiskTopPageChange(item)}
+                        className={`min-w-6 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-40 ${
+                          item === riskTopPage
+                            ? 'bg-blue-600 text-white'
+                            : isDark
+                              ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRiskTopPageChange(riskTopPage + 1)}
+                    disabled={riskTopPage >= riskTopTotalPages || riskLotsLoading}
+                    className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    다음
+                  </button>
+                </nav>
+              </div>
+            ) : null}
           </section>
         </section>
       </div>

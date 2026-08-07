@@ -10,7 +10,8 @@
 - 인수인계(`handover_history`): `issues`와 **독립** (no `issue_id`) · `handover_content` · `handover_from`/`handover_to` · `created_at`/`archived_at` · Knowledge는 `archivedAt||createdAt` 일시 표시
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번은 **issues** 전용 (lot 위험 시드 등). 인수인계 등록은 이슈를 만들지 않음.
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
-- 위험 LOT Top: `GET /api/lots/risk-top` (`analysis_lots.risk_level` JOIN)
+- 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `spc_status` 이탈 · `risk_level` 심각 (`analysis_lots` JOIN)
+- 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
 - 채점: `lotScore.ts` + ai-service → **`analysis_lots`** (공정은 `lots`) · `judgment_lots.probability`는 NULL만 COALESCE
 - 목록의 `date`, `riskLevel`, `status`는 잘못된 값을 보내면 `400`을 반환
 
@@ -31,7 +32,8 @@
 
 | Method | Path | Auth | 설명 |
 |--------|------|------|------|
-| GET | `/api/lots/risk-top?limit=10` | 선택 | 심각·주의 LOT (`analysis_lots`) |
+| GET | `/api/lots/risk-top?page=1&pageSize=8` | 선택 | 최근 3일·SPC 이탈·심각 LOT (`analysis_lots`) |
+| GET | `/api/lots/daily-kpi` | 선택 | 당일 probability 양품/불량 KPI (임계 0.8) |
 | GET | `/api/lots/:lotId` | 선택 | LOT 상세 (공정+채점 JOIN) |
 | POST | `/api/lots/import` | JWT | CSV→`lots` 공정 적재·채점(+`analysis_lots`) + 이슈 시드 |
 | GET | `/api/issues` | 선택 | 미완료∩높음\|중간 |

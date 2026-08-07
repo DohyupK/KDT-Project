@@ -5,6 +5,7 @@ import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import {
   buildIssueTitle,
+  DEFECT_JUDGE_THRESHOLD,
   emptySpcHistory,
   normalizeRiskLevel,
   pushCompleteLotHistory,
@@ -127,16 +128,95 @@ export async function getLotById(lotId: string): Promise<LotDto> {
   return toDto(rows[0])
 }
 
-export async function getRiskTop(limit = 10): Promise<LotDto[]> {
-  const n = Math.min(Math.max(Number(limit) || 10, 1), 50)
-  const rows = await query<LotRow[]>(
-    `${LOT_SELECT}
-     WHERE a.risk_level IN ('심각', '주의', '높음', '중간', 'A', 'B')
-     ORDER BY FIELD(a.risk_level, '심각', 'A', '높음', '주의', 'B', '중간'), l.\`timestamp\` DESC
-     LIMIT ?`,
-    [n],
+export type DailyProbabilityKpi = {
+  threshold: number
+  total: number
+  goodCount: number
+  defectCount: number
+  /** 0~100, null when total=0 */
+  goodRate: number | null
+  /** 0~100, null when total=0 */
+  defectRate: number | null
+}
+
+/** Today 00:00~ · analysis_lots.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
+export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
+  const thr = DEFECT_JUDGE_THRESHOLD
+  const rows = await query<
+    { total: number; defect_count: number | null; good_count: number | null }[]
+  >(
+    `SELECT COUNT(*) AS total,
+       SUM(CASE WHEN a.probability >= ? THEN 1 ELSE 0 END) AS defect_count,
+       SUM(CASE WHEN a.probability <  ? THEN 1 ELSE 0 END) AS good_count
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE l.\`timestamp\` >= CURDATE()
+       AND a.probability IS NOT NULL`,
+    [thr, thr],
   )
-  return rows.map(toDto)
+  const total = Number(rows[0]?.total ?? 0)
+  const defectCount = Number(rows[0]?.defect_count ?? 0)
+  const goodCount = Number(rows[0]?.good_count ?? 0)
+  const round1 = (n: number) => Math.round(n * 10) / 10
+  return {
+    threshold: thr,
+    total,
+    goodCount,
+    defectCount,
+    goodRate: total > 0 ? round1((goodCount / total) * 100) : null,
+    defectRate: total > 0 ? round1((defectCount / total) * 100) : null,
+  }
+}
+
+export type RiskTopResult = {
+  lots: LotDto[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+const RISK_TOP_WHERE = `a.risk_level = '심각'
+  AND a.spc_status LIKE '%이탈%'
+  AND l.\`timestamp\` >= DATE_SUB(NOW(), INTERVAL 3 DAY)`
+
+/** Recent 3 days · SPC OOC · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
+export async function getRiskTop(opts: {
+  page?: number
+  pageSize?: number
+} = {}): Promise<RiskTopResult> {
+  const pageSize = Math.min(Math.max(Number(opts.pageSize) || 8, 1), 50)
+  let page = Math.max(Number(opts.page) || 1, 1)
+
+  const countRows = await query<{ c: number }[]>(
+    `SELECT COUNT(*) AS c
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE ${RISK_TOP_WHERE}`,
+  )
+  const total = Number(countRows[0]?.c ?? 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  if (page > totalPages) page = totalPages
+  const offset = (page - 1) * pageSize
+
+  const rows =
+    total === 0
+      ? []
+      : await query<LotRow[]>(
+          `${LOT_SELECT}
+           WHERE ${RISK_TOP_WHERE}
+           ORDER BY l.\`timestamp\` DESC
+           LIMIT ? OFFSET ?`,
+          [pageSize, offset],
+        )
+
+  return {
+    lots: rows.map(toDto),
+    total,
+    page,
+    pageSize,
+    totalPages,
+  }
 }
 
 function resolveCsvPath(): string {

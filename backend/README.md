@@ -88,7 +88,8 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 | GET | `/api/issues` | 미완료 심각·주의 이슈 목록. query: search, date, lotId, riskLevel, status |
 | GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
 | PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
-| GET | `/api/lots/risk-top` | 심각·주의 LOT Top |
+| GET | `/api/lots/risk-top` | 최근 3일·SPC 이탈·심각 LOT Top (page/pageSize) |
+| GET | `/api/lots/daily-kpi` | 당일 probability 양품/불량 KPI (임계 0.8) |
 | POST | `/api/lots/import` | CSV 공정값 적재 (`?score=1` 시 채점) |
 | POST | `/api/lots/score` | AI+SPC 재채점 (JWT) |
 | GET | `/api/dashboard/*` | LOT 위험·생산추이·상세·CSV·SHAP |
