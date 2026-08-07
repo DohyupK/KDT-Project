@@ -1,18 +1,29 @@
--- Seed basic issue-page mock data into the existing lots/issues schema.
--- Safe to re-run: existing LOT and issue rows are not overwritten.
--- SPC/process/AI analysis fields are intentionally excluded until their contract is defined.
+-- Seed basic issue-page mock data into lots / analysis_lots / issues.
+-- Safe to re-run: existing PK rows are not overwritten (INSERT IGNORE).
 
 INSERT IGNORE INTO lots
-  (lot_id, recorded_at, risk_level)
+  (id, `timestamp`)
 VALUES
-  ('LOT-CA-260721-08', '2026-07-21 15:42:00', '높음'),
-  ('LOT-CA-260721-07', '2026-07-21 14:18:00', '중간'),
-  ('LOT-CA-260721-05', '2026-07-21 11:05:00', '낮음'),
-  ('LOT-CA-260720-12', '2026-07-20 23:36:00', '높음'),
-  ('LOT-CA-260720-09', '2026-07-20 18:12:00', '중간'),
-  ('LOT-CA-260719-06', '2026-07-19 16:48:00', '낮음'),
-  ('LOT-CA-260719-02', '2026-07-19 09:22:00', '중간'),
-  ('LOT-CA-260718-11', '2026-07-18 21:10:00', '높음');
+  ('LOT-CA-260721-08', '2026-07-21 15:42:00'),
+  ('LOT-CA-260721-07', '2026-07-21 14:18:00'),
+  ('LOT-CA-260721-05', '2026-07-21 11:05:00'),
+  ('LOT-CA-260720-12', '2026-07-20 23:36:00'),
+  ('LOT-CA-260720-09', '2026-07-20 18:12:00'),
+  ('LOT-CA-260719-06', '2026-07-19 16:48:00'),
+  ('LOT-CA-260719-02', '2026-07-19 09:22:00'),
+  ('LOT-CA-260718-11', '2026-07-18 21:10:00');
+
+INSERT IGNORE INTO analysis_lots
+  (lot_id, risk_level)
+VALUES
+  ('LOT-CA-260721-08', '높음'),
+  ('LOT-CA-260721-07', '중간'),
+  ('LOT-CA-260721-05', '낮음'),
+  ('LOT-CA-260720-12', '높음'),
+  ('LOT-CA-260720-09', '중간'),
+  ('LOT-CA-260719-06', '낮음'),
+  ('LOT-CA-260719-02', '중간'),
+  ('LOT-CA-260718-11', '높음');
 
 INSERT IGNORE INTO issues
   (issue_id, lot_id, occurred_at, risk_level, status, title,
@@ -30,7 +41,7 @@ VALUES
 
   ('ISS-260721-016', 'LOT-CA-260721-05', '2026-07-21 11:05:00', '낮음', '완료',
    '혼합기 습도 센서 일시 이상',
-   '센서 커넥터를 재체결하고 정상 신호 수신을 확인했습니다.',
+   '센서 커넥터를 재체결하고 정상 신호 검출을 확인했습니다.',
    NULL, NULL),
 
   ('ISS-260720-015', 'LOT-CA-260720-12', '2026-07-20 23:36:00', '높음', '접수',
@@ -58,7 +69,6 @@ VALUES
    '동일 조건 과거 LOT와 공정 파라미터를 교차 분석 중입니다.',
    NULL, NULL);
 
--- Preserve the users FK: map mock assignee names only when a matching real user exists.
 UPDATE issues i
 JOIN (
   SELECT 'ISS-260721-018' AS issue_id, '김현수' AS assignee_name

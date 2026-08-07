@@ -9,7 +9,6 @@ import {
   RESIDUAL_USL,
   type RiskLevel,
 } from './lotScore.js'
-import { getLotSpcDetail } from './lot.service.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
 const RAW_PROCESS_FEATURES = new Set([
@@ -88,30 +87,49 @@ function avg(nums: number[]): number | null {
   return nums.reduce((a, b) => a + b, 0) / nums.length
 }
 
-function clampRate(value: number): number {
-  return Math.min(1, Math.max(0, value))
+export type ProductionTrendGrain = 'day' | 'week' | 'month'
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function parseIsoDateOnly(value: string): Date | null {
+  if (!ISO_DATE_RE.test(value)) return null
+  const [y, m, d] = value.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null
+  return dt
 }
 
-function addDays(date: string, days: number): string {
-  const value = new Date(`${date}T00:00:00Z`)
-  value.setUTCDate(value.getUTCDate() + days)
-  return value.toISOString().slice(0, 10)
+function formatIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-function holtForecast(values: number[], steps: number): number[] {
-  if (values.length === 0) return []
-  if (values.length === 1) return Array.from({ length: steps }, () => clampRate(values[0]))
+function addCalendarDays(date: string, days: number): string {
+  const d = parseIsoDateOnly(date)
+  if (!d) return date
+  d.setDate(d.getDate() + days)
+  return formatIsoDate(d)
+}
 
-  const alpha = 0.5
-  const beta = 0.3
-  let level = values[0]
-  let trend = values[1] - values[0]
-  for (let i = 1; i < values.length; i++) {
-    const previousLevel = level
-    level = alpha * values[i] + (1 - alpha) * (level + trend)
-    trend = beta * (level - previousLevel) + (1 - beta) * trend
-  }
-  return Array.from({ length: steps }, (_, index) => clampRate(level + (index + 1) * trend))
+/** Monday-start ISO week key as YYYY-MM-DD (week start). */
+function weekBucketKey(value: Date | string): string {
+  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value)
+  const day = d.getDay() // 0 Sun .. 6 Sat
+  const diffToMon = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diffToMon)
+  return formatIsoDate(d)
+}
+
+function monthBucketKey(value: Date | string): string {
+  const d = value instanceof Date ? value : new Date(value)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
+}
+
+function bucketKeyForGrain(value: Date | string, grain: ProductionTrendGrain): string {
+  if (grain === 'week') return weekBucketKey(value)
+  if (grain === 'month') return monthBucketKey(value)
+  return dateKey(value)
 }
 
 function domainAverages(rows: LotAggRow[]) {
@@ -152,83 +170,72 @@ export type LotRiskListQuery = {
 export async function listLotRisks(q: LotRiskListQuery) {
   const pageSize = Math.min(Math.max(Number(q.pageSize) || 5, 1), 50)
   const page = Math.max(Number(q.page) || 1, 1)
-  const where: string[] = [
-    'scored_at IS NOT NULL',
-    `risk_level IN ('심각', 'A', '높음', '주의', 'B', '중간')`,
-  ]
+  // judgment_lots: residual + probability. SPC/risk filters deferred.
+  const where: string[] = []
   const params: unknown[] = []
 
   if (q.search?.trim()) {
-    where.push('lot_id LIKE ?')
+    where.push('j.lot_id LIKE ?')
     params.push(`%${q.search.trim()}%`)
   }
-  if (q.riskLevel && q.riskLevel !== 'all') {
-    const risk = normalizeRiskLevel(q.riskLevel)
-    where.push(`risk_level IN (?, ?, ?)`)
-    if (risk === '심각') params.push('심각', '높음', 'A')
-    else if (risk === '주의') params.push('주의', '중간', 'B')
-    else params.push('안정', '낮음', 'C')
-  }
-  if (q.spc && q.spc !== 'all') {
-    if (q.spc === '이탈') {
-      where.push(`spc_status LIKE '%이탈%'`)
-    } else if (q.spc === '주의') {
-      where.push(`(spc_status LIKE '%주의%' OR spc_status = '주의')`)
-    } else if (q.spc === '안정') {
-      where.push(`(spc_status = '안정' OR spc_status = '정상' OR spc_status IS NULL)`)
-    }
-  }
   if (q.minProb != null && Number.isFinite(q.minProb)) {
-    where.push('defect_prob >= ?')
+    where.push('j.probability IS NOT NULL AND j.probability >= ?')
     params.push(q.minProb)
   }
   if (q.maxProb != null && Number.isFinite(q.maxProb)) {
-    where.push('defect_prob < ?')
+    where.push('j.probability IS NOT NULL AND j.probability < ?')
     params.push(q.maxProb)
   }
   if (q.marginLevel === 'low') {
-    where.push('residual_lithium IS NOT NULL AND (? - residual_lithium) <= 500')
+    where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) <= 500')
     params.push(RESIDUAL_USL)
   } else if (q.marginLevel === 'caution') {
     where.push(
-      'residual_lithium IS NOT NULL AND (? - residual_lithium) > 500 AND (? - residual_lithium) <= 1000',
+      'j.residual_li IS NOT NULL AND (? - j.residual_li) > 500 AND (? - j.residual_li) <= 1000',
     )
     params.push(RESIDUAL_USL, RESIDUAL_USL)
   } else if (q.marginLevel === 'sufficient') {
-    where.push('residual_lithium IS NOT NULL AND (? - residual_lithium) > 1000')
+    where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) > 1000')
     params.push(RESIDUAL_USL)
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const fromJoin = `FROM judgment_lots j INNER JOIN lots l ON l.id = j.lot_id`
   const countRows = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM lots ${whereSql}`,
+    `SELECT COUNT(*) AS c ${fromJoin} ${whereSql}`,
     params,
   )
   const total = Number(countRows[0]?.c || 0)
   const offset = (page - 1) * pageSize
 
-  const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, quality_defect, defect_prob, residual_lithium,
-            spc_status, risk_level, risk_reason, d50, d90, metal_impurity, lithium_input,
-            additive_ratio, process_time, sintering_temp, humidity, tank_pressure,
-            operator_id, scored_at
-     FROM lots ${whereSql}
-     ORDER BY recorded_at DESC, lot_id DESC
+  const rows = await query<
+    {
+      lot_id: string
+      recorded_at: Date | string
+      residual_lithium: number | null
+      probability: number | null
+    }[]
+  >(
+    `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
+            j.probability
+     ${fromJoin} ${whereSql}
+     ORDER BY l.\`timestamp\` DESC, j.lot_id DESC
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset],
   )
 
   const items = rows.map((r) => {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
+    const prob = r.probability != null ? Number(r.probability) : null
     return {
       lotId: r.lot_id,
       recordedAt: formatDateTime(r.recorded_at),
-      defectProb: r.defect_prob != null ? Number(r.defect_prob) : null,
+      defectProb: Number.isFinite(prob as number) ? prob : null,
       residualLithium: residual,
       residualMargin: residual != null ? residualMargin(residual) : null,
-      spcStatus: r.spc_status,
-      riskLevel: normalizeRiskLevel(r.risk_level),
-      riskReason: r.risk_reason,
+      spcStatus: null as string | null,
+      riskLevel: null as RiskLevel | null,
+      riskReason: null as string | null,
     }
   })
 
@@ -243,40 +250,48 @@ export async function listLotRisks(q: LotRiskListQuery) {
 }
 
 export async function getLotRiskDetail(lotId: string) {
-  const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, quality_defect, defect_prob, residual_lithium,
-            spc_status, risk_level, risk_reason, d50, d90, metal_impurity, lithium_input,
-            additive_ratio, process_time, sintering_temp, humidity, tank_pressure,
-            operator_id, scored_at
-     FROM lots WHERE lot_id = ? LIMIT 1`,
+  const rows = await query<
+    {
+      lot_id: string
+      recorded_at: Date | string
+      residual_lithium: number | null
+      probability: number | null
+    }[]
+  >(
+    `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
+            j.probability
+     FROM judgment_lots j
+     INNER JOIN lots l ON l.id = j.lot_id
+     WHERE j.lot_id = ? LIMIT 1`,
     [lotId],
   )
   if (!rows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
   const r = rows[0]
   const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
-  const spc = await getLotSpcDetail(lotId)
+  const prob = r.probability != null ? Number(r.probability) : null
 
   return {
     lotId: r.lot_id,
     recordedAt: formatDateTime(r.recorded_at),
-    defectProb: r.defect_prob != null ? Number(r.defect_prob) : null,
+    defectProb: Number.isFinite(prob as number) ? prob : null,
     residualLithium: residual,
     residualMargin: residual != null ? residualMargin(residual) : null,
     residualUsl: RESIDUAL_USL,
-    spcStatus: r.spc_status,
-    riskLevel: normalizeRiskLevel(r.risk_level) as RiskLevel,
-    riskReason: r.risk_reason,
+    spcStatus: null as string | null,
+    riskLevel: null as RiskLevel | null,
+    riskReason: null as string | null,
     actionContent: null as string | null,
-    spc,
+    spc: null,
   }
 }
 
 async function getAllProductionPoints() {
   const rows = await query<LotAggRow[]>(
-    `SELECT recorded_at, quality_defect, defect_prob,
-            metal_impurity, sintering_temp, humidity
-     FROM lots
-     ORDER BY recorded_at ASC`,
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, a.defect_prob,
+            l.metal_impurity, l.sintering_temp, l.humidity
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     ORDER BY l.\`timestamp\` ASC`,
   )
 
   const byDate = new Map<
@@ -308,23 +323,78 @@ async function getAllProductionPoints() {
     }))
 }
 
-export async function getProductionTrend() {
-  const points = await getAllProductionPoints()
-  const actualPoints = points.slice(-5)
-  const rates = points
-    .map((point) => point.defectRate)
-    .filter((rate): rate is number => rate != null && Number.isFinite(rate))
-  const forecasts = holtForecast(rates, 2)
-  const latestDate = actualPoints.at(-1)?.date
-  const forecastPoints =
-    latestDate == null
-      ? []
-      : forecasts.map((defectRate, index) => ({
-          date: addDays(latestDate, index + 1),
-          defectRate,
-        }))
+/**
+ * Production volume trend for dashboard pink-box chart.
+ * Aggregates judgment_lots (COUNT lot_id + quality_defect) by lots.timestamp.
+ * Default window: last 7 calendar days ending on latest judgment lot date.
+ */
+export async function getProductionTrend(params: {
+  from?: string
+  to?: string
+  grain?: string
+} = {}) {
+  const grainRaw = (params.grain || 'day').toLowerCase()
+  const grain: ProductionTrendGrain =
+    grainRaw === 'week' || grainRaw === 'month' ? grainRaw : 'day'
 
-  return { actualPoints, forecastPoints }
+  let from = params.from && ISO_DATE_RE.test(params.from) ? params.from : undefined
+  let to = params.to && ISO_DATE_RE.test(params.to) ? params.to : undefined
+
+  if (!from || !to) {
+    const latestRows = await query<Array<{ latest: Date | string | null }>>(
+      `SELECT MAX(l.\`timestamp\`) AS latest
+       FROM judgment_lots j
+       INNER JOIN lots l ON l.id = j.lot_id`,
+    )
+    const latestRaw = latestRows[0]?.latest
+    const latestKey = latestRaw != null ? dateKey(latestRaw) : formatIsoDate(new Date())
+    to = to ?? latestKey
+    from = from ?? addCalendarDays(to, -6)
+  }
+
+  if (from > to) {
+    const tmp = from
+    from = to
+    to = tmp
+  }
+
+  const rows = await query<
+    Array<{ recorded_at: Date | string; quality_defect: number | boolean }>
+  >(
+    `SELECT l.\`timestamp\` AS recorded_at, j.quality_defect
+     FROM judgment_lots j
+     INNER JOIN lots l ON l.id = j.lot_id
+     WHERE DATE(l.\`timestamp\`) >= ? AND DATE(l.\`timestamp\`) <= ?
+     ORDER BY l.\`timestamp\` ASC`,
+    [from, to],
+  )
+
+  const byBucket = new Map<string, { production: number; defect: number }>()
+  for (const r of rows) {
+    const key = bucketKeyForGrain(r.recorded_at, grain)
+    let bucket = byBucket.get(key)
+    if (!bucket) {
+      bucket = { production: 0, defect: 0 }
+      byBucket.set(key, bucket)
+    }
+    bucket.production++
+    if (Number(r.quality_defect) === 1) bucket.defect++
+  }
+
+  const points = [...byBucket.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, b]) => {
+      const goodCount = b.production - b.defect
+      return {
+        date,
+        production: b.production,
+        goodCount,
+        defectCount: b.defect,
+        defectRate: b.production > 0 ? b.defect / b.production : null,
+      }
+    })
+
+  return { grain, from, to, points }
 }
 
 export async function getProductionDaily(page = 1, pageSize = 5) {
@@ -338,8 +408,10 @@ export async function getProductionDaily(page = 1, pageSize = 5) {
   // Enrich FI averages for the page dates
   const dateSet = new Set(slice.map((p) => p.date))
   const rows = await query<LotAggRow[]>(
-    `SELECT recorded_at, quality_defect, metal_impurity, sintering_temp, humidity, scored_at
-     FROM lots ORDER BY recorded_at ASC`,
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, l.metal_impurity, l.sintering_temp, l.humidity, a.scored_at
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     ORDER BY l.\`timestamp\` ASC`,
   )
   const byDate = new Map<string, LotAggRow[]>()
   for (const r of rows) {
@@ -392,12 +464,14 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
     throw new AppError(400, 'date는 YYYY-MM-DD 형식이어야 합니다.')
   }
   const rows = await query<LotAggRow[]>(
-    `SELECT lot_id, recorded_at, d50, d90, metal_impurity, lithium_input, additive_ratio,
-            process_time, sintering_temp, humidity, tank_pressure, operator_id,
-            quality_defect, defect_prob, residual_lithium, spc_status, risk_level, risk_reason
-     FROM lots
-     WHERE DATE(recorded_at) = ?
-     ORDER BY recorded_at ASC, lot_id ASC`,
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
+            l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
+            0 AS quality_defect, a.defect_prob, j.residual_li AS residual_lithium, a.spc_status, a.risk_level, a.risk_reason
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     WHERE DATE(l.\`timestamp\`) = ?
+     ORDER BY l.\`timestamp\` ASC, l.id ASC`,
     [date],
   )
 

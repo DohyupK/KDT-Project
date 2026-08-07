@@ -330,8 +330,11 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
       spc_status: string | null
     }[]
   >(
-    `SELECT lot_id, risk_reason, defect_prob, residual_lithium, spc_status
-     FROM lots WHERE lot_id = ? LIMIT 1`,
+    `SELECT l.id AS lot_id, a.risk_reason, a.defect_prob, j.residual_li AS residual_lithium, a.spc_status
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     WHERE l.id = ? LIMIT 1`,
     [issue.lotId],
   )
   const lot = lotRows[0]
@@ -384,9 +387,9 @@ async function ensureSysHandoverLot(
   runQuery: (sql: string, params?: unknown[]) => Promise<unknown> = query,
 ): Promise<string> {
   await runQuery(
-    `INSERT INTO lots (lot_id, recorded_at, risk_level, risk_reason, quality_defect)
-     VALUES (?, NOW(), '낮음', '인수인계 전용 시스템 LOT', 0)
-     ON DUPLICATE KEY UPDATE lot_id = lot_id`,
+    `INSERT INTO lots (id, \`timestamp\`)
+     VALUES (?, NOW())
+     ON DUPLICATE KEY UPDATE id = id`,
     [SYS_HANDOVER_LOT_ID],
   )
   return SYS_HANDOVER_LOT_ID

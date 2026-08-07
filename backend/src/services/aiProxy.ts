@@ -132,6 +132,13 @@ export async function predictResidual(features: PredictFeatureBody): Promise<AiR
   return postAiJson<AiResidualResult>('/predict-residual', body)
 }
 
+/** Single-row capacity mAh/g (same contract as chatbot capacity head). */
+export async function predictCapacity(features: PredictFeatureBody): Promise<AiCapacityResult> {
+  const body = sanitizePredictBody(features)
+  delete body.fillThreshold
+  return postAiJson<AiCapacityResult>('/predict-capacity', body)
+}
+
 export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
   const res = await fetch(`${aiServiceBase()}/chat`, {
     method: 'POST',
