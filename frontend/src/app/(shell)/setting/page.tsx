@@ -24,6 +24,7 @@ import {
 } from '@/components/layout/AppShell'
 import type { UserSettingsDto } from '@/types'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const DEFAULT_FONT_SIZE = 18
@@ -269,78 +270,93 @@ export default function SettingPage() {
     })
   }
 
+  const reloadPageSettings = async (isCancelled?: () => boolean) => {
+    if (isLoggedIn()) {
+      try {
+        const { data } = await authApi.getSettings()
+        if (isCancelled?.()) return
+        const s = data.settings
+        const currentConfig = readSystemSettingsConfig()
+        applySettingsToUi({
+          fontSize: s.fontSize as FontSize,
+          themeMode: s.themeMode,
+          language: s.language ?? currentConfig?.language ?? 'ko',
+          refreshInterval: s.refreshInterval as RefreshInterval,
+          autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
+          n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+        })
+        cacheSettingsLocally(s)
+        return
+      } catch {
+        if (!isCancelled?.()) {
+          setSaveMessage('서버 설정을 불러오지 못했습니다. 로컬 설정을 사용합니다.')
+        }
+      }
+    }
+
+    if (isCancelled?.()) return
+
+    const saved = loadSavedSettings()
+    const config = readSystemSettingsConfig()
+
+    let nextFontSize: FontSize = DEFAULT_FONT_SIZE
+    let nextTheme: ThemeMode = DEFAULT_THEME_MODE
+    let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
+    let nextAutoRefresh = DEFAULT_AUTO_REFRESH_ENABLED
+    let nextN8n = DEFAULT_N8N_ALERT
+    let nextLang: Language = DEFAULT_LANGUAGE
+
+    if (saved) {
+      const savedFontSize = parseSavedFontSize(saved)
+      if (savedFontSize) nextFontSize = savedFontSize
+      if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
+      if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
+        nextInterval = saved.RefreshInterval
+      }
+      if (saved.Language === 'ko' || saved.Language === 'en') nextLang = saved.Language
+    }
+
+    if (config) {
+      if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
+        nextFontSize = config.fontSize as FontSize
+      }
+      if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
+      if (
+        typeof config.refreshInterval === 'number' &&
+        REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
+      ) {
+        nextInterval = config.refreshInterval as RefreshInterval
+      }
+      if (typeof config.autoRefreshEnabled === 'boolean') nextAutoRefresh = config.autoRefreshEnabled
+      if (typeof config.n8nAlert === 'boolean') nextN8n = config.n8nAlert
+      if (config.language === 'ko' || config.language === 'en') nextLang = config.language
+    }
+
+    applySettingsToUi({
+      fontSize: nextFontSize,
+      themeMode: nextTheme,
+      language: nextLang,
+      refreshInterval: nextInterval,
+      autoRefreshEnabled: nextAutoRefresh,
+      n8nAlert: nextN8n,
+    })
+  }
+
+  const reloadControlBounds = async (isCancelled?: () => boolean) => {
+    try {
+      const data = await getControlBounds()
+      if (!isCancelled?.() && data.bounds) setBounds(data.bounds)
+    } catch {
+      if (!isCancelled?.()) {
+        setBoundsMessage('한계치를 불러오지 못했습니다. backend(:3001)를 확인하세요.')
+      }
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      if (isLoggedIn()) {
-        try {
-          const { data } = await authApi.getSettings()
-          if (cancelled) return
-          const s = data.settings
-          const currentConfig = readSystemSettingsConfig()
-          applySettingsToUi({
-            fontSize: s.fontSize as FontSize,
-            themeMode: s.themeMode,
-            language: s.language ?? currentConfig?.language ?? 'ko',
-            refreshInterval: s.refreshInterval as RefreshInterval,
-            autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
-            n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
-          })
-          cacheSettingsLocally(s)
-          return
-        } catch {
-          if (!cancelled) {
-            setSaveMessage('서버 설정을 불러오지 못했습니다. 로컬 설정을 사용합니다.')
-          }
-        }
-      }
-
-      if (cancelled) return
-
-      const saved = loadSavedSettings()
-      const config = readSystemSettingsConfig()
-
-      let nextFontSize: FontSize = DEFAULT_FONT_SIZE
-      let nextTheme: ThemeMode = DEFAULT_THEME_MODE
-      let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
-      let nextAutoRefresh = DEFAULT_AUTO_REFRESH_ENABLED
-      let nextN8n = DEFAULT_N8N_ALERT
-      let nextLang: Language = DEFAULT_LANGUAGE
-
-      if (saved) {
-        const savedFontSize = parseSavedFontSize(saved)
-        if (savedFontSize) nextFontSize = savedFontSize
-        if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
-        if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
-          nextInterval = saved.RefreshInterval
-        }
-        if (saved.Language === 'ko' || saved.Language === 'en') nextLang = saved.Language
-      }
-
-      if (config) {
-        if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
-          nextFontSize = config.fontSize as FontSize
-        }
-        if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
-        if (
-          typeof config.refreshInterval === 'number' &&
-          REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
-        ) {
-          nextInterval = config.refreshInterval as RefreshInterval
-        }
-        if (typeof config.autoRefreshEnabled === 'boolean') nextAutoRefresh = config.autoRefreshEnabled
-        if (typeof config.n8nAlert === 'boolean') nextN8n = config.n8nAlert
-        if (config.language === 'ko' || config.language === 'en') nextLang = config.language
-      }
-
-      applySettingsToUi({
-        fontSize: nextFontSize,
-        themeMode: nextTheme,
-        language: nextLang,
-        refreshInterval: nextInterval,
-        autoRefreshEnabled: nextAutoRefresh,
-        n8nAlert: nextN8n,
-      })
+      await reloadPageSettings(() => cancelled)
     })()
 
     return () => {
@@ -348,15 +364,15 @@ export default function SettingPage() {
     }
   }, [])
 
+  useShellRefresh(() => {
+    void reloadPageSettings()
+    void reloadControlBounds()
+  })
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      try {
-        const data = await getControlBounds()
-        if (!cancelled && data.bounds) setBounds(data.bounds)
-      } catch {
-        if (!cancelled) setBoundsMessage('한계치를 불러오지 못했습니다. backend(:3001)를 확인하세요.')
-      }
+      await reloadControlBounds(() => cancelled)
     })()
     return () => {
       cancelled = true
