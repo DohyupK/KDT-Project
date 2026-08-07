@@ -172,11 +172,11 @@ async function main() {
         "event_date DATE NULL COMMENT '날짜' AFTER manager",
       )
 
-      // Backfill event_date from issues.occurred_at, else archived_at/created_at
+      // Backfill event_date from issues.created_at, else archived_at/created_at
       await conn.query(
         `UPDATE handover_history h
          LEFT JOIN issues i ON i.issue_id = h.issue_id
-         SET h.event_date = DATE(COALESCE(i.occurred_at, h.archived_at, h.created_at, NOW()))
+         SET h.event_date = DATE(COALESCE(i.created_at, h.archived_at, h.created_at, NOW()))
          WHERE h.event_date IS NULL`,
       )
       console.log('BACKFILL handover_history.event_date')

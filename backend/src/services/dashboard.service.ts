@@ -4,6 +4,7 @@ import {
   normalizeRiskLevel,
   residualMargin,
   getResidualUsl,
+  DEFECT_JUDGE_THRESHOLD,
   type RiskLevel,
 } from './lotScore.js'
 import { getLotSpcDetail } from './lot.service.js'
@@ -17,7 +18,18 @@ function isLotProcessComplete(row: Record<string, number | null | undefined>): b
   return isProcessComplete(bag)
 }
 
-/** Fixed production-detail FI columns (clf global SHAP Top-4). */
+/** Production-detail table columns (daily aggregate from lots + analysis_lots). */
+export const PRODUCTION_DAILY_COLUMNS = [
+  { key: 'metalImpurity', label: '금속 불순물' },
+  { key: 'sinteringTemp', label: '소성 온도' },
+  { key: 'humidity', label: '습도' },
+  { key: 'lithiumInput', label: '리튬 투입량' },
+  { key: 'additiveRatio', label: '첨가제 비율' },
+  { key: 'tankPressure', label: '압력' },
+  { key: 'processTime', label: '공정시간' },
+] as const
+
+/** @deprecated Prefer PRODUCTION_DAILY_COLUMNS — legacy FI labels */
 export const FIXED_FI_COLUMNS = [
   { key: 'metal_impurity', label: '금속 불순물' },
   { key: 'temp_dev_from_800', label: '소성온도 이탈' },
@@ -306,7 +318,7 @@ export async function getLotRiskDetail(lotId: string) {
             a.risk_level, a.risk_reason,
             (SELECT i.action_content FROM issues i
              WHERE i.lot_id = j.lot_id
-             ORDER BY i.occurred_at DESC LIMIT 1) AS action_content,
+             ORDER BY i.created_at DESC LIMIT 1) AS action_content,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
      FROM judgment_lots j
@@ -476,54 +488,188 @@ export async function getProductionTrend(params: {
   return { grain, from, to, points }
 }
 
-export async function getProductionDaily(page = 1, pageSize = 5) {
-  const size = Math.min(Math.max(pageSize, 1), 50)
-  const safePage = Math.max(page, 1)
-  const all = [...(await getAllProductionPoints())].reverse()
-  const total = all.length
-  const totalPages = Math.max(1, Math.ceil(total / size))
-  const slice = all.slice((safePage - 1) * size, safePage * size)
+function dateFromLotId(lotId: string | null | undefined, fallback: Date | string): string {
+  const m = String(lotId || '').match(/^LOT-(\d{8})(?:-|$)/i)
+  if (m) {
+    const raw = m[1]
+    const y = Number(raw.slice(0, 4))
+    const mo = Number(raw.slice(4, 6))
+    const d = Number(raw.slice(6, 8))
+    if (y >= 2000 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${y}-${pad(mo)}-${pad(d)}`
+    }
+  }
+  return dateKey(fallback)
+}
 
-  // Enrich FI averages for the page dates
-  const dateSet = new Set(slice.map((p) => p.date))
-  const rows = await query<LotAggRow[]>(
-    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, l.metal_impurity, l.sintering_temp, l.humidity
-     FROM lots l
-     ORDER BY l.\`timestamp\` ASC`,
-  )
-  const byDate = new Map<string, LotAggRow[]>()
+export type ProductionDailyQuery = {
+  page?: number
+  pageSize?: number
+  operatorId?: string
+  d50Min?: number
+  d50Max?: number
+  d90Min?: number
+  d90Max?: number
+}
+
+type DayBucket = {
+  production: number
+  good: number
+  defect: number
+  metal: number[]
+  sinter: number[]
+  humidity: number[]
+  lithium: number[]
+  additive: number[]
+  pressure: number[]
+  process: number[]
+}
+
+/**
+ * Daily production detail for dashboard tab.
+ * Date from lot_id YYYYMMDD; good/defect from analysis_lots.probability vs 0.8;
+ * process metrics = day averages from lots. Window = last 7 days by lot_id date.
+ */
+export async function getProductionDaily(q: ProductionDailyQuery = {}) {
+  const size = Math.min(Math.max(Number(q.pageSize) || 7, 1), 50)
+  const safePage = Math.max(Number(q.page) || 1, 1)
+  const thr = DEFECT_JUDGE_THRESHOLD
+
+  const where: string[] = []
+  const params: unknown[] = []
+  if (q.operatorId && String(q.operatorId).trim()) {
+    where.push('l.operator_id = ?')
+    params.push(String(q.operatorId).trim())
+  }
+  if (q.d50Min != null && Number.isFinite(q.d50Min)) {
+    where.push('l.d50 IS NOT NULL AND l.d50 >= ?')
+    params.push(Number(q.d50Min))
+  }
+  if (q.d50Max != null && Number.isFinite(q.d50Max)) {
+    where.push('l.d50 IS NOT NULL AND l.d50 <= ?')
+    params.push(Number(q.d50Max))
+  }
+  if (q.d90Min != null && Number.isFinite(q.d90Min)) {
+    where.push('l.d90 IS NOT NULL AND l.d90 >= ?')
+    params.push(Number(q.d90Min))
+  }
+  if (q.d90Max != null && Number.isFinite(q.d90Max)) {
+    where.push('l.d90 IS NOT NULL AND l.d90 <= ?')
+    params.push(Number(q.d90Max))
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+
+  const [operatorRows, rows] = await Promise.all([
+    query<{ operator_id: string }[]>(
+      `SELECT DISTINCT l.operator_id AS operator_id
+       FROM lots l
+       WHERE l.operator_id IS NOT NULL AND l.operator_id <> ''
+       ORDER BY l.operator_id ASC`,
+    ),
+    query<
+      {
+        lot_id: string
+        recorded_at: Date | string
+        probability: number | null
+        metal_impurity: number | null
+        sintering_temp: number | null
+        humidity: number | null
+        lithium_input: number | null
+        additive_ratio: number | null
+        tank_pressure: number | null
+        process_time: number | null
+        operator_id: string | null
+        d50: number | null
+        d90: number | null
+      }[]
+    >(
+      `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.probability,
+              l.metal_impurity, l.sintering_temp, l.humidity, l.lithium_input,
+              l.additive_ratio, l.tank_pressure, l.process_time, l.operator_id, l.d50, l.d90
+       FROM lots l
+       LEFT JOIN analysis_lots a ON a.lot_id = l.id
+       ${whereSql}
+       ORDER BY l.\`timestamp\` ASC`,
+      params,
+    ),
+  ])
+
+  const operators = operatorRows.map((r) => String(r.operator_id)).filter(Boolean)
+  const byDate = new Map<string, DayBucket>()
+
   for (const r of rows) {
-    const key = dateKey(r.recorded_at)
-    if (!dateSet.has(key)) continue
-    const list = byDate.get(key) || []
-    list.push(r)
-    byDate.set(key, list)
+    const key = dateFromLotId(r.lot_id, r.recorded_at)
+    let b = byDate.get(key)
+    if (!b) {
+      b = {
+        production: 0,
+        good: 0,
+        defect: 0,
+        metal: [],
+        sinter: [],
+        humidity: [],
+        lithium: [],
+        additive: [],
+        pressure: [],
+        process: [],
+      }
+      byDate.set(key, b)
+    }
+    b.production++
+    if (r.probability != null && Number.isFinite(Number(r.probability))) {
+      const p = Number(r.probability)
+      if (p >= thr) b.defect++
+      else b.good++
+    }
+    if (r.metal_impurity != null) b.metal.push(Number(r.metal_impurity))
+    if (r.sintering_temp != null) b.sinter.push(Number(r.sintering_temp))
+    if (r.humidity != null) b.humidity.push(Number(r.humidity))
+    if (r.lithium_input != null) b.lithium.push(Number(r.lithium_input))
+    if (r.additive_ratio != null) b.additive.push(Number(r.additive_ratio))
+    if (r.tank_pressure != null) b.pressure.push(Number(r.tank_pressure))
+    if (r.process_time != null) b.process.push(Number(r.process_time))
   }
 
-  const items = slice.map((p) => {
-    const dayRows = byDate.get(p.date) || []
-    const fi = domainAverages(dayRows)
+  const allDates = [...byDate.keys()].sort((a, b) => a.localeCompare(b))
+  const latest = allDates.length > 0 ? allDates[allDates.length - 1] : formatIsoDate(new Date())
+  const windowStart = addCalendarDays(latest, -6)
+  const windowDates = allDates.filter((d) => d >= windowStart && d <= latest).reverse()
 
+  const total = windowDates.length
+  const totalPages = Math.max(1, Math.ceil(total / size))
+  const page = Math.min(safePage, totalPages)
+  const slice = windowDates.slice((page - 1) * size, page * size)
+
+  const items = slice.map((date) => {
+    const b = byDate.get(date)!
     return {
-      date: p.date,
-      production: p.production,
-      goodCount: p.goodCount,
-      defectCount: p.defectCount,
-      defectRate: p.defectRate,
-      metalImpurity: fi.metal_impurity,
-      tempDevFrom800: fi.temp_dev_from_800,
-      humidity: fi.humidity,
-      tempXHumidity: fi.temp_x_humidity,
+      date,
+      production: b.production,
+      goodCount: b.good,
+      defectCount: b.defect,
+      defectRate: b.production > 0 ? b.defect / b.production : null,
+      metalImpurity: avg(b.metal),
+      sinteringTemp: avg(b.sinter),
+      humidity: avg(b.humidity),
+      lithiumInput: avg(b.lithium),
+      additiveRatio: avg(b.additive),
+      tankPressure: avg(b.pressure),
+      processTime: avg(b.process),
     }
   })
 
   return {
     items,
     total,
-    page: safePage,
+    page,
     pageSize: size,
     totalPages,
-    columns: FIXED_FI_COLUMNS,
+    from: windowStart,
+    to: latest,
+    threshold: thr,
+    operators,
+    columns: [...PRODUCTION_DAILY_COLUMNS],
   }
 }
 

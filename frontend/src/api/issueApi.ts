@@ -1,6 +1,5 @@
 import { apiClient } from './axios'
 
-export type IssueStatus = '접수' | '분석 중' | '조치 중' | '완료'
 /** Canonical ops risk labels (legacy 높음|중간|낮음 still accepted from older rows). */
 export type IssueRiskLevel = '심각' | '주의' | '안정'
 
@@ -13,11 +12,22 @@ export function normalizeIssueRiskLevel(level: string | null | undefined): Issue
 
 export type IssueListItem = {
   issueId: string
-  occurredAt: string
+  createdAt: string
   lotId: string
   riskLevel: IssueRiskLevel
-  status: IssueStatus
-  title: string
+  /** analysis_lots.spc_status */
+  spcStatus: string | null
+  issueContent: string
+}
+
+/** analysis_lots snapshot for 이슈 상세 분석 visualization */
+export type IssueAnalysis = {
+  lotId: string
+  probability: number | null
+  spcStatus: string | null
+  riskLevel: IssueRiskLevel
+  riskReason: string | null
+  createdAt: string | null
 }
 
 export type IssueDetail = IssueListItem & {
@@ -26,6 +36,7 @@ export type IssueDetail = IssueListItem & {
   assigneeName: string | null
   completed: boolean
   completedAt: string | null
+  analysis: IssueAnalysis | null
 }
 
 export type IssueListParams = {
@@ -33,11 +44,9 @@ export type IssueListParams = {
   date?: string
   lotId?: string
   riskLevel?: IssueRiskLevel
-  status?: IssueStatus
 }
 
 export type UpdateIssueBody = {
-  status: IssueStatus
   actionContent: string | null
   completed: boolean
 }
@@ -60,12 +69,12 @@ export type CreateHandoverBody = {
   content: string
 }
 
-/** Completed issues for Knowledge library (no risk/status in UI). */
+/** Completed issues for Knowledge library (no risk in UI). */
 export type PastIssueListItem = {
   issueId: string
-  occurredAt: string
+  createdAt: string
   lotId: string
-  title: string
+  issueContent: string
   assigneeName: string | null
   completedAt: string | null
 }

@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-03 (BM25 핫리로드 · 로그 회전 · SSE · analytics · 3단계)
+최종 갱신: 2026-08-08 (이슈 처리 저장=완료 · 과거 자료 · 목업 제거)
 
 모노레포 기준입니다. `frontend` / `backend` / `ai-service`를 모두 포함합니다.
 
@@ -15,8 +15,7 @@
 **챗봇 가이드(스택·이용):** [`docs/references/security-chatbot-guide.md`](./references/security-chatbot-guide.md)  
 **vLLM 수동 기동:** [`docs/references/vllm-setup.md`](./references/vllm-setup.md)  
 **보안 챗 타임아웃 플랜:** [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](./plans/2026-07-30-secure-chat-timeout-selfquery.md)  
-**일지:** [`docs/work-log/2026-08-02.md`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
-**일지:** [`docs/work-log/2026-08-06.md`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
+**일지:** [`docs/work-log/2026-08-08.md`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
 
 > LLM/RAG 세팅·기법·다음 할 일 SSOT: [`docs/references/LLM 튜닝.md`](./references/LLM%20튜닝.md) §0·§4·§9
 

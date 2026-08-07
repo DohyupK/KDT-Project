@@ -5,6 +5,7 @@ import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import {
   buildIssueTitle,
+  DEFECT_JUDGE_THRESHOLD,
   emptySpcHistory,
   normalizeRiskLevel,
   pushCompleteLotHistory,
@@ -127,16 +128,95 @@ export async function getLotById(lotId: string): Promise<LotDto> {
   return toDto(rows[0])
 }
 
-export async function getRiskTop(limit = 10): Promise<LotDto[]> {
-  const n = Math.min(Math.max(Number(limit) || 10, 1), 50)
-  const rows = await query<LotRow[]>(
-    `${LOT_SELECT}
-     WHERE a.risk_level IN ('심각', '주의', '높음', '중간', 'A', 'B')
-     ORDER BY FIELD(a.risk_level, '심각', 'A', '높음', '주의', 'B', '중간'), l.\`timestamp\` DESC
-     LIMIT ?`,
-    [n],
+export type DailyProbabilityKpi = {
+  threshold: number
+  total: number
+  goodCount: number
+  defectCount: number
+  /** 0~100, null when total=0 */
+  goodRate: number | null
+  /** 0~100, null when total=0 */
+  defectRate: number | null
+}
+
+/** Today 00:00~ · analysis_lots.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
+export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
+  const thr = DEFECT_JUDGE_THRESHOLD
+  const rows = await query<
+    { total: number; defect_count: number | null; good_count: number | null }[]
+  >(
+    `SELECT COUNT(*) AS total,
+       SUM(CASE WHEN a.probability >= ? THEN 1 ELSE 0 END) AS defect_count,
+       SUM(CASE WHEN a.probability <  ? THEN 1 ELSE 0 END) AS good_count
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE l.\`timestamp\` >= CURDATE()
+       AND a.probability IS NOT NULL`,
+    [thr, thr],
   )
-  return rows.map(toDto)
+  const total = Number(rows[0]?.total ?? 0)
+  const defectCount = Number(rows[0]?.defect_count ?? 0)
+  const goodCount = Number(rows[0]?.good_count ?? 0)
+  const round1 = (n: number) => Math.round(n * 10) / 10
+  return {
+    threshold: thr,
+    total,
+    goodCount,
+    defectCount,
+    goodRate: total > 0 ? round1((goodCount / total) * 100) : null,
+    defectRate: total > 0 ? round1((defectCount / total) * 100) : null,
+  }
+}
+
+export type RiskTopResult = {
+  lots: LotDto[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+const RISK_TOP_WHERE = `a.risk_level = '심각'
+  AND a.spc_status LIKE '%이탈%'
+  AND l.\`timestamp\` >= DATE_SUB(NOW(), INTERVAL 3 DAY)`
+
+/** Recent 3 days · SPC OOC · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
+export async function getRiskTop(opts: {
+  page?: number
+  pageSize?: number
+} = {}): Promise<RiskTopResult> {
+  const pageSize = Math.min(Math.max(Number(opts.pageSize) || 8, 1), 50)
+  let page = Math.max(Number(opts.page) || 1, 1)
+
+  const countRows = await query<{ c: number }[]>(
+    `SELECT COUNT(*) AS c
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE ${RISK_TOP_WHERE}`,
+  )
+  const total = Number(countRows[0]?.c ?? 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  if (page > totalPages) page = totalPages
+  const offset = (page - 1) * pageSize
+
+  const rows =
+    total === 0
+      ? []
+      : await query<LotRow[]>(
+          `${LOT_SELECT}
+           WHERE ${RISK_TOP_WHERE}
+           ORDER BY l.\`timestamp\` DESC
+           LIMIT ? OFFSET ?`,
+          [pageSize, offset],
+        )
+
+  return {
+    lots: rows.map(toDto),
+    total,
+    page,
+    pageSize,
+    totalPages,
+  }
 }
 
 function resolveCsvPath(): string {
@@ -491,7 +571,10 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.lithium_input IS NOT NULL AND l.additive_ratio IS NOT NULL AND l.process_time IS NOT NULL
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
-/** Create open issues for complete-case 심각/주의 lots only. */
+/**
+ * Create open issues when analysis_lots is 심각 AND spc_status is 주의|이탈.
+ * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
+ */
 export async function ensureIssuesForRiskLots(): Promise<number> {
   const lots = await query<
     { lot_id: string; recorded_at: Date | string; risk_level: string; risk_reason: string | null }[]
@@ -499,7 +582,8 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.risk_reason
      FROM lots l
      INNER JOIN analysis_lots a ON a.lot_id = l.id
-     WHERE a.risk_level IN ('심각', '주의')
+     WHERE a.risk_level = '심각'
+       AND a.spc_status IN ('주의', '이탈')
        AND (${COMPLETE_PROCESS_SQL_L})`,
   )
 
@@ -507,13 +591,13 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
   for (const lot of lots) {
     const existing = await query<{ c: number }[]>(
       `SELECT COUNT(*) AS c FROM issues
-       WHERE lot_id = ? AND status <> '완료'`,
+       WHERE lot_id = ? AND completed_at IS NULL`,
       [lot.lot_id],
     )
     if (Number(existing[0]?.c) > 0) continue
 
-    const occurred = formatDateTime(lot.recorded_at)
-    const day = occurred.slice(2, 10).replace(/-/g, '')
+    const createdAt = formatDateTime(lot.recorded_at)
+    const day = createdAt.slice(2, 10).replace(/-/g, '')
     const last = await query<{ issue_id: string }[]>(
       `SELECT issue_id FROM issues
        WHERE issue_id REGEXP ?
@@ -524,13 +608,14 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     const seq = last[0]?.issue_id ? Number(last[0].issue_id.slice(-3)) + 1 : 1
     const issueId = `ISS-${day}-${String(seq).padStart(3, '0')}`
     const risk = normalizeRiskLevel(lot.risk_level)
-    const title = buildIssueTitle(lot.risk_reason || risk, lot.lot_id)
+    // TODO: risk_reason → API_LLM short summary → issue_content (deferred until risk_reason stable)
+    const issueContent = buildIssueTitle(lot.risk_reason || risk, lot.lot_id)
 
     await query(
-      `INSERT INTO issues (issue_id, lot_id, occurred_at, risk_level, status, title)
-       VALUES (?, ?, ?, ?, '접수', ?)
+      `INSERT INTO issues (issue_id, lot_id, issue_content, created_at)
+       VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE lot_id = lot_id`,
-      [issueId, lot.lot_id, occurred, risk, title.slice(0, 255)],
+      [issueId, lot.lot_id, issueContent.slice(0, 255), createdAt],
     )
     created++
   }

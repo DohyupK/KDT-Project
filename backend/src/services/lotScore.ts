@@ -17,6 +17,9 @@ export type RiskLevel = '심각' | '주의' | '안정'
 /** @deprecated Prefer loadStandard().spare — kept as sync default for cold paths/tests */
 export const RESIDUAL_USL = getStandardDefaults().spare
 
+/** O/X defect judge cutoff (matches ensemble_config.default_threshold). */
+export const DEFECT_JUDGE_THRESHOLD = 0.8
+
 export const DEFECT_PROB_SEVERE = getStandardDefaults().defect_prob_severe
 export const DEFECT_PROB_CAUTION = getStandardDefaults().defect_prob_caution
 export const RESIDUAL_SEVERE = getStandardDefaults().residual_severe

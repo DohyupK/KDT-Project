@@ -46,21 +46,16 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
 CREATE TABLE IF NOT EXISTS issues (
   issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY COMMENT 'ISS-yyMMdd-001',
   lot_id            VARCHAR(64)  NOT NULL,
-  occurred_at       DATETIME     NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL COMMENT '심각|주의|안정',
-  status            VARCHAR(20)  NOT NULL DEFAULT '접수'
-    COMMENT '접수|분석 중|조치 중|완료',
-  title             VARCHAR(255) NOT NULL COMMENT '이슈 내용',
+  issue_content     VARCHAR(255) NOT NULL COMMENT '이슈 내용 (risk_reason 2차 요약·후속 LLM)',
   action_content    TEXT         NULL COMMENT '조치 내용(목록 미노출)',
   assignee_user_id  VARCHAR(50)  NULL,
   completed_at      DATETIME     NULL COMMENT '처리날짜 (완료 시)',
+  created_at        DATETIME     NOT NULL COMMENT '등록 시각',
   CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
-  INDEX idx_issues_status (status),
   INDEX idx_issues_lot (lot_id),
-  INDEX idx_issues_occurred (occurred_at),
-  INDEX idx_issues_risk (risk_level)
+  INDEX idx_issues_created (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS handover_history (

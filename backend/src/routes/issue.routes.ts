@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.middleware.js'
 const router = Router()
 
 router.get('/lots/risk-top', issueController.getRiskTop)
+router.get('/lots/daily-kpi', issueController.getDailyKpi)
 router.get('/lots/:lotId', issueController.getLot)
 /** Admin/dev: reload CSV features into lots. Optional ?score=1&limit=N for AI/SPC scoring. */
 router.post('/lots/import', authMiddleware, issueController.importLots)

@@ -11,9 +11,15 @@ function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => P
 }
 
 export const getRiskTop = asyncHandler(async (req, res) => {
-  const limit = Number(req.query.limit ?? 10)
-  const lots = await lotService.getRiskTop(limit)
-  res.status(200).json({ lots, total: lots.length })
+  const page = Number(req.query.page ?? 1)
+  const pageSize = Number(req.query.pageSize ?? 8)
+  const result = await lotService.getRiskTop({ page, pageSize })
+  res.status(200).json(result)
+})
+
+export const getDailyKpi = asyncHandler(async (_req, res) => {
+  const kpi = await lotService.getDailyProbabilityKpi()
+  res.status(200).json(kpi)
 })
 
 export const getLot = asyncHandler(async (req, res) => {
@@ -68,7 +74,6 @@ export const listIssues = asyncHandler(async (req, res) => {
     date: req.query.date != null ? String(req.query.date) : undefined,
     lotId: req.query.lotId != null ? String(req.query.lotId) : undefined,
     riskLevel: req.query.riskLevel != null ? String(req.query.riskLevel) : undefined,
-    status: req.query.status != null ? String(req.query.status) : undefined,
   })
   res.status(200).json(result)
 })
@@ -84,7 +89,6 @@ export const updateIssue = asyncHandler(async (req, res) => {
   const issue = await issueService.updateIssue(
     String(req.params.issueId),
     {
-      status: req.body?.status,
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
     },

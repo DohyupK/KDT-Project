@@ -85,10 +85,11 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/issues` | 미완료 심각·주의 이슈 목록. query: search, date, lotId, riskLevel, status |
+| GET | `/api/issues` | 미완료 이슈 목록. query: search, date, lotId, riskLevel (`risk`는 analysis_lots JOIN) |
 | GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
-| PUT | `/api/issues/:issueId` | 처리 상태·조치 내용·완료 여부 저장 (JWT) |
-| GET | `/api/lots/risk-top` | 심각·주의 LOT Top |
+| PUT | `/api/issues/:issueId` | 조치 내용·완료 여부 저장 (JWT) · `status` 없음 |
+| GET | `/api/lots/risk-top` | 최근 3일·SPC 이탈·심각 LOT Top (page/pageSize) |
+| GET | `/api/lots/daily-kpi` | 당일 probability 양품/불량 KPI (임계 0.8) |
 | POST | `/api/lots/import` | CSV 공정값 적재 (`?score=1` 시 채점) |
 | POST | `/api/lots/score` | AI+SPC 재채점 (JWT) |
 | GET | `/api/dashboard/*` | LOT 위험·생산추이·상세·CSV·SHAP |
@@ -107,7 +108,7 @@ npm run sync:spc-lots
 npm run sync:spc-lots -- --skip-score
 ```
 
-- 위험등급: `심각` \| `주의` \| `안정` · SPC: `이탈` \| `주의` \| `안정` \| `이탈, 주의`
+- 위험등급: `심각` \| `주의` \| `안정` · SPC: `이탈` \| `주의` \| `안정` (LOT 단일 라벨)
 - 여유량 = `4000 - residual_li` (API `residualLithium` · DB `judgment_lots.residual_li`)
 - **테이블:** `lots` PK=`id` (공정만) · 채점=`analysis_lots` · 판정=`judgment_lots` (`quality_defect`·`capacity`·`residual_li`·`probability`) · 자식 FK `lot_id` → `lots.id`
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 유지
@@ -125,7 +126,8 @@ npm run sync:spc-lots -- --skip-score
 - 챗봇 인수인계: `../docs/references/chatbot-handoff-2026-08-04.md`
 
 - 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
-- 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
+- Issues 스키마 정렬(행 전량 삭제 포함): `npm run migrate:issues-refactor`
+- 시드: `../DB/issues_seed.sql` · `npm run seed:issues` (mock LOT만 · issues 비움)
 - 판정 테이블: `../DB/judgment_lots.sql` · `npm run seed:judgment-lots` (clf+reg CSV ∩ lots → `judgment_lots`)
 
 ## 변경·설치 이력 (2026-07-24)
