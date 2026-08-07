@@ -76,6 +76,20 @@ function notifyKnowledgeUpdated() {
   window.dispatchEvent(new Event(COMPLETED_KNOWLEDGE_UPDATED_EVENT))
 }
 
+/** Read localStorage knowledge logs into memory, then clear keys (one-shot for LLM). */
+export function consumeLocalKnowledgeForLlm(): TransferredKnowledgeLog[] {
+  if (typeof window === 'undefined') return []
+  const logs = readCompletedKnowledgeLogs()
+  try {
+    window.localStorage.removeItem(COMPLETED_KNOWLEDGE_STORAGE_KEY)
+    window.localStorage.removeItem(COMPLETED_ISSUE_IDS_STORAGE_KEY)
+    notifyKnowledgeUpdated()
+  } catch {
+    // ignore
+  }
+  return logs
+}
+
 export function appendCompletedKnowledgeLog(
   log: TransferredKnowledgeLog,
 ): 'added' | 'exists' | 'failed' {

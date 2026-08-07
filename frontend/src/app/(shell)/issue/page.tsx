@@ -157,16 +157,11 @@ interface HandoverNote {
   category: '특이사항' | '전달사항' | '주의사항';
   content: string;
   createdAt: string;
-  /** 근무 시작 시각 (HH:mm) */
-  shiftStart: string;
-  /** 근무 종료 시각 (HH:mm) */
-  shiftEnd: string;
-  issueId?: string;
 }
 
 interface HandoverNoteSectionProps {
   notes: HandoverNote[];
-  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => void | Promise<void>;
+  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt'>) => void | Promise<void>;
   onRemove: (id: number) => void;
   onClose: () => void;
 }
@@ -1284,13 +1279,6 @@ const HandoverReportModal = ({
                         >
                           {note.author}
                         </span>
-                        <span
-                          className={`text-[11px] font-semibold ${
-                            isDark ? 'text-blue-300' : 'text-blue-700'
-                          }`}
-                        >
-                          {formatShiftRange(note.shiftStart, note.shiftEnd)}
-                        </span>
                         <span className="text-[11px] text-slate-400">{note.createdAt}</span>
                         {isDone ? (
                           <span
@@ -1510,19 +1498,11 @@ function mapHandoverItemToNote(item: HandoverHistoryItem): HandoverNote {
       : '특이사항';
   return {
     id: item.historyId,
-    author: item.handoverFrom || item.manager || '',
+    author: item.handoverFrom || '',
     category,
-    content: item.situation,
-    createdAt: item.archivedAt || item.date,
-    shiftStart: item.shiftStart || '',
-    shiftEnd: item.shiftEnd || '',
-    issueId: item.issueId,
+    content: item.handoverContent,
+    createdAt: item.createdAt || item.archivedAt || '',
   };
-}
-
-function formatShiftRange(start: string, end: string): string {
-  if (!start && !end) return '';
-  return `${start || '--:--'} ~ ${end || '--:--'}`;
 }
 
 const HandoverNoteSection = ({
@@ -1535,8 +1515,6 @@ const HandoverNoteSection = ({
   const c = getUiColors(isDark);
   const [author] = useState(() => getLoggedInUserName());
   const [category, setCategory] = useState<HandoverNote['category']>('특이사항');
-  const [shiftStart, setShiftStart] = useState('08:00');
-  const [shiftEnd, setShiftEnd] = useState('16:00');
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1545,10 +1523,6 @@ const HandoverNoteSection = ({
     event.preventDefault();
     if (!author.trim() || author === UNAUTH_USER_LABEL) {
       setError('로그인 사용자 정보를 확인할 수 없습니다.');
-      return;
-    }
-    if (!shiftStart || !shiftEnd) {
-      setError('근무 시작·종료 시각을 입력해주세요.');
       return;
     }
     if (content.trim().length === 0) {
@@ -1562,8 +1536,6 @@ const HandoverNoteSection = ({
         author: author.trim(),
         category,
         content: content.trim(),
-        shiftStart,
-        shiftEnd,
       });
       setContent('');
     } catch (err) {
@@ -1694,54 +1666,6 @@ const HandoverNoteSection = ({
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
-            <div>
-              <label htmlFor="note-shift-start" style={getLabelStyle(c)}>
-                근무 시작
-              </label>
-              <input
-                id="note-shift-start"
-                type="time"
-                value={shiftStart}
-                onChange={(event) => setShiftStart(event.target.value)}
-                style={getInputStyle(c)}
-              />
-            </div>
-            <div>
-              <label htmlFor="note-shift-end" style={getLabelStyle(c)}>
-                근무 종료
-              </label>
-              <input
-                id="note-shift-end"
-                type="time"
-                value={shiftEnd}
-                onChange={(event) => setShiftEnd(event.target.value)}
-                style={getInputStyle(c)}
-              />
-            </div>
-            <div className="flex items-end">
-              <div
-                className={`mb-0.5 w-full rounded-lg border px-3 py-2.5 text-xs font-semibold ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-900/70 text-slate-400'
-                    : 'border-slate-200 bg-slate-50 text-slate-600'
-                }`}
-              >
-                근무 구간{' '}
-                <span className={isDark ? 'text-slate-100' : 'text-slate-900'}>
-                  {formatShiftRange(shiftStart, shiftEnd)}
-                </span>
-              </div>
-            </div>
-          </div>
-
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="note-content" style={getLabelStyle(c)}>
               인수인계 내용
@@ -1799,9 +1723,6 @@ const HandoverNoteSection = ({
                       {note.category}
                     </span>
                     <strong style={{ color: c.navy, fontSize: 13 }}>{note.author}</strong>
-                    <span style={{ color: c.blue, fontSize: 12, fontWeight: 700 }}>
-                      {formatShiftRange(note.shiftStart, note.shiftEnd)}
-                    </span>
                     <span style={{ color: c.muted, fontSize: 12 }}>{note.createdAt}</span>
                   </div>
                   <button
@@ -3064,13 +2985,11 @@ export default function IssuePage() {
     setSaveMessage('');
   };
 
-  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => {
+  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt'>) => {
     try {
       await issueApi.createHandover({
         category: note.category,
         content: note.content,
-        shiftStart: note.shiftStart,
-        shiftEnd: note.shiftEnd,
       });
       await refreshPendingHandovers();
       setToastMessage('✓ 인수인계 사항이 등록되었습니다. (ISS 번호 자동 발급)');
@@ -3191,7 +3110,7 @@ ${handoverNotes.length === 0
         : handoverNotes
           .map(
             (note) =>
-              `<div class="issue" style="border-left:4px solid ${noteColor(note.category)};"><strong>[${note.category}] ${note.author}</strong><div class="meta">${formatShiftRange(note.shiftStart, note.shiftEnd)} · ${note.createdAt}</div><div class="action">${note.content}</div></div>`,
+              `<div class="issue" style="border-left:4px solid ${noteColor(note.category)};"><strong>[${note.category}] ${note.author}</strong><div class="meta">${note.createdAt}</div><div class="action">${note.content}</div></div>`,
           )
           .join('')
       }
@@ -3250,14 +3169,13 @@ ${issues
       ]),
       toRow([]),
       toRow(['2. 인수인계 특이사항']),
-      toRow(['구분', '작성자', '근무 시간', '작성 시각', '내용']),
+      toRow(['구분', '작성자', '작성 시각', '내용']),
       ...(handoverNotes.length === 0
         ? [toRow(['등록된 인수인계 특이사항이 없습니다.'])]
         : handoverNotes.map((note) =>
           toRow([
             note.category,
             note.author,
-            formatShiftRange(note.shiftStart, note.shiftEnd),
             note.createdAt,
             note.content,
           ]),
@@ -3302,13 +3220,6 @@ ${issues
     if (!selectedIssue || !managementForm.completed || isSaving) return;
 
     const issueId = selectedIssue.id;
-    const loginName = getLoggedInUserName();
-    const handoverFrom =
-      handoverNotes
-        .map((n) => n.author.trim())
-        .find((name) => name && name !== UNAUTH_USER_LABEL) ||
-      (loginName !== UNAUTH_USER_LABEL ? loginName : '');
-    const handoverTo = loginName !== UNAUTH_USER_LABEL ? loginName : '';
 
     setIsSaving(true);
     try {
@@ -3316,8 +3227,6 @@ ${issues
         status: '완료',
         actionContent: managementForm.action.trim() || null,
         completed: true,
-        handoverFrom: handoverFrom || null,
-        handoverTo: handoverTo || null,
       });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(

@@ -113,14 +113,14 @@ npm run sync:spc-lots -- --skip-score
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 유지
 - **채점·판정 쓰기 (운영):**
   - 입력: `lots` 공정값 → ai-service **`Promise.all`로 3헤드 병렬** (`/predict` · `/predict-capacity` · `/predict-residual`) — 학습 순서(clf→reg→residual)와 무관
-  - `analysis_lots`: AI+SPC 점수 **UPSERT**(재채점 시 갱신)
+  - `analysis_lots`: AI+SPC 점수 **UPSERT** (`probability`·`spc_status`·`risk_level`·`risk_reason`; 재채점 시 갱신)
   - `judgment_lots`: `quality_defect`·`capacity`·`residual_li`·`probability`는 **NULL일 때만** 채움 (`COALESCE` · 이미 값이 있으면 유지)
   - `probability` ← `/predict` 앙상블 **불량확률** (0~1) · `quality_defect` ← 같은 응답의 임계값 판정(0/1) · 용량·잔류는 각 회귀 헤드
   - 모델 원리·임계값: [`../ai-service/README.md`](../ai-service/README.md) 「추론·불량확률」
 - LOT CSV 적재: `POST /api/lots/import` (`id`/`timestamp`/공정 → `lots`)
 - QC 재적재: `npm run reload:lots-qc` · `../DB/reload_lots_from_qc_csv.sql`
-- **SPC 싱크 주기:** 기동 시 즉시 1회 + **60초 폴링** (`spcLotSyncPoller` · `SPC_SYNC_ENABLED` 기본 on · `SPC_SYNC_INTERVAL_MS=60000` · `0`/off면 비활성) · 틱마다 `SPC_LOT`→`lots` 미러 + `scored_at` NULL 미채점 score(상한) · 수동 `npm run sync:spc-lots`
-- 구조 SQL: `../DB/align_lots_csv_column_names.sql` · `../DB/migrate_lots_to_analysis_lots.sql`
+- **SPC 싱크 주기:** 기동 시 즉시 1회 + **60초 폴링** (`spcLotSyncPoller` · `SPC_SYNC_ENABLED` 기본 on · `SPC_SYNC_INTERVAL_MS=60000` · `0`/off면 비활성) · 틱마다 `SPC_LOT`→`lots` 미러 + `analysis_lots` 행 없음/`probability` NULL 미채점 score(상한) · 수동 `npm run sync:spc-lots`
+- 구조 SQL: `../DB/align_lots_csv_column_names.sql` · `../DB/migrate_lots_to_analysis_lots.sql` · `../DB/alter_analysis_lots_restructure.sql`
 - 상세 계약: `../docs/references/issue-lot-api.md`
 - 챗봇 인수인계: `../docs/references/chatbot-handoff-2026-08-04.md`
 

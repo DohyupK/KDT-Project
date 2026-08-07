@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import * as lotService from '../services/lot.service.js'
 import * as issueService from '../services/issue.service.js'
+import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.js'
 import { AppError } from '../middleware/errorHandler.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
@@ -86,8 +87,6 @@ export const updateIssue = asyncHandler(async (req, res) => {
       status: req.body?.status,
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
-      handoverFrom: req.body?.handoverFrom,
-      handoverTo: req.body?.handoverTo,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )
@@ -108,8 +107,6 @@ export const createHandover = asyncHandler(async (req, res) => {
     {
       category: req.body?.category,
       content: req.body?.content,
-      shiftStart: req.body?.shiftStart,
-      shiftEnd: req.body?.shiftEnd,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )
@@ -135,4 +132,15 @@ export const listPastIssues = asyncHandler(async (_req, res) => {
 export const getPastIssue = asyncHandler(async (req, res) => {
   const item = await issueService.getPastIssueById(String(req.params.issueId))
   res.status(200).json({ item })
+})
+
+export const analyzeKnowledge = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+
+  const result = await knowledgeAnalyzeService.runKnowledgeAnalyze({
+    message: typeof req.body?.message === 'string' ? req.body.message : '',
+    userId: req.auth.userId,
+    name: req.auth.name || req.auth.userId,
+  })
+  res.status(200).json(result)
 })

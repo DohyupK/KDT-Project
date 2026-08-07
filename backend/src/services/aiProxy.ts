@@ -162,3 +162,38 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
 
   return (await res.json()) as AiChatResponse
 }
+
+export type AiKnowledgeAnalyzeRequest = {
+  message: string
+  llm_mode?: string | null
+  llm_credentials?: AiLlmCredential[]
+}
+
+export type AiKnowledgeAnalyzeResponse = {
+  reply: string
+  mode: string
+  provider?: string | null
+  error: string | null
+}
+
+/** Knowledge library analyze — bypasses /chat SYSTEM_COMPOSE. */
+export async function proxyKnowledgeAnalyze(
+  body: AiKnowledgeAnalyzeRequest,
+): Promise<AiKnowledgeAnalyzeResponse> {
+  const res = await fetch(`${aiServiceBase()}/knowledge-analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: body.message,
+      llm_mode: body.llm_mode ?? 'auto',
+      llm_credentials: body.llm_credentials ?? undefined,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`ai-service /knowledge-analyze ${res.status}: ${text.slice(0, 200)}`)
+  }
+
+  return (await res.json()) as AiKnowledgeAnalyzeResponse
+}

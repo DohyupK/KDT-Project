@@ -63,7 +63,6 @@ type ProductionDailyRow = {
   tempDevFrom800: number | null;
   humidity: number | null;
   tempXHumidity: number | null;
-  dataStatus: string;
 };
 
 type SpcMetric = {
@@ -170,7 +169,6 @@ type DailyDetailRow = {
   avgCapacity?: number;
   avgMetalImpurity?: number;
   avgSinteringTemp?: number;
-  status: string;
 };
 
 type LiveConnectionStatus = 'connected' | 'updating' | 'error';
@@ -1316,7 +1314,6 @@ export default function DashBoardPage() {
       tempDevFrom800: row.tempDevFrom800,
       humidity: row.humidity,
       tempXHumidity: row.tempXHumidity,
-      status: row.dataStatus,
     })),
     [dailyApiRows],
   );
@@ -2610,6 +2607,186 @@ export default function DashBoardPage() {
 
         {/* Grafana (구 생산 상세 테이블 자리) */}
         <section className={`mb-6 p-5 ${cardClass}`}>
+          <div className="mb-3">
+            <h2
+              className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+            >
+              생산 상세 테이블
+            </h2>
+            <p className={`mt-0.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              cathode_clf_data.csv 기반 일별 생산·불량 집계
+            </p>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={searchedDetailRows.length === 0}
+                className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                CSV 다운로드
+              </button>
+            </div>
+          </div>
+
+          {initialLoading ? (
+            <EmptyState message="생산 데이터를 불러오는 중입니다." />
+          ) : !hasData ? (
+            <EmptyState message="선택한 조건에 해당하는 행이 없습니다." />
+          ) : searchedDetailRows.length === 0 ? (
+            <EmptyState message="검색 조건에 해당하는 생산 데이터가 없습니다." />
+          ) : (
+            <div className="space-y-3">
+              <div
+                className={`overflow-x-auto rounded-lg border ${
+                  isDark ? 'border-slate-700' : 'border-slate-200'
+                }`}
+              >
+                <table className="w-full min-w-[1100px] border-collapse text-sm">
+                  <thead
+                    className={`text-xs font-semibold uppercase tracking-wider ${
+                      isDark
+                        ? 'bg-slate-900/80 text-slate-400'
+                        : 'bg-slate-100/70 text-slate-600'
+                    }`}
+                  >
+                    <tr>
+                      <th className="w-10 px-2 py-3 text-center">
+                        <input
+                          ref={selectAllCheckboxRef}
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          disabled={pagedDetailRows.length === 0}
+                          onChange={handleSelectAll}
+                          aria-label="현재 화면의 모든 행 선택"
+                          className="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                      <th className="px-3 py-3 text-left">날짜</th>
+                      <th className="px-3 py-3 text-right">총생산량</th>
+                      <th className="px-3 py-3 text-right">양품 수</th>
+                      <th className="px-3 py-3 text-right">불량품 수</th>
+                      <th className="px-3 py-3 text-right">불량률</th>
+                      <th className="px-3 py-3 text-right">금속 불순물</th>
+                      <th className="px-3 py-3 text-right">소성온도 이탈</th>
+                      <th className="px-3 py-3 text-right">습도</th>
+                      <th className="px-3 py-3 text-right">소성온도×습도</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedDetailRows.map((r) => {
+                      const highDefect = r.defectRate >= 0.1;
+                      const midDefect = r.defectRate >= 0.07 && r.defectRate < 0.1;
+                      const defectTone = highDefect
+                        ? 'text-rose-600'
+                        : midDefect
+                          ? 'text-orange-500'
+                          : isDark
+                            ? 'text-slate-200'
+                            : 'text-slate-700';
+                      return (
+                        <tr
+                          key={r.date}
+                          className={`border-b transition-colors ${
+                            highDefect
+                              ? isDark
+                                ? 'border-slate-700/80 bg-red-950/15 hover:bg-red-950/25'
+                                : 'border-slate-100 bg-red-50/40 hover:bg-red-50/70'
+                              : isDark
+                                ? 'border-slate-700/80 hover:bg-slate-800/60'
+                                : 'border-slate-100 hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="w-10 px-2 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.includes(r.date)}
+                              onChange={() => handleSelectRow(r.date)}
+                              aria-label={`${r.date} 행 선택`}
+                              className="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td
+                            className={`whitespace-nowrap px-3 py-3 text-left font-medium ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.date}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.totalProduction)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.goodCount)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.defectCount)}
+                          </td>
+                          <td className="px-3 py-3 text-right font-semibold tabular-nums">
+                            <span className={defectTone}>
+                              {formatPercent(r.defectRate)}
+                            </span>
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.metalImpurity == null ? '-' : r.metalImpurity.toFixed(3)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tempDevFrom800 == null ? '-' : r.tempDevFrom800.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.humidity == null ? '-' : r.humidity.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tempXHumidity == null ? '-' : r.tempXHumidity.toFixed(1)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div
+                className={`mb-2 flex flex-col items-center gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:justify-between ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
           <h2
             className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
           >

@@ -40,27 +40,17 @@ export type UpdateIssueBody = {
   status: IssueStatus
   actionContent: string | null
   completed: boolean
-  handoverFrom?: string | null
-  handoverTo?: string | null
 }
 
 export type HandoverHistoryItem = {
   historyId: number
-  issueId: string
-  lotId: string
-  riskLevel: IssueRiskLevel
-  situation: string
+  handoverContent: string
   action: string | null
-  cause: string | null
   handoverFrom: string | null
   handoverTo: string | null
-  manager: string | null
-  eventDate: string
-  date: string
   category: string | null
-  archivedAt: string
-  shiftStart?: string | null
-  shiftEnd?: string | null
+  createdAt: string
+  archivedAt: string | null
 }
 
 export type HandoverListStatus = 'pending' | 'completed'
@@ -68,8 +58,27 @@ export type HandoverListStatus = 'pending' | 'completed'
 export type CreateHandoverBody = {
   category: '특이사항' | '전달사항' | '주의사항'
   content: string
-  shiftStart?: string | null
-  shiftEnd?: string | null
+}
+
+/** Completed issues for Knowledge library (no risk/status in UI). */
+export type PastIssueListItem = {
+  issueId: string
+  occurredAt: string
+  lotId: string
+  title: string
+  assigneeName: string | null
+  completedAt: string | null
+}
+
+export type PastIssueDetail = PastIssueListItem & {
+  actionContent: string | null
+  lot: {
+    lotId: string
+    riskReason: string | null
+    defectProb: number | null
+    residualLithium: number | null
+    spcStatus: string | null
+  } | null
 }
 
 export const issueApi = {
@@ -100,5 +109,13 @@ export const issueApi = {
   completeHandover: (historyId: number) =>
     apiClient.patch<{ item: HandoverHistoryItem; message: string }>(
       `/knowledge/handover/${encodeURIComponent(String(historyId))}/complete`,
+    ),
+
+  listPastIssues: () =>
+    apiClient.get<{ items: PastIssueListItem[]; total: number }>('/knowledge/past-issues'),
+
+  getPastIssueById: (issueId: string) =>
+    apiClient.get<{ item: PastIssueDetail }>(
+      `/knowledge/past-issues/${encodeURIComponent(issueId)}`,
     ),
 }

@@ -101,6 +101,8 @@ function TreeRows({
   expanded,
   toggleDir,
   onOpenFile,
+  selectedPaths,
+  onToggleSelect,
   isDark,
 }: {
   nodes: DocTreeNode[]
@@ -108,6 +110,8 @@ function TreeRows({
   expanded: Set<string>
   toggleDir: (path: string) => void
   onOpenFile: (node: DocTreeNode) => void
+  selectedPaths: Set<string>
+  onToggleSelect: (node: DocTreeNode, checked: boolean) => void
   isDark: boolean
 }) {
   return (
@@ -159,6 +163,8 @@ function TreeRows({
                   expanded={expanded}
                   toggleDir={toggleDir}
                   onOpenFile={onOpenFile}
+                  selectedPaths={selectedPaths}
+                  onToggleSelect={onToggleSelect}
                   isDark={isDark}
                 />
               ) : null}
@@ -166,40 +172,60 @@ function TreeRows({
           )
         }
 
+        const checked = selectedPaths.has(node.relativePath)
         return (
-          <button
+          <div
             key={node.relativePath}
-            type="button"
-            onClick={() => onOpenFile(node)}
-            className={`flex w-full items-center gap-2 border-b py-2 pr-3 text-left text-sm transition-colors ${
+            className={`flex w-full items-center gap-2 border-b py-2 pr-3 text-sm transition-colors ${
               isDark
                 ? 'border-slate-700/80 hover:bg-slate-700/50'
                 : 'border-slate-100 hover:bg-blue-50/60'
             }`}
-            style={{ paddingLeft: pad + 20 }}
+            style={{ paddingLeft: pad + 4 }}
           >
-            <span
-              className={`min-w-0 flex-1 truncate ${
-                isDark ? 'text-slate-300' : 'text-slate-700'
-              }`}
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => onToggleSelect(node, event.target.checked)}
+              aria-label={`${node.name} AI 분석 대상 선택`}
+              className="h-4 w-4 shrink-0 accent-blue-600"
+            />
+            <button
+              type="button"
+              onClick={() => onOpenFile(node)}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
             >
-              {node.name}
-            </span>
-            <span
-              className={`shrink-0 text-xs tabular-nums ${
-                isDark ? 'text-slate-500' : 'text-slate-400'
-              }`}
-            >
-              {formatSize(node.size)}
-            </span>
-          </button>
+              <span
+                className={`min-w-0 flex-1 truncate ${
+                  isDark ? 'text-slate-300' : 'text-slate-700'
+                }`}
+              >
+                {node.name}
+              </span>
+              <span
+                className={`shrink-0 text-xs tabular-nums ${
+                  isDark ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
+                {formatSize(node.size)}
+              </span>
+            </button>
+          </div>
         )
       })}
     </>
   )
 }
 
-export default function DocumentsBrowser() {
+export type DocumentsBrowserProps = {
+  selectedPaths?: string[]
+  onSelectedPathsChange?: (paths: string[]) => void
+}
+
+export default function DocumentsBrowser({
+  selectedPaths = [],
+  onSelectedPathsChange,
+}: DocumentsBrowserProps = {}) {
   const { isDark } = useUiSettings()
   const [tree, setTree] = useState<DocTreeNode[]>([])
   const [loading, setLoading] = useState(true)
@@ -207,6 +233,17 @@ export default function DocumentsBrowser() {
   const [filter, setFilter] = useState<DocClearance | 'all'>('all')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(CLEARANCE_ORDER))
   const [pendingAck, setPendingAck] = useState<DocTreeNode | null>(null)
+  /** Secret+ checkbox: legal disclosure warning before adding to AI selection */
+  const [pendingSelect, setPendingSelect] = useState<DocTreeNode | null>(null)
+
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths])
+
+  const setPaths = useCallback(
+    (next: string[]) => {
+      onSelectedPathsChange?.(next)
+    },
+    [onSelectedPathsChange],
+  )
 
   const [viewerOpen, setViewerOpen] = useState(false)
   const [viewerTitle, setViewerTitle] = useState('')
@@ -346,16 +383,41 @@ export default function DocumentsBrowser() {
     void openViewer(node)
   }, [pendingAck, openViewer])
 
+  const onToggleSelect = useCallback(
+    (node: DocTreeNode, checked: boolean) => {
+      if (!onSelectedPathsChange) return
+      if (!checked) {
+        setPaths(selectedPaths.filter((p) => p !== node.relativePath))
+        return
+      }
+      if (isRestrictedClearance(node.clearance)) {
+        setPendingSelect(node)
+        return
+      }
+      if (selectedSet.has(node.relativePath)) return
+      setPaths([...selectedPaths, node.relativePath])
+    },
+    [onSelectedPathsChange, selectedPaths, selectedSet, setPaths],
+  )
+
+  const confirmSelectRestricted = useCallback(() => {
+    if (!pendingSelect) return
+    const path = pendingSelect.relativePath
+    setPendingSelect(null)
+    if (!selectedSet.has(path)) setPaths([...selectedPaths, path])
+  }, [pendingSelect, selectedPaths, selectedSet, setPaths])
+
   useEffect(() => {
-    if (!viewerOpen && !pendingAck) return
+    if (!viewerOpen && !pendingAck && !pendingSelect) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
-      if (pendingAck) setPendingAck(null)
+      if (pendingSelect) setPendingSelect(null)
+      else if (pendingAck) setPendingAck(null)
       else closeViewer()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [viewerOpen, pendingAck, closeViewer])
+  }, [viewerOpen, pendingAck, pendingSelect, closeViewer])
 
   return (
     <div
@@ -476,10 +538,76 @@ export default function DocumentsBrowser() {
             expanded={expanded}
             toggleDir={toggleDir}
             onOpenFile={requestOpenFile}
+            selectedPaths={selectedSet}
+            onToggleSelect={onToggleSelect}
             isDark={isDark}
           />
         )}
       </div>
+
+      {/* Secret+ AI selection legal warning */}
+      {pendingSelect ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="docs-select-legal-title"
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/55 p-4"
+          onClick={() => setPendingSelect(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${
+              isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+            }`}
+          >
+            <p
+              id="docs-select-legal-title"
+              className={`m-0 text-base font-semibold ${
+                isDark ? 'text-rose-200' : 'text-rose-900'
+              }`}
+            >
+              {pendingSelect.clearance} 문서 · AI 분석 선택 경고
+            </p>
+            <p
+              className={`mt-3 text-sm leading-relaxed ${
+                isDark ? 'text-slate-300' : 'text-slate-600'
+              }`}
+            >
+              본 문서는 <strong>{pendingSelect.clearance}</strong> 등급입니다.
+              AI 분석에 포함하면 외부 LLM 등으로 내용이 전송될 수 있으며,
+              <strong> 외부로 누출될 경우 법적 책임을 물을 수 있습니다.</strong>
+              본 선택에 동의하는 경우에만 계속 진행하세요.
+            </p>
+            <p
+              className={`mt-2 break-all text-xs ${
+                isDark ? 'text-slate-500' : 'text-slate-400'
+              }`}
+            >
+              {pendingSelect.relativePath}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingSelect(null)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                  isDark
+                    ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmSelectRestricted}
+                className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500"
+              >
+                책임 인지 후 선택
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Secret / TopSecret ack */}
       {pendingAck ? (

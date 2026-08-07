@@ -163,7 +163,7 @@ clf는 capacity/residual을 입력으로 쓰지 않는다. What-if: 불량 최�
 
 | 응답 | 출처 | backend DB |
 |------|------|------------|
-| `probability` (불량 확률 0~1) | `/predict`만 | `judgment_lots.probability` · `analysis_lots.defect_prob` |
+| `probability` (불량 확률 0~1) | `/predict`만 | `judgment_lots.probability`(우선·NULL-fill) · `analysis_lots.probability` |
 | `defect_status` / O·X | `/predict` · `probability ≥ fillThreshold`(또는 `ensemble_config.default_threshold`) | `judgment_lots.quality_defect` |
 | `capacity` | `/predict-capacity` | `judgment_lots.capacity` |
 | `residual_li` | `/predict-residual` | `judgment_lots.residual_li` |

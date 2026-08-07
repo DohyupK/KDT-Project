@@ -37,7 +37,6 @@ export type LotDto = {
   spcStatus: string | null
   riskLevel: RiskLevel
   riskReason: string | null
-  scoredAt: string | null
 }
 
 type LotRow = {
@@ -55,11 +54,10 @@ type LotRow = {
   operator_id: string | null
   quality_defect: number | boolean
   residual_lithium: number | null
-  defect_prob: number | null
+  probability: number | null
   spc_status: string | null
   risk_level: string | null
   risk_reason: string | null
-  scored_at: Date | string | null
 }
 
 function formatDateTime(value: Date | string | null | undefined): string {
@@ -86,13 +84,12 @@ function toDto(row: LotRow): LotDto {
     tankPressure: row.tank_pressure != null ? Number(row.tank_pressure) : null,
     operatorId: row.operator_id,
     qualityDefect: Boolean(row.quality_defect),
-    defectProb: row.defect_prob != null ? Number(row.defect_prob) : null,
+    defectProb: row.probability != null ? Number(row.probability) : null,
     residualLithium: residual,
     residualMargin: residual != null ? residualMargin(residual, RESIDUAL_USL) : null,
     spcStatus: row.spc_status,
     riskLevel: normalizeRiskLevel(row.risk_level),
     riskReason: row.risk_reason,
-    scoredAt: row.scored_at ? formatDateTime(row.scored_at) : null,
   }
 }
 
@@ -118,7 +115,8 @@ const LOT_SELECT = `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at,
   l.d50, l.d90, l.metal_impurity, l.lithium_input,
   l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
   0 AS quality_defect, j.residual_li AS residual_lithium,
-  a.defect_prob, a.spc_status, a.risk_level, a.risk_reason, a.scored_at
+  COALESCE(j.probability, a.probability) AS probability,
+  a.spc_status, a.risk_level, a.risk_reason
   FROM lots l
   LEFT JOIN analysis_lots a ON a.lot_id = l.id
   LEFT JOIN judgment_lots j ON j.lot_id = l.id`
@@ -247,17 +245,16 @@ async function upsertAnalysisScore(
 ) {
   await query(
     `INSERT INTO analysis_lots (
-      lot_id, defect_prob, spc_status, risk_level, risk_reason, scored_at
-    ) VALUES (?, ?, ?, ?, ?, NOW())
+      lot_id, probability, spc_status, risk_level, risk_reason
+    ) VALUES (?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
-      defect_prob = VALUES(defect_prob),
+      probability = VALUES(probability),
       spc_status = VALUES(spc_status),
       risk_level = VALUES(risk_level),
-      risk_reason = VALUES(risk_reason),
-      scored_at = NOW()`,
+      risk_reason = VALUES(risk_reason)`,
     [
       lotId,
-      scored.defect_prob,
+      scored.probability,
       scored.spc_status,
       scored.risk_level,
       scored.risk_reason,
@@ -323,6 +320,7 @@ async function updateLotScore(
       scored.quality_defect === 1 ? 1 : 0,
       scored.capacity,
       scored.residual_lithium,
+      scored.probability,
       scored.defect_prob,
       scored.spc_status,
     ],
@@ -390,7 +388,7 @@ const LOT_SCORE_FEATURE_SELECT = `id AS lot_id, \`timestamp\` AS recorded_at, d5
 
 /**
  * Re-score using operational `lots` SSOT:
- * - defect_prob ← process features → /predict
+ * - probability ← process features → /predict → analysis_lots (+ judgment NULL-fill)
  * - judgment NULL-fill: quality_defect / capacity / residual_li from AI
  * - SPC ← listwise-complete process features only (Phase I + Nelson 2–8)
  */
@@ -438,6 +436,8 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
 
     const inFilter = idFilter == null || idFilter.has(row.lot_id)
     if (!inFilter) continue
+    // Handover placeholder lot — not process data; never write analysis_lots.
+    if (row.lot_id === 'LOT-SYS-HANDOVER') continue
     if (considered < offset) {
       considered++
       continue

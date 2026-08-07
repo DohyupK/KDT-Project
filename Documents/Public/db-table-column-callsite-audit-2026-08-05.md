@@ -72,27 +72,24 @@
 
 ## 5. `handover_history`
 
-**라이브 컬럼:** `history_id`, `issue_id`, `lot_id`, `risk_level`, `situation`, `action`, `cause`, `handover_from`, `handover_to`, `manager`, `assignee_user_id`, `event_date`, `category`, `snapshot_json`, `archived_at`
+**라이브 컬럼:** `history_id`, `handover_content`, `action`, `handover_from`, `handover_to`, `assignee_user_id`, `category`, `created_at`, `archived_at`
 
 | 파라미터 | 어디에 적혀 있나 | FE DTO / 페이지 |
 |----------|------------------|-----------------|
-| `history_id` | `backend/src/services/issue.service.ts` SELECT/INSERT 후 조회 (~460–606) | `historyId` · `/issue`, `/knowledge` |
-| `issue_id` | INSERT (~548+); SELECT; UPDATE by issue (~251); migrate 스크립트 | `issueId` |
-| `lot_id` | INSERT / SELECT | `lotId` |
-| `risk_level` | INSERT (예: 하드코드 값); SELECT | `riskLevel` |
-| `situation` | INSERT (본문); SELECT | `situation` |
-| `action` | UPDATE `'완료'` (~251, ~591); 목록 필터 `status=pending\|completed` | `action` (`NULL`/`완료`) |
-| `cause` | SELECT만; INSERT `NULL` | `cause` · **항상 비움에 가까움** |
-| `handover_from` | INSERT/UPDATE; `migrate-handover-fk.ts` | `handoverFrom` |
-| `handover_to` | UPDATE/INSERT; migrate | `handoverTo` |
-| `manager` | INSERT (= 작성자); UPDATE coalesce | `manager` |
-| `assignee_user_id` | INSERT (~549–553) | **목록 DTO 미포함** |
-| `event_date` | INSERT/SELECT | `eventDate` / `date` |
+| `history_id` | `issue.service.ts` SELECT/INSERT | `historyId` · `/issue`, `/knowledge` |
+| `handover_content` | INSERT (본문); SELECT | `handoverContent` |
+| `action` | UPDATE `'완료'`; 목록 필터 pending\|completed | `action` |
+| `handover_from` | INSERT/UPDATE | `handoverFrom` |
+| `handover_to` | UPDATE/INSERT | `handoverTo` |
+| `assignee_user_id` | INSERT | DTO 미포함 |
 | `category` | INSERT/SELECT | `category` |
-| `snapshot_json` | INSERT (교대 시간 등); SELECT 파싱 (~445–458) | `shiftStart`/`shiftEnd` |
-| `archived_at` | SELECT (DB 기본값) | `archivedAt` |
+| `created_at` | DEFAULT NOW on INSERT; SELECT | `createdAt` |
+| `archived_at` | 완료 시 NOW(); SELECT | `archivedAt` (Knowledge 날짜+시간) |
 
-**API:** `POST/GET/PATCH /api/knowledge/handover*` · Issue 완료 시 `PUT /api/issues/:id` 연동 UPDATE.  
+> 2026-08-07: 구 `archived_at`→`created_at`, `situation`→`handover_content`, `event_date`→신 `archived_at`(완료). `snapshot_json` DROP.  
+> 2026-08-08: DROP `lot_id`·`risk_level`·`cause`·`manager`·`issue_id` — `issues`와 독립.
+
+**API:** `POST/GET/PATCH /api/knowledge/handover*` (이슈 PUT과 handover 교차 갱신 없음).  
 **FE:** `frontend/src/api/issueApi.ts` · `/issue`, `/knowledge`.
 
 ---
@@ -173,18 +170,15 @@ JOIN: `analysis_lots` + `judgment_lots` on `lot_id = lots.id`. 이슈 ID 규칙 
 | `d50` ~ `tank_pressure` | LOT_SELECT; CSV upsert; score INSERT; dashboard | camelCase 공정값 |
 | `operator_id` | 동일 | |
 | `quality_defect` | SELECT `0 AS` (판정 테이블 미연동) | |
-| `defect_prob` | `analysis_lots`; score UPDATE; 필터; detail | `defectProb` · Issue mock `defectProbability`와 **별개** |
+| `probability` | `analysis_lots`; score UPSERT; `COALESCE(j,a)` 읽기; judgment NULL-fill | `defectProb` · Issue mock `defectProbability`와 **별개** |
 | `residual_lithium` | `judgment_lots.residual_li` JOIN; score NULL-fill UPSERT; 마진 계산; export | `residualLithium` |
 | `residual_margin` **(DB 컬럼)** | **SQL 컬럼 미사용**. API/CSV는 **계산값** (`dashboard.service.ts` export) | `residualMargin` (계산) |
 | `spc_status` | `analysis_lots`; score UPDATE; LIKE 필터; SPC 상세 | `spcStatus` |
 | `risk_level` | `analysis_lots`; risk-top / ensureIssues / 시스템 LOT | `riskLevel` |
 | `risk_reason` | `analysis_lots`; UPDATE/SELECT/export | `riskReason` |
-| `clf_model_version` | **앱 미참조** (라이브만 / schema.sql 없음) | — |
-| `residual_model_version` | **앱 미참조** | — |
-| `spc_limit_version` | **앱 미참조** | — |
-| `scored_at` | `analysis_lots`; score `NOW()`; 목록 필터; daily status; rollback | |
 | `created_at` | **앱 SELECT 목록 없음** (DB 기본값) | — |
-| `updated_at` | **앱 SELECT 목록 없음** | — |
+
+> 2026-08-07: `defect_prob`→`probability`. DROP: model versions · `scored_at` · `updated_at` · production-daily `dataStatus`. 미채점 폴러: `a.lot_id IS NULL OR a.probability IS NULL`.
 
 **주의:** `plant_feeder_live.py` 기본은 `SPC_LOT` / `SPC_LOT_results` (운영 `lots`와 별개 스키마).
 
@@ -322,7 +316,7 @@ VIEW DROP: [`DB/drop_orphan_spc_objects.sql`](../../DB/drop_orphan_spc_objects.s
 | UI 필드 | 출처 | DB 대응 |
 |---------|------|---------|
 | `processData` | `createProcessData` / `MOCK_ISSUES_BY_ID` (~552–844) | `lots` 공정 컬럼과 **미연결** |
-| `defectProbability` | mock 숫자 | `lots.defect_prob`와 **미연결** |
+| `defectProbability` | mock 숫자 | `analysis_lots.probability`와 **미연결** |
 | 목록 `issueId` 등 | `issueApi` → `issues` | 연동됨 |
 
 과거 이슈 API `GET /api/knowledge/past-issues*` — **FE 미배선**.

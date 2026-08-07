@@ -17,6 +17,8 @@ router.put('/issues/:issueId', authMiddleware, issueController.updateIssue)
 
 router.get('/knowledge/past-issues', issueController.listPastIssues)
 router.get('/knowledge/past-issues/:issueId', issueController.getPastIssue)
+/** Knowledge AI 맞춤 분석 (보안 게이트·chatStore 미사용, 답변만 AI_Library_analysis 저장) */
+router.post('/knowledge/analyze', authMiddleware, issueController.analyzeKnowledge)
 /** 인수인계: 등록 POST · 완료 PATCH · 목록 GET(?status=pending|completed) */
 router.get('/knowledge/handover-history', issueController.listHandoverHistory)
 router.post('/knowledge/handover', authMiddleware, issueController.createHandover)

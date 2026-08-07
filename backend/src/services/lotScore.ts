@@ -71,7 +71,8 @@ function loadImputerNumeric(): Record<string, number> {
 }
 
 export type LotScoreResult = {
-  defect_prob: number
+  /** 0~1 → analysis_lots.probability (+ judgment_lots.probability NULL-fill) */
+  probability: number
   residual_lithium: number
   /** /predict defect_status → judgment_lots.quality_defect (NULL-fill only on UPSERT) */
   quality_defect: number
@@ -168,7 +169,7 @@ export function combineLotScore(input: {
     residual_severe: number
   }
 }): LotScoreResult {
-  const defect_prob = Math.round(input.defectProb * 10000) / 10000
+  const probability = Math.round(input.defectProb * 10000) / 10000
   const residual_lithium = Math.round(input.residualLi * 1000) / 1000
   // Incomplete process → SPC label "-" (excluded from risk axes)
   const spc_status = input.incompleteProcess ? '-' : input.spcStatus || '안정'
@@ -190,7 +191,7 @@ export function combineLotScore(input: {
       ? ('안정' as RiskLevel)
       : spcStatusToRiskTier(spc_status)
 
-  if (dTier !== '안정') reasons.push(`불량확률 ${(defect_prob * 100).toFixed(1)}%`)
+  if (dTier !== '안정') reasons.push(`불량확률 ${(probability * 100).toFixed(1)}%`)
   if (rTier !== '안정') reasons.push(`잔류리튬 ${residual_lithium.toFixed(1)}ppm`)
   if (sTier !== '안정' && spc_status !== '-') reasons.push(`SPC ${spc_status}`)
   if (input.incompleteProcess) reasons.push('공정 결측(SPC 제외)')
@@ -202,7 +203,7 @@ export function combineLotScore(input: {
       : worstRisk(dTier, rTier, sTier)
 
   return {
-    defect_prob,
+    probability,
     residual_lithium,
     quality_defect: 0,
     capacity: null,

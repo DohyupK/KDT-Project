@@ -1,4 +1,5 @@
--- Seed basic issue-page mock data into lots / analysis_lots / issues.
+-- Seed basic issue-page mock data into lots / issues.
+-- analysis_lots is scored by backend (not seeded).
 -- Safe to re-run: existing PK rows are not overwritten (INSERT IGNORE).
 
 INSERT IGNORE INTO lots
@@ -12,18 +13,6 @@ VALUES
   ('LOT-CA-260719-06', '2026-07-19 16:48:00'),
   ('LOT-CA-260719-02', '2026-07-19 09:22:00'),
   ('LOT-CA-260718-11', '2026-07-18 21:10:00');
-
-INSERT IGNORE INTO analysis_lots
-  (lot_id, risk_level)
-VALUES
-  ('LOT-CA-260721-08', '높음'),
-  ('LOT-CA-260721-07', '중간'),
-  ('LOT-CA-260721-05', '낮음'),
-  ('LOT-CA-260720-12', '높음'),
-  ('LOT-CA-260720-09', '중간'),
-  ('LOT-CA-260719-06', '낮음'),
-  ('LOT-CA-260719-02', '중간'),
-  ('LOT-CA-260718-11', '높음');
 
 INSERT IGNORE INTO issues
   (issue_id, lot_id, occurred_at, risk_level, status, title,

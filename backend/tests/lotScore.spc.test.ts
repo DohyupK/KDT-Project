@@ -46,6 +46,7 @@ test('combineLotScore uses worst-of and USL reasons', () => {
   })
   assert.equal(scored.risk_level, '심각')
   assert.equal(scored.spc_status, '이탈')
+  assert.ok(scored.probability >= 0.5)
   assert.ok(scored.risk_reason.includes('불량확률'))
 })
 
