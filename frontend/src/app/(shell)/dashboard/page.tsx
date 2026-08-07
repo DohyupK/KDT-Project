@@ -17,12 +17,6 @@ import DateInput from '@/components/DateInput'
 import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 
-/**
- * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
- * Share → Embed의 src만 넣으세요.
- */
-const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1785471624684&to=1786076424684&timezone=browser&refresh=5m&panelId=panel-10'
-
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -2473,14 +2467,16 @@ export default function DashBoardPage() {
         <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-12">
           <div className={`flex min-h-[380px] min-w-0 flex-col p-5 xl:col-span-8 ${cardClass}`}>
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,3fr)_minmax(0,7fr)]">
-              {/* 실시간 잔류리튬 자리 (비움) */}
+              {/* 게이지 — 타 담당자 구역 (중첩 박스·구분선 없음) */}
               <div className="flex min-h-[200px] flex-col lg:min-h-0 lg:pr-3">
                 <h2
                   className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
                 >
-                  실시간 잔류리튬 측정 결과
+                  게이지
                 </h2>
-                <div className="mt-2 min-h-[220px] w-full flex-1" aria-hidden />
+                <p className={`mt-2 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  이 영역은 다른 담당자가 작업합니다.
+                </p>
               </div>
 
               {/* 생산 추이 그래프 */}
@@ -2608,37 +2604,265 @@ export default function DashBoardPage() {
           </div>
         </section>
 
-        {/* Grafana (구 생산 상세 테이블 자리) */}
+        {/* Table */}
         <section className={`mb-6 p-5 ${cardClass}`}>
-          <h2
-            className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-          >
-            실시간 잔류 리튬 분석
-          </h2>
-          <div
-            className={`relative min-h-[520px] h-[520px] w-full overflow-hidden rounded-md ${
-              isDark ? 'bg-slate-900' : 'bg-white'
-            }`}
-          >
-            {GRAFANA_BOTTOM_PANEL_URL.trim() ? (
-              <iframe
-                src={GRAFANA_BOTTOM_PANEL_URL}
-                title="실시간 잔류 리튬 분석"
-                scrolling="no"
-                className="absolute inset-0 block h-full w-full border-0"
-              />
-            ) : (
-              <div className="flex h-full min-h-[520px] items-center justify-center px-4">
-                <p
-                  className={`m-0 text-center text-sm leading-relaxed ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  GRAFANA_BOTTOM_PANEL_URL에 Embed URL을 넣으세요.
-                </p>
-              </div>
-            )}
+          <div className="mb-3">
+            <h2
+              className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+            >
+              생산 상세 테이블
+            </h2>
+            <p className={`mt-0.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              cathode_clf_data.csv 기반 일별 생산·불량 집계
+            </p>
           </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={searchedDetailRows.length === 0}
+                className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                CSV 다운로드
+              </button>
+            </div>
+          </div>
+
+          {initialLoading ? (
+            <EmptyState message="생산 데이터를 불러오는 중입니다." />
+          ) : !hasData ? (
+            <EmptyState message="선택한 조건에 해당하는 행이 없습니다." />
+          ) : searchedDetailRows.length === 0 ? (
+            <EmptyState message="검색 조건에 해당하는 생산 데이터가 없습니다." />
+          ) : (
+            <div className="space-y-3">
+              <div
+                className={`overflow-x-auto rounded-lg border ${
+                  isDark ? 'border-slate-700' : 'border-slate-200'
+                }`}
+              >
+                <table className="w-full min-w-[1220px] border-collapse text-sm">
+                  <thead
+                    className={`text-xs font-semibold uppercase tracking-wider ${
+                      isDark
+                        ? 'bg-slate-900/80 text-slate-400'
+                        : 'bg-slate-100/70 text-slate-600'
+                    }`}
+                  >
+                    <tr>
+                      <th className="w-10 px-2 py-3 text-center">
+                        <input
+                          ref={selectAllCheckboxRef}
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          disabled={pagedDetailRows.length === 0}
+                          onChange={handleSelectAll}
+                          aria-label="현재 화면의 모든 행 선택"
+                          className="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                      <th className="px-3 py-3 text-left">날짜</th>
+                      <th className="px-3 py-3 text-right">총생산량</th>
+                      <th className="px-3 py-3 text-right">양품 수</th>
+                      <th className="px-3 py-3 text-right">불량품 수</th>
+                      <th className="px-3 py-3 text-right">불량률</th>
+                      <th className="px-3 py-3 text-right">금속 불순물</th>
+                      <th className="px-3 py-3 text-right">소성온도 이탈</th>
+                      <th className="px-3 py-3 text-right">습도</th>
+                      <th className="px-3 py-3 text-right">소성온도×습도</th>
+                      <th className="px-3 py-3 text-center">데이터 상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedDetailRows.map((r) => {
+                      const highDefect = r.defectRate >= 0.1;
+                      const midDefect = r.defectRate >= 0.07 && r.defectRate < 0.1;
+                      const defectTone = highDefect
+                        ? 'text-rose-600'
+                        : midDefect
+                          ? 'text-orange-500'
+                          : isDark
+                            ? 'text-slate-200'
+                            : 'text-slate-700';
+                      return (
+                        <tr
+                          key={r.date}
+                          className={`border-b transition-colors ${
+                            highDefect
+                              ? isDark
+                                ? 'border-slate-700/80 bg-red-950/15 hover:bg-red-950/25'
+                                : 'border-slate-100 bg-red-50/40 hover:bg-red-50/70'
+                              : isDark
+                                ? 'border-slate-700/80 hover:bg-slate-800/60'
+                                : 'border-slate-100 hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="w-10 px-2 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.includes(r.date)}
+                              onChange={() => handleSelectRow(r.date)}
+                              aria-label={`${r.date} 행 선택`}
+                              className="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td
+                            className={`whitespace-nowrap px-3 py-3 text-left font-medium ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.date}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.totalProduction)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.goodCount)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-800'
+                            }`}
+                          >
+                            {formatNumber(r.defectCount)}
+                          </td>
+                          <td className="px-3 py-3 text-right font-semibold tabular-nums">
+                            <span className={defectTone}>
+                              {formatPercent(r.defectRate)}
+                            </span>
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.metalImpurity == null ? '-' : r.metalImpurity.toFixed(3)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tempDevFrom800 == null ? '-' : r.tempDevFrom800.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.humidity == null ? '-' : r.humidity.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tempXHumidity == null ? '-' : r.tempXHumidity.toFixed(1)}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span
+                              className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                                r.status === '수집 중' || r.status === '부분 채점'
+                                  ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
+                                  : isDark
+                                    ? 'bg-slate-800 text-slate-300 ring-1 ring-slate-600'
+                                    : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
+                              }`}
+                            >
+                              {r.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div
+                className={`mb-2 flex flex-col items-center gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:justify-between ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <p
+                  className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+                >
+                  {tableStatusText}
+                </p>
+                <nav
+                  aria-label="생산 상세 테이블 페이지"
+                  className="flex flex-wrap items-center justify-center gap-1.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                    disabled={tableSafePage <= 1}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    이전
+                  </button>
+                  {tablePageNumbers.map((item, idx) =>
+                    item === 'ellipsis' ? (
+                      <span
+                        key={`e-${idx}`}
+                        className={`px-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={item}
+                        type="button"
+                        aria-current={item === tableSafePage ? 'page' : undefined}
+                        onClick={() => setTablePage(item)}
+                        className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                          item === tableSafePage
+                            ? 'bg-blue-600 text-white'
+                            : isDark
+                              ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setTablePage((p) => Math.min(tableTotalPages, p + 1))}
+                    disabled={tableSafePage >= tableTotalPages}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    다음
+                  </button>
+                </nav>
+              </div>
+            </div>
+          )}
         </section>
 
       </div>
