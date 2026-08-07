@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
   probability     DOUBLE       NULL,
+  spc             VARCHAR(16)  NULL,
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE
@@ -171,3 +172,4 @@ CREATE TABLE IF NOT EXISTS AI_Library_analysis (
     ON DELETE CASCADE,
   INDEX idx_ai_library_analysis_user_created (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- See also DB/spc_limits_and_standard.sql (spc_limits, standard, judgment_lots.spc)

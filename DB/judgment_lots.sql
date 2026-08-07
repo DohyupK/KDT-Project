@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
   probability     DOUBLE       NULL,
+  spc             VARCHAR(16)  NULL,
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE

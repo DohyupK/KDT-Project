@@ -36,9 +36,20 @@ export const getProductionTrend = asyncHandler(async (req, res) => {
 })
 
 export const getProductionDaily = asyncHandler(async (req, res) => {
-  const page = req.query.page != null ? Number(req.query.page) : 1
-  const pageSize = req.query.pageSize != null ? Number(req.query.pageSize) : 5
-  const result = await dashboardService.getProductionDaily(page, pageSize)
+  const numOrUndef = (v: unknown) => {
+    if (v == null || v === '') return undefined
+    const n = Number(v)
+    return Number.isFinite(n) ? n : undefined
+  }
+  const result = await dashboardService.getProductionDaily({
+    page: req.query.page != null ? Number(req.query.page) : 1,
+    pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : 7,
+    operatorId: req.query.operatorId != null ? String(req.query.operatorId) : undefined,
+    d50Min: numOrUndef(req.query.d50Min),
+    d50Max: numOrUndef(req.query.d50Max),
+    d90Min: numOrUndef(req.query.d90Min),
+    d90Max: numOrUndef(req.query.d90Max),
+  })
   res.status(200).json(result)
 })
 
@@ -51,7 +62,13 @@ export const exportLotsCsv = asyncHandler(async (req, res) => {
 })
 
 export const getFeatureImportance = asyncHandler(async (req, res) => {
-  const topK = req.query.topK != null ? Number(req.query.topK) : 4
-  const result = dashboardService.getFeatureImportance(Number.isFinite(topK) ? topK : 4)
+  const result = await dashboardService.getFeatureImportance({
+    topK: req.query.topK != null ? Number(req.query.topK) : undefined,
+    grain: req.query.grain != null ? String(req.query.grain) : undefined,
+    from: req.query.from != null ? String(req.query.from) : undefined,
+    to: req.query.to != null ? String(req.query.to) : undefined,
+    bucket: req.query.bucket != null ? String(req.query.bucket) : undefined,
+    mode: req.query.mode != null ? String(req.query.mode) : undefined,
+  })
   res.status(200).json(result)
 })

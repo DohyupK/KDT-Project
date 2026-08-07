@@ -8,7 +8,12 @@ import {
   residualTier,
   worstRisk,
 } from '../src/services/lotScore.js'
-import { evaluateLotSpc, loadPhase1Limits, violatesNelson2to8 } from '../src/services/spcEngine.js'
+import {
+  evaluateLotSpc,
+  findNelson2to8Violations,
+  loadPhase1Limits,
+  violatesNelson2to8,
+} from '../src/services/spcEngine.js'
 
 test('risk vocabulary normalize', () => {
   assert.equal(normalizeRiskLevel('높음'), '심각')
@@ -64,8 +69,28 @@ test('Phase I limits load and OOC detection', () => {
   assert.ok(evaled.oocKeys.includes('d50'))
 })
 
-test('Nelson rule 2 same-side streak', () => {
+test('Nelson rule 2 same-side streak at current observation', () => {
   const lim = loadPhase1Limits().humidity
   const above = Array.from({ length: 9 }, () => lim.CL_I + 0.5)
   assert.equal(violatesNelson2to8(above, lim), true)
+})
+
+test('Nelson rule 2 ignores past streak when current window is clear', () => {
+  const lim = loadPhase1Limits().humidity
+  const cl = lim.CL_I
+  const sigma = lim.CL_MR / 1.128
+  const last9 = Array.from({ length: 9 }, (_, i) => cl + (i % 2 === 0 ? 0.2 : -0.2) * sigma)
+  const series = [...Array.from({ length: 12 }, () => cl + 0.5 * sigma), ...last9]
+  assert.equal(findNelson2to8Violations(series, lim).some((h) => h.rule === 2), false)
+})
+
+test('Nelson rule 2 fires only when the last 9 points share a CL side', () => {
+  const lim = loadPhase1Limits().humidity
+  const cl = lim.CL_I
+  const sigma = lim.CL_MR / 1.128
+  const prefix = Array.from({ length: 5 }, () => cl - 0.3 * sigma)
+  const noStreak = [...prefix, cl + 0.1 * sigma, cl - 0.1 * sigma, cl + 0.1 * sigma]
+  const streak = [...prefix, ...Array.from({ length: 9 }, () => cl + 0.5 * sigma)]
+  assert.equal(findNelson2to8Violations(noStreak, lim).some((h) => h.rule === 2), false)
+  assert.ok(findNelson2to8Violations(streak, lim).some((h) => h.rule === 2))
 })
