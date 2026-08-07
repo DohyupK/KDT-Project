@@ -7,39 +7,24 @@ import { usePathname } from 'next/navigation';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
-import SpcAnalysisPanel, {
-  buildSpcMetrics,
-  type SpcMetric,
-} from '@/components/SpcAnalysisPanel';
 import {
-  COMPLETED_KNOWLEDGE_STORAGE_KEY,
-  COMPLETED_KNOWLEDGE_UPDATED_EVENT,
-  readCompletedKnowledgeLogs,
+  consumeLocalKnowledgeForLlm,
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
 import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
+import { postChat } from '@/api/aiApi';
+import { knowledgeApi } from '@/api/knowledgeApi';
+import { fetchDocFileBlob } from '@/api/docsApi';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
+import { isAxiosError } from 'axios';
 
 interface DocumentItem {
   id: string;
-  manager: string;
   date: string;
   title: string;
-  summary: string;
-  process: string;
   lot: string;
-  detail: string;
-  /** 이슈 목록과 통일 — 표시용 */
-  risk: '높음' | '중간' | '낮음';
-  status: '접수' | '분석 중' | '조치 중' | '완료';
-  /** 일시 표시. 없으면 date 사용 */
+  detail?: string;
   occurredAt?: string;
-  /** 이슈에서 이관된 경우 원본 이슈 ID */
-  sourceIssueId?: string;
-  anomaly?: string;
-  residualLiMargin?: number;
-  defectProbability?: number;
-  spcMetrics?: SpcMetric[];
 }
 
 interface ActionHistoryItem {
@@ -66,9 +51,15 @@ interface ReportData {
 }
 
 interface FilterState {
-  manager: string;
   date: string;
   keyword: string;
+}
+
+interface AnalysisResult {
+  summary: string;
+  insights: string;
+  countermeasures: string;
+  references: string;
 }
 
 type TabKey = 'knowledge' | 'report';
@@ -214,13 +205,13 @@ function isSpcMetricArray(value: unknown): value is SpcMetric[] {
 }
 
 function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
-  const from = item.handoverFrom?.trim() || item.manager?.trim() || '';
+  const from = item.handoverFrom?.trim() || '';
   const dateTime = item.archivedAt?.trim() || item.createdAt?.trim() || '';
   return {
     id: item.historyId,
     handoverContent: item.handoverContent,
     action: item.action ?? '',
-    cause: item.cause ?? '',
+    cause: '',
     manager: from,
     date: dateTime,
     ...(item.category ? { category: item.category } : {}),
@@ -229,45 +220,7 @@ function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
   };
 }
 
-function readTransferredKnowledgeDocuments(): DocumentItem[] {
-  const logs = readCompletedKnowledgeLogs();
-  const result: DocumentItem[] = [];
-  const seen = new Set<string>();
-  for (const row of logs) {
-    if (!row.id || seen.has(row.id)) continue;
-    seen.add(row.id);
-    result.push({
-      id: row.id,
-      manager: row.manager ?? '',
-      date: row.date ?? '',
-      title: row.title ?? '',
-      summary: row.summary ?? '',
-      process: row.process ?? '',
-      lot: row.lot ?? '',
-      detail: row.detail ?? '',
-      risk:
-        row.risk === '높음' || row.risk === '중간' || row.risk === '낮음' ? row.risk : '중간',
-      status:
-        row.status === '접수' ||
-        row.status === '분석 중' ||
-        row.status === '조치 중' ||
-        row.status === '완료'
-          ? row.status
-          : '완료',
-      ...(row.occurredAt ? { occurredAt: row.occurredAt } : {}),
-      ...(row.sourceIssueId ? { sourceIssueId: row.sourceIssueId } : {}),
-      anomaly: typeof row.anomaly === 'string' ? row.anomaly : '',
-      residualLiMargin:
-        typeof row.residualLiMargin === 'number' ? row.residualLiMargin : 0.2,
-      defectProbability:
-        typeof row.defectProbability === 'number' ? row.defectProbability : 25,
-      spcMetrics: isSpcMetricArray(row.spcMetrics) ? row.spcMetrics : buildSpcMetrics(),
-    });
-  }
-  return result;
-}
-
-const DOCUMENTS: DocumentItem[] = [
+/* Legacy static mock data intentionally disabled; past issues now load from the API.
   {
     id: 'DOC-2026-041',
     manager: '김현수',
@@ -481,6 +434,7 @@ const DOCUMENTS: DocumentItem[] = [
     ),
   },
 ];
+*/
 
 const INITIAL_REPORT: ReportData = {
   baseDate: '2026-07-21',
@@ -567,61 +521,68 @@ function ReportTabIcon() {
   );
 }
 
-const DOC_ID_PATTERN = /DOC-\d{4}-\d+/g;
+type ParsedAnalysis = {
+  result: AnalysisResult;
+  parseError?: string;
+  raw: string;
+};
 
-function extractDocIds(text: string): string[] {
-  return Array.from(new Set(text.match(DOC_ID_PATTERN) ?? []));
+function getAnalyzeErrorMessage(err: unknown, fallback: string): string {
+  if (isAxiosError(err)) {
+    const status = err.response?.status;
+    const data = err.response?.data as { error?: string; message?: string } | string | undefined;
+    const fromBody =
+      typeof data === 'string'
+        ? data
+        : typeof data?.error === 'string'
+          ? data.error
+          : typeof data?.message === 'string'
+            ? data.message
+            : '';
+    const parts = [
+      status != null ? `HTTP ${status}` : null,
+      fromBody || err.message || null,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(' — ') : fallback;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
+  return fallback;
 }
 
-function extractRiskPercent(riskSummary: string): number | null {
-  const match = riskSummary.match(/(\d+)\s*%/);
-  if (!match) return null;
-  const value = Number(match[1]);
-  if (Number.isNaN(value)) return null;
-  return Math.min(100, Math.max(0, value));
-}
-
-function riskBadgeClass(risk: DocumentItem['risk'], isDark: boolean) {
-  if (risk === '높음') {
-    return isDark
-      ? 'inline-flex items-center rounded-full border border-rose-800 bg-rose-950/40 px-2.5 py-0.5 text-xs font-bold text-rose-300'
-      : 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700';
+/** Knowledge library: free text is success. Optional JSON keys fill cards when present. */
+function asLibraryAnalysisResult(reply: string): ParsedAnalysis {
+  const raw = reply ?? '';
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {
+      result: { summary: '', insights: '', countermeasures: '', references: '' },
+      parseError: 'LLM 응답이 비어 있습니다.',
+      raw,
+    };
   }
-  if (risk === '중간') {
-    return isDark
-      ? 'inline-flex items-center rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-bold text-amber-300'
-      : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700';
+  const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const jsonCandidate = cleaned.match(/^\s*\{[\s\S]*\}\s*$/)?.[0];
+  if (jsonCandidate) {
+    try {
+      const parsed = JSON.parse(jsonCandidate) as Partial<AnalysisResult>;
+      const result: AnalysisResult = {
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        insights: typeof parsed.insights === 'string' ? parsed.insights : '',
+        countermeasures: typeof parsed.countermeasures === 'string' ? parsed.countermeasures : '',
+        references: typeof parsed.references === 'string' ? parsed.references : '',
+      };
+      if (result.summary || result.insights || result.countermeasures || result.references) {
+        return { result, raw };
+      }
+    } catch {
+      /* free text — ignore */
+    }
   }
-  return isDark
-    ? 'inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-0.5 text-xs font-bold text-emerald-300'
-    : 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700';
-}
-
-function statusBadgeClass(status: DocumentItem['status'], isDark: boolean) {
-  if (status === '완료') {
-    return isDark
-      ? 'inline-flex items-center rounded-md border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs font-semibold text-emerald-300'
-      : 'inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700';
-  }
-  if (status === '조치 중') {
-    return isDark
-      ? 'inline-flex items-center rounded-md border border-violet-800 bg-violet-950/40 px-2 py-0.5 text-xs font-semibold text-violet-300'
-      : 'inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700';
-  }
-  if (status === '분석 중') {
-    return isDark
-      ? 'inline-flex items-center rounded-md border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs font-semibold text-blue-300'
-      : 'inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700';
-  }
-  return isDark
-    ? 'inline-flex items-center rounded-md border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-xs font-semibold text-sky-300'
-    : 'inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700';
-}
-
-function displayIssueId(doc: DocumentItem) {
-  if (doc.sourceIssueId) return doc.sourceIssueId;
-  if (doc.id.startsWith('DOC-ISS-')) return doc.id.slice(4);
-  return doc.id;
+  return {
+    result: { summary: raw, insights: '', countermeasures: '', references: '' },
+    raw,
+  };
 }
 
 function CategoryBadge({ label }: { label: string }) {
@@ -792,9 +753,8 @@ export default function KnowledgePage() {
   const [activeTab, setActiveTab] = useState<TabKey>('knowledge');
   const [toast, setToast] = useState('');
 
-  const [filters, setFilters] = useState<FilterState>({ manager: '', date: '', keyword: '' });
+  const [filters, setFilters] = useState<FilterState>({ date: '', keyword: '' });
   const [appliedFilters, setAppliedFilters] = useState<FilterState>({
-    manager: '',
     date: '',
     keyword: '',
   });
@@ -812,19 +772,42 @@ export default function KnowledgePage() {
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [selectedActionIds, setSelectedActionIds] = useState<number[]>([]);
+  const [selectedDocPaths, setSelectedDocPaths] = useState<string[]>([]);
   const [analysisDocIds, setAnalysisDocIds] = useState<string[]>([]);
   const [analysisActionIds, setAnalysisActionIds] = useState<number[]>([]);
+  const [analysisDocPaths, setAnalysisDocPaths] = useState<string[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [llmRawReply, setLlmRawReply] = useState<string | null>(null);
+  const [diagnosisReply, setDiagnosisReply] = useState('');
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [diagnosisError, setDiagnosisError] = useState('');
   const [isSelectionListExpanded, setIsSelectionListExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  /** analyzing UX: reading docs vs waiting on LLM */
+  const [analyzePhase, setAnalyzePhase] = useState<'idle' | 'reading' | 'llm'>('idle');
   const [hasRunAnalysis, setHasRunAnalysis] = useState(false);
   const [docPage, setDocPage] = useState(1);
   const [actionPage, setActionPage] = useState(1);
-  const [transferredDocuments, setTransferredDocuments] = useState<DocumentItem[]>([]);
-  const analysisTimerRef = useRef<number | null>(null);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
-  const refreshTransferredDocuments = () => {
-    setTransferredDocuments(readTransferredKnowledgeDocuments());
-    setDocPage(1);
+  const refreshPastIssues = async () => {
+    try {
+      const { data } = await issueApi.listPastIssues();
+      setDocuments(
+        data.items.map((item) => ({
+          id: item.issueId,
+          title: item.title,
+          lot: item.lotId,
+          date: item.completedAt || item.occurredAt,
+          occurredAt: item.occurredAt,
+        })),
+      );
+    } catch {
+      setDocuments([]);
+    } finally {
+      setDocPage(1);
+    }
   };
 
   const refreshHandoverActions = async () => {
@@ -837,64 +820,45 @@ export default function KnowledgePage() {
   };
 
   useEffect(() => {
-    refreshTransferredDocuments();
+    void refreshPastIssues();
     void refreshHandoverActions();
   }, []);
 
   useShellRefresh(() => {
-    refreshTransferredDocuments();
+    void refreshPastIssues();
     void refreshHandoverActions();
   });
 
   useEffect(() => {
     if (pathname.includes('/knowledge')) {
-      refreshTransferredDocuments();
+      void refreshPastIssues();
       void refreshHandoverActions();
     }
   }, [pathname]);
 
   useEffect(() => {
     if (activeTab === 'knowledge') {
-      refreshTransferredDocuments();
+      void refreshPastIssues();
       void refreshHandoverActions();
     }
   }, [activeTab]);
 
   useEffect(() => {
-    const onUpdated = () => {
-      refreshTransferredDocuments();
-    };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === COMPLETED_KNOWLEDGE_STORAGE_KEY) onUpdated();
-    };
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      refreshTransferredDocuments();
+      void refreshPastIssues();
       void refreshHandoverActions();
     };
 
-    window.addEventListener(COMPLETED_KNOWLEDGE_UPDATED_EVENT, onUpdated);
-    window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     return () => {
-      window.removeEventListener(COMPLETED_KNOWLEDGE_UPDATED_EVENT, onUpdated);
-      window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
     };
   }, []);
 
-  const transferredIdSet = useMemo(
-    () => new Set(transferredDocuments.map((doc) => doc.id)),
-    [transferredDocuments],
-  );
-
-  const allDocuments = useMemo(() => {
-    const staticIds = new Set(DOCUMENTS.map((doc) => doc.id));
-    const uniqueTransferred = transferredDocuments.filter((doc) => !staticIds.has(doc.id));
-    return [...uniqueTransferred, ...DOCUMENTS];
-  }, [transferredDocuments]);
+  const allDocuments = documents;
 
   const allActions = useMemo(() => actions, [actions]);
 
@@ -908,11 +872,8 @@ export default function KnowledgePage() {
       const matchesKeyword =
         !keyword ||
         doc.title.toLowerCase().includes(keyword) ||
-        doc.summary.toLowerCase().includes(keyword) ||
-        doc.process.toLowerCase().includes(keyword) ||
         doc.lot.toLowerCase().includes(keyword) ||
-        doc.id.toLowerCase().includes(keyword) ||
-        (doc.sourceIssueId ?? '').toLowerCase().includes(keyword);
+        doc.id.toLowerCase().includes(keyword);
       return matchesDate && matchesKeyword;
     });
   }, [appliedFilters, allDocuments]);
@@ -947,7 +908,8 @@ export default function KnowledgePage() {
     [selectedActionIds, allActions],
   );
 
-  const selectedCount = validSelectedDocIds.length + validSelectedActionIds.length;
+  const selectedCount =
+    validSelectedDocIds.length + validSelectedActionIds.length + selectedDocPaths.length;
 
   const selectedDocs = useMemo(
     () => allDocuments.filter((doc) => validSelectedDocIds.includes(doc.id)),
@@ -969,8 +931,19 @@ export default function KnowledgePage() {
       item,
       order: selectedDocs.length + index + 1,
     }));
-    return [...docs, ...actionItems];
-  }, [selectedDocs, selectedActions]);
+    const base = selectedDocs.length + selectedActions.length;
+    const files = selectedDocPaths.map((path, index) => {
+      const parts = path.replace(/\\/g, '/').split('/');
+      const name = parts[parts.length - 1] || path;
+      return {
+        kind: 'file' as const,
+        path,
+        name,
+        order: base + index + 1,
+      };
+    });
+    return [...docs, ...actionItems, ...files];
+  }, [selectedDocs, selectedActions, selectedDocPaths]);
 
   const remainingSelectionCount = Math.max(0, selectedCount - DEFAULT_VISIBLE_COUNT);
   const visibleSelectionItems = isSelectionListExpanded
@@ -985,37 +958,26 @@ export default function KnowledgePage() {
     () => allActions.filter((item) => analysisActionIds.includes(item.id)),
     [analysisActionIds, allActions],
   );
-  const analysisCount = analysisDocs.length + analysisActions.length;
+  const analysisCount = analysisDocs.length + analysisActions.length + analysisDocPaths.length;
 
   const selectionMatchesAnalysis = useMemo(() => {
     if (!hasRunAnalysis) return false;
     if (validSelectedDocIds.length !== analysisDocIds.length) return false;
     if (validSelectedActionIds.length !== analysisActionIds.length) return false;
+    if (selectedDocPaths.length !== analysisDocPaths.length) return false;
     const docsMatch = validSelectedDocIds.every((id) => analysisDocIds.includes(id));
     const actionsMatch = validSelectedActionIds.every((id) => analysisActionIds.includes(id));
-    return docsMatch && actionsMatch;
+    const pathsMatch = selectedDocPaths.every((path) => analysisDocPaths.includes(path));
+    return docsMatch && actionsMatch && pathsMatch;
   }, [
     hasRunAnalysis,
     validSelectedDocIds,
     validSelectedActionIds,
     analysisDocIds,
     analysisActionIds,
+    selectedDocPaths,
+    analysisDocPaths,
   ]);
-
-  const analysisInsights = useMemo(() => {
-    const summaries = analysisDocs.map((doc) => doc.summary).filter(Boolean);
-    const causes = analysisActions.map((item) => item.cause).filter(Boolean);
-    const actionsTaken = analysisActions.map((item) => item.action).filter(Boolean);
-    return {
-      summaries,
-      causes,
-      actionsTaken,
-      titles: [
-        ...analysisDocs.map((doc) => `${doc.id} · ${doc.title}`),
-        ...analysisActions.map((item) => item.handoverContent),
-      ],
-    };
-  }, [analysisDocs, analysisActions]);
 
   const docTotalPages = Math.max(1, Math.ceil(filteredDocuments.length / LIST_PAGE_SIZE));
   const actionTotalPages = Math.max(1, Math.ceil(filteredActions.length / LIST_PAGE_SIZE));
@@ -1041,9 +1003,6 @@ export default function KnowledgePage() {
     [actionTotalPages],
   );
 
-  const riskPercent = useMemo(() => extractRiskPercent(report.riskSummary), [report.riskSummary]);
-  const similarDocIds = useMemo(() => extractDocIds(report.similarCase), [report.similarCase]);
-
   const visibleDocIds = useMemo(() => filteredDocuments.map((doc) => doc.id), [filteredDocuments]);
   const visibleActionIds = useMemo(
     () => filteredActions.map((item) => item.id),
@@ -1067,7 +1026,7 @@ export default function KnowledgePage() {
   };
 
   const applyKnowledgeFilters = () => {
-    setAppliedFilters({ ...filters, manager: '' });
+    setAppliedFilters(filters);
     setAppliedActionSearch(actionSearch);
     setDocPage(1);
     setActionPage(1);
@@ -1075,7 +1034,7 @@ export default function KnowledgePage() {
   };
 
   const resetKnowledgeFilters = () => {
-    const empty = { manager: '', date: '', keyword: '' };
+    const empty = { date: '', keyword: '' };
     setFilters(empty);
     setAppliedFilters(empty);
     setActionSearch('');
@@ -1107,9 +1066,61 @@ export default function KnowledgePage() {
     setFormError('');
   };
 
-  const openDocumentDetail = (doc: DocumentItem) => {
+  const openDocumentDetail = async (doc: DocumentItem) => {
     setSelectedDocId(doc.id);
     setDetailTarget({ kind: 'document', item: doc });
+    setDiagnosisReply('');
+    setDiagnosisError('');
+    setDiagnosisLoading(true);
+    try {
+      const { data } = await issueApi.getPastIssueById(doc.id);
+      const item = data.item;
+      const detailedDoc: DocumentItem = {
+        id: item.issueId,
+        title: item.title,
+        lot: item.lotId,
+        date: item.completedAt || item.occurredAt,
+        occurredAt: item.occurredAt,
+        detail: item.actionContent || undefined,
+      };
+      setDetailTarget({ kind: 'document', item: detailedDoc });
+      try {
+        const response = await postChat({
+          message: `완료 이슈 "${item.title}"(이슈 ID: ${item.issueId}, LOT: ${item.lotId})를 검토해 주세요. 다른 완료 이슈와의 유사 가능성과 대안 조치 방안을 한국어로 간결하게 설명하세요. 이슈 상세: ${item.actionContent || '기록 없음'}`,
+        });
+        if (response.error) {
+          console.error('[knowledge-diagnose] ai.error', response.error);
+          setDiagnosisError(`AI error: ${response.error}`);
+        }
+        if (response.mode === 'security_redirect') {
+          console.error('[knowledge-diagnose] security_redirect', response.security_matched);
+          setDiagnosisError(
+            (prev) =>
+              [prev, `보안 키워드 감지(${response.security_matched || 'unknown'}) — 일반 채널 답변 대신 안내가 반환되었습니다.`]
+                .filter(Boolean)
+                .join('\n'),
+          );
+        }
+        const reply = response.reply ?? '';
+        if (!reply.trim()) {
+          console.error('[knowledge-diagnose] empty reply', response);
+          setDiagnosisError((prev) =>
+            [prev, 'LLM 응답이 비어 있습니다.'].filter(Boolean).join('\n'),
+          );
+        }
+        setDiagnosisReply(reply);
+      } catch (err) {
+        const msg = getAnalyzeErrorMessage(err, 'AI 진단을 불러오지 못했습니다.');
+        console.error('[knowledge-diagnose] postChat', msg, err);
+        setDiagnosisError(`LLM 요청 실패: ${msg}`);
+      }
+    } catch (err) {
+      const msg = getAnalyzeErrorMessage(err, '상세 이슈를 불러오지 못했습니다.');
+      console.error('[knowledge-diagnose] getPastIssueById', msg, err);
+      setDiagnosisError(msg);
+    } finally {
+      setDiagnosisLoading(false);
+    }
   };
 
   const openActionDetail = (item: ActionHistoryItem) => {
@@ -1118,6 +1129,8 @@ export default function KnowledgePage() {
 
   const closeDetailModal = () => {
     setDetailTarget(null);
+    setDiagnosisReply('');
+    setDiagnosisError('');
   };
 
   const handleActionSubmit = () => {
@@ -1170,17 +1183,6 @@ export default function KnowledgePage() {
     });
   };
 
-  const clearAnalysisTimer = () => {
-    if (analysisTimerRef.current !== null) {
-      window.clearTimeout(analysisTimerRef.current);
-      analysisTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => clearAnalysisTimer();
-  }, []);
-
   useEffect(() => {
     if (selectedCount <= DEFAULT_VISIBLE_COUNT) {
       setIsSelectionListExpanded(false);
@@ -1189,12 +1191,17 @@ export default function KnowledgePage() {
 
   const clearSelection = () => {
     if (isAnalyzing) return;
-    clearAnalysisTimer();
     setIsAnalyzing(false);
+    setAnalyzePhase('idle');
     setSelectedDocIds([]);
     setSelectedActionIds([]);
+    setSelectedDocPaths([]);
     setAnalysisDocIds([]);
     setAnalysisActionIds([]);
+    setAnalysisDocPaths([]);
+    setAnalysisResult(null);
+    setAnalysisError(null);
+    setLlmRawReply(null);
     setHasRunAnalysis(false);
     setIsSelectionListExpanded(false);
   };
@@ -1209,6 +1216,11 @@ export default function KnowledgePage() {
     setSelectedActionIds((current) => current.filter((item) => item !== id));
   };
 
+  const removeFileFromSelection = (path: string) => {
+    if (isAnalyzing) return;
+    setSelectedDocPaths((current) => current.filter((p) => p !== path));
+  };
+
   /** 지식 탭 액션바: 분석 탭으로 이동 (분석은 아직 실행하지 않음) */
   const runSelectedAnalysis = () => {
     if (selectedCount === 0) return;
@@ -1216,21 +1228,137 @@ export default function KnowledgePage() {
     setActiveTab('report');
   };
 
+  const MAX_DOC_FILES = 3;
+  const MAX_DOC_CHARS = 1200;
+
   /** AI 탭: 현재 선택 스냅샷으로 분석 실행 */
-  const executeAnalysis = () => {
+  const executeAnalysis = async () => {
     if (selectedCount === 0 || isAnalyzing) return;
     const docSnapshot = [...validSelectedDocIds];
     const actionSnapshot = [...validSelectedActionIds];
-    clearAnalysisTimer();
+    const docPathSnapshot = [...selectedDocPaths];
     setIsAnalyzing(true);
-    analysisTimerRef.current = window.setTimeout(() => {
+    setAnalyzePhase('reading');
+    setHasRunAnalysis(false);
+    setAnalysisResult(null);
+    setAnalysisError(null);
+    setLlmRawReply(null);
+    const warnings: string[] = [];
+    try {
+      const localKnowledge = consumeLocalKnowledgeForLlm();
+      const selectedPastIssues = allDocuments.filter((doc) => docSnapshot.includes(doc.id));
+      const selectedHandoverActions = allActions.filter((item) => actionSnapshot.includes(item.id));
+      const pathsToFetch = docPathSnapshot.slice(0, MAX_DOC_FILES);
+      const docSnippets = await Promise.all(
+        pathsToFetch.map(async (path) => {
+          try {
+            const { blob, contentType } = await fetchDocFileBlob(path);
+            const lower = path.toLowerCase();
+            const isText =
+              contentType.startsWith('text/') ||
+              contentType.includes('json') ||
+              contentType.includes('markdown') ||
+              /\.(md|txt|csv|json)$/i.test(lower);
+            if (!isText) {
+              const msg = `문서 읽기 실패: ${path} — 텍스트 추출 불가 (${contentType || 'unknown type'})`;
+              warnings.push(msg);
+              console.error('[knowledge-analyze] doc_fetch', msg);
+              return `- ${path}: (텍스트 추출 불가)`;
+            }
+            const text = (await blob.text()).slice(0, MAX_DOC_CHARS);
+            return `- ${path}:\n${text}`;
+          } catch (err) {
+            const detail = getAnalyzeErrorMessage(err, '알 수 없는 오류');
+            const msg = `문서 읽기 실패: ${path} — ${detail}`;
+            warnings.push(msg);
+            console.error('[knowledge-analyze] doc_fetch', msg, err);
+            return `- ${path}: (읽기 실패: ${detail})`;
+          }
+        }),
+      );
+      if (docPathSnapshot.length > MAX_DOC_FILES) {
+        docSnippets.push(`- (외 ${docPathSnapshot.length - MAX_DOC_FILES}개 문서는 속도상 생략)`);
+      }
+      const prompt = `선택한 지식 항목을 바탕으로 한국어로 「요약」과 「참고 사항」을 작성해 주세요.
+아래에 나열된 선택 항목을 모두 언급해 주세요.
+
+[완료 이슈]
+${
+  selectedPastIssues
+    .map((item) => `- ${item.id} / ${item.title}${item.lot ? ` (${item.lot})` : ''}`)
+    .join('\n') || '(없음)'
+}
+
+[인수인계]
+${selectedHandoverActions.map((item) => `- ${item.handoverContent}`).join('\n') || '(없음)'}
+
+[사내 문서]
+${docSnippets.join('\n') || '(없음)'}
+
+[로컬 1회 지식]
+${
+  localKnowledge
+    .map((item) => `- ${item.title}:${(item.summary || item.detail || '').slice(0, 200)}`)
+    .join('\n') || '(없음)'
+}`;
+      setAnalyzePhase('llm');
+      let response;
+      try {
+        response = await knowledgeApi.analyze(prompt);
+      } catch (err) {
+        const msg = getAnalyzeErrorMessage(err, '알 수 없는 네트워크 오류');
+        console.error('[knowledge-analyze] api', msg, err);
+        setAnalysisDocIds(docSnapshot);
+        setAnalysisActionIds(actionSnapshot);
+        setAnalysisDocPaths(docPathSnapshot);
+        setAnalysisResult(null);
+        setLlmRawReply(null);
+        const full = [...warnings, `LLM 요청 실패: ${msg}`].join('\n');
+        setAnalysisError(full);
+        setHasRunAnalysis(true);
+        showToast(`분석 실패: ${msg}`);
+        return;
+      }
+
+      if (response.error) {
+        console.error('[knowledge-analyze] ai.error', response.error);
+        warnings.push(`API error: ${response.error}`);
+      }
+
+      const reply = response.reply ?? '';
+      const { result, parseError, raw } = asLibraryAnalysisResult(reply);
+      if (parseError) {
+        console.error('[knowledge-analyze] empty', parseError);
+        warnings.push(parseError);
+      }
+
       setAnalysisDocIds(docSnapshot);
       setAnalysisActionIds(actionSnapshot);
+      setAnalysisDocPaths(docPathSnapshot);
+      setAnalysisResult(result);
+      setLlmRawReply(raw || null);
+      setAnalysisError(warnings.length > 0 ? warnings.join('\n') : null);
       setHasRunAnalysis(true);
+      if (warnings.length > 0 && !raw) {
+        showToast(warnings[warnings.length - 1]);
+      } else {
+        showToast(
+          `선택한 ${docSnapshot.length + actionSnapshot.length + docPathSnapshot.length}개 항목 분석을 완료했습니다.`,
+        );
+      }
+    } catch (err) {
+      const msg = getAnalyzeErrorMessage(err, '알 수 없는 오류');
+      console.error('[knowledge-analyze] unexpected', msg, err);
+      setAnalysisDocIds(docSnapshot);
+      setAnalysisActionIds(actionSnapshot);
+      setAnalysisDocPaths(docPathSnapshot);
+      setAnalysisError([...warnings, msg].join('\n'));
+      setHasRunAnalysis(true);
+      showToast(`분석 실패: ${msg}`);
+    } finally {
       setIsAnalyzing(false);
-      analysisTimerRef.current = null;
-      showToast(`선택한 ${docSnapshot.length + actionSnapshot.length}개 항목 분석을 완료했습니다.`);
-    }, 1000);
+      setAnalyzePhase('idle');
+    }
   };
 
   const onRowKeyOpen = (
@@ -1241,37 +1369,6 @@ export default function KnowledgePage() {
       event.preventDefault();
       open();
     }
-  };
-
-  const renderSimilarCaseText = (text: string) => {
-    const parts = text.split(DOC_ID_PATTERN);
-    const ids = text.match(DOC_ID_PATTERN) ?? [];
-    const nodes: ReactNode[] = [];
-    parts.forEach((part, index) => {
-      nodes.push(<span key={`t-${index}`}>{part}</span>);
-      const docId = ids[index];
-      if (!docId) return;
-      const matched = allDocuments.find((doc) => doc.id === docId);
-      if (matched) {
-        nodes.push(
-          <button
-            key={`d-${docId}-${index}`}
-            type="button"
-            onClick={() => openDocumentDetail(matched)}
-            className="cursor-pointer font-semibold text-blue-600 hover:underline"
-          >
-            {docId}
-          </button>,
-        );
-      } else {
-        nodes.push(
-          <span key={`u-${docId}-${index}`} className="text-slate-700">
-            {docId}
-          </span>,
-        );
-      }
-    });
-    return nodes;
   };
 
   // 기존 핸들러 참조 유지 (트리셰이킹/린트 대비)
@@ -1425,7 +1522,7 @@ export default function KnowledgePage() {
               </div>
               <div className="min-w-[180px] flex-[1.4]">
                 <label htmlFor="doc-keyword" style={labelStyle}>
-                  문서 검색
+                  과거 이슈 검색
                 </label>
                 <input
                   id="doc-keyword"
@@ -1433,7 +1530,7 @@ export default function KnowledgePage() {
                   onChange={(event) =>
                     setFilters((current) => ({ ...current, keyword: event.target.value }))
                   }
-                  placeholder="제목, 요약, 공정, LOT 통합 검색"
+                  placeholder="이슈 ID, 제목, LOT 검색"
                   style={inputStyle}
                 />
               </div>
@@ -1445,7 +1542,7 @@ export default function KnowledgePage() {
                   id="action-search"
                   value={actionSearch}
                   onChange={(event) => setActionSearch(event.target.value)}
-                  placeholder="제목, 요약, 공정, LOT 통합 검색"
+                  placeholder="인수인계 내용 검색"
                   style={inputStyle}
                 />
               </div>
@@ -1555,8 +1652,6 @@ export default function KnowledgePage() {
                         <th className="whitespace-nowrap px-4 py-2.5 font-semibold">이슈 ID</th>
                         <th className="whitespace-nowrap px-4 py-2.5 font-semibold">일시</th>
                         <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-semibold">처리상태</th>
                         <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
                         <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">진단</th>
                       </tr>
@@ -1565,7 +1660,7 @@ export default function KnowledgePage() {
                       {filteredDocuments.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={8}
+                            colSpan={6}
                             className={`px-4 py-12 text-center text-sm ${
                               isDark ? 'text-slate-500' : 'text-slate-400'
                             }`}
@@ -1576,7 +1671,6 @@ export default function KnowledgePage() {
                       ) : (
                         renderedDocuments.map((doc) => {
                           const checked = validSelectedDocIds.includes(doc.id);
-                          const issueIdLabel = displayIssueId(doc);
                           return (
                             <tr
                               key={doc.id}
@@ -1622,7 +1716,7 @@ export default function KnowledgePage() {
                                     openDocumentDetail(doc);
                                   }}
                                 >
-                                  {issueIdLabel}
+                                  {doc.id}
                                 </button>
                               </td>
                               <td
@@ -1638,14 +1732,6 @@ export default function KnowledgePage() {
                                 }`}
                               >
                                 {doc.lot || '-'}
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3">
-                                <span className={riskBadgeClass(doc.risk, isDark)}>{doc.risk}</span>
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3">
-                                <span className={statusBadgeClass(doc.status, isDark)}>
-                                  {doc.status}
-                                </span>
                               </td>
                               <td
                                 className={`max-w-[420px] px-4 py-3 text-sm font-semibold ${
@@ -1967,7 +2053,10 @@ export default function KnowledgePage() {
               </div>
 
               {/* 사내 문서 (Documents/ READ-ONLY) */}
-              <DocumentsBrowser />
+              <DocumentsBrowser
+                selectedPaths={selectedDocPaths}
+                onSelectedPathsChange={setSelectedDocPaths}
+              />
             </div>
           </section>
         )}
@@ -2071,18 +2160,7 @@ export default function KnowledgePage() {
                                 >
                                   {doc.id}
                                 </span>
-                                {doc.process ? <CategoryBadge label={doc.process} /> : null}
-                                {transferredIdSet.has(doc.id) ? (
-                                  <span
-                                    className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
-                                      isDark
-                                        ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
-                                        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                    }`}
-                                  >
-                                    이슈완료
-                                  </span>
-                                ) : null}
+                                <span className="text-[11px] text-slate-400">{doc.lot || '-'}</span>
                               </div>
                               <div
                                 className={`line-clamp-2 text-sm font-semibold ${
@@ -2101,6 +2179,56 @@ export default function KnowledgePage() {
                                 event.stopPropagation();
                                 removeDocFromSelection(doc.id);
                               }}
+                              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 disabled:cursor-not-allowed disabled:opacity-40 ${
+                                isDark
+                                  ? 'hover:bg-slate-700 hover:text-slate-200'
+                                  : 'hover:bg-slate-100 hover:text-slate-700'
+                              }`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (entry.kind === 'file') {
+                        return (
+                          <div
+                            key={`file-${entry.path}`}
+                            className={`flex gap-2 rounded-lg border p-3 ${
+                              isDark
+                                ? 'border-slate-700 bg-slate-800'
+                                : 'border-slate-200 bg-white'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1 text-left">
+                              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
+                                  {entry.order}
+                                </span>
+                                <CategoryBadge label="사내 문서" />
+                              </div>
+                              <div
+                                className={`line-clamp-2 text-sm font-semibold ${
+                                  isDark ? 'text-slate-100' : 'text-slate-900'
+                                }`}
+                                title={entry.path}
+                              >
+                                {entry.name}
+                              </div>
+                              <div
+                                className={`mt-1 truncate text-[11px] ${
+                                  isDark ? 'text-slate-500' : 'text-slate-400'
+                                }`}
+                                title={entry.path}
+                              >
+                                {entry.path}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={isAnalyzing}
+                              aria-label={`${entry.name} 분석 대상에서 제외`}
+                              onClick={() => removeFileFromSelection(entry.path)}
                               className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 disabled:cursor-not-allowed disabled:opacity-40 ${
                                 isDark
                                   ? 'hover:bg-slate-700 hover:text-slate-200'
@@ -2210,7 +2338,18 @@ export default function KnowledgePage() {
                           isDark ? 'text-slate-200' : 'text-slate-700'
                         }`}
                       >
-                        AI가 선택된 지식 항목을 분석 중입니다...
+                        {analyzePhase === 'reading'
+                          ? '문서 읽는 중…'
+                          : analyzePhase === 'llm'
+                            ? 'LLM 요청 중…'
+                            : 'AI가 선택된 지식 항목을 분석 중입니다...'}
+                      </p>
+                      <p
+                        className={`m-0 text-xs ${
+                          isDark ? 'text-slate-500' : 'text-slate-400'
+                        }`}
+                      >
+                        문서 본문은 최대 {MAX_DOC_FILES}개·각 {MAX_DOC_CHARS}자로 제한해 전송합니다.
                       </p>
                       <button type="button" disabled style={primaryButtonStyle} className="opacity-60">
                         분석 실행
@@ -2275,6 +2414,20 @@ export default function KnowledgePage() {
                         </button>
                       </div>
                       <div className="grid gap-3 p-4">
+                        {analysisError ? (
+                          <div
+                            role="alert"
+                            className={`whitespace-pre-wrap rounded-xl border px-3.5 py-3 text-sm leading-relaxed ${
+                              isDark
+                                ? 'border-rose-800/70 bg-rose-950/40 text-rose-200'
+                                : 'border-rose-200 bg-rose-50 text-rose-800'
+                            }`}
+                          >
+                            <div className="mb-1 text-xs font-bold">분석 경고 / 실패 사유</div>
+                            {analysisError}
+                          </div>
+                        ) : null}
+
                         <div
                           className={`rounded-xl border p-3.5 ${
                             isDark
@@ -2294,7 +2447,7 @@ export default function KnowledgePage() {
                               isDark ? 'text-slate-100' : 'text-slate-800'
                             }`}
                           >
-                            문서 {analysisDocs.length}건 · 대처 이력 {analysisActions.length}건 · 총{' '}
+                            완료 이슈 {analysisDocs.length}건 · 대처 이력 {analysisActions.length}건 · 사내 문서 {analysisDocPaths.length}건 · 총{' '}
                             {analysisCount}개 항목을 분석 참고 범위로 사용합니다.
                           </p>
                         </div>
@@ -2316,16 +2469,17 @@ export default function KnowledgePage() {
                               marginBottom: 6,
                             }}
                           >
-                            주요 인사이트
+                            요약
                           </div>
-                          <p style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}>
-                            {analysisInsights.summaries.length > 0
-                              ? analysisInsights.summaries.join(' / ')
-                              : '선택된 지식 항목을 AI 분석 참고 범위로 설정했습니다.'}
+                          <p style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                            {analysisResult?.summary ||
+                              (analysisError
+                                ? '요약 카드를 만들지 못했습니다. 아래 실패 사유와 LLM 원문을 확인하세요.'
+                                : '분석 결과를 불러오지 못했습니다.')}
                           </p>
                         </div>
 
-                        {analysisInsights.causes.length > 0 && (
+                        {analysisResult?.insights && (
                           <div
                             style={{
                               border: `1px solid ${uiColors.line}`,
@@ -2343,17 +2497,17 @@ export default function KnowledgePage() {
                                 marginBottom: 6,
                               }}
                             >
-                              공통 원인 또는 기록된 원인
+                              주요 인사이트
                             </div>
                             <p
-                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}
+                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}
                             >
-                              {analysisInsights.causes.join(' / ')}
+                              {analysisResult.insights}
                             </p>
                           </div>
                         )}
 
-                        {analysisInsights.actionsTaken.length > 0 && (
+                        {analysisResult?.countermeasures && (
                           <div
                             style={{
                               border: `1px solid ${uiColors.line}`,
@@ -2371,15 +2525,40 @@ export default function KnowledgePage() {
                                 marginBottom: 6,
                               }}
                             >
-                              추천 대응 조치 또는 기록된 대응 조치
+                              권장 대응 조치
                             </div>
                             <p
-                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7 }}
+                              style={{ margin: 0, color: uiColors.navy, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}
                             >
-                              {analysisInsights.actionsTaken.join(' / ')}
+                              {analysisResult.countermeasures}
                             </p>
                           </div>
                         )}
+
+                        {llmRawReply ? (
+                          <div
+                            className={`rounded-xl border p-3.5 ${
+                              isDark
+                                ? 'border-slate-600 bg-slate-900/80'
+                                : 'border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div
+                              className={`mb-1.5 text-xs font-bold ${
+                                isDark ? 'text-slate-300' : 'text-slate-600'
+                              }`}
+                            >
+                              LLM 원문
+                            </div>
+                            <pre
+                              className={`m-0 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed ${
+                                isDark ? 'text-slate-200' : 'text-slate-800'
+                              }`}
+                            >
+                              {llmRawReply}
+                            </pre>
+                          </div>
+                        ) : null}
 
                         <div
                           className={`rounded-xl border p-3.5 ${
@@ -2393,6 +2572,11 @@ export default function KnowledgePage() {
                           >
                             참고 지식 항목
                           </div>
+                          {analysisResult?.references ? (
+                            <p className={`mb-2 whitespace-pre-wrap text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                              {analysisResult.references}
+                            </p>
+                          ) : null}
                           <div className="flex flex-wrap gap-2">
                             {analysisDocs.map((doc) => (
                               <button
@@ -2422,6 +2606,23 @@ export default function KnowledgePage() {
                                 <span className="truncate">{item.handoverContent}</span>
                               </button>
                             ))}
+                            {analysisDocPaths.map((path) => {
+                              const parts = path.replace(/\\/g, '/').split('/');
+                              const name = parts[parts.length - 1] || path;
+                              return (
+                                <span
+                                  key={path}
+                                  title={path}
+                                  className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+                                    isDark
+                                      ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-300'
+                                      : 'border-emerald-100 bg-emerald-50 text-emerald-800'
+                                  }`}
+                                >
+                                  <span className="truncate">{name}</span>
+                                </span>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
@@ -2483,20 +2684,9 @@ export default function KnowledgePage() {
               <span className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
                 {detailTarget.item.id}
               </span>
-              {detailTarget.item.process ? (
-                <CategoryBadge label={detailTarget.item.process} />
-              ) : null}
-              {transferredIdSet.has(detailTarget.item.id) ? (
-                <span
-                  className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
-                    isDark
-                      ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300'
-                      : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                  }`}
-                >
-                  이슈완료
-                </span>
-              ) : null}
+              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                LOT {detailTarget.item.lot || '-'}
+              </span>
             </div>
             <h4
               className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
@@ -2504,12 +2694,8 @@ export default function KnowledgePage() {
               {detailTarget.item.title}
             </h4>
             <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {detailTarget.item.manager} · {detailTarget.item.date}
-              {detailTarget.item.lot ? ` · ${detailTarget.item.lot}` : ''}
+              {detailTarget.item.occurredAt || detailTarget.item.date}
             </div>
-            <p className={`m-0 leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-              {detailTarget.item.summary}
-            </p>
             <div
               className={`rounded-xl p-4 leading-relaxed whitespace-pre-wrap ${
                 isDark
@@ -2517,7 +2703,7 @@ export default function KnowledgePage() {
                   : 'bg-slate-50 text-slate-800'
               }`}
             >
-              {detailTarget.item.detail}
+              {detailTarget.item.detail || '등록된 상세 조치 내용이 없습니다.'}
             </div>
             <div
               className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
@@ -2527,19 +2713,29 @@ export default function KnowledgePage() {
                   isDark ? 'text-slate-100' : 'text-slate-900'
                 }`}
               >
-                상세 분석
+                AI 유사 이슈·대안 조치 진단
               </h5>
-              <SpcAnalysisPanel
-                anomaly={detailTarget.item.anomaly ?? ''}
-                spcMetrics={
-                  detailTarget.item.spcMetrics?.length
-                    ? detailTarget.item.spcMetrics
-                    : buildSpcMetrics()
-                }
-                residualLiMargin={detailTarget.item.residualLiMargin ?? 0.2}
-                defectProbability={detailTarget.item.defectProbability ?? 25}
-                isDark={isDark}
-              />
+              {diagnosisLoading ? (
+                <p className={`m-0 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  AI 진단을 불러오는 중입니다...
+                </p>
+              ) : (
+                <>
+                  {diagnosisError ? (
+                    <p className="m-0 mb-2 whitespace-pre-wrap text-sm text-red-500">
+                      {diagnosisError}
+                    </p>
+                  ) : null}
+                  <p
+                    className={`m-0 whitespace-pre-wrap text-sm leading-relaxed ${
+                      isDark ? 'text-slate-200' : 'text-slate-700'
+                    }`}
+                  >
+                    {diagnosisReply ||
+                      (diagnosisError ? '진단 원문이 없습니다.' : '진단 결과가 없습니다.')}
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}

@@ -32,6 +32,7 @@ chatRouter.post('/chat', async (req, res) => {
     const body = req.body as ChatBody
     const message = (body.message || '').trim()
     if (!message) {
+      console.warn('[POST /api/chat] missing_message')
       res.status(400).json({ error: 'message is required' })
       return
     }
@@ -82,25 +83,43 @@ chatRouter.post('/chat', async (req, res) => {
       )
     }
 
-    const ai = await proxyChat({
-      message,
-      thread_id: threadId || sessionId,
-      user_id: userId,
-      features: body.features ?? undefined,
-      fillThreshold: body.fillThreshold ?? undefined,
-      need_guideline: guideline,
-      llm_mode: body.llm_mode ?? 'auto',
-      llm_credentials: llm_credentials.map((k) => ({
-        id: k.id,
-        display_name: k.display_name,
-        provider_kind: k.provider_kind,
-        company: k.company,
-        model: k.model,
-        base_url: k.base_url,
-        api_key: k.api_key,
-        cost_score: k.cost_score,
-      })),
-    })
+    let ai: Awaited<ReturnType<typeof proxyChat>>
+    try {
+      ai = await proxyChat({
+        message,
+        thread_id: threadId || sessionId,
+        user_id: userId,
+        features: body.features ?? undefined,
+        fillThreshold: body.fillThreshold ?? undefined,
+        need_guideline: guideline,
+        llm_mode: body.llm_mode ?? 'auto',
+        llm_credentials: llm_credentials.map((k) => ({
+          id: k.id,
+          display_name: k.display_name,
+          provider_kind: k.provider_kind,
+          company: k.company,
+          model: k.model,
+          base_url: k.base_url,
+          api_key: k.api_key,
+          cost_score: k.cost_score,
+        })),
+      })
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.error('[POST /api/chat] proxy_failed:', detail)
+      throw err
+    }
+
+    if (!ai.reply || ai.error) {
+      console.warn(
+        '[POST /api/chat] empty_or_ai_error:',
+        `session=${sessionId.slice(0, 8)}`,
+        `reply_len=${(ai.reply ?? '').length}`,
+        `error=${ai.error ?? 'null'}`,
+        `mode=${ai.mode ?? 'unknown'}`,
+        `provider=${ai.provider ?? 'unknown'}`,
+      )
+    }
 
     await insertMessage(
       sessionId,

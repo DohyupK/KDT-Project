@@ -175,6 +175,25 @@ class ChatResponse(BaseModel):
     error: str | None = None
 
 
+class KnowledgeAnalyzeRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Knowledge library materials + instruction")
+    llm_mode: str | None = Field(
+        default="auto",
+        description='"auto" or a registered credential id from /security vault.',
+    )
+    llm_credentials: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Decrypted credentials from Express (never stored in ai-service).",
+    )
+
+
+class KnowledgeAnalyzeResponse(BaseModel):
+    reply: str
+    mode: str = Field(description="'llm' | 'error'")
+    provider: str | None = None
+    error: str | None = None
+
+
 class SecurityChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Security-tab user text")
     thread_id: str | None = Field(

@@ -1,8 +1,5 @@
 /**
  * Align handover_history to DB/schema.sql:
- * - handover_content (not situation)
- * - created_at = registration, archived_at = completion (last col)
- * - no event_date / snapshot_json
  * Empty table → DROP + CREATE for exact column order.
  */
 import '../src/loadRootEnv.js'
@@ -10,15 +7,10 @@ import { query } from '../src/db/connection.js'
 
 const EXPECTED = [
   'history_id',
-  'issue_id',
-  'lot_id',
-  'risk_level',
   'handover_content',
   'action',
-  'cause',
   'handover_from',
   'handover_to',
-  'manager',
   'assignee_user_id',
   'category',
   'created_at',
@@ -28,30 +20,17 @@ const EXPECTED = [
 const CREATE_SQL = `
 CREATE TABLE handover_history (
   history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  issue_id          VARCHAR(32)  NOT NULL,
-  lot_id            VARCHAR(64)  NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL,
   handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
   action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
-  cause             VARCHAR(255) NULL,
   handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← users.name',
   handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
-  manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
   category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
   archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
-  CONSTRAINT fk_handover_issue
-    FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
-    ON DELETE RESTRICT,
-  CONSTRAINT fk_handover_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(id)
-    ON DELETE RESTRICT,
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
-  INDEX idx_handover_issue (issue_id),
-  INDEX idx_handover_lot (lot_id),
   INDEX idx_handover_created (created_at),
   INDEX idx_handover_action (action(32))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -116,10 +95,6 @@ async function alterInPlace() {
        CHANGE COLUMN archived_at created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각'`,
     )
     console.log('RENAMED archived_at → created_at')
-  } else if (cols.has('created_at')) {
-    console.log('SKIP created_at already present')
-  } else {
-    throw new Error('Neither archived_at nor created_at found')
   }
 
   cols = await columnSet()
@@ -129,26 +104,47 @@ async function alterInPlace() {
        CHANGE COLUMN situation handover_content VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)'`,
     )
     console.log('RENAMED situation → handover_content')
-  } else if (cols.has('handover_content')) {
-    console.log('SKIP handover_content already present')
-  } else {
-    throw new Error('Neither situation nor handover_content found')
   }
 
-  // Leftovers when both old+new coexist (partial migrate / restore).
-  for (const col of ['situation', 'event_date', 'snapshot_json'] as const) {
-    cols = await columnSet()
-    if (cols.has(col)) {
-      await query(`ALTER TABLE handover_history DROP COLUMN \`${col}\``)
-      console.log('DROPPED', col)
-    } else {
-      console.log('SKIP_DROP', col)
+  // Drop FKs before dropping referencing columns
+  for (const fk of ['fk_handover_lot', 'fk_handover_issue'] as const) {
+    const fks = await query<{ CONSTRAINT_NAME: string }[]>(
+      `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+         AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = ?`,
+      [fk],
+    )
+    if (fks.length) {
+      await query(`ALTER TABLE handover_history DROP FOREIGN KEY ${fk}`)
+      console.log('DROPPED_FK', fk)
     }
   }
 
   if (await indexExists('idx_handover_date')) {
     await query('ALTER TABLE handover_history DROP INDEX idx_handover_date')
-    console.log('DROPPED_INDEX idx_handover_date')
+  }
+  if (await indexExists('idx_handover_lot')) {
+    await query('ALTER TABLE handover_history DROP INDEX idx_handover_lot')
+  }
+  if (await indexExists('idx_handover_issue')) {
+    await query('ALTER TABLE handover_history DROP INDEX idx_handover_issue')
+  }
+
+  for (const col of [
+    'situation',
+    'event_date',
+    'snapshot_json',
+    'lot_id',
+    'risk_level',
+    'cause',
+    'manager',
+    'issue_id',
+  ] as const) {
+    cols = await columnSet()
+    if (cols.has(col)) {
+      await query(`ALTER TABLE handover_history DROP COLUMN \`${col}\``)
+      console.log('DROPPED', col)
+    }
   }
 
   cols = await columnSet()
@@ -157,30 +153,21 @@ async function alterInPlace() {
       `ALTER TABLE handover_history
        ADD COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
     )
-    console.log('ADDED archived_at (completion)')
   } else {
-    // Force last column after created_at.
     await query(
       `ALTER TABLE handover_history
        MODIFY COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
     )
-    console.log('MOVED archived_at AFTER created_at')
   }
 
-  const backfill = await query<unknown>(
+  await query(
     `UPDATE handover_history
      SET archived_at = created_at
      WHERE action = '완료' AND archived_at IS NULL`,
   )
-  const affected =
-    backfill && typeof backfill === 'object' && 'affectedRows' in backfill
-      ? Number((backfill as { affectedRows: number }).affectedRows)
-      : backfill
-  console.log('BACKFILL_COMPLETED_ARCHIVED_AT', { affectedRows: affected })
 
   if (!(await indexExists('idx_handover_created'))) {
     await query('ALTER TABLE handover_history ADD INDEX idx_handover_created (created_at)')
-    console.log('ADDED_INDEX idx_handover_created')
   }
 }
 

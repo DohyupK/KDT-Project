@@ -62,7 +62,7 @@ export const NOTIFICATION_TYPE_SPEC: Record<HeaderNotificationType, Notification
   handover_pending: {
     priority: 'P1',
     titleTemplate: '인수인계 대기',
-    messageTemplate: '{lotId} {handoverContent}',
+    messageTemplate: '{handoverContent}',
     defaultHref: '/knowledge',
     futureApiSource: 'GET /api/knowledge/handover-history?status=pending',
   },

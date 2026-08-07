@@ -66,6 +66,8 @@ from app.schemas import (
     ChatThreadListResponse,
     ChatThreadMessagesResponse,
     HealthResponse,
+    KnowledgeAnalyzeRequest,
+    KnowledgeAnalyzeResponse,
     PredictRequest,
     PredictResponse,
     ResidualResponse,
@@ -410,6 +412,37 @@ def chat_endpoint(
     )
 
 
+@app.post("/knowledge-analyze", response_model=KnowledgeAnalyzeResponse)
+def knowledge_analyze_endpoint(body: KnowledgeAnalyzeRequest) -> KnowledgeAnalyzeResponse:
+    """
+    Knowledge library summarize — no /chat graph, SYSTEM_COMPOSE, predict, RAG, or history.
+    Uses registered API LLM credentials from Express only.
+    """
+    from agent.api_llm.knowledge_compose import compose_knowledge
+
+    reply, provider, err = compose_knowledge(
+        body.message,
+        llm_mode=body.llm_mode,
+        llm_credentials=body.llm_credentials,
+    )
+    if not reply:
+        logging.getLogger(__name__).warning(
+            "[knowledge-analyze] empty_or_error: %s", err or "unknown"
+        )
+        return KnowledgeAnalyzeResponse(
+            reply="",
+            mode="error",
+            provider=provider,
+            error=err or "LLM 응답이 비어 있습니다.",
+        )
+    return KnowledgeAnalyzeResponse(
+        reply=reply,
+        mode="llm",
+        provider=provider or "llm",
+        error=err,
+    )
+
+
 @app.post("/security-chat", response_model=SecurityChatResponse)
 def security_chat_endpoint(
     body: SecurityChatRequest,
@@ -541,6 +574,7 @@ def root() -> dict[str, str]:
         "predict_capacity": "POST /predict-capacity",
         "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
+        "knowledge_analyze": "POST /knowledge-analyze",
         "security_chat": "POST /security-chat",
         "security_chat_stream": "POST /security-chat/stream",
     }

@@ -85,30 +85,17 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE TABLE IF NOT EXISTS handover_history (
   history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  issue_id          VARCHAR(32)  NOT NULL,
-  lot_id            VARCHAR(64)  NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL,
   handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
   action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
-  cause             VARCHAR(255) NULL,
   handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← users.name',
   handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
-  manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
   category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
   archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
-  CONSTRAINT fk_handover_issue
-    FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
-    ON DELETE RESTRICT,
-  CONSTRAINT fk_handover_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(id)
-    ON DELETE RESTRICT,
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
-  INDEX idx_handover_issue (issue_id),
-  INDEX idx_handover_lot (lot_id),
   INDEX idx_handover_created (created_at),
   INDEX idx_handover_action (action(32))
 );
@@ -171,3 +158,16 @@ CREATE TABLE IF NOT EXISTS inquiries (
   INDEX idx_inquiries_created (created_at),
   INDEX idx_inquiries_visibility (visibility)
 );
+
+-- Knowledge AI custom analysis answers only (prompt/docs are not persisted).
+CREATE TABLE IF NOT EXISTS AI_Library_analysis (
+  id                BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id           VARCHAR(50)  NOT NULL,
+  name              VARCHAR(50)  NOT NULL,
+  analysis_content  TEXT         NOT NULL,
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ai_library_analysis_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+  INDEX idx_ai_library_analysis_user_created (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

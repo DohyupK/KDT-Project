@@ -157,12 +157,11 @@ interface HandoverNote {
   category: '특이사항' | '전달사항' | '주의사항';
   content: string;
   createdAt: string;
-  issueId?: string;
 }
 
 interface HandoverNoteSectionProps {
   notes: HandoverNote[];
-  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => void | Promise<void>;
+  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt'>) => void | Promise<void>;
   onRemove: (id: number) => void;
   onClose: () => void;
 }
@@ -1499,11 +1498,10 @@ function mapHandoverItemToNote(item: HandoverHistoryItem): HandoverNote {
       : '특이사항';
   return {
     id: item.historyId,
-    author: item.handoverFrom || item.manager || '',
+    author: item.handoverFrom || '',
     category,
     content: item.handoverContent,
     createdAt: item.createdAt || item.archivedAt || '',
-    issueId: item.issueId,
   };
 }
 
@@ -2987,7 +2985,7 @@ export default function IssuePage() {
     setSaveMessage('');
   };
 
-  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt' | 'issueId'>) => {
+  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt'>) => {
     try {
       await issueApi.createHandover({
         category: note.category,
@@ -3222,13 +3220,6 @@ ${issues
     if (!selectedIssue || !managementForm.completed || isSaving) return;
 
     const issueId = selectedIssue.id;
-    const loginName = getLoggedInUserName();
-    const handoverFrom =
-      handoverNotes
-        .map((n) => n.author.trim())
-        .find((name) => name && name !== UNAUTH_USER_LABEL) ||
-      (loginName !== UNAUTH_USER_LABEL ? loginName : '');
-    const handoverTo = loginName !== UNAUTH_USER_LABEL ? loginName : '';
 
     setIsSaving(true);
     try {
@@ -3236,8 +3227,6 @@ ${issues
         status: '완료',
         actionContent: managementForm.action.trim() || null,
         completed: true,
-        handoverFrom: handoverFrom || null,
-        handoverTo: handoverTo || null,
       });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(

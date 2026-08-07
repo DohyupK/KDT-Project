@@ -72,28 +72,24 @@
 
 ## 5. `handover_history`
 
-**라이브 컬럼:** `history_id`, `issue_id`, `lot_id`, `risk_level`, `handover_content`, `action`, `cause`, `handover_from`, `handover_to`, `manager`, `assignee_user_id`, `category`, `created_at`, `archived_at`
+**라이브 컬럼:** `history_id`, `handover_content`, `action`, `handover_from`, `handover_to`, `assignee_user_id`, `category`, `created_at`, `archived_at`
 
 | 파라미터 | 어디에 적혀 있나 | FE DTO / 페이지 |
 |----------|------------------|-----------------|
 | `history_id` | `issue.service.ts` SELECT/INSERT | `historyId` · `/issue`, `/knowledge` |
-| `issue_id` | INSERT; SELECT; UPDATE by issue; migrate | `issueId` |
-| `lot_id` | INSERT / SELECT | `lotId` |
-| `risk_level` | INSERT; SELECT | `riskLevel` |
 | `handover_content` | INSERT (본문); SELECT | `handoverContent` |
 | `action` | UPDATE `'완료'`; 목록 필터 pending\|completed | `action` |
-| `cause` | SELECT; INSERT NULL | `cause` |
 | `handover_from` | INSERT/UPDATE | `handoverFrom` |
 | `handover_to` | UPDATE/INSERT | `handoverTo` |
-| `manager` | INSERT/UPDATE | `manager` |
 | `assignee_user_id` | INSERT | DTO 미포함 |
 | `category` | INSERT/SELECT | `category` |
 | `created_at` | DEFAULT NOW on INSERT; SELECT | `createdAt` |
 | `archived_at` | 완료 시 NOW(); SELECT | `archivedAt` (Knowledge 날짜+시간) |
 
-> 2026-08-07: 구 `archived_at`→`created_at`, `situation`→`handover_content`, `event_date`→신 `archived_at`(완료). `snapshot_json` DROP.
+> 2026-08-07: 구 `archived_at`→`created_at`, `situation`→`handover_content`, `event_date`→신 `archived_at`(완료). `snapshot_json` DROP.  
+> 2026-08-08: DROP `lot_id`·`risk_level`·`cause`·`manager`·`issue_id` — `issues`와 독립.
 
-**API:** `POST/GET/PATCH /api/knowledge/handover*` · Issue 완료 시 `PUT /api/issues/:id` 연동 UPDATE.  
+**API:** `POST/GET/PATCH /api/knowledge/handover*` (이슈 PUT과 handover 교차 갱신 없음).  
 **FE:** `frontend/src/api/issueApi.ts` · `/issue`, `/knowledge`.
 
 ---

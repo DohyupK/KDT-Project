@@ -423,6 +423,8 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
 
     const inFilter = idFilter == null || idFilter.has(row.lot_id)
     if (!inFilter) continue
+    // Handover placeholder lot — not process data; never write analysis_lots.
+    if (row.lot_id === 'LOT-SYS-HANDOVER') continue
     if (considered < offset) {
       considered++
       continue

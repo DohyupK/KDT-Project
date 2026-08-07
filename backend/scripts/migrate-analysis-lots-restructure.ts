@@ -53,6 +53,7 @@ async function main() {
     'scored_at',
     'updated_at',
     'defect_prob',
+    'spc_chart_json', // not in schema.sql — drop if present
   ]) {
     const now = await columnNames()
     if (now.has(col)) {
