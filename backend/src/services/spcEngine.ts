@@ -19,6 +19,9 @@ export type SpcParamKey = (typeof SPC_PARAM_KEYS)[number]
 
 export type SpcParamStatus = '이탈' | '주의' | '안정'
 
+/** Lot-level SPC label stored in judgment_lots.spc / analysis_lots.spc_status */
+export type SpcLotStatus = '이탈' | '주의' | '안정' | '-'
+
 export type SpcLimit = {
   label: string
   LCL_I: number
@@ -28,6 +31,11 @@ export type SpcLimit = {
   UCL_MR: number
 }
 
+export type NelsonRuleHit = {
+  rule: number
+  description: string
+}
+
 export type SpcParamEvaluation = {
   key: SpcParamKey
   label: string
@@ -35,11 +43,12 @@ export type SpcParamEvaluation = {
   value: number
   ooc: boolean
   nelson: boolean
+  violatedRules: NelsonRuleHit[]
 }
 
 export type SpcLotEvaluation = {
-  /** LOT cell label: 이탈 | 주의 | 안정 | 이탈, 주의 */
-  status: string
+  /** LOT cell: 이탈 | 주의 | 안정 (이탈 wins over 주의) */
+  status: Exclude<SpcLotStatus, '-'>
   params: SpcParamEvaluation[]
   oocKeys: SpcParamKey[]
   cautionKeys: SpcParamKey[]
@@ -50,6 +59,17 @@ type LimitsFile = {
 }
 
 const D2 = 1.128
+
+export const NELSON_RULE_DESCRIPTIONS: Record<number, string> = {
+  1: 'UCL 초과 또는 LCL 미만',
+  2: '중심선(CL) 같은 쪽에 연속 9점',
+  3: '연속 6점 증가 또는 감소',
+  4: '연속 14점이 상승·하강 교대',
+  5: '연속 3점 중 2점 이상이 같은 쪽에서 2σ 초과',
+  6: '연속 5점 중 4점 이상이 같은 쪽에서 1σ 초과',
+  7: '연속 15점이 CL의 1σ 이내',
+  8: '연속 8점이 모두 1σ 밖에 있음(양쪽 허용)',
+}
 
 let cachedLimits: Record<SpcParamKey, SpcLimit> | null = null
 
@@ -79,6 +99,10 @@ export function loadPhase1Limits(): Record<SpcParamKey, SpcLimit> {
   return out
 }
 
+export function clearLimitsCache() {
+  cachedLimits = null
+}
+
 export function isProcessComplete(
   values: Partial<Record<SpcParamKey, number | null | undefined>>,
 ): boolean {
@@ -96,96 +120,100 @@ function isOoc(value: number, lim: SpcLimit): boolean {
   return value < lim.LCL_I || value > lim.UCL_I
 }
 
-/** Nelson rules 2–8 on I-chart (Rule 1 = OOC handled separately). */
-export function violatesNelson2to8(series: number[], lim: SpcLimit): boolean {
+/** Nelson rules 2–8 on I-chart at the **current (last) observation** only. */
+export function findNelson2to8Violations(series: number[], lim: SpcLimit): NelsonRuleHit[] {
+  const hits: NelsonRuleHit[] = []
   const n = series.length
-  if (n < 3) return false
+  if (n < 3) return hits
   const cl = lim.CL_I
   const sigma = sigmaFromMr(lim.CL_MR)
-  if (!(sigma > 0)) return false
+  if (!(sigma > 0)) return hits
 
   const side = (v: number) => (v > cl ? 1 : v < cl ? -1 : 0)
   const beyond = (v: number, k: number) => Math.abs(v - cl) > k * sigma
+  const add = (rule: number) => {
+    if (!hits.some((h) => h.rule === rule)) {
+      hits.push({ rule, description: NELSON_RULE_DESCRIPTIONS[rule] })
+    }
+  }
+  const tail = (len: number) => series.slice(n - len, n)
 
-  // Rule 2: 9 consecutive on same side of CL
+  // Rule 2: last 9 consecutive on same side of CL
   if (n >= 9) {
-    for (let i = 8; i < n; i++) {
-      const window = series.slice(i - 8, i + 1)
-      const s0 = side(window[0])
-      if (s0 !== 0 && window.every((v) => side(v) === s0)) return true
-    }
+    const window = tail(9)
+    const s0 = side(window[0])
+    if (s0 !== 0 && window.every((v) => side(v) === s0)) add(2)
   }
 
-  // Rule 3: 6 consecutive increasing or decreasing
+  // Rule 3: last 6 consecutive increasing or decreasing
   if (n >= 6) {
-    for (let i = 5; i < n; i++) {
-      const w = series.slice(i - 5, i + 1)
-      let up = true
-      let down = true
-      for (let j = 1; j < w.length; j++) {
-        if (!(w[j] > w[j - 1])) up = false
-        if (!(w[j] < w[j - 1])) down = false
-      }
-      if (up || down) return true
+    const w = tail(6)
+    let up = true
+    let down = true
+    for (let j = 1; j < w.length; j++) {
+      if (!(w[j] > w[j - 1])) up = false
+      if (!(w[j] < w[j - 1])) down = false
     }
+    if (up || down) add(3)
   }
 
-  // Rule 4: 14 alternating up/down
+  // Rule 4: last 14 alternating up/down
   if (n >= 14) {
-    for (let i = 13; i < n; i++) {
-      const w = series.slice(i - 13, i + 1)
-      let alt = true
-      for (let j = 2; j < w.length; j++) {
-        const prev = w[j - 1] - w[j - 2]
-        const cur = w[j] - w[j - 1]
-        if (prev === 0 || cur === 0 || Math.sign(prev) === Math.sign(cur)) {
-          alt = false
-          break
-        }
+    const w = tail(14)
+    let alt = true
+    for (let j = 2; j < w.length; j++) {
+      const prev = w[j - 1] - w[j - 2]
+      const cur = w[j] - w[j - 1]
+      if (prev === 0 || cur === 0 || Math.sign(prev) === Math.sign(cur)) {
+        alt = false
+        break
       }
-      if (alt) return true
     }
+    if (alt) add(4)
   }
 
-  // Rule 5: 2 of 3 consecutive beyond 2σ same side
+  // Rule 5: last 3 points — 2 of 3 beyond 2σ same side
   if (n >= 3) {
-    for (let i = 2; i < n; i++) {
-      const w = series.slice(i - 2, i + 1)
-      for (const s of [1, -1] as const) {
-        const hits = w.filter((v) => side(v) === s && beyond(v, 2)).length
-        if (hits >= 2) return true
+    const w = tail(3)
+    for (const s of [1, -1] as const) {
+      const c = w.filter((v) => side(v) === s && beyond(v, 2)).length
+      if (c >= 2) {
+        add(5)
+        break
       }
     }
   }
 
-  // Rule 6: 4 of 5 consecutive beyond 1σ same side
+  // Rule 6: last 5 points — 4 of 5 beyond 1σ same side
   if (n >= 5) {
-    for (let i = 4; i < n; i++) {
-      const w = series.slice(i - 4, i + 1)
-      for (const s of [1, -1] as const) {
-        const hits = w.filter((v) => side(v) === s && beyond(v, 1)).length
-        if (hits >= 4) return true
+    const w = tail(5)
+    for (const s of [1, -1] as const) {
+      const c = w.filter((v) => side(v) === s && beyond(v, 1)).length
+      if (c >= 4) {
+        add(6)
+        break
       }
     }
   }
 
-  // Rule 7: 15 consecutive within 1σ of CL
+  // Rule 7: last 15 consecutive within 1σ of CL
   if (n >= 15) {
-    for (let i = 14; i < n; i++) {
-      const w = series.slice(i - 14, i + 1)
-      if (w.every((v) => !beyond(v, 1))) return true
-    }
+    const w = tail(15)
+    if (w.every((v) => !beyond(v, 1))) add(7)
   }
 
-  // Rule 8: 8 consecutive outside 1σ (both sides ok) with none inside 1σ
+  // Rule 8: last 8 consecutive outside 1σ
   if (n >= 8) {
-    for (let i = 7; i < n; i++) {
-      const w = series.slice(i - 7, i + 1)
-      if (w.every((v) => beyond(v, 1))) return true
-    }
+    const w = tail(8)
+    if (w.every((v) => beyond(v, 1))) add(8)
   }
 
-  return false
+  return hits
+}
+
+/** @deprecated use findNelson2to8Violations */
+export function violatesNelson2to8(series: number[], lim: SpcLimit): boolean {
+  return findNelson2to8Violations(series, lim).length > 0
 }
 
 /**
@@ -212,11 +240,16 @@ export function evaluateLotSpc(
         value: NaN,
         ooc: false,
         nelson: false,
+        violatedRules: [],
       })
       continue
     }
     const ooc = isOoc(value, lim)
-    const nelson = !ooc && violatesNelson2to8(series, lim)
+    const nelsonHits = ooc ? [] : findNelson2to8Violations(series, lim)
+    const violatedRules: NelsonRuleHit[] = ooc
+      ? [{ rule: 1, description: NELSON_RULE_DESCRIPTIONS[1] }]
+      : nelsonHits
+    const nelson = nelsonHits.length > 0
     let status: SpcParamStatus = '안정'
     if (ooc) {
       status = '이탈'
@@ -225,20 +258,30 @@ export function evaluateLotSpc(
       status = '주의'
       cautionKeys.push(key)
     }
-    params.push({ key, label: lim.label, status, value, ooc, nelson })
+    params.push({ key, label: lim.label, status, value, ooc, nelson, violatedRules })
   }
 
-  let status = '안정'
-  if (oocKeys.length > 0 && cautionKeys.length > 0) status = '이탈, 주의'
-  else if (oocKeys.length > 0) status = '이탈'
+  // Lot label: 이탈 > 주의 > 안정 (never combine "이탈, 주의")
+  let status: Exclude<SpcLotStatus, '-'> = '안정'
+  if (oocKeys.length > 0) status = '이탈'
   else if (cautionKeys.length > 0) status = '주의'
 
   return { status, params, oocKeys, cautionKeys }
 }
 
 export function spcStatusToRiskTier(spcStatus: string | null | undefined): '심각' | '주의' | '안정' {
-  if (!spcStatus || spcStatus === '안정') return '안정'
+  if (!spcStatus || spcStatus === '안정' || spcStatus === '-') return '안정'
   if (spcStatus.includes('이탈')) return '심각'
   if (spcStatus.includes('주의')) return '주의'
   return '안정'
+}
+
+/** Normalize stored/API SPC labels to 이탈|주의|안정|- */
+export function normalizeSpcStatus(raw: string | null | undefined): SpcLotStatus {
+  const v = (raw || '').trim()
+  if (!v || v === '-') return '-'
+  if (v.includes('이탈')) return '이탈'
+  if (v.includes('주의')) return '주의'
+  if (v === '안정') return '안정'
+  return '-'
 }
