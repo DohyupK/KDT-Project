@@ -68,14 +68,4 @@ export const MOCK_HEADER_NOTIFICATIONS: HeaderNotification[] = [
     unread: false,
     href: NOTIFICATION_TYPE_SPEC.inquiry_unanswered.defaultHref,
   },
-  {
-    id: 'mock-scoring-1',
-    type: 'scoring_delay',
-    priority: NOTIFICATION_TYPE_SPEC.scoring_delay.priority,
-    time: '2시간 전',
-    title: NOTIFICATION_TYPE_SPEC.scoring_delay.titleTemplate,
-    message: '최근 생산 LOT 5건 미채점',
-    unread: false,
-    href: NOTIFICATION_TYPE_SPEC.scoring_delay.defaultHref,
-  },
 ]

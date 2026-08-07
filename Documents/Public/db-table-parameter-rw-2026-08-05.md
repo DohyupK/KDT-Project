@@ -113,17 +113,18 @@ DROP: [`DB/drop_orphan_spc_objects.sql`](../../DB/drop_orphan_spc_objects.sql).
 | `issue_id` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 등록 |
 | `lot_id` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
 | `risk_level` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
-| `situation` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
+| `handover_content` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
 | `action` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 완료 |
 | `cause` | R | — | — | `/issue`, `/knowledge` | — (항상 NULL급) |
 | `handover_from` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 등록·완료 |
 | `handover_to` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 완료·UPDATE |
 | `manager` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 등록 |
 | `assignee_user_id` | W | — | — | — (DTO 미사용) | `/issue` 등록 |
-| `event_date` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
 | `category` | R · W | (migrate) | — | `/issue`, `/knowledge` | `/issue` 등록 |
-| `snapshot_json` | R · W | — | — | `/issue`, `/knowledge` | `/issue` 등록 |
-| `archived_at` | R | — | — | `/issue`, `/knowledge` | DB 기본값 |
+| `created_at` | R | — | — | `/issue`, `/knowledge` | DB 기본값 (등록) |
+| `archived_at` | R · W | — | — | `/issue`, `/knowledge` | 완료 시 NOW() |
+
+> 2026-08-07: `situation`→`handover_content`, 구 `archived_at`→`created_at`, `event_date` DROP 후 신 `archived_at`(완료). `snapshot_json` DROP.
 
 ---
 
@@ -199,18 +200,15 @@ DROP: [`DB/drop_orphan_spc_objects.sql`](../../DB/drop_orphan_spc_objects.sql).
 | `tank_pressure` | R · W | R · W | ※ | `/dashboard` | score · import |
 | `operator_id` | R · W | R · W | ※ | `/dashboard` | score · import · reload:lots-qc |
 | `quality_defect` | R (별칭 0) | — | ※ | `/dashboard` | — (판정은 `judgment_lots`) |
-| `defect_prob` | R · W | R · W | — | `/dashboard` | score (`analysis_lots`) |
+| `probability` | R · W | R · W | — | `/dashboard` | score (`analysis_lots`) · judgment NULL-fill |
 | `residual_lithium` | R · W | R · W | — | `/dashboard` | score → `judgment_lots.residual_li` |
 | `residual_margin` | — | — | — | — (계산값만 API) | — |
 | `spc_status` | R · W | R · W | — | `/dashboard` | score (`analysis_lots`) |
 | `risk_level` | R · W | R · W | ※ | `/dashboard`, `/issue` | score · `/issue` |
 | `risk_reason` | R · W | R · W | ※ | `/dashboard`, `/issue` | score |
-| `clf_model_version` | — | — | — | — | — |
-| `residual_model_version` | — | — | — | — | — |
-| `spc_limit_version` | — | — | — | — | — |
-| `scored_at` | R · W | R · W | — | `/dashboard` | score (`analysis_lots`) |
 | `created_at` | — | — | — | — | — |
-| `updated_at` | — | — | — | — | — |
+
+> 2026-08-07: `defect_prob`→`probability`. DROP: `clf/residual/spc *_model_version`, `scored_at`, `updated_at` (+ daily `dataStatus` UI). 마이그레이션: `DB/alter_analysis_lots_restructure.sql`.
 
 ※ 피더는 기본 `SPC_LOT` / `SPC_LOT_results` (§12–13). 운영 `lots`와 별개.
 

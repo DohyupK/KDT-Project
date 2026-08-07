@@ -14,7 +14,6 @@ export type HeaderNotificationType =
   | 'pending_issue'
   | 'handover_pending'
   | 'inquiry_unanswered'
-  | 'scoring_delay'
 
 export type HeaderNotification = {
   id: string
@@ -63,7 +62,7 @@ export const NOTIFICATION_TYPE_SPEC: Record<HeaderNotificationType, Notification
   handover_pending: {
     priority: 'P1',
     titleTemplate: '인수인계 대기',
-    messageTemplate: '{lotId} {situation}',
+    messageTemplate: '{lotId} {handoverContent}',
     defaultHref: '/knowledge',
     futureApiSource: 'GET /api/knowledge/handover-history?status=pending',
   },
@@ -73,12 +72,5 @@ export const NOTIFICATION_TYPE_SPEC: Record<HeaderNotificationType, Notification
     messageTemplate: '{inquiryCode} {category} 문의 미처리',
     defaultHref: '/inquiry',
     futureApiSource: 'GET /api/inquiries',
-  },
-  scoring_delay: {
-    priority: 'P2',
-    titleTemplate: 'LOT 채점 지연',
-    messageTemplate: '최근 생산 LOT {count}건 미채점',
-    defaultHref: '/dashboard',
-    futureApiSource: 'lots.scored_at IS NULL',
   },
 }

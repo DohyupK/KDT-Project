@@ -50,7 +50,7 @@ type LotAggRow = {
   lot_id: string
   recorded_at: Date | string
   quality_defect: number | boolean
-  defect_prob: number | null
+  probability: number | null
   residual_lithium: number | null
   spc_status: string | null
   risk_level: string
@@ -65,7 +65,6 @@ type LotAggRow = {
   humidity: number | null
   tank_pressure: number | null
   operator_id: string | null
-  scored_at: Date | string | null
 }
 
 function formatDateTime(value: Date | string | null | undefined): string {
@@ -287,10 +286,12 @@ export async function getLotRiskDetail(lotId: string) {
 
 async function getAllProductionPoints() {
   const rows = await query<LotAggRow[]>(
-    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, a.defect_prob,
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect,
+            COALESCE(j.probability, a.probability) AS probability,
             l.metal_impurity, l.sintering_temp, l.humidity
      FROM lots l
      LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
      ORDER BY l.\`timestamp\` ASC`,
   )
 
@@ -308,7 +309,7 @@ async function getAllProductionPoints() {
     bucket.production++
     if (Number(r.quality_defect) === 1) bucket.defect++
     else bucket.good++
-    if (r.defect_prob != null) bucket.probs.push(Number(r.defect_prob))
+    if (r.probability != null) bucket.probs.push(Number(r.probability))
   }
 
   return [...byDate.entries()]
@@ -408,9 +409,8 @@ export async function getProductionDaily(page = 1, pageSize = 5) {
   // Enrich FI averages for the page dates
   const dateSet = new Set(slice.map((p) => p.date))
   const rows = await query<LotAggRow[]>(
-    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, l.metal_impurity, l.sintering_temp, l.humidity, a.scored_at
+    `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect, l.metal_impurity, l.sintering_temp, l.humidity
      FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
      ORDER BY l.\`timestamp\` ASC`,
   )
   const byDate = new Map<string, LotAggRow[]>()
@@ -425,15 +425,6 @@ export async function getProductionDaily(page = 1, pageSize = 5) {
   const items = slice.map((p) => {
     const dayRows = byDate.get(p.date) || []
     const fi = domainAverages(dayRows)
-    const scored = dayRows.filter((r) => r.scored_at != null).length
-    const dataStatus =
-      dayRows.length === 0
-        ? '데이터 없음'
-        : scored === dayRows.length
-          ? '집계 완료'
-          : scored > 0
-            ? '부분 채점'
-            : '수집 중'
 
     return {
       date: p.date,
@@ -445,7 +436,6 @@ export async function getProductionDaily(page = 1, pageSize = 5) {
       tempDevFrom800: fi.temp_dev_from_800,
       humidity: fi.humidity,
       tempXHumidity: fi.temp_x_humidity,
-      dataStatus,
     }
   })
 
@@ -466,7 +456,9 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
   const rows = await query<LotAggRow[]>(
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
-            0 AS quality_defect, a.defect_prob, j.residual_li AS residual_lithium, a.spc_status, a.risk_level, a.risk_reason
+            0 AS quality_defect,
+            COALESCE(j.probability, a.probability) AS probability,
+            j.residual_li AS residual_lithium, a.spc_status, a.risk_level, a.risk_reason
      FROM lots l
      LEFT JOIN analysis_lots a ON a.lot_id = l.id
      LEFT JOIN judgment_lots j ON j.lot_id = l.id
@@ -489,7 +481,7 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
     'tank_pressure',
     'operator_id',
     'quality_defect',
-    'defect_prob',
+    'probability',
     'residual_lithium',
     'residual_margin',
     'spc_status',
@@ -514,7 +506,7 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
       r.tank_pressure,
       r.operator_id,
       Number(r.quality_defect) === 1 ? 1 : 0,
-      r.defect_prob,
+      r.probability,
       residual,
       margin,
       r.spc_status,

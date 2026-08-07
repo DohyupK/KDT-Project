@@ -108,8 +108,6 @@ export const createHandover = asyncHandler(async (req, res) => {
     {
       category: req.body?.category,
       content: req.body?.content,
-      shiftStart: req.body?.shiftStart,
-      shiftEnd: req.body?.shiftEnd,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )

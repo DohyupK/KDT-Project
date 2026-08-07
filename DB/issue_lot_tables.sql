@@ -20,22 +20,16 @@ CREATE TABLE IF NOT EXISTS lots (
 
 CREATE TABLE IF NOT EXISTS analysis_lots (
   lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
-  defect_prob              DOUBLE       NULL COMMENT '불량확률(잠정/채점)',
+  probability              DOUBLE       NULL COMMENT '불량확률(잠정/채점) 0~1',
   spc_status               VARCHAR(32)  NULL COMMENT '이탈|주의|안정|이탈, 주의',
   risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정'
     COMMENT '심각|주의|안정',
   risk_reason              VARCHAR(255) NULL,
-  clf_model_version        VARCHAR(64)  NULL,
-  residual_model_version   VARCHAR(64)  NULL,
-  spc_limit_version        VARCHAR(64)  NULL,
-  scored_at                DATETIME     NULL,
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_analysis_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE,
-  INDEX idx_analysis_risk (risk_level),
-  INDEX idx_analysis_scored (scored_at)
+  INDEX idx_analysis_risk (risk_level)
 );
 
 CREATE TABLE IF NOT EXISTS judgment_lots (
@@ -74,17 +68,16 @@ CREATE TABLE IF NOT EXISTS handover_history (
   issue_id          VARCHAR(32)  NOT NULL,
   lot_id            VARCHAR(64)  NOT NULL,
   risk_level        VARCHAR(10)  NOT NULL,
-  situation         VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
+  handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
   action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
   cause             VARCHAR(255) NULL,
   handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← users.name',
   handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
   manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
-  event_date        DATE         NOT NULL COMMENT '날짜 ← issues.occurred_at 일자',
   category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
-  snapshot_json     JSON         NULL,
-  archived_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
+  archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
   CONSTRAINT fk_handover_issue
     FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
     ON DELETE RESTRICT,
@@ -96,6 +89,6 @@ CREATE TABLE IF NOT EXISTS handover_history (
     ON DELETE SET NULL,
   INDEX idx_handover_issue (issue_id),
   INDEX idx_handover_lot (lot_id),
-  INDEX idx_handover_date (event_date),
+  INDEX idx_handover_created (created_at),
   INDEX idx_handover_action (action(32))
 );

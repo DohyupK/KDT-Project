@@ -1,5 +1,5 @@
 /**
- * ADD judgment_lots.probability + backfill from analysis_lots.defect_prob.
+ * ADD judgment_lots.probability + backfill from analysis_lots.probability.
  */
 import '../src/loadRootEnv.js'
 import { query } from '../src/db/connection.js'
@@ -14,8 +14,8 @@ async function main() {
   const res = await query<unknown>(
     `UPDATE judgment_lots j
      INNER JOIN analysis_lots a ON a.lot_id = j.lot_id
-     SET j.probability = a.defect_prob
-     WHERE j.probability IS NULL AND a.defect_prob IS NOT NULL`,
+     SET j.probability = a.probability
+     WHERE j.probability IS NULL AND a.probability IS NOT NULL`,
   )
   const affected =
     res && typeof res === 'object' && 'affectedRows' in res

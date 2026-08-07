@@ -1,26 +1,27 @@
 # Issue / LOT / 과거 자료 API (백엔드)
 
-최종 갱신: 2026-08-05
+최종 갱신: 2026-08-07
 
 ## 규칙
 
 - 이슈 목록: `status <> 완료` AND `risk_level IN (높음, 중간)` — **낮음 제외**
 - 목록 DTO에 `actionContent` 없음 (상세·PUT에만)
 - **완료 → 라이브러리 「과거 자료」** (`issues.completed` / `completed_at`). **인수인계 이력으로 넣지 않음**
-- 인수인계(`handover_history`)·이슈 연동: **후속**
+- 인수인계(`handover_history`): `handover_content` · `created_at`(등록) · `archived_at`(완료 시 NOW) · Knowledge는 `archivedAt||createdAt` 일시 표시 · `snapshot_json` 없음
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
 - 위험 LOT Top: `GET /api/lots/risk-top` (`analysis_lots.risk_level` JOIN)
-- 채점: `lotScore.ts` + ai-service → **`analysis_lots`** (공정은 `lots`)
+- 채점: `lotScore.ts` + ai-service → **`analysis_lots`** (공정은 `lots`) · `judgment_lots.probability`는 NULL만 COALESCE
 - 목록의 `date`, `riskLevel`, `status`는 잘못된 값을 보내면 `400`을 반환
 
 ## 테이블 분리 (`lots` / `analysis_lots`)
 
 | 테이블 | 역할 |
 |--------|------|
-| `lots` | CSV명 SSOT: `id`, `timestamp`, 공정 9, `operator_id`, `residual_li` |
-| `analysis_lots` | 채점: `lot_id` **FK → `lots.id`**, `defect_prob`, `spc_status`, `risk_level`, … |
+| `lots` | CSV명 SSOT: `id`, `timestamp`, 공정 9, `operator_id` |
+| `analysis_lots` | 채점: `lot_id` **FK → `lots.id`**, `probability`, `spc_status`, `risk_level`, `risk_reason`, `created_at` |
 
-- API camelCase는 SELECT 별칭 유지 (`id AS lot_id`, `residual_li AS residual_lithium`).
+- 마이그레이션: [`DB/alter_analysis_lots_restructure.sql`](../../DB/alter_analysis_lots_restructure.sql) (`defect_prob`→`probability`, 모델버전/`scored_at`/`updated_at` DROP).
+- API camelCase는 SELECT 별칭 유지 (`id AS lot_id`, `residual_li AS residual_lithium`; 확률 API는 `defectProb` ← `COALESCE(judgment, analysis).probability`).
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 ([`allocateNextIssueId`](../../backend/src/services/issue.service.ts)).
 - `quality_defect` DB 컬럼 보류 — API는 `0 AS quality_defect`.
 - 정렬 SQL: [`DB/align_lots_csv_column_names.sql`](../../DB/align_lots_csv_column_names.sql)
@@ -92,8 +93,9 @@
 - [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql)
 - [`DB/schema.sql`](../../DB/schema.sql)
 - [`DB/migrate_lots_to_analysis_lots.sql`](../../DB/migrate_lots_to_analysis_lots.sql)
+- [`DB/alter_analysis_lots_restructure.sql`](../../DB/alter_analysis_lots_restructure.sql)
 - AWS 정리: `npm run migrate:schema-cleanup`
-- 이슈 목업 데이터: [`DB/issues_seed.sql`](../../DB/issues_seed.sql) / `npm run seed:issues`
+- 이슈 목업 데이터: [`DB/issues_seed.sql`](../../DB/issues_seed.sql) / `npm run seed:issues` (`analysis_lots` 미시드)
 
 ## FE
 

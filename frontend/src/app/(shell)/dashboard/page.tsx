@@ -57,7 +57,6 @@ type ProductionDailyRow = {
   tempDevFrom800: number | null;
   humidity: number | null;
   tempXHumidity: number | null;
-  dataStatus: string;
 };
 
 type SpcMetric = {
@@ -162,7 +161,6 @@ type DailyDetailRow = {
   avgCapacity?: number;
   avgMetalImpurity?: number;
   avgSinteringTemp?: number;
-  status: string;
 };
 
 type LiveConnectionStatus = 'connected' | 'updating' | 'error';
@@ -1211,7 +1209,6 @@ export default function DashBoardPage() {
       tempDevFrom800: row.tempDevFrom800,
       humidity: row.humidity,
       tempXHumidity: row.tempXHumidity,
-      status: row.dataStatus,
     })),
     [dailyApiRows],
   );
@@ -2403,7 +2400,7 @@ export default function DashBoardPage() {
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-                <table className="w-full min-w-[1220px] border-collapse text-sm">
+                <table className="w-full min-w-[1100px] border-collapse text-sm">
                   <thead
                     className={`text-xs font-semibold uppercase tracking-wider ${
                       isDark
@@ -2432,7 +2429,6 @@ export default function DashBoardPage() {
                       <th className="px-3 py-3 text-right">소성온도 이탈</th>
                       <th className="px-3 py-3 text-right">습도</th>
                       <th className="px-3 py-3 text-right">소성온도×습도</th>
-                      <th className="px-3 py-3 text-center">데이터 상태</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2528,19 +2524,6 @@ export default function DashBoardPage() {
                             }`}
                           >
                             {r.tempXHumidity == null ? '-' : r.tempXHumidity.toFixed(1)}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span
-                              className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                                r.status === '수집 중' || r.status === '부분 채점'
-                                  ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
-                                  : isDark
-                                    ? 'bg-slate-800 text-slate-300 ring-1 ring-slate-600'
-                                    : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
-                              }`}
-                            >
-                              {r.status}
-                            </span>
                           </td>
                         </tr>
                       );

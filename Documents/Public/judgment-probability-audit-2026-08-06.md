@@ -109,7 +109,7 @@ Cursor 도메인 체크리스트 vs DB `judgment_lots.probability` 대조.
 ### B. 판정 테이블·재채점 정책
 
 1. NULL-only만 유지할지, 재학습/`model_version` 변경 시 **probability 재기록**할지 정책 문서화.  
-2. `analysis_lots.defect_prob` ↔ `judgment_lots.probability` 주기적 드리프트 체크.  
+2. `analysis_lots.probability` ↔ `judgment_lots.probability` 주기적 드리프트 체크.  
 3. 임계값(`fillThreshold` / metadata ~0.4)과 대시보드 등급 구간 정렬.
 
 ### C. 모델·확률 품질 (재학습 승인 후)

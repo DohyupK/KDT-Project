@@ -49,18 +49,15 @@ export type HandoverHistoryItem = {
   issueId: string
   lotId: string
   riskLevel: IssueRiskLevel
-  situation: string
+  handoverContent: string
   action: string | null
   cause: string | null
   handoverFrom: string | null
   handoverTo: string | null
   manager: string | null
-  eventDate: string
-  date: string
   category: string | null
-  archivedAt: string
-  shiftStart?: string | null
-  shiftEnd?: string | null
+  createdAt: string
+  archivedAt: string | null
 }
 
 export type HandoverListStatus = 'pending' | 'completed'
@@ -68,8 +65,6 @@ export type HandoverListStatus = 'pending' | 'completed'
 export type CreateHandoverBody = {
   category: '특이사항' | '전달사항' | '주의사항'
   content: string
-  shiftStart?: string | null
-  shiftEnd?: string | null
 }
 
 export const issueApi = {

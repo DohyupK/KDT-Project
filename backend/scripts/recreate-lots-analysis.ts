@@ -21,21 +21,15 @@ CREATE TABLE lots (
 const ANALYSIS_DDL = `
 CREATE TABLE analysis_lots (
   lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
-  defect_prob              DOUBLE       NULL,
+  probability              DOUBLE       NULL,
   spc_status               VARCHAR(32)  NULL,
   risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정',
   risk_reason              VARCHAR(255) NULL,
-  clf_model_version        VARCHAR(64)  NULL,
-  residual_model_version   VARCHAR(64)  NULL,
-  spc_limit_version        VARCHAR(64)  NULL,
-  scored_at                DATETIME     NULL,
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_analysis_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE,
-  INDEX idx_analysis_risk (risk_level),
-  INDEX idx_analysis_scored (scored_at)
+  INDEX idx_analysis_risk (risk_level)
 )`
 
 async function main() {

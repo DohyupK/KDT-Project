@@ -8,7 +8,7 @@ import * as lotService from './lot.service.js'
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
   concurrency?: number
-  /** Max unscored lots to pick up per tick (analysis_lots.scored_at IS NULL). */
+  /** Max unscored lots to pick up per tick (no analysis row or probability IS NULL). */
   unscoredLimit?: number
   quiet?: boolean
 }
@@ -145,7 +145,7 @@ export async function syncSpcLotsToApp(
       `SELECT l.id
        FROM lots l
        LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       WHERE a.lot_id IS NULL OR a.scored_at IS NULL
+       WHERE a.lot_id IS NULL OR a.probability IS NULL
        ORDER BY l.\`timestamp\` ASC, l.id ASC
        LIMIT ?`,
       [unscoredLimit],

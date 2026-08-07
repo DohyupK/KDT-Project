@@ -252,7 +252,8 @@ export async function updateIssue(
        SET action = '완료',
            handover_to = COALESCE(?, handover_to),
            handover_from = COALESCE(?, handover_from),
-           manager = COALESCE(?, manager)
+           manager = COALESCE(?, manager),
+           archived_at = COALESCE(archived_at, NOW())
        WHERE issue_id = ?
          AND (action IS NULL OR TRIM(action) = '' OR action <> '완료')`,
       [handoverTo, handoverFrom, handoverFrom, issueId],
@@ -325,12 +326,14 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     {
       lot_id: string
       risk_reason: string | null
-      defect_prob: number | null
+      probability: number | null
       residual_lithium: number | null
       spc_status: string | null
     }[]
   >(
-    `SELECT l.id AS lot_id, a.risk_reason, a.defect_prob, j.residual_li AS residual_lithium, a.spc_status
+    `SELECT l.id AS lot_id, a.risk_reason,
+            COALESCE(j.probability, a.probability) AS probability,
+            j.residual_li AS residual_lithium, a.spc_status
      FROM lots l
      LEFT JOIN analysis_lots a ON a.lot_id = l.id
      LEFT JOIN judgment_lots j ON j.lot_id = l.id
@@ -351,7 +354,7 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
       ? {
           lotId: lot.lot_id,
           riskReason: lot.risk_reason,
-          defectProb: lot.defect_prob,
+          defectProb: lot.probability,
           residualLithium: lot.residual_lithium,
           spcStatus: lot.spc_status,
         }
@@ -364,18 +367,17 @@ export type HandoverHistoryItem = {
   issueId: string
   lotId: string
   riskLevel: RiskLevel
-  situation: string
+  handoverContent: string
   action: string | null
   cause: string | null
   handoverFrom: string | null
   handoverTo: string | null
   manager: string | null
-  eventDate: string
-  date: string
   category: string | null
-  archivedAt: string
-  shiftStart?: string | null
-  shiftEnd?: string | null
+  /** Registration time (DB created_at). */
+  createdAt: string
+  /** Completion time (DB archived_at); null/empty while pending. */
+  archivedAt: string | null
 }
 
 export type HandoverListStatus = 'pending' | 'completed'
@@ -428,54 +430,36 @@ type HandoverRow = {
   issue_id: string
   lot_id: string
   risk_level: string
-  situation: string
+  handover_content: string
   action: string | null
   cause: string | null
   handover_from: string | null
   handover_to: string | null
   manager: string | null
-  event_date: Date | string
   category: string | null
-  archived_at: Date | string
-  snapshot_json?: unknown
+  created_at: Date | string
+  archived_at: Date | string | null
 }
+
+const HANDOVER_SELECT = `history_id, issue_id, lot_id, risk_level, handover_content, action, cause,
+            handover_from, handover_to, manager, category, created_at, archived_at`
 
 function mapHandoverRow(r: HandoverRow): HandoverHistoryItem {
   const from = r.handover_from?.trim() || r.manager?.trim() || null
-  const eventDate = formatDate(r.event_date)
-  let shiftStart: string | null = null
-  let shiftEnd: string | null = null
-  const snap = r.snapshot_json
-  if (snap && typeof snap === 'object') {
-    const obj = snap as Record<string, unknown>
-    if (typeof obj.shiftStart === 'string') shiftStart = obj.shiftStart
-    if (typeof obj.shiftEnd === 'string') shiftEnd = obj.shiftEnd
-  } else if (typeof snap === 'string') {
-    try {
-      const obj = JSON.parse(snap) as Record<string, unknown>
-      if (typeof obj.shiftStart === 'string') shiftStart = obj.shiftStart
-      if (typeof obj.shiftEnd === 'string') shiftEnd = obj.shiftEnd
-    } catch {
-      /* ignore */
-    }
-  }
   return {
     historyId: Number(r.history_id),
     issueId: r.issue_id,
     lotId: r.lot_id,
     riskLevel: toRisk(r.risk_level),
-    situation: r.situation,
+    handoverContent: r.handover_content,
     action: r.action,
     cause: r.cause,
     handoverFrom: from,
     handoverTo: r.handover_to?.trim() || null,
     manager: from,
-    eventDate,
-    date: eventDate,
     category: r.category,
-    archivedAt: formatDateTime(r.archived_at),
-    shiftStart,
-    shiftEnd,
+    createdAt: formatDateTime(r.created_at),
+    archivedAt: r.archived_at != null ? formatDateTime(r.archived_at) : null,
   }
 }
 
@@ -486,14 +470,16 @@ export async function listHandoverHistory(
     status === 'pending'
       ? `(action IS NULL OR TRIM(action) = '' OR action <> '완료')`
       : `action = '완료'`
+  const orderBy =
+    status === 'completed'
+      ? `ORDER BY COALESCE(archived_at, created_at) DESC`
+      : `ORDER BY created_at DESC`
 
   const rows = await query<HandoverRow[]>(
-    `SELECT history_id, issue_id, lot_id, risk_level, situation, action, cause,
-            handover_from, handover_to, manager, event_date, category, archived_at,
-            snapshot_json
+    `SELECT ${HANDOVER_SELECT}
      FROM handover_history
      WHERE ${where}
-     ORDER BY archived_at DESC`,
+     ${orderBy}`,
   )
 
   const items = rows.map(mapHandoverRow)
@@ -504,8 +490,6 @@ export async function createHandoverNote(
   body: {
     category: string
     content: string
-    shiftStart?: string | null
-    shiftEnd?: string | null
   },
   actor: { userId: string; name: string },
 ): Promise<HandoverHistoryItem> {
@@ -521,19 +505,11 @@ export async function createHandoverNote(
   }
 
   const author = actor.name.trim() || actor.userId
-  const shiftStart =
-    typeof body.shiftStart === 'string' && body.shiftStart.trim()
-      ? body.shiftStart.trim()
-      : null
-  const shiftEnd =
-    typeof body.shiftEnd === 'string' && body.shiftEnd.trim() ? body.shiftEnd.trim() : null
-  const snapshot = JSON.stringify({ shiftStart, shiftEnd })
   const now = new Date()
   const day =
     String(now.getFullYear()).slice(2) +
     String(now.getMonth() + 1).padStart(2, '0') +
     String(now.getDate()).padStart(2, '0')
-  const eventDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const title = `[인수인계/${category}] ${content}`.slice(0, 255)
 
   const historyId = await withTransaction(async (conn) => {
@@ -549,11 +525,11 @@ export async function createHandoverNote(
 
     const result = (await run(
       `INSERT INTO handover_history (
-         issue_id, lot_id, risk_level, situation, action, cause,
+         issue_id, lot_id, risk_level, handover_content, action, cause,
          handover_from, handover_to, manager, assignee_user_id,
-         event_date, category, snapshot_json
-       ) VALUES (?, ?, '낮음', ?, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?)`,
-      [issueId, lotId, content, author, author, actor.userId, eventDate, category, snapshot],
+         category, archived_at
+       ) VALUES (?, ?, '낮음', ?, NULL, NULL, ?, NULL, ?, ?, ?, NULL)`,
+      [issueId, lotId, content, author, author, actor.userId, category],
     )) as { insertId?: number | bigint }
 
     const id = Number(result?.insertId ?? 0)
@@ -562,9 +538,7 @@ export async function createHandoverNote(
   })
 
   const rows = await query<HandoverRow[]>(
-    `SELECT history_id, issue_id, lot_id, risk_level, situation, action, cause,
-            handover_from, handover_to, manager, event_date, category, archived_at,
-            snapshot_json
+    `SELECT ${HANDOVER_SELECT}
      FROM handover_history WHERE history_id = ? LIMIT 1`,
     [historyId],
   )
@@ -581,9 +555,7 @@ export async function completeHandoverNote(
   }
 
   const existing = await query<HandoverRow[]>(
-    `SELECT history_id, issue_id, lot_id, risk_level, situation, action, cause,
-            handover_from, handover_to, manager, event_date, category, archived_at,
-            snapshot_json
+    `SELECT ${HANDOVER_SELECT}
      FROM handover_history WHERE history_id = ? LIMIT 1`,
     [historyId],
   )
@@ -593,15 +565,14 @@ export async function completeHandoverNote(
   await query(
     `UPDATE handover_history
      SET action = '완료',
-         handover_to = COALESCE(?, handover_to)
+         handover_to = COALESCE(?, handover_to),
+         archived_at = COALESCE(archived_at, NOW())
      WHERE history_id = ?`,
     [toName, historyId],
   )
 
   const rows = await query<HandoverRow[]>(
-    `SELECT history_id, issue_id, lot_id, risk_level, situation, action, cause,
-            handover_from, handover_to, manager, event_date, category, archived_at,
-            snapshot_json
+    `SELECT ${HANDOVER_SELECT}
      FROM handover_history WHERE history_id = ? LIMIT 1`,
     [historyId],
   )

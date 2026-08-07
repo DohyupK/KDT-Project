@@ -44,10 +44,11 @@ interface DocumentItem {
 
 interface ActionHistoryItem {
   id: number;
-  situation: string;
+  handoverContent: string;
   action: string;
   cause: string;
   manager: string;
+  /** Display datetime: archivedAt || createdAt */
   date: string;
   /** 인수인계 이관 항목의 분류(특이사항/전달사항/주의사항). 정적 목업에는 없음 */
   category?: string;
@@ -214,13 +215,14 @@ function isSpcMetricArray(value: unknown): value is SpcMetric[] {
 
 function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
   const from = item.handoverFrom?.trim() || item.manager?.trim() || '';
+  const dateTime = item.archivedAt?.trim() || item.createdAt?.trim() || '';
   return {
     id: item.historyId,
-    situation: item.situation,
+    handoverContent: item.handoverContent,
     action: item.action ?? '',
     cause: item.cause ?? '',
     manager: from,
-    date: item.date || item.eventDate,
+    date: dateTime,
     ...(item.category ? { category: item.category } : {}),
     ...(from ? { handoverFrom: from } : {}),
     ...(item.handoverTo?.trim() ? { handoverTo: item.handoverTo.trim() } : {}),
@@ -925,7 +927,7 @@ export default function KnowledgePage() {
     if (!keyword) return allActions;
     return allActions.filter(
       (item) =>
-        item.situation.toLowerCase().includes(keyword) ||
+        item.handoverContent.toLowerCase().includes(keyword) ||
         item.action.toLowerCase().includes(keyword) ||
         item.cause.toLowerCase().includes(keyword) ||
         item.manager.toLowerCase().includes(keyword) ||
@@ -1010,7 +1012,7 @@ export default function KnowledgePage() {
       actionsTaken,
       titles: [
         ...analysisDocs.map((doc) => `${doc.id} · ${doc.title}`),
-        ...analysisActions.map((item) => item.situation),
+        ...analysisActions.map((item) => item.handoverContent),
       ],
     };
   }, [analysisDocs, analysisActions]);
@@ -1090,7 +1092,7 @@ export default function KnowledgePage() {
   const startEdit = (item: ActionHistoryItem) => {
     setEditingId(item.id);
     setActionForm({
-      situation: item.situation,
+      situation: item.handoverContent,
       action: item.action,
       cause: item.cause,
       manager: item.manager,
@@ -1801,7 +1803,7 @@ export default function KnowledgePage() {
                         <th className="min-w-[220px] px-3 py-3">발생 상황</th>
                         <th className="w-[100px] whitespace-nowrap px-3 py-3">인계자</th>
                         <th className="w-[100px] whitespace-nowrap px-3 py-3">인수자</th>
-                        <th className="w-[108px] whitespace-nowrap px-3 py-3">날짜</th>
+                        <th className="w-[148px] whitespace-nowrap px-3 py-3">날짜</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1851,7 +1853,7 @@ export default function KnowledgePage() {
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => toggleActionSelection(item.id)}
-                                  aria-label={`${item.situation} 선택`}
+                                  aria-label={`${item.handoverContent} 선택`}
                                   className="h-4 w-4 accent-blue-600"
                                 />
                               </td>
@@ -1862,9 +1864,9 @@ export default function KnowledgePage() {
                                 className={`min-w-[220px] px-3 py-3.5 text-sm font-semibold ${
                                   isDark ? 'text-slate-100' : 'text-slate-800'
                                 }`}
-                                title={item.situation}
+                                title={item.handoverContent}
                               >
-                                <div className="line-clamp-2">{item.situation}</div>
+                                <div className="line-clamp-2">{item.handoverContent}</div>
                               </td>
                               <td
                                 className={`w-[100px] whitespace-nowrap px-3 py-3.5 text-sm ${
@@ -1881,11 +1883,11 @@ export default function KnowledgePage() {
                                 {toName}
                               </td>
                               <td
-                                className={`w-[108px] whitespace-nowrap px-3 py-3.5 text-sm ${
+                                className={`w-[148px] whitespace-nowrap px-3 py-3.5 text-sm ${
                                   isDark ? 'text-slate-400' : 'text-slate-600'
                                 }`}
                               >
-                                {item.date}
+                                {item.date || '-'}
                               </td>
                             </tr>
                           );
@@ -2136,14 +2138,14 @@ export default function KnowledgePage() {
                                 isDark ? 'text-slate-100' : 'text-slate-900'
                               }`}
                             >
-                              {item.situation}
+                              {item.handoverContent}
                             </div>
                             <div className="mt-1 text-[11px] text-slate-400">{item.date}</div>
                           </button>
                           <button
                             type="button"
                             disabled={isAnalyzing}
-                            aria-label={`${item.situation} 분석 대상에서 제외`}
+                            aria-label={`${item.handoverContent} 분석 대상에서 제외`}
                             onClick={(event) => {
                               event.stopPropagation();
                               removeActionFromSelection(item.id);
@@ -2417,7 +2419,7 @@ export default function KnowledgePage() {
                                     : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                                 }`}
                               >
-                                <span className="truncate">{item.situation}</span>
+                                <span className="truncate">{item.handoverContent}</span>
                               </button>
                             ))}
                           </div>
@@ -2556,7 +2558,7 @@ export default function KnowledgePage() {
                   isDark ? 'text-slate-100' : 'text-slate-900'
                 }`}
               >
-                {detailTarget.item.situation}
+                {detailTarget.item.handoverContent}
               </div>
             </div>
             {(detailTarget.item.handoverFrom || detailTarget.item.handoverTo) ? (
