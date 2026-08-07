@@ -1,21 +1,27 @@
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import {
   normalizeRiskLevel,
   residualMargin,
-  getResidualUsl,
+  RESIDUAL_USL,
   type RiskLevel,
 } from './lotScore.js'
-import { getLotSpcDetail } from './lot.service.js'
-import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
-
-function isLotProcessComplete(row: Record<string, number | null | undefined>): boolean {
-  const bag: Partial<Record<(typeof SPC_PARAM_KEYS)[number], number | null>> = {}
-  for (const k of SPC_PARAM_KEYS) bag[k] = row[k] != null ? Number(row[k]) : null
-  return isProcessComplete(bag)
-}
+const RAW_PROCESS_FEATURES = new Set([
+  'd50',
+  'd90',
+  'metal_impurity',
+  'lithium_input',
+  'additive_ratio',
+  'process_time',
+  'sintering_temp',
+  'humidity',
+  'tank_pressure',
+])
 
 /** Fixed production-detail FI columns (clf global SHAP Top-4). */
 export const FIXED_FI_COLUMNS = [
@@ -164,7 +170,7 @@ export type LotRiskListQuery = {
 export async function listLotRisks(q: LotRiskListQuery) {
   const pageSize = Math.min(Math.max(Number(q.pageSize) || 5, 1), 50)
   const page = Math.max(Number(q.page) || 1, 1)
-  const usl = await getResidualUsl()
+  // judgment_lots: residual + probability. SPC/risk filters deferred.
   const where: string[] = []
   const params: unknown[] = []
 
@@ -182,31 +188,19 @@ export async function listLotRisks(q: LotRiskListQuery) {
   }
   if (q.marginLevel === 'low') {
     where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) <= 500')
-    params.push(usl)
+    params.push(RESIDUAL_USL)
   } else if (q.marginLevel === 'caution') {
     where.push(
       'j.residual_li IS NOT NULL AND (? - j.residual_li) > 500 AND (? - j.residual_li) <= 1000',
     )
-    params.push(usl, usl)
+    params.push(RESIDUAL_USL, RESIDUAL_USL)
   } else if (q.marginLevel === 'sufficient') {
     where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) > 1000')
-    params.push(usl)
-  }
-  if (q.riskLevel && q.riskLevel !== 'all') {
-    where.push('a.risk_level = ?')
-    params.push(q.riskLevel)
-  }
-  if (q.spc && q.spc !== 'all') {
-    where.push(
-      `(COALESCE(j.spc, a.spc_status) = ? OR ( ? = '이탈' AND COALESCE(j.spc, a.spc_status) LIKE '%이탈%' ))`,
-    )
-    params.push(q.spc, q.spc)
+    params.push(RESIDUAL_USL)
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const fromJoin = `FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
-     LEFT JOIN analysis_lots a ON a.lot_id = j.lot_id`
+  const fromJoin = `FROM judgment_lots j INNER JOIN lots l ON l.id = j.lot_id`
   const countRows = await query<{ c: number }[]>(
     `SELECT COUNT(*) AS c ${fromJoin} ${whereSql}`,
     params,
@@ -220,26 +214,10 @@ export async function listLotRisks(q: LotRiskListQuery) {
       recorded_at: Date | string
       residual_lithium: number | null
       probability: number | null
-      j_spc: string | null
-      a_spc: string | null
-      risk_level: string | null
-      risk_reason: string | null
-      d50: number | null
-      d90: number | null
-      metal_impurity: number | null
-      lithium_input: number | null
-      additive_ratio: number | null
-      process_time: number | null
-      sintering_temp: number | null
-      humidity: number | null
-      tank_pressure: number | null
     }[]
   >(
     `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
-            j.probability, j.spc AS j_spc, a.spc_status AS a_spc,
-            a.risk_level, a.risk_reason,
-            l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
-            l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
+            j.probability
      ${fromJoin} ${whereSql}
      ORDER BY l.\`timestamp\` DESC, j.lot_id DESC
      LIMIT ? OFFSET ?`,
@@ -249,22 +227,15 @@ export async function listLotRisks(q: LotRiskListQuery) {
   const items = rows.map((r) => {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
     const prob = r.probability != null ? Number(r.probability) : null
-    const processComplete = isLotProcessComplete(r)
-    const spcRaw = r.j_spc || r.a_spc
-    const spcStatus = !processComplete
-      ? '-'
-      : spcRaw != null
-        ? normalizeSpcStatus(spcRaw)
-        : null
     return {
       lotId: r.lot_id,
       recordedAt: formatDateTime(r.recorded_at),
       defectProb: Number.isFinite(prob as number) ? prob : null,
       residualLithium: residual,
-      residualMargin: residual != null ? residualMargin(residual, usl) : null,
-      spcStatus,
-      riskLevel: r.risk_level != null ? normalizeRiskLevel(r.risk_level) : null,
-      riskReason: r.risk_reason,
+      residualMargin: residual != null ? residualMargin(residual) : null,
+      spcStatus: null as string | null,
+      riskLevel: null as RiskLevel | null,
+      riskReason: null as string | null,
     }
   })
 
@@ -274,45 +245,23 @@ export async function listLotRisks(q: LotRiskListQuery) {
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    residualUsl: usl,
+    residualUsl: RESIDUAL_USL,
   }
 }
 
 export async function getLotRiskDetail(lotId: string) {
-  const usl = await getResidualUsl()
   const rows = await query<
     {
       lot_id: string
       recorded_at: Date | string
       residual_lithium: number | null
       probability: number | null
-      j_spc: string | null
-      a_spc: string | null
-      risk_level: string | null
-      risk_reason: string | null
-      action_content: string | null
-      d50: number | null
-      d90: number | null
-      metal_impurity: number | null
-      lithium_input: number | null
-      additive_ratio: number | null
-      process_time: number | null
-      sintering_temp: number | null
-      humidity: number | null
-      tank_pressure: number | null
     }[]
   >(
     `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
-            j.probability, j.spc AS j_spc, a.spc_status AS a_spc,
-            a.risk_level, a.risk_reason,
-            (SELECT i.action_content FROM issues i
-             WHERE i.lot_id = j.lot_id
-             ORDER BY i.occurred_at DESC LIMIT 1) AS action_content,
-            l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
-            l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
+            j.probability
      FROM judgment_lots j
      INNER JOIN lots l ON l.id = j.lot_id
-     LEFT JOIN analysis_lots a ON a.lot_id = j.lot_id
      WHERE j.lot_id = ? LIMIT 1`,
     [lotId],
   )
@@ -320,46 +269,19 @@ export async function getLotRiskDetail(lotId: string) {
   const r = rows[0]
   const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
   const prob = r.probability != null ? Number(r.probability) : null
-  const processComplete = isLotProcessComplete(r)
-  const spcRaw = r.j_spc || r.a_spc
-  const spcStatus = !processComplete
-    ? '-'
-    : spcRaw != null
-      ? normalizeSpcStatus(spcRaw)
-      : null
-
-  let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
-  try {
-    spc = await getLotSpcDetail(lotId)
-  } catch {
-    spc = null
-  }
-
-  const resolvedSpc = !processComplete
-    ? '-'
-    : spcStatus != null
-      ? spcStatus
-      : spc?.spcStatus
-        ? normalizeSpcStatus(spc.spcStatus)
-        : '-'
 
   return {
     lotId: r.lot_id,
     recordedAt: formatDateTime(r.recorded_at),
     defectProb: Number.isFinite(prob as number) ? prob : null,
     residualLithium: residual,
-    residualMargin: residual != null ? residualMargin(residual, usl) : null,
-    residualUsl: usl,
-    spcStatus: resolvedSpc,
-    riskLevel: r.risk_level != null ? normalizeRiskLevel(r.risk_level) : null,
-    riskReason: r.risk_reason,
-    actionContent: r.action_content,
-    spc:
-      resolvedSpc !== '-' && spc && spc.metrics.length > 0
-        ? {
-            metrics: spc.metrics,
-          }
-        : null,
+    residualMargin: residual != null ? residualMargin(residual) : null,
+    residualUsl: RESIDUAL_USL,
+    spcStatus: null as string | null,
+    riskLevel: null as RiskLevel | null,
+    riskReason: null as string | null,
+    actionContent: null as string | null,
+    spc: null,
   }
 }
 
@@ -574,11 +496,10 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
     'risk_level',
     'risk_reason',
   ]
-  const usl = await getResidualUsl()
   const lines = [header.join(',')]
   for (const r of rows) {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
-    const margin = residual != null ? residualMargin(residual, usl) : null
+    const margin = residual != null ? residualMargin(residual) : null
     const vals = [
       r.lot_id,
       formatDateTime(r.recorded_at),
@@ -609,200 +530,42 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
   return `\uFEFF${lines.join('\n')}`
 }
 
-/** Resolve default window for grain relative to `now` (local). */
-export function defaultPeriodForGrain(
-  grain: ProductionTrendGrain,
-  now = new Date(),
-): { from: string; to: string; label: string; mode: 'default' } {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const y = now.getFullYear()
-  const m = now.getMonth()
-  const d = now.getDate()
-  const today = `${y}-${pad(m + 1)}-${pad(d)}`
+function resolveShapPath(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    path.resolve(here, '../../../../ai-service/models/shap_xgb_importance.json'),
+    path.resolve(here, '../../../ai-service/models/shap_xgb_importance.json'),
+    path.resolve(process.cwd(), '../ai-service/models/shap_xgb_importance.json'),
+    path.resolve(process.cwd(), 'ai-service/models/shap_xgb_importance.json'),
+  ]
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  return null
+}
 
-  if (grain === 'month') {
-    const from = `${y}-${pad(m + 1)}-01`
+export function getFeatureImportance(topK = 4) {
+  const k = Math.min(Math.max(topK, 1), 4)
+  const shapPath = resolveShapPath()
+  if (!shapPath) {
+    const fallbackFeatures = ['metal_impurity', 'humidity', 'process_time', 'sintering_temp']
     return {
-      from,
-      to: today,
-      label: `당월 · ${y}년 ${m + 1}월`,
-      mode: 'default',
+      source: 'fallback',
+      items: fallbackFeatures.slice(0, k).map((feature, i) => ({
+        feature,
+        label: FEATURE_LABELS[feature],
+        importance: 1 - i * 0.15,
+      })),
     }
   }
-  if (grain === 'week') {
-    const day = now.getDay()
-    const diffToMon = day === 0 ? -6 : 1 - day
-    const mon = new Date(y, m, d + diffToMon)
-    const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6)
-    const from = formatIsoDate(mon)
-    const to = today
-    const label = `당주 · ${formatKoreanDate(mon)} ~ ${formatKoreanDate(sun)}`
-    return { from, to, label, mode: 'default' }
-  }
-  return {
-    from: today,
-    to: today,
-    label: `당일 · ${formatKoreanDate(now)}`,
-    mode: 'default',
-  }
-}
-
-function formatKoreanDate(d: Date): string {
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`
-}
-
-export function labelForSelectedBucket(
-  grain: ProductionTrendGrain,
-  bucketKey: string,
-): string {
-  if (grain === 'month') {
-    const [y, mo] = bucketKey.split('-').map(Number)
-    return `${y}년 ${mo}월`
-  }
-  if (grain === 'week') {
-    const start = parseIsoDateOnly(bucketKey)
-    if (!start) return bucketKey
-    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6)
-    return `${formatKoreanDate(start)} ~ ${formatKoreanDate(end)}`
-  }
-  const day = parseIsoDateOnly(bucketKey)
-  return day ? formatKoreanDate(day) : bucketKey
-}
-
-/**
- * Period-scoped defect drivers (clf / quality_defect=1 lots only).
- * Importance ∝ |mean_defect − mean_good| / σ (lots separation only).
- */
-export async function getFeatureImportance(params: {
-  topK?: number
-  grain?: string
-  from?: string
-  to?: string
-  bucket?: string
-  mode?: string
-} = {}) {
-  const grainRaw = (params.grain || 'day').toLowerCase()
-  const grain: ProductionTrendGrain =
-    grainRaw === 'week' || grainRaw === 'month' ? grainRaw : 'day'
-
-  let from = params.from && ISO_DATE_RE.test(params.from) ? params.from : undefined
-  let to = params.to && ISO_DATE_RE.test(params.to) ? params.to : undefined
-  let label = ''
-  let mode: 'default' | 'selected' = params.mode === 'selected' ? 'selected' : 'default'
-
-  if (params.bucket?.trim() && mode === 'selected') {
-    const bucket = params.bucket.trim()
-    label = labelForSelectedBucket(grain, bucket)
-    if (grain === 'month') {
-      from = `${bucket}-01`
-      const [y, mo] = bucket.split('-').map(Number)
-      const last = new Date(y, mo, 0).getDate()
-      to = `${bucket}-${String(last).padStart(2, '0')}`
-    } else if (grain === 'week') {
-      from = bucket
-      to = addCalendarDays(bucket, 6)
-    } else {
-      from = bucket
-      to = bucket
-    }
-  } else {
-    const def = defaultPeriodForGrain(grain)
-    from = from ?? def.from
-    to = to ?? def.to
-    label = def.label
-    mode = 'default'
-  }
-
-  if (from! > to!) {
-    const tmp = from
-    from = to
-    to = tmp
-  }
-
-  type FeatRow = {
-    quality_defect: number | boolean
-    d50: number | null
-    d90: number | null
-    metal_impurity: number | null
-    lithium_input: number | null
-    additive_ratio: number | null
-    process_time: number | null
-    sintering_temp: number | null
-    humidity: number | null
-    tank_pressure: number | null
-  }
-
-  const rows = await query<FeatRow[]>(
-    `SELECT j.quality_defect,
-            l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
-            l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
-     FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
-     WHERE DATE(l.\`timestamp\`) >= ? AND DATE(l.\`timestamp\`) <= ?
-       AND l.\`timestamp\` <= NOW()`,
-    [from, to],
-  )
-
-  const defectRows = rows.filter((r) => Number(r.quality_defect) === 1)
-  const goodRows = rows.filter((r) => Number(r.quality_defect) !== 1)
-  const defectCount = defectRows.length
-
-  if (defectCount === 0) {
-    return {
-      source: 'period-defect-empty',
-      grain,
-      from,
-      to,
-      label,
-      mode,
-      defectCount: 0,
-      items: [] as Array<{ feature: string; label: string; importance: number; primary: boolean }>,
-    }
-  }
-
-  const mean = (list: FeatRow[], key: (typeof SPC_PARAM_KEYS)[number]) => {
-    const vals = list.map((r) => r[key]).filter((v): v is number => v != null && Number.isFinite(Number(v))).map(Number)
-    if (vals.length === 0) return null
-    return vals.reduce((a, b) => a + b, 0) / vals.length
-  }
-  const stdev = (list: FeatRow[], key: (typeof SPC_PARAM_KEYS)[number]) => {
-    const vals = list.map((r) => r[key]).filter((v): v is number => v != null && Number.isFinite(Number(v))).map(Number)
-    if (vals.length < 2) return 1
-    const m = vals.reduce((a, b) => a + b, 0) / vals.length
-    const v = vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length
-    return Math.sqrt(v) || 1
-  }
-
-  const scored = SPC_PARAM_KEYS.map((key) => {
-    const md = mean(defectRows, key)
-    const mg = mean(goodRows.length ? goodRows : rows, key)
-    if (md == null || mg == null) return { feature: key, score: 0 }
-    const sep = Math.abs(md - mg) / stdev(rows, key)
-    return { feature: key, score: sep }
-  })
-
-  const sum = scored.reduce((a, b) => a + b.score, 0)
-  const normalized = scored
-    .map((s) => ({
-      feature: s.feature,
-      label: FEATURE_LABELS[s.feature] || s.feature,
-      importance: sum > 0 ? s.score / sum : 0,
-    }))
-    .sort((a, b) => b.importance - a.importance)
-
-  const items = normalized.map((item, i) => ({
-    ...item,
-    primary: i < 4,
+  const raw = JSON.parse(fs.readFileSync(shapPath, 'utf8')) as Array<{
+    feature: string
+    importance: number
+  }>
+  const items = raw.filter((row) => RAW_PROCESS_FEATURES.has(row.feature)).slice(0, k).map((row) => ({
+    feature: row.feature,
+    label: FEATURE_LABELS[row.feature] || row.feature,
+    importance: row.importance,
   }))
-
-  return {
-    source: 'period-defect-separation',
-    grain,
-    from,
-    to,
-    label,
-    mode,
-    defectCount,
-    items,
-  }
+  return { source: shapPath, items }
 }

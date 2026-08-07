@@ -9,18 +9,16 @@ import {
   SPC_PARAM_KEYS,
   type SpcParamKey,
 } from './spcEngine.js'
-import { getStandardDefaults, loadStandard } from './standard.js'
 
 /** Dashboard / lots / issues risk vocabulary (replaces 높음|중간|낮음). */
 export type RiskLevel = '심각' | '주의' | '안정'
 
-/** @deprecated Prefer loadStandard().spare — kept as sync default for cold paths/tests */
-export const RESIDUAL_USL = getStandardDefaults().spare
+export const RESIDUAL_USL = 4000
 
-export const DEFECT_PROB_SEVERE = getStandardDefaults().defect_prob_severe
-export const DEFECT_PROB_CAUTION = getStandardDefaults().defect_prob_caution
-export const RESIDUAL_SEVERE = getStandardDefaults().residual_severe
-export const RESIDUAL_CAUTION = getStandardDefaults().residual_caution
+export const DEFECT_PROB_SEVERE = 0.4
+export const DEFECT_PROB_CAUTION = 0.2
+export const RESIDUAL_SEVERE = 3500
+export const RESIDUAL_CAUTION = 3000
 
 const RAW_NUMERIC_KEYS = [
   'd50',
@@ -86,28 +84,15 @@ export function residualMargin(residualLithium: number, usl = RESIDUAL_USL): num
   return usl - residualLithium
 }
 
-export async function getResidualUsl(): Promise<number> {
-  const std = await loadStandard()
-  return std.spare
-}
-
-export function defectProbTier(
-  prob: number,
-  caution = DEFECT_PROB_CAUTION,
-  severe = DEFECT_PROB_SEVERE,
-): RiskLevel {
-  if (prob >= severe) return '심각'
-  if (prob >= caution) return '주의'
+export function defectProbTier(prob: number): RiskLevel {
+  if (prob >= DEFECT_PROB_SEVERE) return '심각'
+  if (prob >= DEFECT_PROB_CAUTION) return '주의'
   return '안정'
 }
 
-export function residualTier(
-  residualLi: number,
-  caution = RESIDUAL_CAUTION,
-  severe = RESIDUAL_SEVERE,
-): RiskLevel {
-  if (residualLi >= severe) return '심각'
-  if (residualLi >= caution) return '주의'
+export function residualTier(residualLi: number): RiskLevel {
+  if (residualLi >= RESIDUAL_SEVERE) return '심각'
+  if (residualLi >= RESIDUAL_CAUTION) return '주의'
   return '안정'
 }
 
@@ -160,54 +145,31 @@ export function combineLotScore(input: {
   residualLi: number
   spcStatus: string | null
   incompleteProcess?: boolean
-  /** Optional thresholds from `standard` table */
-  thresholds?: {
-    defect_prob_caution: number
-    defect_prob_severe: number
-    residual_caution: number
-    residual_severe: number
-  }
 }): LotScoreResult {
   const defect_prob = Math.round(input.defectProb * 10000) / 10000
   const residual_lithium = Math.round(input.residualLi * 1000) / 1000
-  // Incomplete process → SPC label "-" (excluded from risk axes)
-  const spc_status = input.incompleteProcess ? '-' : input.spcStatus || '안정'
+  const spc_status = input.incompleteProcess ? null : input.spcStatus || '안정'
   const reasons: string[] = []
-  const t = input.thresholds
 
-  const dTier = defectProbTier(
-    defect_prob,
-    t?.defect_prob_caution,
-    t?.defect_prob_severe,
-  )
-  const rTier = residualTier(
-    residual_lithium,
-    t?.residual_caution,
-    t?.residual_severe,
-  )
-  const sTier =
-    spc_status === '-'
-      ? ('안정' as RiskLevel)
-      : spcStatusToRiskTier(spc_status)
+  const dTier = defectProbTier(defect_prob)
+  const rTier = residualTier(residual_lithium)
+  const sTier = input.incompleteProcess
+    ? ('안정' as RiskLevel)
+    : spcStatusToRiskTier(spc_status)
 
   if (dTier !== '안정') reasons.push(`불량확률 ${(defect_prob * 100).toFixed(1)}%`)
   if (rTier !== '안정') reasons.push(`잔류리튬 ${residual_lithium.toFixed(1)}ppm`)
-  if (sTier !== '안정' && spc_status !== '-') reasons.push(`SPC ${spc_status}`)
+  if (sTier !== '안정' && spc_status) reasons.push(`SPC ${spc_status}`)
   if (input.incompleteProcess) reasons.push('공정 결측(SPC 제외)')
   if (reasons.length === 0) reasons.push('기준 범위 내')
-
-  const riskAxes =
-    spc_status === '-'
-      ? worstRisk(dTier, rTier)
-      : worstRisk(dTier, rTier, sTier)
 
   return {
     defect_prob,
     residual_lithium,
     quality_defect: 0,
     capacity: null,
-    spc_status,
-    risk_level: riskAxes,
+    spc_status: spc_status ?? '안정',
+    risk_level: worstRisk(dTier, rTier, sTier),
     risk_reason: reasons.join(', ').slice(0, 255),
   }
 }
@@ -221,7 +183,7 @@ export function evaluateSpcForFeatures(
     bag[k] = features[k]
   }
   if (!isProcessComplete(bag)) {
-    return { complete: false, status: '-' }
+    return { complete: false, status: '안정' }
   }
   const evaled = evaluateLotSpc(historyByParam)
   return { complete: true, status: evaled.status }
@@ -244,18 +206,11 @@ export async function scoreLotWithAi(
     predictCapacity(clfBody),
   ])
   const spc = evaluateSpcForFeatures(spcInput, historyByParam)
-  const std = await loadStandard()
   const scored = combineLotScore({
     defectProb: clf.probability,
     residualLi: residual.residual_li,
     spcStatus: spc.status,
     incompleteProcess: !spc.complete,
-    thresholds: {
-      defect_prob_caution: std.defect_prob_caution,
-      defect_prob_severe: std.defect_prob_severe,
-      residual_caution: std.residual_caution,
-      residual_severe: std.residual_severe,
-    },
   })
   scored.quality_defect = Number(clf.defect_status) === 1 ? 1 : 0
   const cap = Number(capacity.capacity)
