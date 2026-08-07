@@ -35,15 +35,15 @@ const SPC_CARD_LABELS: Record<SpcCardTitle, string> = {
  * 패널 자체 refresh를 쓰면 iframe 통째 리로드는 불필요합니다.
  */
 const GRAFANA_PANEL_URLS: Record<SpcCardTitle, string> = {
-  d50: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-1',
-  d90: 'http://localhost:4000/d-solo/adwh4tx/d90?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&showCategory=Panel%20options&panelId=panel-2',
-  metal_impurity: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-3',
-  lithium_input: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-4',
-  additive_ratio: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-5',
-  process_time: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-6',
-  sintering_temp: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-9',
-  humidity: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-7',
-  tank_pressure: 'http://localhost:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-8',
+  d50: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-1',
+  d90: 'http://3.36.100.128:4000/d-solo/adwh4tx/d90?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&showCategory=Panel%20options&panelId=panel-2',
+  metal_impurity: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-3',
+  lithium_input: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-4',
+  additive_ratio: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-5',
+  process_time: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-6',
+  sintering_temp: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-9',
+  humidity: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-7',
+  tank_pressure: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-8',
 }
 
 function GrafanaEmbed({
