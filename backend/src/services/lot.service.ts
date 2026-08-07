@@ -310,34 +310,22 @@ async function updateLotScore(
     )
   }
   await query(
-    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability, spc)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        quality_defect = COALESCE(judgment_lots.quality_defect, VALUES(quality_defect)),
        capacity = COALESCE(judgment_lots.capacity, VALUES(capacity)),
        residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li)),
-       probability = COALESCE(judgment_lots.probability, VALUES(probability)),
-       spc = VALUES(spc)`,
+       probability = COALESCE(judgment_lots.probability, VALUES(probability))`,
     [
       lotId,
       scored.quality_defect === 1 ? 1 : 0,
       scored.capacity,
       scored.residual_lithium,
       scored.defect_prob,
-      scored.spc_status,
     ],
   )
   await upsertAnalysisScore(lotId, scored)
-}
-
-/** Latest N lot ids by production time (for targeted rescoring). */
-export async function getLatestLotIds(limit: number): Promise<string[]> {
-  const n = Math.max(1, Math.floor(limit))
-  const rows = await query<Array<{ id: string }>>(
-    `SELECT id FROM lots ORDER BY \`timestamp\` DESC, id DESC LIMIT ?`,
-    [n],
-  )
-  return rows.map((r) => String(r.id))
 }
 
 export type ScoreLotsOptions = {
@@ -537,9 +525,6 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
   return created
 }
 
-/** Trailing LOT count shown on detail I-charts (must cover longest Nelson window: 15). */
-export const SPC_DETAIL_CHART_WINDOW = 30
-
 /** SPC series + per-param status for LOT detail (recomputed from Phase I limits). */
 export async function getLotSpcDetail(lotId: string): Promise<{
   lotId: string
@@ -552,19 +537,13 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     centerLine: number
     upperControlLimit: number
     lowerControlLimit: number
-    violatedRules: Array<{ rule: number; description: string }>
     data: Array<{ timestamp: string; value: number }>
   }>
 }> {
   const targetRows = await query<LotRow[]>(`${LOT_SELECT} WHERE l.id = ? LIMIT 1`, [lotId])
   if (!targetRows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
   const target = targetRows[0]
-  const targetFeatures = rowToFeatures(target)
-  const targetBag: Partial<Record<SpcParamKey, number | null>> = {}
-  for (const k of SPC_PARAM_KEYS) targetBag[k] = targetFeatures[k]
-  if (!isProcessComplete(targetBag)) {
-    return { lotId, spcStatus: '-', metrics: [] }
-  }
+  const targetAt = new Date(target.recorded_at).getTime()
 
   const prior = await query<LotRow[]>(
     `${LOT_SELECT}
@@ -581,36 +560,36 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     timestamps.push(formatDateTime(row.recorded_at))
   }
 
-  const storedSpc = target.spc_status || '-'
   if (timestamps.length === 0) {
-    return { lotId, spcStatus: storedSpc === '-' ? '-' : storedSpc, metrics: [] }
+    return { lotId, spcStatus: target.spc_status || '안정', metrics: [] }
   }
 
   const evaled = evaluateLotSpc(history)
   const limits = loadPhase1Limits()
-  const window = SPC_DETAIL_CHART_WINDOW
-  const paramsToShow = evaled.params.filter((p) => p.status === '이탈' || p.status === '주의')
-  const metrics = paramsToShow.map((p) => {
-    const series = history[p.key]
-    const start = Math.max(0, series.length - window)
-    const data = series.slice(start).map((value, i) => ({
-      timestamp: timestamps[start + i] || String(start + i),
-      value,
-    }))
-    const lim = limits[p.key]
-    return {
-      key: p.key,
-      label: lim.label,
-      status: p.status,
-      currentValue: p.value,
-      centerLine: lim.CL_I,
-      upperControlLimit: lim.UCL_I,
-      lowerControlLimit: lim.LCL_I,
-      violatedRules: p.violatedRules,
-      data,
-    }
-  })
+  const window = 30
+  const metrics = evaled.params
+    .filter((p) => p.status === '이탈' || p.status === '주의')
+    .map((p) => {
+      const series = history[p.key]
+      const start = Math.max(0, series.length - window)
+      const data = series.slice(start).map((value, i) => ({
+        timestamp: timestamps[start + i] || String(start + i),
+        value,
+      }))
+      const lim = limits[p.key]
+      return {
+        key: p.key,
+        label: lim.label,
+        status: p.status,
+        currentValue: p.value,
+        centerLine: lim.CL_I,
+        upperControlLimit: lim.UCL_I,
+        lowerControlLimit: lim.LCL_I,
+        data,
+      }
+    })
 
+  void targetAt
   return {
     lotId,
     spcStatus: evaled.status,
