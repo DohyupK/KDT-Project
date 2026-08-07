@@ -74,6 +74,7 @@ type SpcMetric = {
   centerLine: number;
   upperControlLimit: number;
   lowerControlLimit: number;
+  violatedRules?: Array<{ rule: number; description: string }>;
   data: Array<{ timestamp: string; value: number }>;
 };
 
@@ -144,6 +145,7 @@ type FeatureImportanceItem = {
   label: string;
   sub?: string;
   importance: number;
+  primary?: boolean;
 };
 
 type PageSizeOption = 10 | 20 | 30 | 50;
@@ -196,7 +198,7 @@ type LotRiskRow = {
 
 type LotRiskFilterState = {
   lotQuery: string;
-  grade: 'all' | '심각' | '주의';
+  grade: 'all' | '심각' | '주의' | '안정';
   spc: 'all' | '안정' | '주의' | '이탈';
   probLevel: 'all' | 'high' | 'mid' | 'low';
   marginLevel: 'all' | 'low' | 'caution' | 'sufficient';
@@ -217,7 +219,9 @@ function isLotRiskFilterActive(filter: LotRiskFilterState): boolean {
   return (
     filter.lotQuery.trim() !== '' ||
     filter.marginLevel !== 'all' ||
-    filter.probLevel !== 'all'
+    filter.probLevel !== 'all' ||
+    filter.grade !== 'all' ||
+    filter.spc !== 'all'
   );
 }
 
@@ -483,6 +487,34 @@ function niceChartMax(rawMax: number, tickCount = 5): number {
   return Math.ceil(rawMax / step) * step;
 }
 
+function addCalendarDaysIso(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatTrendXLabel(date: string, grain: 'day' | 'week' | 'month'): string {
+  if (grain === 'week') {
+    const start = date.length >= 10 ? date.slice(5) : date;
+    const end = addCalendarDaysIso(date, 6).slice(5);
+    return `${start}~${end}`;
+  }
+  if (grain === 'month') return date;
+  return date.length >= 10 ? date.slice(5) : date;
+}
+
+function formatTrendTooltipTitle(date: string, grain: 'day' | 'week' | 'month'): string {
+  if (grain === 'week') return `${date} ~ ${addCalendarDaysIso(date, 6)}`;
+  return date;
+}
+
+function productionVolumeLabel(grain: 'day' | 'week' | 'month'): string {
+  return grain === 'day' ? '생산량' : '누적 생산량';
+}
+
 function emptyDefectBreakdown(): DefectBreakdown {
   return {
     '기계 결함': 0,
@@ -642,10 +674,12 @@ function EmptyState({
 function ProductionTrendChart({
   points,
   isDark = false,
+  trendGrain = 'day',
   onBarClick,
 }: {
   points: DailyAggregate[];
   isDark?: boolean;
+  trendGrain?: 'day' | 'week' | 'month';
   /** Reserved for Feature Importance linkage (green panel) — unused for now. */
   onBarClick?: (bucket: DailyAggregate) => void;
 }) {
@@ -668,10 +702,11 @@ function ProductionTrendChart({
   const rawMaxY = Math.max(...points.map((d) => d.production), 1);
   const tickCount = 5;
   const maxY = niceChartMax(rawMaxY, tickCount);
-  const maxRate = Math.max(
+  const rawMaxRate = Math.max(
     ...points.map((d) => (d.defectRate != null ? d.defectRate : 0)),
-    0.05,
+    0,
   );
+  const maxRate = niceChartMax(Math.max(rawMaxRate * 2, 0.2), 4);
   const n = points.length;
   const barW = Math.min(34, Math.max(12, (innerW / n) * 0.52));
   const slotX = (i: number) => pad.left + (innerW / n) * i + (innerW / n) / 2;
@@ -849,7 +884,7 @@ function ProductionTrendChart({
             className={isDark ? 'text-xs' : 'fill-slate-500 text-xs'}
             fill={labelFill}
           >
-            {p.date.length >= 10 ? p.date.slice(5) : p.date}
+            {formatTrendXLabel(p.date, trendGrain)}
           </text>
         ))}
       </svg>
@@ -866,12 +901,20 @@ function ProductionTrendChart({
           }}
         >
           <div className={`mb-1 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-            {hover.point.date}
+            {formatTrendTooltipTitle(hover.point.date, trendGrain)}
           </div>
-          <div>현재 생산량 (좌축): {formatNumber(hover.point.production)}</div>
-          <div>양품: {formatNumber(hover.point.goodCount)}</div>
-          <div>불량: {formatNumber(hover.point.defectCount)}</div>
-          <div>불량률 (우축): {formatPercent(hover.point.defectRate)}</div>
+          <div className={isDark ? 'text-sky-400' : 'text-blue-700'}>
+            {productionVolumeLabel(trendGrain)}: {formatNumber(hover.point.production)}
+          </div>
+          <div className={isDark ? 'text-teal-300' : 'text-teal-700'}>
+            양품: {formatNumber(hover.point.goodCount)}
+          </div>
+          <div className={isDark ? 'text-red-400' : 'text-red-600'}>
+            불량: {formatNumber(hover.point.defectCount)}
+          </div>
+          <div className={isDark ? 'text-orange-400' : 'text-orange-600'}>
+            불량률: {formatPercent(hover.point.defectRate)}
+          </div>
         </div>
       ) : null}
     </div>
@@ -881,68 +924,122 @@ function ProductionTrendChart({
 function FeatureImportancePanel({
   items,
   isDark,
+  periodLabel,
+  selected,
+  onClearSelection,
 }: {
   items: FeatureImportanceItem[];
   isDark: boolean;
+  periodLabel: string;
+  selected: boolean;
+  onClearSelection: () => void;
 }) {
+  const mainItems = items.some((i) => i.primary === true)
+    ? items.filter((i) => i.primary)
+    : items.slice(0, 4);
+  const subItems = items.some((i) => i.primary === true)
+    ? items.filter((i) => !i.primary)
+    : items.slice(4);
+
+  const renderItem = (item: FeatureImportanceItem, i: number, large: boolean) => {
+    const pct = Math.round(Math.min(1, Math.max(0, item.importance)) * 100);
+    return (
+      <li key={item.label}>
+        <div
+          className={`mb-1 flex items-center justify-between gap-2 ${
+            large ? 'text-sm' : 'text-xs'
+          }`}
+        >
+          <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>
+            {item.label}
+            {item.sub ? (
+              <span
+                className={`ml-1 text-xs font-normal ${
+                  isDark ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
+                {item.sub}
+              </span>
+            ) : null}
+          </span>
+          <span
+            className={`tabular-nums font-semibold ${
+              large
+                ? isDark
+                  ? 'text-slate-300'
+                  : 'text-slate-600'
+                : isDark
+                  ? 'text-slate-400'
+                  : 'text-slate-500'
+            }`}
+          >
+            {pct}%
+          </span>
+        </div>
+        <div
+          className={`overflow-hidden rounded-full ${
+            large ? 'h-2.5' : 'h-1.5'
+          } ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}
+        >
+          <div
+            className="h-full rounded-full"
+            style={
+              {
+                width: `${pct}%`,
+                backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+              } as CSSProperties
+            }
+          />
+        </div>
+      </li>
+    );
+  };
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h2
           className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
         >
-          AI 도출 주요 불량 유발 변수
+          불량 유발 변수
         </h2>
         <span className="text-sm font-normal text-gray-400">Feature Importance</span>
       </div>
-      <p className={`mb-4 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-        전체 LOT 기준 추정 중요도 · 양극재 공정 변수
-      </p>
-      <ul className="space-y-4">
-        {items.map((item, i) => {
-          const pct = Math.round(Math.min(1, Math.max(0, item.importance)) * 100);
-          return (
-            <li key={item.label}>
-              <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>
-                  {item.label}
-                  {item.sub ? (
-                    <span
-                      className={`ml-1 text-xs font-normal ${
-                        isDark ? 'text-slate-500' : 'text-slate-400'
-                      }`}
-                    >
-                      {item.sub}
-                    </span>
-                  ) : null}
-                </span>
-                <span
-                  className={`tabular-nums font-semibold ${
-                    isDark ? 'text-slate-300' : 'text-slate-600'
-                  }`}
-                >
-                  {pct}%
-                </span>
-              </div>
-              <div
-                className={`h-2.5 overflow-hidden rounded-full ${
-                  isDark ? 'bg-slate-700' : 'bg-slate-100'
-                }`}
-              >
-                <div
-                  className="h-full rounded-full"
-                  style={
-                    {
-                      width: `${pct}%`,
-                      backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                    } as CSSProperties
-                  }
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          {periodLabel || '기간 선택'}
+        </p>
+        {selected ? (
+          <button
+            type="button"
+            aria-label="기간 선택 해제"
+            onClick={onClearSelection}
+            className={`inline-flex h-5 w-5 items-center justify-center rounded text-xs font-bold ${
+              isDark
+                ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+            }`}
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+      {items.length === 0 ? (
+        <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+          해당 기간 불량 LOT 데이터가 없습니다.
+        </p>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          <ul className="space-y-4">
+            {mainItems.map((item, i) => renderItem(item, i, true))}
+          </ul>
+          {subItems.length > 0 ? (
+            <ul className="space-y-2 border-t border-dashed pt-3 opacity-90 dark:border-slate-700">
+              {subItems.map((item, i) => renderItem(item, i + 4, false))}
+            </ul>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -1041,9 +1138,10 @@ export default function DashBoardPage() {
   const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
   const [selectedLotRiskDetail, setSelectedLotRiskDetail] = useState<LotRiskApiDetail | null>(null);
   const [trendPoints, setTrendPoints] = useState<DailyAggregate[]>([]);
-  /** TODO: wire selectedTrendBucket to Feature Importance (green panel). */
+  /** Selected production-trend bar → Feature Importance period. */
   const [selectedTrendBucket, setSelectedTrendBucket] = useState<DailyAggregate | null>(null);
   const [trendGrain, setTrendGrain] = useState<'day' | 'week' | 'month'>('day');
+  const [featureImportanceLabel, setFeatureImportanceLabel] = useState('당일');
   const [trendFilterDraft, setTrendFilterDraft] = useState({ startDate: '', endDate: '' });
   const [trendFilterApplied, setTrendFilterApplied] = useState({ startDate: '', endDate: '' });
   const [dailyApiRows, setDailyApiRows] = useState<ProductionDailyRow[]>([]);
@@ -1106,6 +1204,7 @@ export default function DashBoardPage() {
       setSelectedLotRiskDetail(null);
       return;
     }
+    setSelectedLotRiskDetail(null);
     let cancelled = false;
     dashboardApi.getLotRiskDetail(selectedLotRiskId)
       .then(({ data }) => {
@@ -1323,6 +1422,14 @@ export default function DashBoardPage() {
               grain: trendGrain,
             }
           : { grain: trendGrain };
+      const fiParams =
+        selectedTrendBucket != null
+          ? {
+              grain: trendGrain,
+              bucket: selectedTrendBucket.date,
+              mode: 'selected' as const,
+            }
+          : { grain: trendGrain, mode: 'default' as const };
       const [lotResponse, trendResponse, dailyResponse, fiResponse] = await Promise.all([
         dashboardApi.listLotRisks({
           page: lotRiskPage,
@@ -1332,11 +1439,14 @@ export default function DashBoardPage() {
             lotRiskFilterApplied.marginLevel === 'all'
               ? undefined
               : lotRiskFilterApplied.marginLevel,
+          riskLevel:
+            lotRiskFilterApplied.grade === 'all' ? undefined : lotRiskFilterApplied.grade,
+          spc: lotRiskFilterApplied.spc === 'all' ? undefined : lotRiskFilterApplied.spc,
           ...probParams,
         }),
         dashboardApi.getProductionTrend(trendParams),
         dashboardApi.getProductionDaily(tablePage, 5),
-        dashboardApi.getFeatureImportance(4),
+        dashboardApi.getFeatureImportance(fiParams),
       ]);
       const mappedLots = lotResponse.data.items.map((row: DashboardLotRiskItem): LotRiskRow => ({
         lot: row.lotId,
@@ -1379,12 +1489,14 @@ export default function DashBoardPage() {
         0,
       );
       setFeatureImportanceItems(
-        fiResponse.data.items.map((item) => ({
+        fiResponse.data.items.map((item, idx) => ({
           label: item.label,
           importance:
             importanceTotal > 0 ? Math.max(0, Number(item.importance) || 0) / importanceTotal : 0,
+          primary: item.primary ?? idx < 4,
         })),
       );
+      setFeatureImportanceLabel(fiResponse.data.label || '당일');
       setLastUpdatedAt(new Date());
       setLiveStatus('connected');
     } catch {
@@ -1393,7 +1505,14 @@ export default function DashBoardPage() {
       fetchingRef.current = false;
       setInitialLoading(false);
     }
-  }, [lotRiskFilterApplied, lotRiskPage, tablePage, trendFilterApplied, trendGrain]);
+  }, [
+    lotRiskFilterApplied,
+    lotRiskPage,
+    tablePage,
+    trendFilterApplied,
+    trendGrain,
+    selectedTrendBucket,
+  ]);
 
   useEffect(() => {
     void refreshDashboardData();
@@ -1727,35 +1846,51 @@ export default function DashBoardPage() {
               </select>
             </label>
 
-            <label className="inline-flex items-center gap-1.5 text-xs opacity-50">
+            <label className="inline-flex items-center gap-1.5 text-xs">
               <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>SPC</span>
               <select
-                aria-label="SPC 필터 (후속)"
-                disabled
-                value="all"
-                className={`h-9 cursor-not-allowed rounded-lg border px-2 text-sm ${
+                aria-label="SPC 필터"
+                value={lotRiskFilterDraft.spc}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    spc: e.target.value as LotRiskFilterState['spc'],
+                  }))
+                }
+                className={`h-9 rounded-lg border px-2 text-sm ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
+                <option value="이탈">이탈</option>
+                <option value="주의">주의</option>
+                <option value="안정">안정</option>
               </select>
             </label>
 
-            <label className="inline-flex items-center gap-1.5 text-xs opacity-50">
+            <label className="inline-flex items-center gap-1.5 text-xs">
               <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
               <select
-                aria-label="위험등급 필터 (후속)"
-                disabled
-                value="all"
-                className={`h-9 cursor-not-allowed rounded-lg border px-2 text-sm ${
+                aria-label="위험등급 필터"
+                value={lotRiskFilterDraft.grade}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    grade: e.target.value as LotRiskFilterState['grade'],
+                  }))
+                }
+                className={`h-9 rounded-lg border px-2 text-sm ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
+                <option value="심각">심각</option>
+                <option value="주의">주의</option>
+                <option value="안정">안정</option>
               </select>
             </label>
 
@@ -1955,19 +2090,65 @@ export default function DashBoardPage() {
                         >
                           {formatSpecDistance(row.margin)}
                         </td>
-                        <td
-                          className={`px-3 py-3 text-center tabular-nums ${
-                            isDark ? 'text-slate-500' : 'text-slate-400'
-                          }`}
-                        >
-                          —
+                        <td className="px-3 py-3 text-center">
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-sm font-medium ${
+                              row.spc === '이탈'
+                                ? 'text-red-600'
+                                : row.spc === '주의'
+                                  ? 'text-amber-600'
+                                  : row.spc === '안정'
+                                    ? isDark
+                                      ? 'text-slate-300'
+                                      : 'text-slate-700'
+                                    : isDark
+                                      ? 'text-slate-500'
+                                      : 'text-slate-400'
+                            }`}
+                          >
+                            {row.spc === '이탈' || row.spc === '주의' || row.spc === '안정' ? (
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  row.spc === '이탈'
+                                    ? 'bg-red-500'
+                                    : row.spc === '주의'
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                }`}
+                              />
+                            ) : null}
+                            {row.spc || '—'}
+                          </span>
                         </td>
-                        <td
-                          className={`px-3 py-3 text-center tabular-nums ${
-                            isDark ? 'text-slate-500' : 'text-slate-400'
-                          }`}
-                        >
-                          —
+                        <td className="px-3 py-3 text-center">
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                              row.grade === '심각'
+                                ? 'text-red-600'
+                                : row.grade === '주의'
+                                  ? 'text-amber-600'
+                                  : row.grade === '안정'
+                                    ? isDark
+                                      ? 'text-slate-300'
+                                      : 'text-slate-700'
+                                    : isDark
+                                      ? 'text-slate-500'
+                                      : 'text-slate-400'
+                            }`}
+                          >
+                            {row.grade === '심각' || row.grade === '주의' || row.grade === '안정' ? (
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  row.grade === '심각'
+                                    ? 'bg-red-500'
+                                    : row.grade === '주의'
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                }`}
+                              />
+                            ) : null}
+                            {row.grade || '—'}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -2131,10 +2312,24 @@ export default function DashBoardPage() {
                     </div>
                     <span
                       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'
+                        selectedLotRisk.grade === '심각'
+                          ? isDark
+                            ? 'bg-red-950/50 text-red-400'
+                            : 'bg-red-50 text-red-700'
+                          : selectedLotRisk.grade === '주의'
+                            ? isDark
+                              ? 'bg-amber-950/40 text-amber-400'
+                              : 'bg-amber-50 text-amber-700'
+                            : selectedLotRisk.grade === '안정'
+                              ? isDark
+                                ? 'bg-emerald-950/40 text-emerald-400'
+                                : 'bg-emerald-50 text-emerald-700'
+                              : isDark
+                                ? 'bg-slate-800 text-slate-500'
+                                : 'bg-slate-100 text-slate-400'
                       }`}
                     >
-                      —
+                      {selectedLotRisk.grade || '—'}
                     </span>
                   </div>
 
@@ -2168,7 +2363,13 @@ export default function DashBoardPage() {
                         value: formatSpecDistance(selectedLotRisk.margin, true),
                         valueClass: lotRiskMarginClass(selectedLotRisk.margin, isDark),
                       },
-                      { label: 'SPC', value: '—' },
+                      {
+                        label: 'SPC',
+                        value:
+                          selectedLotRiskDetail?.spcStatus ??
+                          selectedLotRisk.spc ??
+                          '—',
+                      },
                     ].map((m) => (
                       <div
                         key={m.label}
@@ -2196,6 +2397,7 @@ export default function DashBoardPage() {
                     ))}
                   </div>
 
+                  {(selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) !== '-' ? (
                   <div className="mb-3 space-y-2">
                     <p
                       className={`mb-1.5 text-xs font-semibold ${
@@ -2204,14 +2406,46 @@ export default function DashBoardPage() {
                     >
                       SPC 관리도
                     </p>
-                    <p
-                      className={`rounded-md px-2.5 py-2 text-xs ${
-                        isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
-                      }`}
-                    >
-                      후속 연동 예정
-                    </p>
+                    {selectedLotRiskDetail?.spc?.metrics &&
+                    selectedLotRiskDetail.spc.metrics.length > 0 ? (
+                      <div className="space-y-3">
+                        {selectedLotRiskDetail.spc.metrics.map((metric) => (
+                          <div key={metric.key}>
+                            <SpcChartCard metric={metric} isDark={isDark} />
+                            {metric.violatedRules && metric.violatedRules.length > 0 ? (
+                              <ul
+                                className={`mt-2 space-y-1.5 rounded-md px-2 py-1.5 text-sm leading-relaxed ${
+                                  isDark
+                                    ? 'bg-amber-950/40 text-amber-100'
+                                    : 'bg-amber-50 text-amber-950'
+                                }`}
+                              >
+                                {metric.violatedRules.map((rule) => (
+                                  <li
+                                    key={`${metric.key}-${rule.rule}`}
+                                    className={`font-medium ${
+                                      isDark ? 'text-amber-50' : 'text-amber-900'
+                                    }`}
+                                  >
+                                    RULE {rule.rule} : {rule.description}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p
+                        className={`rounded-md px-2.5 py-2 text-xs ${
+                          isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
+                        }`}
+                      >
+                        표시할 SPC 관리도 데이터가 없습니다.
+                      </p>
+                    )}
                   </div>
+                  ) : null}
 
                   <div className="mt-auto pt-1">
                     <p
@@ -2226,7 +2460,7 @@ export default function DashBoardPage() {
                         isDark ? 'text-slate-100' : 'text-slate-900'
                       }`}
                     >
-                      &nbsp;
+                      {selectedLotRiskDetail.actionContent?.trim() || '\u00A0'}
                     </p>
                   </div>
                 </div>
@@ -2272,7 +2506,10 @@ export default function DashBoardPage() {
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => setTrendGrain(opt.id)}
+                        onClick={() => {
+                          setSelectedTrendBucket(null);
+                          setTrendGrain(opt.id);
+                        }}
                         className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                           trendGrain === opt.id
                             ? isDark
@@ -2349,6 +2586,7 @@ export default function DashBoardPage() {
                     <ProductionTrendChart
                       points={dailyAggregates}
                       isDark={isDark}
+                      trendGrain={trendGrain}
                       onBarClick={setSelectedTrendBucket}
                     />
                   ) : (
@@ -2360,7 +2598,13 @@ export default function DashBoardPage() {
           </div>
 
           <div className={`flex min-w-0 flex-col p-5 xl:col-span-4 ${cardClass}`}>
-            <FeatureImportancePanel items={featureImportanceItems} isDark={isDark} />
+            <FeatureImportancePanel
+              items={featureImportanceItems}
+              isDark={isDark}
+              periodLabel={featureImportanceLabel}
+              selected={selectedTrendBucket != null}
+              onClearSelection={() => setSelectedTrendBucket(null)}
+            />
           </div>
         </section>
 
