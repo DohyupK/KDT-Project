@@ -1,0 +1,10 @@
+{
+  "sintering_temp": {
+    "min": 700,
+    "max": 850
+  },
+  "humidity": {
+    "min": 5,
+    "max": 95
+  }
+}

@@ -1,0 +1,4 @@
+# Runtime SQLite (local secrets / session data). Do not commit.
+*.sqlite
+*.sqlite-*
+!.gitkeep

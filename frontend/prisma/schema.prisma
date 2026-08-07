@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// Existing MariaDB `users` — reference only; do not migrate/alter this table via Prisma.
+model User {
+  user_id String @id @db.VarChar(50)
+
+  threads UserChatThread[]
+
+  @@map("users")
+}
+
+model UserChatThread {
+  id        String   @id @default(uuid()) @db.Char(36)
+  userId    String   @map("user_id") @db.VarChar(50)
+  channel   String   @default("security") @db.VarChar(32) // "security" | "general"
+  title     String?  @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User              @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  messages UserChatMessage[]
+
+  @@index([userId, updatedAt], map: "idx_user_chat_threads_user_updated")
+  @@index([channel], map: "idx_user_chat_threads_channel")
+  @@map("user_chat_threads")
+}
+
+model UserChatMessage {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  threadId  String   @map("thread_id") @db.Char(36)
+  role      String   @db.VarChar(16) // "user" | "assistant"
+  content   String   @db.Text
+  mode      String?  @db.VarChar(64)
+  provider  String?  @db.VarChar(64)
+  /// RAG citation payloads for multi-turn follow-up (Python also reads/writes).
+  sources   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  thread UserChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt], map: "idx_user_chat_messages_thread_created")
+  @@map("user_chat_messages")
+}

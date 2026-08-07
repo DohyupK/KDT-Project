@@ -1,29 +1,56 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
+import {
+  issueApi,
+  normalizeIssueRiskLevel,
+  type HandoverHistoryItem,
+  type IssueDetail as IssueApiDetail,
+  type IssueListItem as IssueApiListItem,
+} from '@/api/issueApi';
+import { useUiSettings } from '@/components/layout/AppShell';
+import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import { useSelectedLot } from '@/context/SelectedLotContext';
+import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
+import DateInput from '@/components/DateInput';
+import { getAuthUser } from '@/lib/authStorage';
+import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 interface ProcessData {
   time: string;
   temperature: number;
   pressure: number;
-  speed: number;
+  humidity: number;
   riskBefore: number;
   riskAfter: number;
 }
 
+type SpcStatus = '이상' | '주의' | '안정';
+
 interface Issue {
   id: string;
-  occurredAt: string;
+  createdAt: string;
   date: string;
   lot: string;
-  risk: '높음' | '중간' | '낮음';
-  status: '접수' | '분석 중' | '조치 중' | '완료';
-  title: string;
+  risk: '심각' | '주의' | '안정';
+  issueContent: string;
   assignee: string;
   action: string;
   completed: boolean;
-  anomaly: string;
+  /** analysis_lots (상세 API). 목록만이면 null */
+  analysis: {
+    lotId: string;
+    probability: number | null;
+    spcStatus: string | null;
+    riskLevel: '심각' | '주의' | '안정';
+    riskReason: string | null;
+    createdAt: string | null;
+  } | null;
+  /** 목록 SPC 필터용 (analysis_lots.spc_status) */
+  listSpcStatus: string | null;
+  /** 챗봇 connectLot용 — 공정 시계열 API 전 placeholder */
   processData: ProcessData[];
 }
 
@@ -32,14 +59,15 @@ interface FilterState {
   date: string;
   lot: string;
   risk: '' | Issue['risk'];
-  status: '' | Issue['status'];
+  /** 대표 SPC 상태 필터. 안정은 목록 제외 대상이라 옵션에 없음 */
+  spc: '' | '이상' | '주의';
 }
 
 interface HandoverData {
   period: string;
   averageTemperature: number;
   averagePressure: number;
-  averageSpeed: number;
+  averageHumidity: number;
   aiRiskPredictions: number;
   riskyLots: number;
   issueCount: number;
@@ -47,7 +75,6 @@ interface HandoverData {
 
 interface ManagementForm {
   assignee: string;
-  status: Issue['status'];
   action: string;
   completed: boolean;
 }
@@ -62,21 +89,38 @@ interface HeaderHandoverSectionProps {
 
 interface IssueListSectionProps {
   issues: Issue[];
+  totalCount: number;
+  isRefreshing?: boolean;
+  currentPage: number;
+  totalPages: number;
+  pageItems: Array<number | 'ellipsis'>;
+  pageInput: string;
+  rangeLabel: string;
   filters: FilterState;
   lots: string[];
   selectedId: string | null;
   onFilterChange: (key: keyof FilterState, value: string) => void;
+  onApplyFilter: () => void;
+  onResetFilter: () => void;
+  onPageChange: (page: number) => void;
+  onPageInputChange: (value: string) => void;
+  onPageInputSubmit: () => void;
   onSelect: (id: string) => void;
+  /** 메인「위험 LOT Top」과 동일 — 챗봇 features 주입 + 자동 진단 */
+  onDiagnose: (issue: Issue) => void;
 }
 
 interface DetailAnalysisSectionProps {
   issue: Issue | null;
+  onDiagnose?: (issue: Issue) => void;
 }
 
 interface ManagementSectionProps {
   issue: Issue | null;
   form: ManagementForm;
   message: string;
+  canSave: boolean;
+  isSaving?: boolean;
   onChange: <K extends keyof ManagementForm>(key: K, value: ManagementForm[K]) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -91,7 +135,7 @@ interface HandoverNote {
 
 interface HandoverNoteSectionProps {
   notes: HandoverNote[];
-  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt'>) => void;
+  onAdd: (note: Omit<HandoverNote, 'id' | 'createdAt'>) => void | Promise<void>;
   onRemove: (id: number) => void;
   onClose: () => void;
 }
@@ -100,11 +144,16 @@ interface HandoverReportModalProps {
   data: HandoverData;
   issues: Issue[];
   notes: HandoverNote[];
+  completedNoteIds: number[];
   onClose: () => void;
   onDownloadPdf: () => void;
   onDownloadCsv: () => void;
+  onCompleteOne: (noteId: number, party: { from: string; to: string }) => void;
+  onCompleteAll: (party: { from: string; to: string }) => void;
+  isCompleting?: boolean;
 }
 
+/** Light palette — also used by PDF HTML builder (always light). */
 const colors = {
   background: '#f1f5f9',
   panel: '#ffffff',
@@ -123,45 +172,106 @@ const colors = {
   amberSoft: '#fffbeb',
 };
 
-const panelStyle: CSSProperties = {
-  background: colors.panel,
-  border: `1px solid ${colors.line}`,
+type UiColors = typeof colors;
+
+const darkColors: UiColors = {
+  background: '#0f172a',
+  panel: '#1e293b',
+  navy: '#f1f5f9',
+  slate: '#94a3b8',
+  muted: '#94a3b8',
+  line: '#334155',
+  blue: '#60a5fa',
+  blueSoft: 'rgba(23, 37, 84, 0.4)',
+  cyan: '#22d3ee',
+  green: '#34d399',
+  greenSoft: 'rgba(6, 78, 59, 0.4)',
+  red: '#fb7185',
+  redSoft: 'rgba(76, 5, 25, 0.4)',
+  amber: '#fbbf24',
+  amberSoft: 'rgba(69, 26, 3, 0.4)',
+};
+
+const getUiColors = (isDark: boolean): UiColors => (isDark ? darkColors : colors);
+
+const getPanelStyle = (c: UiColors): CSSProperties => ({
+  background: c.panel,
+  border: `1px solid ${c.line}`,
   borderRadius: 18,
-  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.06)',
+  boxShadow:
+    c.panel === darkColors.panel
+      ? '0 8px 24px rgba(0, 0, 0, 0.35)'
+      : '0 8px 24px rgba(15, 23, 42, 0.06)',
   padding: 24,
+});
+
+const getInputStyle = (c: UiColors): CSSProperties => {
+  const isDark = c.panel === darkColors.panel;
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: `1px solid ${isDark ? '#475569' : c.line}`,
+    borderRadius: 10,
+    background: isDark ? '#0f172a' : '#f8fafc',
+    color: c.navy,
+    fontSize: 14,
+    padding: '10px 12px',
+    outlineColor: c.blue,
+  };
 };
 
-const inputStyle: CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  border: `1px solid ${colors.line}`,
-  borderRadius: 10,
-  background: '#f8fafc',
-  color: colors.navy,
-  fontSize: 14,
-  padding: '10px 12px',
-  outlineColor: colors.blue,
-};
-
-const labelStyle: CSSProperties = {
+const getLabelStyle = (c: UiColors): CSSProperties => ({
   display: 'block',
   marginBottom: 7,
-  color: colors.slate,
+  color: c.slate,
   fontSize: 13,
   fontWeight: 700,
-};
+});
 
-const riskStyle = (risk: Issue['risk']): CSSProperties => {
-  if (risk === '높음') return { background: colors.redSoft, color: colors.red };
-  if (risk === '중간') return { background: colors.amberSoft, color: colors.amber };
-  return { background: colors.greenSoft, color: colors.green };
-};
-
-const statusStyle = (status: Issue['status']): CSSProperties => {
-  if (status === '완료') return { background: colors.greenSoft, color: colors.green };
-  if (status === '조치 중') return { background: '#f5f3ff', color: '#7c3aed' };
-  if (status === '분석 중') return { background: colors.blueSoft, color: colors.blue };
-  return { background: '#f1f5f9', color: colors.slate };
+const riskStyle = (risk: Issue['risk'], isDark = false): CSSProperties => {
+  if (risk === '심각' || risk === ('높음' as Issue['risk'])) {
+    return isDark
+      ? {
+          background: 'rgba(76, 5, 25, 0.4)',
+          color: '#fda4af',
+          border: '1px solid #9f1239',
+          fontWeight: 700,
+        }
+      : {
+          background: '#fff1f2',
+          color: '#be123c',
+          border: '1px solid #fecdd3',
+          fontWeight: 700,
+        };
+  }
+  if (risk === '주의' || risk === ('중간' as Issue['risk'])) {
+    return isDark
+      ? {
+          background: 'rgba(69, 26, 3, 0.4)',
+          color: '#fcd34d',
+          border: '1px solid #b45309',
+          fontWeight: 700,
+        }
+      : {
+          background: '#fffbeb',
+          color: '#b45309',
+          border: '1px solid #fde68a',
+          fontWeight: 700,
+        };
+  }
+  return isDark
+    ? {
+        background: 'rgba(6, 78, 59, 0.4)',
+        color: '#6ee7b7',
+        border: '1px solid #047857',
+        fontWeight: 700,
+      }
+    : {
+        background: '#ecfdf5',
+        color: '#047857',
+        border: '1px solid #a7f3d0',
+        fontWeight: 700,
+      };
 };
 
 const badgeBase: CSSProperties = {
@@ -175,181 +285,166 @@ const badgeBase: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const createProcessData = (
-  temperatures: number[],
-  pressures: number[],
-  before: number[],
-  after: number[],
-): ProcessData[] =>
-  temperatures.map((temperature, index) => ({
-    time: `${index * 2}h`,
-    temperature,
-    pressure: pressures[index],
-    speed: 34 + (index % 3),
-    riskBefore: before[index],
-    riskAfter: after[index],
-  }));
+const getFilterControlStyle = (c: UiColors): CSSProperties => {
+  const isDark = c.panel === darkColors.panel;
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    height: 36,
+    border: `1px solid ${isDark ? '#475569' : '#e2e8f0'}`,
+    borderRadius: 8,
+    background: isDark ? '#0f172a' : '#fff',
+    color: c.navy,
+    fontSize: 13,
+    padding: '0 10px',
+    outlineColor: c.blue,
+  };
+};
 
-const INITIAL_ISSUES: Issue[] = [
-  {
-    id: 'ISS-260721-018',
-    occurredAt: '2026-07-21 15:42',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-08',
-    risk: '높음',
-    status: '조치 중',
-    title: '소성로 2호기 온도 상한 지속 초과',
-    assignee: '김현수',
-    action: '소성 온도를 742°C로 하향 조정하고 냉각 계통을 점검 중입니다.',
-    completed: false,
-    anomaly: '14시 이후 온도가 관리 상한 750°C를 3회 초과했으며 AI 위험 점수가 91점까지 상승했습니다.',
-    processData: createProcessData(
-      [738, 742, 748, 754, 752, 746],
-      [1.8, 1.9, 2.1, 2.4, 2.3, 2.0],
-      [42, 51, 68, 91, 86, 72],
-      [38, 43, 52, 61, 48, 35],
-    ),
-  },
-  {
-    id: 'ISS-260721-017',
-    occurredAt: '2026-07-21 14:18',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-07',
-    risk: '중간',
-    status: '분석 중',
-    title: '리튬 투입 속도 편차 증가',
-    assignee: '박서연',
-    action: '공급기 센서 로그와 계량기 교정 이력을 비교 분석하고 있습니다.',
-    completed: false,
-    anomaly: '리튬 투입 속도의 표준편차가 기준 대비 32% 증가하여 조성 불균일 가능성이 감지되었습니다.',
-    processData: createProcessData(
-      [736, 739, 741, 743, 740, 738],
-      [1.7, 1.8, 2.0, 2.1, 1.9, 1.8],
-      [31, 39, 55, 66, 58, 47],
-      [28, 32, 41, 46, 39, 31],
-    ),
-  },
-  {
-    id: 'ISS-260721-016',
-    occurredAt: '2026-07-21 11:05',
-    date: '2026-07-21',
-    lot: 'LOT-CA-260721-05',
-    risk: '낮음',
-    status: '완료',
-    title: '혼합기 진동 센서 일시 이상',
-    assignee: '이도윤',
-    action: '센서 커넥터를 재체결하고 정상 신호 수신을 확인했습니다.',
-    completed: true,
-    anomaly: '진동 센서 신호가 4분간 단절되었으나 설비 실측 진동값은 정상 범위였습니다.',
-    processData: createProcessData(
-      [735, 736, 737, 738, 737, 736],
-      [1.7, 1.7, 1.8, 1.8, 1.7, 1.7],
-      [24, 28, 36, 33, 27, 22],
-      [20, 22, 25, 23, 20, 18],
-    ),
-  },
-  {
-    id: 'ISS-260720-015',
-    occurredAt: '2026-07-20 23:36',
-    date: '2026-07-20',
-    lot: 'LOT-CA-260720-12',
-    risk: '높음',
-    status: '접수',
-    title: '냉각 구간 압력 급상승',
+const noteCategoryStyle = (
+  category: HandoverNote['category'],
+  isDark = false,
+): CSSProperties => {
+  const c = getUiColors(isDark);
+  if (category === '주의사항') return { background: c.redSoft, color: c.red };
+  if (category === '전달사항') return { background: c.blueSoft, color: c.blue };
+  return { background: c.amberSoft, color: c.amber };
+};
+
+function isIssueCompleted(issue: Pick<Issue, 'completed'>) {
+  return issue.completed;
+}
+
+function spcStatusBadgeClass(status: SpcStatus, isDark = false) {
+  const base = 'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold';
+  if (status === '이상') {
+    return isDark
+      ? `${base} bg-rose-950/50 text-rose-300`
+      : `${base} bg-rose-100 text-rose-700`;
+  }
+  if (status === '주의') {
+    return isDark
+      ? `${base} bg-amber-950/50 text-amber-300`
+      : `${base} bg-amber-100 text-amber-700`;
+  }
+  return isDark
+    ? `${base} bg-emerald-950/50 text-emerald-300`
+    : `${base} bg-emerald-100 text-emerald-700`;
+}
+
+function mapAnalysisSpcToFilter(spcStatus: string | null | undefined): SpcStatus {
+  const raw = (spcStatus || '').trim();
+  if (!raw) return '안정';
+  if (raw.includes('이탈') || raw.includes('이상')) return '이상';
+  if (raw.includes('주의')) return '주의';
+  return '안정';
+}
+
+function formatAnalysisProbability(probability: number | null | undefined): {
+  pct: number;
+  label: string;
+} {
+  if (probability == null || Number.isNaN(Number(probability))) {
+    return { pct: 0, label: '—' };
+  }
+  const n = Number(probability);
+  const pct = n <= 1 ? n * 100 : n;
+  const clamped = Math.max(0, Math.min(100, pct));
+  return { pct: clamped, label: `${pct.toFixed(1)}%` };
+}
+
+const EMPTY_PROCESS_DATA: ProcessData[] = [];
+
+/**
+ * 이슈 processData → 챗봇 LotSensorRecord.
+ * 메인 위험 LOT 연결과 동일한 connectLot 입력 형태.
+ */
+function issueToLotSensorRecord(issue: Issue): LotSensorRecord {
+  const points = issue.processData;
+  const last = points[points.length - 1];
+  const peakTemp =
+    points.length > 0 ? Math.max(...points.map((p) => p.temperature)) : 740;
+  const peakPressure =
+    points.length > 0 ? Math.max(...points.map((p) => p.pressure)) : 1.8;
+  const timePart = issue.createdAt.includes(' ')
+    ? issue.createdAt.split(' ')[1] ?? '00:00'
+    : '00:00';
+  const hour = timePart.length >= 5 ? timePart.slice(0, 5) : timePart;
+  const riskBoost = issue.risk === '심각' ? 1 : issue.risk === '주의' ? 0.5 : 0;
+
+  return {
+    id: issue.lot,
+    date: issue.date,
+    hour,
+    sintering_temp: last?.temperature ?? peakTemp,
+    tank_pressure: last?.pressure ?? peakPressure,
+    process_time: Math.max(60, points.length * 20),
+    lithium_input: Math.round((1.02 + riskBoost * 0.04) * 1000) / 1000,
+    humidity: Math.round(38 + riskBoost * 4),
+    metal_impurity: Math.round((0.022 + riskBoost * 0.01) * 1000) / 1000,
+    additive_ratio: Math.round((2.5 + riskBoost * 0.3) * 10) / 10,
+  };
+}
+
+/** 목록 API → UI. 담당자·조치·analysis는 상세 API에서 채움. */
+function mapIssueListItem(item: IssueApiListItem): Issue {
+  return {
+    id: item.issueId,
+    createdAt: item.createdAt,
+    date: item.createdAt.slice(0, 10),
+    lot: item.lotId,
+    risk: normalizeIssueRiskLevel(item.riskLevel),
+    issueContent: item.issueContent,
     assignee: '미배정',
     action: '',
     completed: false,
-    anomaly: '냉각수 압력이 2.7bar까지 급상승하고 배출 온도 안정화 시간이 평소보다 18분 지연되었습니다.',
-    processData: createProcessData(
-      [741, 744, 747, 749, 746, 742],
-      [1.9, 2.0, 2.3, 2.7, 2.5, 2.2],
-      [45, 53, 71, 94, 83, 67],
-      [41, 47, 58, 69, 54, 42],
-    ),
-  },
-  {
-    id: 'ISS-260720-014',
-    occurredAt: '2026-07-20 18:12',
-    date: '2026-07-20',
-    lot: 'LOT-CA-260720-09',
-    risk: '중간',
-    status: '완료',
-    title: '입도 분포 D50 기준치 접근',
-    assignee: '최유진',
-    action: '분쇄기 회전수를 3% 낮추고 재측정하여 정상 범위를 확인했습니다.',
-    completed: true,
-    anomaly: 'D50 측정값이 관리 상한에 근접했으나 공정 조정 후 정상 중앙값으로 회복되었습니다.',
-    processData: createProcessData(
-      [737, 738, 740, 741, 739, 738],
-      [1.8, 1.9, 2.0, 2.0, 1.9, 1.8],
-      [34, 42, 57, 63, 48, 37],
-      [29, 34, 40, 43, 33, 26],
-    ),
-  },
-  {
-    id: 'ISS-260719-013',
-    occurredAt: '2026-07-19 16:48',
-    date: '2026-07-19',
-    lot: 'LOT-CA-260719-06',
-    risk: '낮음',
-    status: '완료',
-    title: '검사 장비 이미지 수집 지연',
-    assignee: '정민재',
-    action: '카메라 캐시를 초기화하고 네트워크 지연 상태를 점검했습니다.',
-    completed: true,
-    anomaly: '표면 검사 이미지 수집이 평균 1.2초 지연되었으나 검사 결과 누락은 없었습니다.',
-    processData: createProcessData(
-      [734, 735, 736, 736, 735, 734],
-      [1.6, 1.7, 1.7, 1.8, 1.7, 1.6],
-      [18, 22, 29, 31, 25, 20],
-      [16, 18, 21, 22, 19, 15],
-    ),
-  },
-  {
-    id: 'ISS-260719-012',
-    occurredAt: '2026-07-19 09:22',
-    date: '2026-07-19',
-    lot: 'LOT-CA-260719-02',
-    risk: '중간',
-    status: '조치 중',
-    title: '전구체 수분 함량 변동 감지',
-    assignee: '한지우',
-    action: '원료 보관 습도와 건조 공정 시간을 재조정하고 있습니다.',
-    completed: false,
-    anomaly: '수분 함량이 0.03%p 상승하여 소성 후 잔류 리튬 증가 가능성이 확인되었습니다.',
-    processData: createProcessData(
-      [736, 738, 742, 744, 742, 739],
-      [1.7, 1.8, 2.0, 2.2, 2.1, 1.9],
-      [30, 38, 54, 69, 61, 49],
-      [27, 33, 42, 49, 41, 34],
-    ),
-  },
-  {
-    id: 'ISS-260718-011',
-    occurredAt: '2026-07-18 21:10',
-    date: '2026-07-18',
-    lot: 'LOT-CA-260718-11',
-    risk: '높음',
-    status: '분석 중',
-    title: '예측 불량률 2.5% 초과',
-    assignee: '김현수',
-    action: '동일 조건 과거 LOT와 공정 파라미터를 교차 분석 중입니다.',
-    completed: false,
-    anomaly: '온도와 투입량 복합 영향으로 AI 예측 불량률이 2.73%까지 상승했습니다.',
-    processData: createProcessData(
-      [739, 743, 749, 753, 751, 747],
-      [1.8, 2.0, 2.2, 2.5, 2.4, 2.1],
-      [44, 56, 74, 92, 87, 73],
-      [39, 46, 58, 65, 55, 43],
-    ),
-  },
-];
+    analysis: null,
+    listSpcStatus: item.spcStatus ?? null,
+    processData: EMPTY_PROCESS_DATA,
+  };
+}
+
+function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
+  const analysis = detail.analysis
+    ? {
+        lotId: detail.analysis.lotId,
+        probability: detail.analysis.probability,
+        spcStatus: detail.analysis.spcStatus,
+        riskLevel: normalizeIssueRiskLevel(detail.analysis.riskLevel),
+        riskReason: detail.analysis.riskReason,
+        createdAt: detail.analysis.createdAt,
+      }
+    : null;
+
+  return {
+    ...issue,
+    id: detail.issueId,
+    createdAt: detail.createdAt,
+    date: detail.createdAt.slice(0, 10),
+    lot: detail.lotId,
+    risk: normalizeIssueRiskLevel(detail.riskLevel),
+    issueContent: detail.issueContent,
+    assignee: detail.assigneeName?.trim() || '미배정',
+    action: detail.actionContent ?? '',
+    completed: detail.completed,
+    analysis,
+    listSpcStatus: detail.analysis?.spcStatus ?? detail.spcStatus ?? issue.listSpcStatus,
+  };
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string } | undefined;
+    if (data?.message) return data.message;
+  }
+  return fallback;
+}
 
 const HANDOVER_DATA: HandoverData = {
   period: '2026-07-21 08:00 ~ 16:00',
   averageTemperature: 742.6,
   averagePressure: 1.94,
-  averageSpeed: 35.2,
+  averageHumidity: 45.8,
   aiRiskPredictions: 5,
   riskyLots: 3,
   issueCount: 4,
@@ -362,27 +457,20 @@ const HeaderHandoverSection = ({
   onWrite,
   onCloseNotice,
 }: HeaderHandoverSectionProps) => {
-  const metrics = [
-    { label: '평균 온도', value: `${data.averageTemperature}°C`, color: colors.blue },
-    { label: '평균 압력', value: `${data.averagePressure} bar`, color: colors.cyan },
-    { label: '평균 속도', value: `${data.averageSpeed} rpm`, color: '#8b5cf6' },
-    { label: 'AI 예측 위험', value: `${data.aiRiskPredictions}건`, color: colors.amber },
-    { label: '위험 LOT', value: `${data.riskyLots}개`, color: colors.red },
-    { label: '발생 이슈', value: `${data.issueCount}건`, color: colors.slate },
-  ];
-
+  const { isDark, language } = useUiSettings();
+  const c = getUiColors(isDark);
   return (
     <section>
       {notice && (
         <div
           role="status"
           style={{
-            ...panelStyle,
+            ...getPanelStyle(c),
             marginBottom: 18,
             padding: '13px 16px',
-            borderColor: '#86efac',
-            background: colors.greenSoft,
-            color: '#166534',
+            borderColor: isDark ? '#047857' : '#86efac',
+            background: c.greenSoft,
+            color: isDark ? '#6ee7b7' : '#166534',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -398,7 +486,7 @@ const HeaderHandoverSection = ({
             style={{
               border: 0,
               background: 'transparent',
-              color: '#166534',
+              color: isDark ? '#6ee7b7' : '#166534',
               cursor: 'pointer',
               fontSize: 20,
             }}
@@ -417,121 +505,122 @@ const HeaderHandoverSection = ({
           marginBottom: 22,
         }}
       >
-        <div>
-          <h1 style={{ margin: 0, color: colors.navy, fontSize: 30, letterSpacing: '-0.03em' }}>
-            이슈 관리
+        <div className="flex flex-col gap-1">
+          <p
+            className={`text-sm font-bold tracking-wide ${
+              isDark ? 'text-blue-400' : 'text-blue-600'
+            }`}
+          >
+            Issue Operations
+          </p>
+          <h1
+            className={`mt-1 text-3xl font-bold tracking-tight ${
+              isDark ? 'text-slate-100' : 'text-gray-900'
+            }`}
+          >
+            {language === 'en' ? 'Issue Management' : '이슈 관리'}
           </h1>
-          <p style={{ margin: '9px 0 0', color: colors.slate, fontSize: 15 }}>
-            공정 이슈를 조회하고 분석하며 처리 현황을 관리할 수 있습니다.
+          <p className={`mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+            {language === 'en'
+              ? 'Review process issues, analyze them, and manage resolution status.'
+              : '공정 이슈를 조회하고 분석하며 처리 현황을 관리할 수 있습니다.'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
             onClick={onWrite}
-            style={{
-              border: `2px solid ${colors.blue}`,
-              borderRadius: 11,
-              background: '#fff',
-              color: colors.blue,
-              padding: '11px 18px',
-              fontSize: 14,
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
+            className={`inline-flex h-9 items-center rounded-lg border-2 border-blue-600 px-3 text-xs font-bold text-blue-600 ${
+              isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-white hover:bg-blue-50'
+            }`}
           >
-            인수인계 사항 작성
+            {language === 'en' ? '+ Write Handover' : '+ 인수인계 작성'}
           </button>
           <button
             type="button"
             onClick={onGenerate}
-            style={{
-              border: 0,
-              borderRadius: 11,
-              background: colors.blue,
-              color: '#fff',
-              padding: '12px 18px',
-              fontSize: 14,
-              fontWeight: 800,
-              cursor: 'pointer',
-              boxShadow: '0 8px 18px rgba(37, 99, 235, 0.24)',
-            }}
+            className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-blue-700"
           >
-            인수인계 사항 조회 및 다운로드
+            {language === 'en' ? 'View / Download Handover' : '인수인계 조회/다운로드'}
           </button>
-        </div>
-      </div>
-      <div style={panelStyle}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 18,
-          }}
-        >
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 18 }}>이전 8시간 공정 요약</h2>
-          <span style={{ color: colors.muted, fontSize: 12 }}>{data.period}</span>
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {metrics.map((metric) => (
-            <div
-              key={metric.label}
-              style={{
-                border: `1px solid ${colors.line}`,
-                borderRadius: 13,
-                padding: 16,
-                background: '#f8fafc',
-                borderTop: `3px solid ${metric.color}`,
-              }}
-            >
-              <div style={{ color: colors.slate, fontSize: 12, fontWeight: 700 }}>
-                {metric.label}
-              </div>
-              <div style={{ marginTop: 7, color: colors.navy, fontSize: 22, fontWeight: 900 }}>
-                {metric.value}
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </section>
   );
 };
 
-const reportCellStyle: CSSProperties = {
-  border: `1px solid ${colors.line}`,
-  padding: '9px 12px',
-  fontSize: 13,
-  color: colors.navy,
-  textAlign: 'left',
-};
-
-const reportHeadCellStyle: CSSProperties = {
-  ...reportCellStyle,
-  background: '#f8fafc',
-  color: colors.slate,
-  fontWeight: 800,
-  whiteSpace: 'nowrap',
-};
-
 const HandoverReportModal = ({
   data,
   issues,
   notes,
+  completedNoteIds,
   onClose,
   onDownloadPdf,
   onDownloadCsv,
+  onCompleteOne,
+  onCompleteAll,
+  isCompleting = false,
 }: HandoverReportModalProps) => {
+  const { isDark } = useUiSettings();
+  const loginName = getLoggedInUserName();
+  const noteAuthor =
+    notes.map((n) => n.author.trim()).find((name) => name && name !== UNAUTH_USER_LABEL) ||
+    loginName;
+  const [handoverFrom, setHandoverFrom] = useState(noteAuthor);
+  const [handoverTo, setHandoverTo] = useState(loginName);
+  const [partyError, setPartyError] = useState('');
+
+  useEffect(() => {
+    const nextFrom =
+      notes.map((n) => n.author.trim()).find((name) => name && name !== UNAUTH_USER_LABEL) ||
+      getLoggedInUserName();
+    const nextTo = getLoggedInUserName();
+    setHandoverFrom(nextFrom);
+    setHandoverTo(nextTo);
+    setPartyError('');
+  }, [notes]);
+
+  const totalCount = issues.length;
+  const completedCount = issues.filter((issue) => issue.completed).length;
   const openIssues = issues.filter((issue) => !issue.completed);
+  const criticalOpenIssues = openIssues
+    .filter((issue) => issue.risk === '심각')
+    .concat(openIssues.filter((issue) => issue.risk !== '심각'))
+    .slice(0, 2);
+
+  const shiftLabel = '2026-07-21 주간 조 (08:00 ~ 16:00)';
+  const writtenAt = '2026-07-21 15:55';
+  const defaultBriefing = '소성로 2호기 온도 트렌드 30분 간격 추적 필요';
+  const completedIdSet = useMemo(() => new Set(completedNoteIds), [completedNoteIds]);
+  const pendingNotes = useMemo(
+    () => notes.filter((note) => !completedIdSet.has(note.id)),
+    [notes, completedIdSet],
+  );
+  const transferredCount = notes.length - pendingNotes.length;
+  const canCompleteAll = pendingNotes.length > 0 && !isCompleting;
+
+  const resolveParty = (): { from: string; to: string } | null => {
+    const from = handoverFrom.trim();
+    const to = handoverTo.trim();
+    if (!from || !to) {
+      setPartyError('인계자와 인수자를 모두 입력해주세요.');
+      return null;
+    }
+    setPartyError('');
+    return { from, to };
+  };
+
+  const handleCompleteAllClick = () => {
+    const party = resolveParty();
+    if (!party) return;
+    onCompleteAll(party);
+  };
+
+  const handleCompleteOneClick = (noteId: number) => {
+    const party = resolveParty();
+    if (!party) return;
+    onCompleteOne(noteId, party);
+  };
 
   return (
     <div
@@ -552,265 +641,473 @@ const HandoverReportModal = ({
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        style={{
-          background: '#fff',
-          borderRadius: 18,
-          width: 'min(860px, 100%)',
-          maxHeight: '88vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: '0 24px 64px rgba(15, 23, 42, 0.35)',
-        }}
+        className={`flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl shadow-2xl ${
+          isDark ? 'bg-slate-800 text-slate-100' : 'bg-white'
+        }`}
       >
+        {/* Pinned top bar */}
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: '18px 24px',
-            borderBottom: `1px solid ${colors.line}`,
-            background: colors.navy,
-            color: '#fff',
-          }}
+          className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b bg-slate-900 px-5 py-3.5 text-white ${
+            isDark ? 'border-slate-700' : 'border-slate-200'
+          }`}
         >
-          <strong style={{ fontSize: 16 }}>교대 인수인계 보고서</strong>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <strong className="text-sm font-semibold tracking-tight">교대 인수인계 브리핑</strong>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onDownloadPdf}
-              style={{
-                border: 0,
-                borderRadius: 9,
-                background: colors.blue,
-                color: '#fff',
-                padding: '9px 15px',
-                fontSize: 13,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
+              className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700"
             >
-              ⬇ PDF 다운로드
+              PDF 다운로드
             </button>
             <button
               type="button"
               onClick={onDownloadCsv}
-              style={{
-                border: `2px solid ${colors.blue}`,
-                borderRadius: 9,
-                background: 'transparent',
-                color: '#dbeafe',
-                padding: '7px 15px',
-                fontSize: 13,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
+              className="inline-flex h-9 items-center rounded-lg border border-blue-300/60 bg-transparent px-3 text-xs font-bold text-blue-100 hover:bg-white/10"
             >
-              ⬇ CSV 다운로드
+              CSV 다운로드
             </button>
             <button
               type="button"
               onClick={onClose}
               aria-label="보고서 닫기"
-              style={{
-                border: 0,
-                background: 'transparent',
-                color: '#cbd5e1',
-                cursor: 'pointer',
-                fontSize: 22,
-                lineHeight: 1,
-              }}
+              className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg text-xl text-slate-300 hover:bg-white/10 hover:text-white"
             >
               ×
             </button>
           </div>
         </div>
 
-        <div style={{ padding: 28, overflowY: 'auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <h2 style={{ margin: 0, color: colors.navy, fontSize: 22, letterSpacing: '-0.02em' }}>
-              공정 이슈 인수인계 보고서
-            </h2>
-            <div style={{ marginTop: 8, color: colors.slate, fontSize: 13 }}>
-              대상 기간: {data.period}
+        <div className="overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+          {/* 1. Shift Header */}
+          <section
+            className={`mb-5 rounded-xl border p-4 ${
+              isDark
+                ? 'border-slate-700 bg-slate-900/70'
+                : 'border-slate-200 bg-slate-50/80'
+            }`}
+          >
+            <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
+              교대 정보
             </div>
-          </div>
-
-          <h3 style={{ margin: '0 0 10px', color: colors.navy, fontSize: 15 }}>1. 공정 요약</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
-            <tbody>
-              <tr>
-                <th style={reportHeadCellStyle}>평균 온도</th>
-                <td style={reportCellStyle}>{data.averageTemperature}°C</td>
-                <th style={reportHeadCellStyle}>평균 압력</th>
-                <td style={reportCellStyle}>{data.averagePressure} bar</td>
-                <th style={reportHeadCellStyle}>평균 속도</th>
-                <td style={reportCellStyle}>{data.averageSpeed} rpm</td>
-              </tr>
-              <tr>
-                <th style={reportHeadCellStyle}>AI 예측 위험</th>
-                <td style={reportCellStyle}>{data.aiRiskPredictions}건</td>
-                <th style={reportHeadCellStyle}>위험 LOT</th>
-                <td style={reportCellStyle}>{data.riskyLots}개</td>
-                <th style={reportHeadCellStyle}>발생 이슈</th>
-                <td style={reportCellStyle}>{data.issueCount}건</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <h3 style={{ margin: '0 0 10px', color: colors.navy, fontSize: 15 }}>
-            2. 미완료 이슈 ({openIssues.length}건)
-          </h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
-            <thead>
-              <tr>
-                <th style={reportHeadCellStyle}>이슈 ID</th>
-                <th style={reportHeadCellStyle}>발생일시</th>
-                <th style={reportHeadCellStyle}>LOT</th>
-                <th style={reportHeadCellStyle}>위험도</th>
-                <th style={reportHeadCellStyle}>상태</th>
-                <th style={reportHeadCellStyle}>담당자</th>
-              </tr>
-            </thead>
-            <tbody>
-              {openIssues.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ ...reportCellStyle, textAlign: 'center', color: colors.slate }}>
-                    미완료 이슈가 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                openIssues.map((issue) => (
-                  <tr key={issue.id}>
-                    <td style={reportCellStyle}>{issue.id}</td>
-                    <td style={reportCellStyle}>{issue.occurredAt}</td>
-                    <td style={reportCellStyle}>{issue.lot}</td>
-                    <td style={{ ...reportCellStyle, fontWeight: 800, color: riskStyle(issue.risk).color }}>
-                      {issue.risk}
-                    </td>
-                    <td style={reportCellStyle}>{issue.status}</td>
-                    <td style={reportCellStyle}>{issue.assignee}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          <h3 style={{ margin: '0 0 10px', color: colors.navy, fontSize: 15 }}>
-            3. 인수인계 특이사항 ({notes.length}건)
-          </h3>
-          {notes.length === 0 ? (
-            <div
-              style={{
-                border: `1px solid ${colors.line}`,
-                borderRadius: 10,
-                padding: '14px 16px',
-                color: colors.slate,
-                fontSize: 13,
-                textAlign: 'center',
-                marginBottom: 24,
-              }}
-            >
-              등록된 인수인계 특이사항이 없습니다.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
-              {notes.map((note) => (
-                <div
-                  key={note.id}
-                  style={{
-                    border: `1px solid ${colors.line}`,
-                    borderLeft: `4px solid ${noteCategoryStyle(note.category).color}`,
-                    borderRadius: 10,
-                    padding: '12px 15px',
-                  }}
+            <dl className="grid gap-3 text-sm sm:grid-cols-1">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <dt
+                  className={`w-24 shrink-0 text-xs font-semibold ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ ...badgeBase, ...noteCategoryStyle(note.category) }}>
-                      {note.category}
-                    </span>
-                    <strong style={{ color: colors.navy, fontSize: 13 }}>{note.author}</strong>
-                    <span style={{ color: colors.muted, fontSize: 12 }}>{note.createdAt}</span>
-                  </div>
-                  <p style={{ margin: '8px 0 0', color: colors.navy, fontSize: 13, lineHeight: 1.65 }}>
-                    {note.content}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <h3 style={{ margin: '0 0 10px', color: colors.navy, fontSize: 15 }}>
-            4. 전체 이슈 처리 현황 ({issues.length}건)
-          </h3>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {issues.map((issue) => (
-              <div
-                key={issue.id}
-                style={{
-                  border: `1px solid ${colors.line}`,
-                  borderLeft: `4px solid ${riskStyle(issue.risk).color}`,
-                  borderRadius: 10,
-                  padding: '12px 15px',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 10,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <strong style={{ color: colors.navy, fontSize: 14 }}>
-                    [{issue.id}] {issue.title}
-                  </strong>
-                  <span style={{ ...badgeBase, ...statusStyle(issue.status) }}>{issue.status}</span>
-                </div>
-                <div style={{ marginTop: 6, color: colors.slate, fontSize: 12 }}>
-                  {issue.occurredAt} · {issue.lot} · 담당 {issue.assignee}
-                </div>
-                {issue.action && (
-                  <div style={{ marginTop: 6, color: colors.navy, fontSize: 13, lineHeight: 1.6 }}>
-                    조치: {issue.action}
-                  </div>
-                )}
+                  교대 구분
+                </dt>
+                <dd className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  {shiftLabel}
+                </dd>
               </div>
-            ))}
-          </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="handover-from"
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    인계자
+                  </label>
+                  <input
+                    id="handover-from"
+                    value={handoverFrom}
+                    readOnly
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-slate-50 text-slate-900'
+                    }`}
+                    placeholder="인계자 이름"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="handover-to"
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    인수자
+                  </label>
+                  <input
+                    id="handover-to"
+                    value={handoverTo}
+                    readOnly
+                    className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-slate-50 text-slate-900'
+                    }`}
+                    placeholder="인수자 이름"
+                  />
+                </div>
+              </div>
+              {partyError ? (
+                <p
+                  className={`m-0 text-xs font-semibold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}
+                  role="alert"
+                >
+                  {partyError}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <dt
+                  className={`w-24 shrink-0 text-xs font-semibold ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  작성 일시
+                </dt>
+                <dd className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {writtenAt}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-3 text-[11px] text-slate-400">대상 기간 · {data.period}</p>
+          </section>
+
+          {/* 2. Top Notice / Callout — 다음 조 전달사항 */}
+          <section
+            className={`mb-5 rounded-xl border p-4 ${
+              isDark
+                ? 'border-amber-800/60 bg-amber-950/40'
+                : 'border-amber-200/80 bg-amber-50/80'
+            }`}
+          >
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3
+                className={`m-0 text-sm font-bold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}
+              >
+                3. 교대 전달 및 주의사항
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                    isDark
+                      ? 'border-amber-800 bg-slate-800/70 text-amber-200'
+                      : 'border-amber-200 bg-white/70 text-amber-800'
+                  }`}
+                >
+                  전체 {notes.length}건 · 완료 {transferredCount}건 · 대기 {pendingNotes.length}건
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCompleteAllClick}
+                  disabled={!canCompleteAll}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {isCompleting ? '저장 중…' : '전체 완료'}
+                </button>
+              </div>
+            </div>
+            {notes.length === 0 ? (
+              <p
+                className={`m-0 text-sm font-semibold leading-relaxed ${
+                  isDark ? 'text-amber-100' : 'text-amber-950'
+                }`}
+              >
+                ⚠ {defaultBriefing}
+              </p>
+            ) : (
+              <ul className="m-0 list-none space-y-2.5 p-0">
+                {notes.map((note) => {
+                  const isDone = completedIdSet.has(note.id);
+                  return (
+                    <li
+                      key={note.id}
+                      className={`rounded-lg border px-3 py-2.5 ${
+                        isDone
+                          ? isDark
+                            ? 'border-emerald-800 bg-emerald-950/40'
+                            : 'border-emerald-100 bg-emerald-50/70'
+                          : isDark
+                            ? 'border-amber-800/60 bg-slate-800/70'
+                            : 'border-amber-100/80 bg-white/70'
+                      }`}
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <span
+                          className="rounded-md px-1.5 py-0.5 text-[10px] font-bold"
+                          style={noteCategoryStyle(note.category, isDark)}
+                        >
+                          {note.category}
+                        </span>
+                        <span
+                          className={`text-xs font-semibold ${
+                            isDark ? 'text-slate-300' : 'text-slate-700'
+                          }`}
+                        >
+                          {note.author}
+                        </span>
+                        <span className="text-[11px] text-slate-400">{note.createdAt}</span>
+                        {isDone ? (
+                          <span
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                              isDark
+                                ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300'
+                                : 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            완료됨
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteOneClick(note.id)}
+                          disabled={isDone || isCompleting}
+                          className={`ml-auto inline-flex h-7 items-center rounded-md bg-emerald-600 px-2.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed ${
+                            isDark
+                              ? 'disabled:bg-emerald-950/40 disabled:text-emerald-400'
+                              : 'disabled:bg-emerald-200 disabled:text-emerald-700'
+                          }`}
+                        >
+                          {isDone ? '완료됨' : '완료'}
+                        </button>
+                      </div>
+                      <p
+                        className={`m-0 text-sm font-medium leading-relaxed ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                      >
+                        {note.content}
+                      </p>
+                    </li>
+                  );
+                })}
+                {!notes.some((note) => note.content.includes('소성로')) ? (
+                  <li
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                      isDark
+                        ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                        : 'border-rose-100 bg-rose-50/60 text-rose-800'
+                    }`}
+                  >
+                    ⚠ {defaultBriefing}
+                  </li>
+                ) : null}
+              </ul>
+            )}
+          </section>
+
+          {/* 3. Production Brief */}
+          <section className="mb-5">
+            <h3
+              className={`mb-2.5 mt-0 text-sm font-bold ${
+                isDark ? 'text-slate-100' : 'text-slate-900'
+              }`}
+            >
+              공정 실적 요약
+            </h3>
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  주간 생산량
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold tabular-nums ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                  1,958 LOT
+                </div>
+                <div
+                  className={`mt-0.5 text-[11px] font-medium ${
+                    isDark ? 'text-emerald-300' : 'text-emerald-700'
+                  }`}
+                >
+                  목표 95.2% 달성
+                </div>
+              </div>
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  평균 불량률
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold tabular-nums ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                  8.8%
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-400">교대 집계</div>
+              </div>
+              <div
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
+                <div className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  특이 설비
+                </div>
+                <div
+                  className={`mt-1 text-base font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                >
+                  소성로 2호기
+                </div>
+                <div
+                  className={`mt-0.5 text-[11px] font-medium ${
+                    isDark ? 'text-amber-300' : 'text-amber-700'
+                  }`}
+                >
+                  점검중
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* 4. Unresolved Issues (Compact) */}
+          <section>
+            <h3
+              className={`mb-2.5 mt-0 text-sm font-bold ${
+                isDark ? 'text-slate-100' : 'text-slate-900'
+              }`}
+            >
+              야간 이관 이슈
+            </h3>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-900/70 text-slate-300'
+                    : 'border-slate-200 bg-slate-50 text-slate-700'
+                }`}
+              >
+                총 발생: {totalCount || data.issueCount}건
+              </span>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                완료: {completedCount}건
+              </span>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  isDark
+                    ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                }`}
+              >
+                야간 이관(미완료): {openIssues.length}건
+              </span>
+            </div>
+
+            {criticalOpenIssues.length === 0 ? (
+              <div
+                className={`rounded-xl border px-4 py-3 text-center text-sm ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                    : 'border-slate-200 bg-slate-50 text-slate-500'
+                }`}
+              >
+                야간 이관이 필요한 미완료 이슈가 없습니다.
+              </div>
+            ) : (
+              <ul className="m-0 list-none space-y-2 p-0">
+                {criticalOpenIssues.map((issue) => (
+                  <li
+                    key={issue.id}
+                    className={`rounded-lg border px-3.5 py-2.5 text-sm ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-800 text-slate-200'
+                        : 'border-slate-200 bg-white text-slate-800'
+                    }`}
+                  >
+                    <span className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                      {issue.id}
+                    </span>
+                    <span className={`mx-1.5 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>|</span>
+                    <span className="font-medium">{issue.issueContent}</span>
+                    <span className={`mx-1.5 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>|</span>
+                    <span className={`font-semibold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>
+                      야간점검 필요
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
     </div>
   );
 };
 
-const noteCategoryStyle = (category: HandoverNote['category']): CSSProperties => {
-  if (category === '주의사항') return { background: colors.redSoft, color: colors.red };
-  if (category === '전달사항') return { background: colors.blueSoft, color: colors.blue };
-  return { background: colors.amberSoft, color: colors.amber };
-};
+const UNAUTH_USER_LABEL = '—(로그인 필요)';
 
-const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSectionProps) => {
-  const [author, setAuthor] = useState('');
+/** users.name from login session (kdt-auth-user). */
+function getLoggedInUserName(): string {
+  const name = getAuthUser()?.name?.trim();
+  return name || UNAUTH_USER_LABEL;
+}
+
+function mapHandoverItemToNote(item: HandoverHistoryItem): HandoverNote {
+  const category: HandoverNote['category'] =
+    item.category === '전달사항' || item.category === '주의사항' || item.category === '특이사항'
+      ? item.category
+      : '특이사항';
+  return {
+    id: item.historyId,
+    author: item.handoverFrom || '',
+    category,
+    content: item.handoverContent,
+    createdAt: item.createdAt || item.archivedAt || '',
+  };
+}
+
+const HandoverNoteSection = ({
+  notes,
+  onAdd,
+  onRemove,
+  onClose,
+}: HandoverNoteSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+  const [author] = useState(() => getLoggedInUserName());
   const [category, setCategory] = useState<HandoverNote['category']>('특이사항');
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (author.trim().length === 0) {
-      setError('작성자를 입력해주세요.');
+    if (!author.trim() || author === UNAUTH_USER_LABEL) {
+      setError('로그인 사용자 정보를 확인할 수 없습니다.');
       return;
     }
     if (content.trim().length === 0) {
       setError('인수인계 내용을 입력해주세요.');
       return;
     }
-    onAdd({ author: author.trim(), category, content: content.trim() });
-    setContent('');
+    setSubmitting(true);
     setError('');
+    try {
+      await onAdd({
+        author: author.trim(),
+        category,
+        content: content.trim(),
+      });
+      setContent('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '인수인계 등록에 실패했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -833,7 +1130,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
       <section
         onClick={(event) => event.stopPropagation()}
         style={{
-          ...panelStyle,
+          ...getPanelStyle(c),
           width: 'min(680px, 100%)',
           maxHeight: '88vh',
           overflowY: 'auto',
@@ -841,9 +1138,9 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>인수인계 사항 작성</h2>
+          <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>인수인계 사항 작성</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ color: colors.slate, fontSize: 13, fontWeight: 700 }}>
+            <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
               등록 {notes.length}건
             </span>
             <button
@@ -853,7 +1150,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               style={{
                 border: 0,
                 background: 'transparent',
-                color: colors.muted,
+                color: c.muted,
                 cursor: 'pointer',
                 fontSize: 22,
                 lineHeight: 1,
@@ -864,7 +1161,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
             </button>
           </div>
         </div>
-        <p style={{ margin: '0 0 18px', color: colors.slate, fontSize: 13 }}>
+        <p style={{ margin: '0 0 18px', color: c.slate, fontSize: 13 }}>
           다음 교대 근무자에게 전달할 특이사항과 주의사항을 기록하면 인수인계 보고서에 함께 포함됩니다.
         </p>
 
@@ -872,10 +1169,10 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
           <div
             role="alert"
             style={{
-              border: '1px solid #fca5a5',
+              border: isDark ? '1px solid #9f1239' : '1px solid #fca5a5',
               borderRadius: 10,
-              background: colors.redSoft,
-              color: colors.red,
+              background: c.redSoft,
+              color: c.red,
               padding: '11px 13px',
               marginBottom: 16,
               fontSize: 13,
@@ -890,28 +1187,42 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
               gap: 12,
               marginBottom: 12,
             }}
           >
             <div>
-              <label htmlFor="note-author" style={labelStyle}>작성자</label>
+              <label htmlFor="note-author" style={getLabelStyle(c)}>
+                작성자
+              </label>
               <input
                 id="note-author"
                 value={author}
-                onChange={(event) => setAuthor(event.target.value)}
-                placeholder="작성자 이름"
-                style={inputStyle}
+                readOnly
+                aria-readonly="true"
+                title="로그인 계정 정보가 자동 입력됩니다"
+                style={{
+                  ...getInputStyle(c),
+                  background: isDark ? '#0f172a' : '#f1f5f9',
+                  color: c.navy,
+                  fontWeight: 700,
+                  cursor: 'default',
+                }}
               />
+              <p style={{ margin: '6px 0 0', color: c.muted, fontSize: 11 }}>
+                로그인 정보로 자동 입력됩니다.
+              </p>
             </div>
             <div>
-              <label htmlFor="note-category" style={labelStyle}>구분</label>
+              <label htmlFor="note-category" style={getLabelStyle(c)}>
+                구분
+              </label>
               <select
                 id="note-category"
                 value={category}
                 onChange={(event) => setCategory(event.target.value as HandoverNote['category'])}
-                style={inputStyle}
+                style={getInputStyle(c)}
               >
                 <option value="특이사항">특이사항</option>
                 <option value="전달사항">전달사항</option>
@@ -919,30 +1230,35 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               </select>
             </div>
           </div>
+
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="note-content" style={labelStyle}>인수인계 내용</label>
+            <label htmlFor="note-content" style={getLabelStyle(c)}>
+              인수인계 내용
+            </label>
             <textarea
               id="note-content"
               value={content}
               onChange={(event) => setContent(event.target.value)}
               placeholder="예) 소성로 2호기 냉각 계통 점검 중이므로 온도 트렌드를 30분 간격으로 확인해주세요."
-              style={{ ...inputStyle, minHeight: 90, resize: 'vertical', fontFamily: 'inherit' }}
+              style={{ ...getInputStyle(c), minHeight: 90, resize: 'vertical', fontFamily: 'inherit' }}
             />
           </div>
           <button
             type="submit"
+            disabled={submitting}
             style={{
               border: 0,
               borderRadius: 10,
-              background: colors.blue,
+              background: c.blue,
               color: '#fff',
               padding: '11px 18px',
               fontSize: 14,
               fontWeight: 800,
-              cursor: 'pointer',
+              cursor: submitting ? 'wait' : 'pointer',
+              opacity: submitting ? 0.7 : 1,
             }}
           >
-            인수인계 사항 등록
+            {submitting ? '등록 중…' : '인수인계 사항 등록'}
           </button>
         </form>
 
@@ -952,10 +1268,10 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
               <div
                 key={note.id}
                 style={{
-                  border: `1px solid ${colors.line}`,
+                  border: `1px solid ${c.line}`,
                   borderRadius: 12,
                   padding: '12px 15px',
-                  background: '#f8fafc',
+                  background: isDark ? '#0f172a' : '#f8fafc',
                 }}
               >
                 <div
@@ -967,12 +1283,12 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                     flexWrap: 'wrap',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ ...badgeBase, ...noteCategoryStyle(note.category) }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ ...badgeBase, ...noteCategoryStyle(note.category, isDark) }}>
                       {note.category}
                     </span>
-                    <strong style={{ color: colors.navy, fontSize: 13 }}>{note.author}</strong>
-                    <span style={{ color: colors.muted, fontSize: 12 }}>{note.createdAt}</span>
+                    <strong style={{ color: c.navy, fontSize: 13 }}>{note.author}</strong>
+                    <span style={{ color: c.muted, fontSize: 12 }}>{note.createdAt}</span>
                   </div>
                   <button
                     type="button"
@@ -982,7 +1298,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                       border: 0,
                       borderRadius: 8,
                       background: 'transparent',
-                      color: colors.muted,
+                      color: c.muted,
                       cursor: 'pointer',
                       fontSize: 17,
                       lineHeight: 1,
@@ -992,7 +1308,7 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
                     ×
                   </button>
                 </div>
-                <p style={{ margin: '8px 0 0', color: colors.navy, fontSize: 13, lineHeight: 1.65 }}>
+                <p style={{ margin: '8px 0 0', color: c.navy, fontSize: 13, lineHeight: 1.65 }}>
                   {note.content}
                 </p>
               </div>
@@ -1006,97 +1322,157 @@ const HandoverNoteSection = ({ notes, onAdd, onRemove, onClose }: HandoverNoteSe
 
 const IssueListSection = ({
   issues,
+  totalCount,
+  isRefreshing = false,
+  currentPage,
+  totalPages,
+  pageItems,
+  pageInput,
+  rangeLabel,
   filters,
   lots,
   selectedId,
   onFilterChange,
+  onApplyFilter,
+  onResetFilter,
+  onPageChange,
+  onPageInputChange,
+  onPageInputSubmit,
   onSelect,
-}: IssueListSectionProps) => (
-  <section style={panelStyle}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-      <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>이슈 목록</h2>
-      <span style={{ color: colors.slate, fontSize: 13, fontWeight: 700 }}>
-        검색 결과 {issues.length}건
+  onDiagnose,
+}: IssueListSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+
+  return (
+  <section style={getPanelStyle(c)}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+      <div>
+        <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 목록</h2>
+        <p style={{ margin: '4px 0 0', color: c.slate, fontSize: 12 }}>
+          행 클릭 → 상세 선택 · 「진단」으로 챗봇 자동 진단
+        </p>
+      </div>
+      <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
+        {isRefreshing ? '목록 불러오는 중…' : `검색 결과 ${totalCount}건`}
       </span>
     </div>
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-        gap: 12,
-        marginBottom: 20,
+    <form
+      className={`mb-5 flex flex-wrap items-end gap-2.5 rounded-xl border p-3 ${
+        isDark
+          ? 'border-slate-700 bg-slate-900/70'
+          : 'border-slate-200/80 bg-slate-50/60'
+      }`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApplyFilter();
       }}
     >
-      <div style={{ gridColumn: 'span 2' }}>
-        <label htmlFor="issue-search" style={labelStyle}>검색어</label>
+      <div className="min-w-[180px] flex-1">
+        <label htmlFor="issue-search" style={getLabelStyle(c)}>
+          검색어
+        </label>
         <input
           id="issue-search"
           value={filters.search}
           onChange={(event) => onFilterChange('search', event.target.value)}
           placeholder="제목 또는 LOT 번호"
-          style={inputStyle}
+          style={getFilterControlStyle(c)}
         />
       </div>
-      <div>
-        <label htmlFor="issue-date" style={labelStyle}>날짜</label>
-        <input
+      <div className="w-[150px]">
+        <label htmlFor="issue-date" style={getLabelStyle(c)}>
+          날짜
+        </label>
+        <DateInput
           id="issue-date"
-          type="date"
           value={filters.date}
-          onChange={(event) => onFilterChange('date', event.target.value)}
-          style={inputStyle}
+          onChange={(date) => onFilterChange('date', date)}
+          isDark={isDark}
+          style={getFilterControlStyle(c)}
+          aria-label="날짜"
         />
       </div>
-      <div>
-        <label htmlFor="issue-lot" style={labelStyle}>LOT</label>
+      <div className="min-w-[150px] flex-1">
+        <label htmlFor="issue-lot" style={getLabelStyle(c)}>
+          LOT
+        </label>
         <select
           id="issue-lot"
           value={filters.lot}
           onChange={(event) => onFilterChange('lot', event.target.value)}
-          style={inputStyle}
+          style={getFilterControlStyle(c)}
         >
           <option value="">전체 LOT</option>
-          {lots.map((lot) => <option key={lot} value={lot}>{lot}</option>)}
+          {lots.map((lot) => (
+            <option key={lot} value={lot}>
+              {lot}
+            </option>
+          ))}
         </select>
       </div>
-      <div>
-        <label htmlFor="issue-risk" style={labelStyle}>위험도</label>
+      <div className="w-[120px]">
+        <label htmlFor="issue-risk" style={getLabelStyle(c)}>
+          위험도
+        </label>
         <select
           id="issue-risk"
           value={filters.risk}
           onChange={(event) => onFilterChange('risk', event.target.value)}
-          style={inputStyle}
+          style={getFilterControlStyle(c)}
         >
           <option value="">전체 위험도</option>
-          <option value="높음">높음</option>
-          <option value="중간">중간</option>
-          <option value="낮음">낮음</option>
+          <option value="심각">심각</option>
+          <option value="주의">주의</option>
+          <option value="안정">안정</option>
         </select>
       </div>
-      <div>
-        <label htmlFor="issue-status" style={labelStyle}>처리 상태</label>
+      <div className="w-[120px]">
+        <label htmlFor="issue-spc" style={getLabelStyle(c)}>
+          SPC
+        </label>
         <select
-          id="issue-status"
-          value={filters.status}
-          onChange={(event) => onFilterChange('status', event.target.value)}
-          style={inputStyle}
+          id="issue-spc"
+          value={filters.spc}
+          onChange={(event) => onFilterChange('spc', event.target.value)}
+          style={getFilterControlStyle(c)}
+          aria-label="SPC 상태 필터"
         >
-          <option value="">전체 상태</option>
-          <option value="접수">접수</option>
-          <option value="분석 중">분석 중</option>
-          <option value="조치 중">조치 중</option>
-          <option value="완료">완료</option>
+          <option value="">전체</option>
+          <option value="이상">이상</option>
+          <option value="주의">주의</option>
         </select>
       </div>
-    </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="submit"
+          className={`inline-flex h-9 items-center rounded-lg px-4 text-xs font-semibold text-white ${
+            isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'
+          }`}
+        >
+          적용하기
+        </button>
+        <button
+          type="button"
+          onClick={onResetFilter}
+          className={`inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold ${
+            isDark
+              ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+              : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+          }`}
+        >
+          전체보기
+        </button>
+      </div>
+    </form>
 
     {issues.length === 0 ? (
       <div
         style={{
           padding: '54px 20px',
           borderRadius: 14,
-          background: '#f8fafc',
-          color: colors.slate,
+          background: isDark ? '#0f172a' : '#f8fafc',
+          color: c.slate,
           textAlign: 'center',
           fontWeight: 700,
         }}
@@ -1104,114 +1480,278 @@ const IssueListSection = ({
         조건에 맞는 이슈가 없습니다.
       </div>
     ) : (
-      <div style={{ display: 'grid', gap: 10 }}>
-        {issues.map((issue) => {
-          const selected = issue.id === selectedId;
-          return (
-            <button
-              key={issue.id}
-              type="button"
-              onClick={() => onSelect(issue.id)}
-              style={{
-                width: '100%',
-                border: selected ? `2px solid ${colors.blue}` : `1px solid ${colors.line}`,
-                borderRadius: 13,
-                background: selected ? colors.blueSoft : '#fff',
-                padding: 15,
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: selected ? '0 0 0 3px rgba(37, 99, 235, 0.08)' : 'none',
-              }}
+      <>
+      <div className="-mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[960px] border-collapse text-left">
+          <thead>
+            <tr
+              className={`border-y text-xs font-semibold ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900/70 text-slate-400'
+                  : 'border-slate-200 bg-slate-50 text-slate-500'
+              }`}
             >
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '130px 145px minmax(145px, 1fr) 68px 78px minmax(220px, 2fr)',
-                  gap: 12,
-                  alignItems: 'center',
-                  overflowX: 'auto',
-                }}
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">이슈 ID</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">일시</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
+              <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">진단</th>
+            </tr>
+          </thead>
+          <tbody>
+            {issues.map((issue) => {
+              const selected = issue.id === selectedId;
+              return (
+                <tr
+                  key={issue.id}
+                  onClick={() => onSelect(issue.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelect(issue.id);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-pressed={selected}
+                  className={`cursor-pointer border-b border-l-4 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
+                    isDark ? 'border-slate-700 hover:bg-slate-900/50' : 'border-slate-100 hover:bg-slate-50/80'
+                  } ${
+                    selected
+                      ? isDark
+                        ? 'border-l-blue-400 bg-blue-950/30 font-medium'
+                        : 'border-l-blue-600 bg-blue-50/70 font-medium'
+                      : isDark
+                        ? 'border-l-transparent bg-slate-800'
+                        : 'border-l-transparent bg-white'
+                  }`}
+                >
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(issue.id);
+                      }}
+                      className={`cursor-pointer font-semibold hover:underline ${
+                        isDark ? 'text-blue-300' : 'text-blue-600'
+                      }`}
+                    >
+                      {issue.id}
+                    </button>
+                  </td>
+                  <td
+                    className={`whitespace-nowrap px-4 py-3 text-xs ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    {issue.createdAt}
+                  </td>
+                  <td
+                    className={`whitespace-nowrap px-4 py-3 text-xs font-semibold ${
+                      isDark ? 'text-slate-200' : 'text-slate-800'
+                    }`}
+                  >
+                    {issue.lot}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <span
+                      className={
+                        issue.risk === '심각'
+                          ? isDark
+                            ? 'inline-flex items-center rounded-full border border-rose-800 bg-rose-950/40 px-2.5 py-0.5 text-xs font-bold text-rose-300'
+                            : 'inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700'
+                          : issue.risk === '주의'
+                            ? isDark
+                              ? 'inline-flex items-center rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-0.5 text-xs font-bold text-amber-300'
+                              : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700'
+                            : isDark
+                              ? 'inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/40 px-2.5 py-0.5 text-xs font-bold text-emerald-300'
+                              : 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700'
+                      }
+                    >
+                      {issue.risk}
+                    </span>
+                  </td>
+                  <td
+                    className={`max-w-[420px] px-4 py-3 text-sm font-semibold ${
+                      isDark ? 'text-slate-100' : 'text-slate-900'
+                    }`}
+                  >
+                    <span className="line-clamp-2">{issue.issueContent}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                        isDark
+                          ? 'border-blue-700 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60'
+                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDiagnose(issue);
+                      }}
+                    >
+                      챗봇으로 진단
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {Array.from({ length: Math.max(0, ISSUE_PAGE_SIZE - issues.length) }, (_, index) => (
+              <tr
+                key={`issue-empty-row-${index}`}
+                aria-hidden="true"
+                className={isDark ? 'border-b border-slate-700' : 'border-b border-slate-100'}
               >
-                <strong style={{ color: colors.blue, fontSize: 13 }}>{issue.id}</strong>
-                <span style={{ color: colors.slate, fontSize: 12 }}>{issue.occurredAt}</span>
-                <span style={{ color: colors.navy, fontSize: 13, fontWeight: 700 }}>{issue.lot}</span>
-                <span style={{ ...badgeBase, ...riskStyle(issue.risk) }}>{issue.risk}</span>
-                <span style={{ ...badgeBase, ...statusStyle(issue.status) }}>{issue.status}</span>
-                <span style={{ color: colors.navy, fontSize: 14, fontWeight: 700 }}>{issue.title}</span>
-              </div>
-            </button>
-          );
-        })}
+                <td colSpan={6} className="h-[57px] px-4 py-3">
+                  &nbsp;
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <div
+        className={`mt-3 flex flex-col items-center gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:justify-between ${
+          isDark
+            ? 'border-slate-700 bg-slate-900/70'
+            : 'border-slate-200 bg-slate-50'
+        }`}
+      >
+        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+          {rangeLabel} / 총 {totalCount}건
+        </span>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <nav
+            aria-label="이슈 목록 페이지"
+            className="flex flex-wrap items-center justify-center gap-1.5"
+          >
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage <= 1}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            이전
+          </button>
+          {pageItems.map((item, index) =>
+            item === 'ellipsis' ? (
+              <span
+                key={`issue-page-ellipsis-${index}`}
+                className={`inline-flex min-w-8 items-center justify-center px-1 text-xs ${
+                  isDark ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
+                …
+              </span>
+            ) : (
+              <button
+                key={item}
+                type="button"
+                aria-current={item === currentPage ? 'page' : undefined}
+                onClick={() => onPageChange(item)}
+                className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  item === currentPage
+                    ? 'bg-blue-600 text-white'
+                    : isDark
+                      ? 'border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {item}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage >= totalPages}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            다음
+          </button>
+          </nav>
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onPageInputSubmit();
+            }}
+          >
+            <label
+              htmlFor="issue-page-jump"
+              className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+            >
+              페이지
+            </label>
+            <input
+              id="issue-page-jump"
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInput}
+              onChange={(event) => onPageInputChange(event.target.value)}
+              aria-label="이동할 페이지 번호"
+              className={`h-8 w-16 rounded-lg border px-2 text-center text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-slate-200'
+                  : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            />
+            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              / {totalPages}
+            </span>
+            <button
+              type="submit"
+              className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              이동
+            </button>
+          </form>
+        </div>
+      </div>
+      </>
     )}
   </section>
-);
-
-const LineChart = ({
-  data,
-  dataKey,
-  color,
-  min,
-  max,
-}: {
-  data: ProcessData[];
-  dataKey: 'temperature' | 'pressure';
-  color: string;
-  min: number;
-  max: number;
-}) => {
-  const width = 560;
-  const height = 180;
-  const pad = 26;
-  const range = max - min;
-  const points = data
-    .map((item, index) => {
-      const x = pad + (index * (width - pad * 2)) / Math.max(data.length - 1, 1);
-      const y = height - pad - ((item[dataKey] - min) / range) * (height - pad * 2);
-      return `${x},${y}`;
-    })
-    .join(' ');
-
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={`${dataKey} 시계열 그래프`}
-      style={{ width: '100%', height: 180, display: 'block' }}
-    >
-      {[0, 1, 2, 3].map((line) => {
-        const y = pad + (line * (height - pad * 2)) / 3;
-        return <line key={line} x1={pad} y1={y} x2={width - pad} y2={y} stroke={colors.line} />;
-      })}
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {data.map((item, index) => {
-        const x = pad + (index * (width - pad * 2)) / Math.max(data.length - 1, 1);
-        const y = height - pad - ((item[dataKey] - min) / range) * (height - pad * 2);
-        return (
-          <g key={item.time}>
-            <circle cx={x} cy={y} r="5" fill="#fff" stroke={color} strokeWidth="3" />
-            <text x={x} y={height - 5} textAnchor="middle" fontSize="11" fill={colors.slate}>
-              {item.time}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
   );
 };
 
-const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
+function renderHighlightedAnomaly(anomaly: string) {
+  return anomaly;
+}
+
+const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+
   if (!issue) {
     return (
-      <section style={{ ...panelStyle, minHeight: 220, display: 'grid', placeItems: 'center' }}>
-        <div style={{ textAlign: 'center', color: colors.slate }}>
+      <section
+        id="issue-detail-analysis"
+        style={{
+          ...getPanelStyle(c),
+          height: '100%',
+          minHeight: 220,
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        <div style={{ textAlign: 'center', color: c.slate }}>
           <div style={{ fontSize: 38, marginBottom: 12 }}>⌁</div>
           <strong>목록에서 이슈를 선택하면 상세 분석 데이터가 표시됩니다.</strong>
         </div>
@@ -1219,8 +1759,55 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
     );
   }
 
+  const analysis = issue.analysis;
+  const spcFilter = mapAnalysisSpcToFilter(analysis?.spcStatus ?? issue.listSpcStatus);
+  const risk = analysis?.riskLevel ?? issue.risk;
+  const { pct: probPct, label: probLabel } = formatAnalysisProbability(analysis?.probability ?? null);
+  const defectTone = !analysis || analysis.probability == null
+    ? '미정'
+    : probPct >= 80
+      ? '위험'
+      : probPct >= 40
+        ? '주의'
+        : '양호';
+  const reason = analysis?.riskReason?.trim() || '';
+
+  const fieldRows: Array<{ key: string; label: string; value: string }> = [
+    { key: 'lot_id', label: 'lot_id', value: analysis?.lotId || issue.lot || '—' },
+    { key: 'risk_level', label: 'risk_level', value: risk },
+    {
+      key: 'spc_status',
+      label: 'spc_status',
+      value: analysis?.spcStatus?.trim() || issue.listSpcStatus?.trim() || '—',
+    },
+    {
+      key: 'probability',
+      label: 'probability',
+      value:
+        analysis?.probability == null
+          ? '—'
+          : `${analysis.probability} (${probLabel})`,
+    },
+    {
+      key: 'risk_reason',
+      label: 'risk_reason',
+      value: reason || '—',
+    },
+    {
+      key: 'created_at',
+      label: 'created_at',
+      value: analysis?.createdAt || '—',
+    },
+  ];
+
+  const cardClass = isDark
+    ? 'rounded-xl border border-slate-700 bg-slate-900/40 p-4'
+    : 'rounded-xl border border-slate-200 bg-white p-4';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const strong = isDark ? 'text-slate-100' : 'text-slate-900';
+
   return (
-    <section style={panelStyle}>
+    <section id="issue-detail-analysis" style={{ ...getPanelStyle(c), height: '100%' }}>
       <div
         style={{
           display: 'flex',
@@ -1232,126 +1819,158 @@ const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
         }}
       >
         <div>
-          <h2 style={{ margin: 0, color: colors.navy, fontSize: 19 }}>이슈 상세 분석</h2>
-          <div style={{ marginTop: 6, color: colors.slate, fontSize: 13 }}>
-            {issue.id} · {issue.lot}
+          <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 상세 분석</h2>
+          <div style={{ marginTop: 6, color: c.slate, fontSize: 13 }}>
+            {issue.id} · {issue.lot} · {issue.createdAt}
+          </div>
+          <div style={{ marginTop: 8, color: c.navy, fontSize: 14, fontWeight: 600 }}>
+            {issue.issueContent}
+          </div>
+          <div style={{ marginTop: 6, color: c.slate, fontSize: 11 }}>
+            소스: analysis_lots (시각화 초안 · 상세 목적은 후속 정의)
           </div>
         </div>
-        <span style={{ ...badgeBase, ...riskStyle(issue.risk) }}>위험도 {issue.risk}</span>
-      </div>
-
-      <div
-        style={{
-          border: '1px solid #fed7aa',
-          borderLeft: `4px solid ${colors.amber}`,
-          borderRadius: 12,
-          background: colors.amberSoft,
-          padding: 15,
-          color: '#92400e',
-          fontSize: 14,
-          lineHeight: 1.65,
-          marginBottom: 20,
-        }}
-      >
-        <strong>이상 징후 요약</strong>
-        <div style={{ marginTop: 4 }}>{issue.anomaly}</div>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: 16,
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16 }}>
-          <h3 style={{ margin: 0, color: colors.navy, fontSize: 14 }}>시간대별 온도 변화 (°C)</h3>
-          <LineChart data={issue.processData} dataKey="temperature" color={colors.red} min={720} max={765} />
-        </div>
-        <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16 }}>
-          <h3 style={{ margin: 0, color: colors.navy, fontSize: 14 }}>시간대별 압력 변화 (bar)</h3>
-          <LineChart data={issue.processData} dataKey="pressure" color={colors.cyan} min={1.3} max={3} />
-        </div>
-      </div>
-
-      <div style={{ border: `1px solid ${colors.line}`, borderRadius: 14, padding: 16, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 14px', color: colors.navy, fontSize: 14 }}>
-          AI 위험 점수 Before / After
-        </h3>
-        <div style={{ display: 'grid', gap: 11 }}>
-          {issue.processData.map((item) => (
-            <div
-              key={item.time}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '34px 1fr 1fr',
-                alignItems: 'center',
-                gap: 10,
-                fontSize: 11,
-                color: colors.slate,
-              }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ ...badgeBase, ...riskStyle(risk, isDark) }}>위험도 {risk}</span>
+          <span className={spcStatusBadgeClass(spcFilter, isDark)}>
+            SPC {analysis?.spcStatus?.trim() || spcFilter}
+          </span>
+          {onDiagnose ? (
+            <button
+              type="button"
+              onClick={() => onDiagnose(issue)}
+              className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-white ${
+                isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              <strong>{item.time}</strong>
-              <div style={{ height: 18, background: '#fee2e2', borderRadius: 999, overflow: 'hidden' }}>
-                <div
-                  style={{
-                    width: `${item.riskBefore}%`,
-                    height: '100%',
-                    background: colors.red,
-                    borderRadius: 999,
-                  }}
-                  title={`Before ${item.riskBefore}`}
-                />
-              </div>
-              <div style={{ height: 18, background: '#dcfce7', borderRadius: 999, overflow: 'hidden' }}>
-                <div
-                  style={{
-                    width: `${item.riskAfter}%`,
-                    height: '100%',
-                    background: colors.green,
-                    borderRadius: 999,
-                  }}
-                  title={`After ${item.riskAfter}`}
-                />
-              </div>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 14, fontSize: 11 }}>
-            <span style={{ color: colors.red }}>■ Before</span>
-            <span style={{ color: colors.green }}>■ After</span>
-          </div>
+              챗봇으로 진단
+            </button>
+          ) : null}
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620, fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', color: colors.slate }}>
-              {['시간', '온도(°C)', '압력(bar)', '속도(rpm)', '위험 Before', '위험 After'].map((heading) => (
-                <th
-                  key={heading}
-                  style={{ padding: 11, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}
+      {!analysis ? (
+        <div
+          className={`rounded-xl border px-4 py-10 text-center text-sm ${
+            isDark
+              ? 'border-slate-700 bg-slate-900/40 text-slate-400'
+              : 'border-slate-200 bg-slate-50 text-slate-500'
+          }`}
+        >
+          <p className="m-0 font-medium">analysis_lots 행이 없거나 아직 불러오는 중입니다.</p>
+          <p className="mt-2 mb-0 text-xs">이슈를 다시 선택하거나 LOT 채점 데이터를 확인하세요.</p>
+        </div>
+      ) : (
+        <>
+          <div
+            style={{
+              border: isDark ? '1px solid #b45309' : '1px solid #fed7aa',
+              borderLeft: `4px solid ${c.amber}`,
+              borderRadius: 12,
+              background: c.amberSoft,
+              padding: 15,
+              color: isDark ? '#fcd34d' : '#92400e',
+              fontSize: 14,
+              lineHeight: 1.65,
+              marginBottom: 16,
+            }}
+          >
+            <strong>risk_reason</strong>
+            <div style={{ marginTop: 4 }}>
+              {reason ? renderHighlightedAnomaly(reason) : '위험 원인 문구가 비어 있습니다.'}
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className={cardClass}>
+              <div className={`text-xs font-semibold ${muted}`}>probability</div>
+              <div
+                className={`mt-1 text-2xl font-bold tabular-nums ${
+                  defectTone === '위험'
+                    ? 'text-rose-600'
+                    : defectTone === '주의'
+                      ? 'text-amber-600'
+                      : defectTone === '양호'
+                        ? 'text-emerald-600'
+                        : strong
+                }`}
+              >
+                {probLabel}
+              </div>
+              <div
+                className={`mt-2 h-2 overflow-hidden rounded-full ${
+                  isDark ? 'bg-slate-800' : 'bg-slate-100'
+                }`}
+              >
+                <div
+                  className={`h-full rounded-full transition-[width] ${
+                    defectTone === '위험'
+                      ? 'bg-rose-500'
+                      : defectTone === '주의'
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${probPct}%` }}
+                />
+              </div>
+              <p className={`mt-1 text-xs ${muted}`}>불량 확률(0~1 → %)</p>
+            </div>
+
+            <div className={cardClass}>
+              <div className={`text-xs font-semibold ${muted}`}>risk_level</div>
+              <div className="mt-2">
+                <span style={{ ...badgeBase, ...riskStyle(risk, isDark), fontSize: 14 }}>
+                  {risk}
+                </span>
+              </div>
+              <p className={`mt-3 text-xs ${muted}`}>analysis_lots.risk_level</p>
+            </div>
+
+            <div className={cardClass}>
+              <div className={`text-xs font-semibold ${muted}`}>spc_status</div>
+              <div className="mt-2">
+                <span className={spcStatusBadgeClass(spcFilter, isDark)}>
+                  {analysis.spcStatus?.trim() || '—'}
+                </span>
+              </div>
+              <p className={`mt-3 text-xs ${muted}`}>analysis_lots.spc_status</p>
+            </div>
+          </div>
+
+          <div
+            className={`overflow-hidden rounded-xl border ${
+              isDark ? 'border-slate-700' : 'border-slate-200'
+            }`}
+          >
+            <div
+              className={`border-b px-4 py-2.5 text-sm font-semibold ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900/70 text-slate-200'
+                  : 'border-slate-200 bg-slate-50 text-slate-800'
+              }`}
+            >
+              analysis_lots 필드
+            </div>
+            <dl className="m-0">
+              {fieldRows.map((row, index) => (
+                <div
+                  key={row.key}
+                  className={`grid grid-cols-[140px_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${
+                    index > 0
+                      ? isDark
+                        ? 'border-t border-slate-700'
+                        : 'border-t border-slate-200'
+                      : ''
+                  }`}
                 >
-                  {heading}
-                </th>
+                  <dt className={`font-mono text-xs font-semibold ${muted}`}>{row.label}</dt>
+                  <dd className={`m-0 break-words ${strong}`}>{row.value}</dd>
+                </div>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {issue.processData.map((item) => (
-              <tr key={item.time} style={{ color: colors.navy }}>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.time}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.temperature}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.pressure}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center' }}>{item.speed}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center', color: colors.red, fontWeight: 800 }}>{item.riskBefore}</td>
-                <td style={{ padding: 10, borderBottom: `1px solid ${colors.line}`, textAlign: 'center', color: colors.green, fontWeight: 800 }}>{item.riskAfter}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </dl>
+          </div>
+        </>
+      )}
     </section>
   );
 };
@@ -1360,74 +1979,110 @@ const ManagementSection = ({
   issue,
   form,
   message,
+  canSave,
+  isSaving = false,
   onChange,
   onSave,
-}: ManagementSectionProps) => (
-  <section style={panelStyle}>
-    <h2 style={{ margin: '0 0 6px', color: colors.navy, fontSize: 19 }}>이슈 처리 관리</h2>
-    <p style={{ margin: '0 0 20px', color: colors.slate, fontSize: 13 }}>
-      {issue ? `${issue.id}의 담당자와 처리 현황을 관리합니다.` : '관리할 이슈를 먼저 선택해주세요.'}
+}: ManagementSectionProps) => {
+  const { isDark } = useUiSettings();
+  const c = getUiColors(isDark);
+  const saveDisabled = !issue || !canSave || isSaving;
+
+  return (
+  <section
+    style={{
+      ...getPanelStyle(c),
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+    }}
+  >
+    <h2 style={{ margin: '0 0 6px', color: c.navy, fontSize: 19, flexShrink: 0 }}>
+      이슈 처리 관리
+    </h2>
+    <p style={{ margin: '0 0 20px', color: c.slate, fontSize: 13, flexShrink: 0 }}>
+      {issue
+        ? `${issue.id} · 조치 완료 체크 후 저장하면 목록에서 사라지고 과거 자료로 이동합니다.`
+        : '관리할 이슈를 먼저 선택해주세요.'}
     </p>
     {message && (
       <div
         role="status"
         style={{
-          border: '1px solid #86efac',
+          border: isDark ? '1px solid #047857' : '1px solid #86efac',
           borderRadius: 10,
-          background: colors.greenSoft,
-          color: '#166534',
+          background: c.greenSoft,
+          color: isDark ? '#6ee7b7' : '#166534',
           padding: '11px 13px',
           marginBottom: 16,
           fontSize: 13,
           fontWeight: 800,
+          flexShrink: 0,
         }}
       >
         ✓ {message}
       </div>
     )}
-    <form onSubmit={onSave}>
-      <fieldset disabled={!issue} style={{ border: 0, margin: 0, padding: 0 }}>
+    <form
+      onSubmit={onSave}
+      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+    >
+      <fieldset
+        disabled={!issue}
+        style={{
+          border: 0,
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
             gap: 16,
             marginBottom: 16,
+            flexShrink: 0,
           }}
         >
           <div>
-            <label htmlFor="manager-assignee" style={labelStyle}>담당자</label>
+            <label htmlFor="manager-assignee" style={getLabelStyle(c)}>담당자</label>
             <input
               id="manager-assignee"
               value={form.assignee}
-              onChange={(event) => onChange('assignee', event.target.value)}
-              placeholder="담당자 이름"
-              style={inputStyle}
+              readOnly
+              title="users.name (저장 시 로그인 사용자가 담당자로 지정됩니다)"
+              placeholder="상세 조회 시 표시 · 저장 시 자동 지정"
+              style={{ ...getInputStyle(c), cursor: 'default' }}
             />
           </div>
-          <div>
-            <label htmlFor="manager-status" style={labelStyle}>처리 상태</label>
-            <select
-              id="manager-status"
-              value={form.status}
-              onChange={(event) => onChange('status', event.target.value as Issue['status'])}
-              style={inputStyle}
-            >
-              <option value="접수">접수</option>
-              <option value="분석 중">분석 중</option>
-              <option value="조치 중">조치 중</option>
-              <option value="완료">완료</option>
-            </select>
-          </div>
         </div>
-        <div style={{ marginBottom: 16 }}>
-          <label htmlFor="manager-action" style={labelStyle}>조치 내용</label>
+        <div
+          style={{
+            marginBottom: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          <label htmlFor="manager-action" style={getLabelStyle(c)}>조치 내용</label>
           <textarea
             id="manager-action"
             value={form.action}
             onChange={(event) => onChange('action', event.target.value)}
             placeholder="분석 내용과 조치 사항을 입력해주세요."
-            style={{ ...inputStyle, minHeight: 110, resize: 'vertical', fontFamily: 'inherit' }}
+            style={{
+              ...getInputStyle(c),
+              flex: 1,
+              minHeight: 110,
+              resize: 'none',
+              fontFamily: 'inherit',
+            }}
           />
         </div>
         <label
@@ -1435,65 +2090,170 @@ const ManagementSection = ({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            color: colors.navy,
+            color: c.navy,
             fontSize: 14,
             fontWeight: 700,
             cursor: issue ? 'pointer' : 'not-allowed',
-            marginBottom: 20,
+            marginBottom: 12,
+            flexShrink: 0,
           }}
         >
           <input
             type="checkbox"
             checked={form.completed}
             onChange={(event) => onChange('completed', event.target.checked)}
-            style={{ width: 18, height: 18, accentColor: colors.blue, cursor: 'pointer' }}
+            style={{ width: 18, height: 18, accentColor: c.blue, cursor: 'pointer' }}
           />
           조치 완료 여부
         </label>
+        {!form.completed && issue ? (
+          <p
+            style={{
+              margin: '0 0 12px',
+              color: c.slate,
+              fontSize: 12,
+              flexShrink: 0,
+            }}
+          >
+            조치 완료 여부를 체크해야 저장할 수 있습니다.
+          </p>
+        ) : null}
         <button
           type="submit"
+          disabled={saveDisabled}
           style={{
             width: '100%',
             border: 0,
             borderRadius: 11,
-            background: issue ? colors.navy : colors.muted,
-            color: '#fff',
             padding: '12px 18px',
             fontSize: 14,
-            fontWeight: 800,
-            cursor: issue ? 'pointer' : 'not-allowed',
+            cursor: !saveDisabled ? 'pointer' : 'not-allowed',
+            flexShrink: 0,
+            marginTop: 'auto',
           }}
+          className="bg-blue-600 text-white hover:bg-blue-700 font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:hover:bg-gray-300"
         >
-          저장
+          {isSaving ? '저장 중...' : '저장'}
         </button>
       </fieldset>
     </form>
   </section>
-);
+  );
+};
 
 const EMPTY_FORM: ManagementForm = {
   assignee: '',
-  status: '접수',
   action: '',
   completed: false,
 };
 
+const EMPTY_FILTERS: FilterState = {
+  search: '',
+  date: '',
+  lot: '',
+  risk: '',
+  spc: '',
+};
+
+const ISSUE_PAGE_SIZE = 5;
+
+function buildPaginationItems(current: number, total: number): Array<number | 'ellipsis'> {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, 'ellipsis', total];
+  if (current >= total - 3) {
+    return [1, 'ellipsis', total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total];
+}
+
+const HANDOVER_ACTION_STORAGE_KEY = 'handover_action_logs';
+
+/** Clear legacy localStorage handover logs once (Knowledge now uses DB). */
+function clearLegacyHandoverActionLogs() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(HANDOVER_ACTION_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function IssuePage() {
-  const [issues, setIssues] = useState<Issue[]>(INITIAL_ISSUES);
+  const { isDark } = useUiSettings();
+  const { connectLot } = useSelectedLot();
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    date: '',
-    lot: '',
-    risk: '',
-    status: '',
-  });
+  const [draftFilters, setDraftFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
   const [managementForm, setManagementForm] = useState<ManagementForm>(EMPTY_FORM);
   const [reportNotice, setReportNotice] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
+  const [completedHandoverNoteIds, setCompletedHandoverNoteIds] = useState<number[]>([]);
+  const prevSelectedIdRef = useRef<string | null>(null);
+  const detailRequestRef = useRef(0);
+
+  useEffect(() => {
+    clearLegacyHandoverActionLogs();
+  }, []);
+
+  const refreshPendingHandovers = async () => {
+    try {
+      const { data } = await issueApi.listHandoverHistory('pending');
+      setHandoverNotes(data.items.map(mapHandoverItemToNote));
+    } catch {
+      /* keep current notes on transient errors */
+    }
+  };
+
+  const loadIssues = async () => {
+    setIsListRefreshing(true);
+    try {
+      const { data } = await issueApi.list();
+      setIssues(data.issues.map(mapIssueListItem));
+    } catch (error) {
+      setIssues([]);
+      setToastMessage(getApiErrorMessage(error, '이슈 목록을 불러오지 못했습니다.'));
+      setShowToast(true);
+    } finally {
+      setIsListRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadIssues();
+    void refreshPendingHandovers();
+  }, []);
+
+  useShellRefresh(() => {
+    void loadIssues();
+    void refreshPendingHandovers();
+  });
+
+  useEffect(() => {
+    if (!isNoteOpen && !isReportOpen) return;
+    void refreshPendingHandovers();
+  }, [isNoteOpen, isReportOpen]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshPendingHandovers();
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,
@@ -1506,33 +2266,91 @@ export default function IssuePage() {
   );
 
   const filteredIssues = useMemo(() => {
-    const keyword = filters.search.trim().toLowerCase();
+    const keyword = appliedFilters.search.trim().toLowerCase();
     return issues.filter((issue) => {
+      // 완료 이슈는 백엔드의 미완료 목록 정책과 동일하게 표시하지 않음
+      if (isIssueCompleted(issue)) return false;
+
+      const overallSpc = mapAnalysisSpcToFilter(
+        issue.analysis?.spcStatus ?? issue.listSpcStatus,
+      );
+
       const matchesSearch =
         !keyword ||
-        issue.title.toLowerCase().includes(keyword) ||
+        issue.id.toLowerCase().includes(keyword) ||
+        issue.issueContent.toLowerCase().includes(keyword) ||
         issue.lot.toLowerCase().includes(keyword);
-      const matchesDate = !filters.date || issue.date === filters.date;
-      const matchesLot = !filters.lot || issue.lot === filters.lot;
-      const matchesRisk = !filters.risk || issue.risk === filters.risk;
-      const matchesStatus = !filters.status || issue.status === filters.status;
-      return matchesSearch && matchesDate && matchesLot && matchesRisk && matchesStatus;
+      const matchesDate = !appliedFilters.date || issue.date === appliedFilters.date;
+      const matchesLot = !appliedFilters.lot || issue.lot === appliedFilters.lot;
+      const matchesRisk = !appliedFilters.risk || issue.risk === appliedFilters.risk;
+      const matchesSpc = !appliedFilters.spc || overallSpc === appliedFilters.spc;
+      return (
+        matchesSearch &&
+        matchesDate &&
+        matchesLot &&
+        matchesRisk &&
+        matchesSpc
+      );
     });
-  }, [filters, issues]);
+  }, [appliedFilters, issues]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredIssues.length / ISSUE_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedIssues = useMemo(() => {
+    const start = (safePage - 1) * ISSUE_PAGE_SIZE;
+    return filteredIssues.slice(start, start + ISSUE_PAGE_SIZE);
+  }, [filteredIssues, safePage]);
+  const pageItems = useMemo(
+    () => buildPaginationItems(safePage, totalPages),
+    [safePage, totalPages],
+  );
+  const pageRangeStart =
+    filteredIssues.length === 0 ? 0 : (safePage - 1) * ISSUE_PAGE_SIZE + 1;
+  const pageRangeEnd = Math.min(safePage * ISSUE_PAGE_SIZE, filteredIssues.length);
+  const pageRangeLabel = `${pageRangeStart}–${pageRangeEnd}`;
 
   useEffect(() => {
-    if (!selectedIssue) {
+    if (!selectedId) return;
+    if (!filteredIssues.some((issue) => issue.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [filteredIssues, selectedId]);
+
+  /** 저장 = 완료만. 조치 완료 체크 없이는 저장 불가. */
+  const canSave = useMemo(() => {
+    if (!selectedIssue) return false;
+    if (!managementForm.completed) return false;
+    return (
+      managementForm.action !== selectedIssue.action ||
+      managementForm.completed !== selectedIssue.completed
+    );
+  }, [managementForm, selectedIssue]);
+
+  // 행 선택이 바뀔 때만 폼을 채움
+  useEffect(() => {
+    if (selectedId === prevSelectedIdRef.current) return;
+    prevSelectedIdRef.current = selectedId;
+
+    if (!selectedId) {
       setManagementForm(EMPTY_FORM);
+      setSaveMessage('');
       return;
     }
+
+    const issue = issues.find((item) => item.id === selectedId);
+    if (!issue) {
+      setManagementForm(EMPTY_FORM);
+      setSaveMessage('');
+      return;
+    }
+
     setManagementForm({
-      assignee: selectedIssue.assignee,
-      status: selectedIssue.status,
-      action: selectedIssue.action,
-      completed: selectedIssue.completed,
+      assignee: issue.assignee,
+      action: issue.action,
+      completed: issue.completed,
     });
     setSaveMessage('');
-  }, [selectedIssue]);
+  }, [selectedId, issues]);
 
   useEffect(() => {
     if (!reportNotice) return;
@@ -1540,32 +2358,153 @@ export default function IssuePage() {
     return () => window.clearTimeout(timer);
   }, [reportNotice]);
 
+  useEffect(() => {
+    if (!saveMessage) return;
+    const timer = window.setTimeout(() => setSaveMessage(''), 2800);
+    return () => window.clearTimeout(timer);
+  }, [saveMessage]);
+
+  useEffect(() => {
+    if (!showToast) return;
+    const timer = window.setTimeout(() => setShowToast(false), 2500);
+    return () => window.clearTimeout(timer);
+  }, [showToast]);
+
+  const handleSelectIssue = async (id: string) => {
+    const requestId = ++detailRequestRef.current;
+    setSelectedId(id);
+    window.setTimeout(() => {
+      document
+        .getElementById('issue-detail-analysis')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+
+    try {
+      const { data } = await issueApi.getById(id);
+      if (requestId !== detailRequestRef.current) return;
+      setIssues((current) =>
+        current.map((issue) => (issue.id === id ? mergeIssueDetail(issue, data.issue) : issue)),
+      );
+      setManagementForm({
+        assignee: data.issue.assigneeName?.trim() || '미배정',
+        action: data.issue.actionContent ?? '',
+        completed: data.issue.completed,
+      });
+      setSaveMessage('');
+    } catch (error) {
+      if (requestId !== detailRequestRef.current) return;
+      setToastMessage(getApiErrorMessage(error, '이슈 상세를 불러오지 못했습니다.'));
+      setShowToast(true);
+    }
+  };
+
   const handleFilterChange = (key: keyof FilterState, value: string) => {
-    setFilters((current) => ({ ...current, [key]: value }));
+    setDraftFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const handlePageChange = (page: number) => {
+    const nextPage = Math.min(totalPages, Math.max(1, Math.trunc(page)));
+    setCurrentPage(nextPage);
+    setPageInput(String(nextPage));
+  };
+
+  const handlePageInputSubmit = () => {
+    const requestedPage = Number(pageInput);
+    if (!Number.isFinite(requestedPage)) {
+      setPageInput(String(safePage));
+      return;
+    }
+    handlePageChange(requestedPage);
+  };
+
+  const handleApplyFilter = () => {
+    setAppliedFilters(draftFilters);
+    setCurrentPage(1);
+    setPageInput('1');
+  };
+
+  /** 메인 위험 LOT Top과 동일 — 챗봇 패널 오픈 + 자동 O/X 진단 */
+  const handleDiagnoseIssue = (issue: Issue) => {
+    connectLot(issueToLotSensorRecord(issue), { openChat: true, diagnose: true });
+    setSelectedId(issue.id);
+    setToastMessage(`${issue.lot} 연결 · 챗봇 진단 시작`);
+    setShowToast(true);
+  };
+
+  const handleResetFilter = () => {
+    setDraftFilters(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
+    setCurrentPage(1);
+    setPageInput('1');
   };
 
   const handleFormChange = <K extends keyof ManagementForm>(
     key: K,
     value: ManagementForm[K],
   ) => {
-    setManagementForm((current) => {
-      const next = { ...current, [key]: value };
-      if (key === 'completed' && value === true) next.status = '완료';
-      if (key === 'status' && value !== '완료') next.completed = false;
-      if (key === 'status' && value === '완료') next.completed = true;
-      return next;
-    });
+    setManagementForm((current) => ({ ...current, [key]: value }));
+    setSaveMessage('');
   };
 
-  const handleAddNote = (note: Omit<HandoverNote, 'id' | 'createdAt'>) => {
-    const now = new Date();
-    const pad = (value: number) => String(value).padStart(2, '0');
-    const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    setHandoverNotes((current) => [{ ...note, id: Date.now(), createdAt }, ...current]);
+  const handleAddNote = async (note: Omit<HandoverNote, 'id' | 'createdAt'>) => {
+    try {
+      await issueApi.createHandover({
+        category: note.category,
+        content: note.content,
+      });
+      await refreshPendingHandovers();
+      setToastMessage('✓ 인수인계 사항이 등록되었습니다. (ISS 번호 자동 발급)');
+      setShowToast(true);
+    } catch (error) {
+      throw new Error(getApiErrorMessage(error, '인수인계 등록에 실패했습니다.'));
+    }
   };
 
-  const handleRemoveNote = (id: number) => {
-    setHandoverNotes((current) => current.filter((note) => note.id !== id));
+  const handleCompleteOneHandover = async (
+    noteId: number,
+    party: { from: string; to: string },
+  ) => {
+    void party;
+    try {
+      await issueApi.completeHandover(noteId);
+      await refreshPendingHandovers();
+      setCompletedHandoverNoteIds((current) =>
+        current.includes(noteId) ? current : [...current, noteId],
+      );
+      setToastMessage('✓ 인수인계 사항을 완료 처리했습니다. Knowledge에서 확인할 수 있습니다.');
+      setShowToast(true);
+    } catch (error) {
+      setToastMessage(getApiErrorMessage(error, '인수인계 완료 처리에 실패했습니다.'));
+      setShowToast(true);
+    }
+  };
+
+  const handleCompleteAllHandover = async (party: { from: string; to: string }) => {
+    void party;
+    const pending = handoverNotes.filter((note) => !completedHandoverNoteIds.includes(note.id));
+    if (pending.length === 0) return;
+    try {
+      for (const note of pending) {
+        await issueApi.completeHandover(note.id);
+      }
+      await refreshPendingHandovers();
+      setCompletedHandoverNoteIds((current) => {
+        const next = new Set(current);
+        pending.forEach((note) => next.add(note.id));
+        return Array.from(next);
+      });
+      setToastMessage('✓ 대기 중인 인수인계를 모두 완료 처리했습니다.');
+      setShowToast(true);
+    } catch (error) {
+      await refreshPendingHandovers();
+      setToastMessage(getApiErrorMessage(error, '인수인계 일괄 완료에 실패했습니다.'));
+      setShowToast(true);
+    }
+  };
+
+  const handleRemoveNote = (_id: number) => {
+    setToastMessage('등록된 인수인계는 서버에서 삭제할 수 없습니다.');
+    setShowToast(true);
   };
 
   const handleGenerateReport = () => {
@@ -1582,7 +2521,7 @@ export default function IssuePage() {
     const data = HANDOVER_DATA;
     const openIssues = issues.filter((issue) => !issue.completed);
     const riskColor = (risk: Issue['risk']) =>
-      risk === '높음' ? colors.red : risk === '중간' ? colors.amber : colors.green;
+      risk === '심각' ? colors.red : risk === '주의' ? colors.amber : colors.green;
     const noteColor = (category: HandoverNote['category']) =>
       category === '주의사항' ? colors.red : category === '전달사항' ? colors.blue : colors.amber;
 
@@ -1610,18 +2549,18 @@ export default function IssuePage() {
 <div class="period">대상 기간: ${data.period}</div>
 <h2>1. 공정 요약</h2>
 <table>
-  <tr><th>평균 온도</th><td>${data.averageTemperature}°C</td><th>평균 압력</th><td>${data.averagePressure} bar</td><th>평균 속도</th><td>${data.averageSpeed} rpm</td></tr>
+  <tr><th>평균 온도</th><td>${data.averageTemperature}°C</td><th>평균 압력</th><td>${data.averagePressure} bar</td><th>평균 습도</th><td>${data.averageHumidity}%</td></tr>
   <tr><th>AI 예측 위험</th><td>${data.aiRiskPredictions}건</td><th>위험 LOT</th><td>${data.riskyLots}개</td><th>발생 이슈</th><td>${data.issueCount}건</td></tr>
 </table>
 <h2>2. 미완료 이슈 (${openIssues.length}건)</h2>
 <table>
-  <tr><th>이슈 ID</th><th>발생일시</th><th>LOT</th><th>위험도</th><th>상태</th><th>담당자</th></tr>
+  <tr><th>이슈 ID</th><th>발생일시</th><th>LOT</th><th>위험도</th><th>담당자</th></tr>
   ${openIssues.length === 0
-        ? '<tr><td colspan="6" style="text-align:center;">미완료 이슈가 없습니다.</td></tr>'
+        ? '<tr><td colspan="5" style="text-align:center;">미완료 이슈가 없습니다.</td></tr>'
         : openIssues
           .map(
             (issue) =>
-              `<tr><td>${issue.id}</td><td>${issue.occurredAt}</td><td>${issue.lot}</td><td style="color:${riskColor(issue.risk)};font-weight:800;">${issue.risk}</td><td>${issue.status}</td><td>${issue.assignee}</td></tr>`,
+              `<tr><td>${issue.id}</td><td>${issue.createdAt}</td><td>${issue.lot}</td><td style="color:${riskColor(issue.risk)};font-weight:800;">${issue.risk}</td><td>${issue.assignee}</td></tr>`,
           )
           .join('')
       }
@@ -1640,7 +2579,7 @@ ${handoverNotes.length === 0
 ${issues
         .map(
           (issue) =>
-            `<div class="issue" style="border-left:4px solid ${riskColor(issue.risk)};"><strong>[${issue.id}] ${issue.title}</strong> — ${issue.status}<div class="meta">${issue.occurredAt} · ${issue.lot} · 담당 ${issue.assignee}</div>${issue.action ? `<div class="action">조치: ${issue.action}</div>` : ''}</div>`,
+            `<div class="issue" style="border-left:4px solid ${riskColor(issue.risk)};"><strong>[${issue.id}] ${issue.issueContent}</strong><div class="meta">${issue.createdAt} · ${issue.lot} · 담당 ${issue.assignee}</div>${issue.action ? `<div class="action">조치: ${issue.action}</div>` : ''}</div>`,
         )
         .join('')}
 <script>window.onload = function () { window.print(); };</script>
@@ -1663,7 +2602,7 @@ ${issues
 
   const handleDownloadCsv = () => {
     const data = HANDOVER_DATA;
-    const COLUMN_COUNT = 9;
+    const COLUMN_COUNT = 8;
     const escapeCsv = (value: string | number) => {
       const text = String(value).replace(/"/g, '""').replace(/\r?\n/g, ' ');
       return `"${text}"`;
@@ -1680,11 +2619,11 @@ ${issues
       toRow(['대상 기간', data.period]),
       toRow([]),
       toRow(['1. 공정 요약']),
-      toRow(['평균 온도(°C)', '평균 압력(bar)', '평균 속도(rpm)', 'AI 예측 위험(건)', '위험 LOT(개)', '발생 이슈(건)']),
+      toRow(['평균 온도(°C)', '평균 압력(bar)', '평균 습도(%)', 'AI 예측 위험(건)', '위험 LOT(개)', '발생 이슈(건)']),
       toRow([
         data.averageTemperature,
         data.averagePressure,
-        data.averageSpeed,
+        data.averageHumidity,
         data.aiRiskPredictions,
         data.riskyLots,
         data.issueCount,
@@ -1695,20 +2634,24 @@ ${issues
       ...(handoverNotes.length === 0
         ? [toRow(['등록된 인수인계 특이사항이 없습니다.'])]
         : handoverNotes.map((note) =>
-          toRow([note.category, note.author, note.createdAt, note.content]),
+          toRow([
+            note.category,
+            note.author,
+            note.createdAt,
+            note.content,
+          ]),
         )),
       toRow([]),
       toRow(['3. 전체 이슈 처리 현황']),
-      toRow(['이슈 ID', '발생일시', 'LOT', '위험도', '처리 상태', '담당자', '제목', '조치 내용', '완료 여부']),
+      toRow(['이슈 ID', '등록일시', 'LOT', '위험도', '담당자', '이슈 내용', '조치 내용', '완료 여부']),
       ...issues.map((issue) =>
         toRow([
           issue.id,
-          issue.occurredAt,
+          issue.createdAt,
           issue.lot,
           issue.risk,
-          issue.status,
           issue.assignee,
-          issue.title,
+          issue.issueContent,
           issue.action,
           issue.completed ? '완료' : '미완료',
         ]),
@@ -1733,44 +2676,64 @@ ${issues
     });
   };
 
-  const handleSave = (event: FormEvent<HTMLFormElement>) => {
+  const handleCompleteIssue = async () => {
+    if (!selectedIssue || !managementForm.completed || isSaving) return;
+
+    const issueId = selectedIssue.id;
+
+    setIsSaving(true);
+    try {
+      await issueApi.update(issueId, {
+        actionContent: managementForm.action.trim() || null,
+        completed: true,
+      });
+      setIssues((current) => current.filter((issue) => issue.id !== issueId));
+      const nextTotalPages = Math.max(
+        1,
+        Math.ceil(Math.max(0, filteredIssues.length - 1) / ISSUE_PAGE_SIZE),
+      );
+      const nextPage = Math.min(safePage, nextTotalPages);
+      setCurrentPage(nextPage);
+      setPageInput(String(nextPage));
+      setSelectedId(null);
+      setSaveMessage('');
+      setToastMessage('✓ 이슈가 완료 처리되어 목록에서 제거되었습니다.');
+      setShowToast(true);
+      void refreshPendingHandovers();
+    } catch (error) {
+      setToastMessage(getApiErrorMessage(error, '이슈 완료 처리에 실패했습니다.'));
+      setShowToast(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedIssue) return;
-    const savedData = {
-      issueId: selectedIssue.id,
-      ...managementForm,
-      status: managementForm.completed ? ('완료' as const) : managementForm.status,
-    };
-    console.log('이슈 처리 저장 데이터:', savedData);
-    setIssues((current) =>
-      current.map((issue) =>
-        issue.id === selectedIssue.id
-          ? {
-            ...issue,
-            assignee: savedData.assignee,
-            status: savedData.status,
-            action: savedData.action,
-            completed: savedData.completed,
-          }
-          : issue,
-      ),
-    );
-    setSaveMessage('이슈 처리 정보가 저장되었습니다.');
+    if (!selectedIssue || !canSave || isSaving) return;
+    if (!managementForm.completed) {
+      setToastMessage('조치 완료 여부를 체크한 뒤 저장해주세요.');
+      setShowToast(true);
+      return;
+    }
+    await handleCompleteIssue();
   };
 
   return (
-    <main
+    <div
+      className={
+        isDark
+          ? 'h-full overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800'
+          : 'h-full overflow-y-auto bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50'
+      }
       style={{
-        minHeight: '100vh',
         boxSizing: 'border-box',
-        background: colors.background,
-        color: colors.navy,
-        padding: '36px clamp(16px, 3vw, 44px) 56px',
+        color: isDark ? '#f8fafc' : colors.navy,
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif",
       }}
     >
-      <div style={{ width: '100%', maxWidth: 1440, margin: '0 auto' }}>
+      <div className={`${SHELL_CONTENT_CLASS} py-6 pb-14`}>
         <HeaderHandoverSection
           data={HANDOVER_DATA}
           notice={reportNotice}
@@ -1780,29 +2743,48 @@ ${issues
         />
         <div style={{ display: 'grid', gap: 22, marginTop: 22 }}>
           <IssueListSection
-            issues={filteredIssues}
-            filters={filters}
+            issues={paginatedIssues}
+            totalCount={filteredIssues.length}
+            isRefreshing={isListRefreshing}
+            currentPage={safePage}
+            totalPages={totalPages}
+            pageItems={pageItems}
+            pageInput={pageInput}
+            rangeLabel={pageRangeLabel}
+            filters={draftFilters}
             lots={lots}
             selectedId={selectedId}
             onFilterChange={handleFilterChange}
-            onSelect={setSelectedId}
+            onApplyFilter={handleApplyFilter}
+            onResetFilter={handleResetFilter}
+            onPageChange={handlePageChange}
+            onPageInputChange={setPageInput}
+            onPageInputSubmit={handlePageInputSubmit}
+            onSelect={handleSelectIssue}
+            onDiagnose={handleDiagnoseIssue}
           />
           <div
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(0, 2fr) minmax(300px, 1fr)',
               gap: 22,
-              alignItems: 'start',
+              alignItems: 'stretch',
             }}
           >
-            <DetailAnalysisSection issue={selectedIssue} />
-            <ManagementSection
-              issue={selectedIssue}
-              form={managementForm}
-              message={saveMessage}
-              onChange={handleFormChange}
-              onSave={handleSave}
-            />
+            <div style={{ minHeight: 0, height: '100%' }}>
+              <DetailAnalysisSection issue={selectedIssue} onDiagnose={handleDiagnoseIssue} />
+            </div>
+            <div style={{ minHeight: 0, height: '100%' }}>
+              <ManagementSection
+                issue={selectedIssue}
+                form={managementForm}
+                message={saveMessage}
+                canSave={canSave}
+                isSaving={isSaving}
+                onChange={handleFormChange}
+                onSave={handleSave}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -1819,11 +2801,30 @@ ${issues
           data={HANDOVER_DATA}
           issues={issues}
           notes={handoverNotes}
+          completedNoteIds={completedHandoverNoteIds}
           onClose={() => setIsReportOpen(false)}
           onDownloadPdf={handleDownloadPdf}
           onDownloadCsv={handleDownloadCsv}
+          onCompleteOne={handleCompleteOneHandover}
+          onCompleteAll={handleCompleteAllHandover}
         />
       )}
-    </main>
+      {showToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[120] max-w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-medium text-white shadow-lg sm:left-auto sm:right-6 sm:translate-x-0"
+          style={{ animation: 'issue-toast-fade-in 0.25s ease-out' }}
+        >
+          {toastMessage}
+        </div>
+      ) : null}
+      <style>{`
+        @keyframes issue-toast-fade-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
   );
 };

@@ -1,0 +1,13 @@
+{
+  "name": "kdt-project",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n ai,backend,frontend -c magenta,green,cyan \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:ai": "node ai-service/scripts/dev-ai.cjs",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9"
+  }
+}

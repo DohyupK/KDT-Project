@@ -1,0 +1,5 @@
+# Legacy folder. New default for LLM keys: ../../DB/data/llm_keys.sqlite
+# Do not commit leftover *.sqlite here.
+*.sqlite
+*.sqlite-*
+!.gitkeep

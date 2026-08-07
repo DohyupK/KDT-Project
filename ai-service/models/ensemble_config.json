@@ -1,0 +1,7 @@
+{
+  "weights": {
+    "xgb": 0.5,
+    "cat": 0.5
+  },
+  "default_threshold": 0.8
+}
