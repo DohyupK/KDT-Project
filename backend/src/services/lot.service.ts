@@ -54,10 +54,10 @@ type LotRow = {
   tank_pressure: number | null
   operator_id: string | null
   quality_defect: number | boolean
-  defect_prob: number | null
   residual_lithium: number | null
+  defect_prob: number | null
   spc_status: string | null
-  risk_level: string
+  risk_level: string | null
   risk_reason: string | null
   scored_at: Date | string | null
 }
@@ -113,13 +113,18 @@ function rowToFeatures(row: LotRow): ProcessFeatures {
   }
 }
 
-const LOT_SELECT = `SELECT lot_id, recorded_at, d50, d90, metal_impurity, lithium_input,
-  additive_ratio, process_time, sintering_temp, humidity, tank_pressure, operator_id,
-  quality_defect, defect_prob, residual_lithium, spc_status, risk_level, risk_reason, scored_at
-  FROM lots`
+/** Process on `lots` + scores on `analysis_lots` + residual on `judgment_lots`. */
+const LOT_SELECT = `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at,
+  l.d50, l.d90, l.metal_impurity, l.lithium_input,
+  l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
+  0 AS quality_defect, j.residual_li AS residual_lithium,
+  a.defect_prob, a.spc_status, a.risk_level, a.risk_reason, a.scored_at
+  FROM lots l
+  LEFT JOIN analysis_lots a ON a.lot_id = l.id
+  LEFT JOIN judgment_lots j ON j.lot_id = l.id`
 
 export async function getLotById(lotId: string): Promise<LotDto> {
-  const rows = await query<LotRow[]>(`${LOT_SELECT} WHERE lot_id = ? LIMIT 1`, [lotId])
+  const rows = await query<LotRow[]>(`${LOT_SELECT} WHERE l.id = ? LIMIT 1`, [lotId])
   if (!rows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
   return toDto(rows[0])
 }
@@ -128,8 +133,8 @@ export async function getRiskTop(limit = 10): Promise<LotDto[]> {
   const n = Math.min(Math.max(Number(limit) || 10, 1), 50)
   const rows = await query<LotRow[]>(
     `${LOT_SELECT}
-     WHERE risk_level IN ('심각', '주의', '높음', '중간', 'A', 'B')
-     ORDER BY FIELD(risk_level, '심각', 'A', '높음', '주의', 'B', '중간'), recorded_at DESC
+     WHERE a.risk_level IN ('심각', '주의', '높음', '중간', 'A', 'B')
+     ORDER BY FIELD(a.risk_level, '심각', 'A', '높음', '주의', 'B', '중간'), l.\`timestamp\` DESC
      LIMIT ?`,
     [n],
   )
@@ -202,22 +207,19 @@ export async function importLotsFromCsv(csvPath?: string): Promise<{ imported: n
 
     const recordedRaw = cols[idx('timestamp')]?.trim() || ''
     const recordedAt = recordedRaw.replace('T', ' ').slice(0, 19)
-    const qualityDefect = Number(cols[idx('quality_defect')] ?? 0) === 1 ? 1 : 0
 
     await query(
       `INSERT INTO lots (
-        lot_id, recorded_at, d50, d90, metal_impurity, lithium_input, additive_ratio,
-        process_time, sintering_temp, humidity, tank_pressure, operator_id, quality_defect,
-        risk_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '안정')
+        id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
+        process_time, sintering_temp, humidity, tank_pressure, operator_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        recorded_at = VALUES(recorded_at),
+        \`timestamp\` = VALUES(\`timestamp\`),
         d50 = VALUES(d50), d90 = VALUES(d90),
         metal_impurity = VALUES(metal_impurity), lithium_input = VALUES(lithium_input),
         additive_ratio = VALUES(additive_ratio), process_time = VALUES(process_time),
         sintering_temp = VALUES(sintering_temp), humidity = VALUES(humidity),
-        tank_pressure = VALUES(tank_pressure), operator_id = VALUES(operator_id),
-        quality_defect = VALUES(quality_defect)`,
+        tank_pressure = VALUES(tank_pressure), operator_id = VALUES(operator_id)`,
       [
         lotId,
         recordedAt,
@@ -231,13 +233,36 @@ export async function importLotsFromCsv(csvPath?: string): Promise<{ imported: n
         num(cols[idx('humidity')]),
         num(cols[idx('tank_pressure')]),
         cols[idx('operator_id')]?.trim() || null,
-        qualityDefect,
       ],
     )
     imported++
   }
 
   return { imported, path: filePath }
+}
+
+async function upsertAnalysisScore(
+  lotId: string,
+  scored: Awaited<ReturnType<typeof scoreLotWithAi>>,
+) {
+  await query(
+    `INSERT INTO analysis_lots (
+      lot_id, defect_prob, spc_status, risk_level, risk_reason, scored_at
+    ) VALUES (?, ?, ?, ?, ?, NOW())
+    ON DUPLICATE KEY UPDATE
+      defect_prob = VALUES(defect_prob),
+      spc_status = VALUES(spc_status),
+      risk_level = VALUES(risk_level),
+      risk_reason = VALUES(risk_reason),
+      scored_at = NOW()`,
+    [
+      lotId,
+      scored.defect_prob,
+      scored.spc_status,
+      scored.risk_level,
+      scored.risk_reason,
+    ],
+  )
 }
 
 async function updateLotScore(
@@ -253,17 +278,21 @@ async function updateLotScore(
     const f = seed.features
     await query(
       `INSERT INTO lots (
-        lot_id, recorded_at, d50, d90, metal_impurity, lithium_input, additive_ratio,
-        process_time, sintering_temp, humidity, tank_pressure, operator_id, quality_defect,
-        defect_prob, residual_lithium, spc_status, risk_level, risk_reason, scored_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
+        process_time, sintering_temp, humidity, tank_pressure, operator_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        defect_prob = VALUES(defect_prob),
-        residual_lithium = VALUES(residual_lithium),
-        spc_status = VALUES(spc_status),
-        risk_level = VALUES(risk_level),
-        risk_reason = VALUES(risk_reason),
-        scored_at = NOW()`,
+        \`timestamp\` = VALUES(\`timestamp\`),
+        d50 = VALUES(d50),
+        d90 = VALUES(d90),
+        metal_impurity = VALUES(metal_impurity),
+        lithium_input = VALUES(lithium_input),
+        additive_ratio = VALUES(additive_ratio),
+        process_time = VALUES(process_time),
+        sintering_temp = VALUES(sintering_temp),
+        humidity = VALUES(humidity),
+        tank_pressure = VALUES(tank_pressure),
+        operator_id = VALUES(operator_id)`,
       [
         lotId,
         seed.recordedAt,
@@ -277,30 +306,26 @@ async function updateLotScore(
         f.humidity,
         f.tank_pressure,
         f.operator_id,
-        seed.qualityDefect,
-        scored.defect_prob,
-        scored.residual_lithium,
-        scored.spc_status,
-        scored.risk_level,
-        scored.risk_reason,
       ],
     )
-    return
   }
   await query(
-    `UPDATE lots SET
-      defect_prob = ?, residual_lithium = ?, spc_status = ?,
-      risk_level = ?, risk_reason = ?, scored_at = NOW()
-     WHERE lot_id = ?`,
+    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability)
+     VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       quality_defect = COALESCE(judgment_lots.quality_defect, VALUES(quality_defect)),
+       capacity = COALESCE(judgment_lots.capacity, VALUES(capacity)),
+       residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li)),
+       probability = COALESCE(judgment_lots.probability, VALUES(probability))`,
     [
-      scored.defect_prob,
-      scored.residual_lithium,
-      scored.spc_status,
-      scored.risk_level,
-      scored.risk_reason,
       lotId,
+      scored.quality_defect === 1 ? 1 : 0,
+      scored.capacity,
+      scored.residual_lithium,
+      scored.defect_prob,
     ],
   )
+  await upsertAnalysisScore(lotId, scored)
 }
 
 export type ScoreLotsOptions = {
@@ -308,11 +333,13 @@ export type ScoreLotsOptions = {
   limit?: number
   /** Skip first N lots in time order. */
   offset?: number
+  /** If set, only these lot ids are scored (SPC history still walks all lots). */
+  lotIds?: string[]
   concurrency?: number
   onProgress?: (done: number, total: number, lotId: string) => void
 }
 
-type SampleRow = {
+type LotScoreSourceRow = {
   lot_id: string
   recorded_at: Date | string
   d50: number | null
@@ -326,10 +353,9 @@ type SampleRow = {
   tank_pressure: number | null
   operator_id: string | null
   quality_defect?: number | boolean
-  residual_li?: number | null
 }
 
-function sampleToFeatures(row: SampleRow): ProcessFeatures {
+function lotRowToFeatures(row: LotScoreSourceRow): ProcessFeatures {
   return {
     d50: row.d50 != null ? Number(row.d50) : null,
     d90: row.d90 != null ? Number(row.d90) : null,
@@ -346,13 +372,14 @@ function sampleToFeatures(row: SampleRow): ProcessFeatures {
   }
 }
 
-const SAMPLE_FEATURE_SELECT = `lot_id, recorded_at, d50, d90, metal_impurity, lithium_input,
-  additive_ratio, process_time, sintering_temp, humidity, tank_pressure, operator_id`
+const LOT_SCORE_FEATURE_SELECT = `id AS lot_id, \`timestamp\` AS recorded_at, d50, d90, metal_impurity, lithium_input,
+  additive_ratio, process_time, sintering_temp, humidity, tank_pressure, operator_id,
+  0 AS quality_defect`
 
 /**
- * Re-score using sample-table SSOT:
- * - defect_prob ← cathode_clf_samples → /predict
- * - residual_lithium ← cathode_residual_samples → /predict-residual
+ * Re-score using operational `lots` SSOT:
+ * - defect_prob ← process features → /predict
+ * - judgment NULL-fill: quality_defect / capacity / residual_li from AI
  * - SPC ← listwise-complete process features only (Phase I + Nelson 2–8)
  */
 export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
@@ -363,72 +390,73 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   const offset = Math.max(0, options.offset ?? 0)
   const limit = options.limit != null ? Math.max(1, options.limit) : undefined
   const concurrency = Math.min(Math.max(options.concurrency ?? 4, 1), 16)
+  const idFilter =
+    options.lotIds != null && options.lotIds.length > 0
+      ? new Set(options.lotIds.map(String))
+      : null
 
-  const clfRows = await query<SampleRow[]>(
-    `SELECT ${SAMPLE_FEATURE_SELECT}, quality_defect
-     FROM cathode_clf_samples
-     ORDER BY recorded_at ASC, lot_id ASC`,
+  const lotRows = await query<LotScoreSourceRow[]>(
+    `SELECT ${LOT_SCORE_FEATURE_SELECT}
+     FROM lots
+     ORDER BY \`timestamp\` ASC, id ASC`,
   )
-  const residualRows = await query<SampleRow[]>(
-    `SELECT ${SAMPLE_FEATURE_SELECT}, residual_li
-     FROM cathode_residual_samples`,
-  )
-  const residualById = new Map(residualRows.map((r) => [r.lot_id, r]))
 
-  const slice = limit != null ? clfRows.slice(offset, offset + limit) : clfRows.slice(offset)
   const history = emptySpcHistory()
-
-  for (let i = 0; i < offset && i < clfRows.length; i++) {
-    pushCompleteLotHistory(history, sampleToFeatures(clfRows[i]))
-  }
-
   let scored = 0
   let failed = 0
   const errors: string[] = []
 
   type Job = {
-    clf: SampleRow
-    residual: SampleRow | undefined
+    row: LotScoreSourceRow
     histSnapshot: Record<SpcParamKey, number[]>
   }
   const jobs: Job[] = []
 
-  for (const clf of slice) {
-    const features = sampleToFeatures(clf)
+  // Walk all lots in time order for SPC history; only enqueue filter/slice targets.
+  let considered = 0
+  for (let i = 0; i < lotRows.length; i++) {
+    const row = lotRows[i]
+    const features = lotRowToFeatures(row)
     const bag: Partial<Record<SpcParamKey, number | null>> = {}
     for (const k of SPC_PARAM_KEYS) bag[k] = features[k]
     const complete = isProcessComplete(bag)
     if (complete) {
       for (const k of SPC_PARAM_KEYS) history[k].push(Number(features[k]))
     }
+
+    const inFilter = idFilter == null || idFilter.has(row.lot_id)
+    if (!inFilter) continue
+    if (considered < offset) {
+      considered++
+      continue
+    }
+    if (limit != null && jobs.length >= limit) continue
+    considered++
+
     const histSnapshot = {} as Record<SpcParamKey, number[]>
     for (const k of SPC_PARAM_KEYS) {
       histSnapshot[k] = complete ? history[k].slice() : []
     }
-    jobs.push({ clf, residual: residualById.get(clf.lot_id), histSnapshot })
+    jobs.push({ row, histSnapshot })
   }
 
   for (let i = 0; i < jobs.length; i += concurrency) {
     const chunk = jobs.slice(i, i + concurrency)
     const results = await Promise.allSettled(
-      chunk.map(async ({ clf, residual, histSnapshot }) => {
-        if (!residual) {
-          throw new Error(`cathode_residual_samples missing lot_id=${clf.lot_id}`)
-        }
-        const clfFeatures = sampleToFeatures(clf)
-        const residualFeatures = sampleToFeatures(residual)
+      chunk.map(async ({ row, histSnapshot }) => {
+        const features = lotRowToFeatures(row)
         const scoredRow = await scoreLotWithAi(
-          clfFeatures,
-          residualFeatures,
+          features,
+          features,
           histSnapshot,
-          clfFeatures,
+          features,
         )
-        await updateLotScore(clf.lot_id, scoredRow, {
-          recordedAt: formatDateTime(clf.recorded_at),
-          qualityDefect: Number(clf.quality_defect) === 1 ? 1 : 0,
-          features: clfFeatures,
+        await updateLotScore(row.lot_id, scoredRow, {
+          recordedAt: formatDateTime(row.recorded_at),
+          qualityDefect: Number(row.quality_defect) === 1 ? 1 : 0,
+          features,
         })
-        return clf.lot_id
+        return row.lot_id
       }),
     )
     for (const r of results) {
@@ -447,18 +475,20 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   return { scored, failed, errors: errors.slice(0, 20) }
 }
 
-const COMPLETE_PROCESS_SQL = `d50 IS NOT NULL AND d90 IS NOT NULL AND metal_impurity IS NOT NULL
-  AND lithium_input IS NOT NULL AND additive_ratio IS NOT NULL AND process_time IS NOT NULL
-  AND sintering_temp IS NOT NULL AND humidity IS NOT NULL AND tank_pressure IS NOT NULL`
+const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.metal_impurity IS NOT NULL
+  AND l.lithium_input IS NOT NULL AND l.additive_ratio IS NOT NULL AND l.process_time IS NOT NULL
+  AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
 /** Create open issues for complete-case 심각/주의 lots only. */
 export async function ensureIssuesForRiskLots(): Promise<number> {
   const lots = await query<
     { lot_id: string; recorded_at: Date | string; risk_level: string; risk_reason: string | null }[]
   >(
-    `SELECT lot_id, recorded_at, risk_level, risk_reason FROM lots
-     WHERE risk_level IN ('심각', '주의')
-       AND (${COMPLETE_PROCESS_SQL})`,
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.risk_reason
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE a.risk_level IN ('심각', '주의')
+       AND (${COMPLETE_PROCESS_SQL_L})`,
   )
 
   let created = 0
@@ -472,8 +502,15 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
 
     const occurred = formatDateTime(lot.recorded_at)
     const day = occurred.slice(2, 10).replace(/-/g, '')
-    const suffix = lot.lot_id.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || String(created + 1)
-    const issueId = `ISS-${day}-${suffix}`.slice(0, 32)
+    const last = await query<{ issue_id: string }[]>(
+      `SELECT issue_id FROM issues
+       WHERE issue_id REGEXP ?
+       ORDER BY issue_id DESC
+       LIMIT 1`,
+      [`^ISS-${day}-[0-9]{3}$`],
+    )
+    const seq = last[0]?.issue_id ? Number(last[0].issue_id.slice(-3)) + 1 : 1
+    const issueId = `ISS-${day}-${String(seq).padStart(3, '0')}`
     const risk = normalizeRiskLevel(lot.risk_level)
     const title = buildIssueTitle(lot.risk_reason || risk, lot.lot_id)
 
@@ -503,15 +540,15 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     data: Array<{ timestamp: string; value: number }>
   }>
 }> {
-  const targetRows = await query<LotRow[]>(`${LOT_SELECT} WHERE lot_id = ? LIMIT 1`, [lotId])
+  const targetRows = await query<LotRow[]>(`${LOT_SELECT} WHERE l.id = ? LIMIT 1`, [lotId])
   if (!targetRows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
   const target = targetRows[0]
   const targetAt = new Date(target.recorded_at).getTime()
 
   const prior = await query<LotRow[]>(
     `${LOT_SELECT}
-     WHERE recorded_at < ? OR (recorded_at = ? AND lot_id <= ?)
-     ORDER BY recorded_at ASC, lot_id ASC`,
+     WHERE l.\`timestamp\` < ? OR (l.\`timestamp\` = ? AND l.id <= ?)
+     ORDER BY l.\`timestamp\` ASC, l.id ASC`,
     [target.recorded_at, target.recorded_at, lotId],
   )
 

@@ -27,8 +27,11 @@ export const getLotRiskDetail = asyncHandler(async (req, res) => {
 })
 
 export const getProductionTrend = asyncHandler(async (req, res) => {
-  void req
-  const result = await dashboardService.getProductionTrend()
+  const result = await dashboardService.getProductionTrend({
+    from: req.query.from != null ? String(req.query.from) : undefined,
+    to: req.query.to != null ? String(req.query.to) : undefined,
+    grain: req.query.grain != null ? String(req.query.grain) : undefined,
+  })
   res.status(200).json(result)
 })
 

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { predictDefect, predictResidual } from './aiProxy.js'
+import { predictCapacity, predictDefect, predictResidual } from './aiProxy.js'
 import {
   evaluateLotSpc,
   isProcessComplete,
@@ -71,6 +71,10 @@ function loadImputerNumeric(): Record<string, number> {
 export type LotScoreResult = {
   defect_prob: number
   residual_lithium: number
+  /** /predict defect_status → judgment_lots.quality_defect (NULL-fill only on UPSERT) */
+  quality_defect: number
+  /** /predict-capacity → judgment_lots.capacity (NULL-fill only on UPSERT) */
+  capacity: number | null
   spc_status: string
   risk_level: RiskLevel
   risk_reason: string
@@ -162,6 +166,8 @@ export function combineLotScore(input: {
   return {
     defect_prob,
     residual_lithium,
+    quality_defect: 0,
+    capacity: null,
     spc_status: spc_status ?? '안정',
     risk_level: worstRisk(dTier, rTier, sTier),
     risk_reason: reasons.join(', ').slice(0, 255),
@@ -183,7 +189,7 @@ export function evaluateSpcForFeatures(
   return { complete: true, status: evaled.status }
 }
 
-/** Call ai-service using clf_samples features for O/X and residual_samples for residual Li. */
+/** Call ai-service: O/X, capacity, residual from process features + SPC label. */
 export async function scoreLotWithAi(
   clfFeatures: ProcessFeatures,
   residualFeatures: ProcessFeatures,
@@ -194,17 +200,22 @@ export async function scoreLotWithAi(
   const spcInput = spcFeatures ?? clfFeatures
   const clfBody = featuresToPredictBody(clfFeatures)
   const residualBody = featuresToPredictBody(residualFeatures)
-  const [clf, residual] = await Promise.all([
+  const [clf, residual, capacity] = await Promise.all([
     predictDefect(clfBody),
     predictResidual(residualBody),
+    predictCapacity(clfBody),
   ])
   const spc = evaluateSpcForFeatures(spcInput, historyByParam)
-  return combineLotScore({
+  const scored = combineLotScore({
     defectProb: clf.probability,
     residualLi: residual.residual_li,
     spcStatus: spc.status,
     incompleteProcess: !spc.complete,
   })
+  scored.quality_defect = Number(clf.defect_status) === 1 ? 1 : 0
+  const cap = Number(capacity.capacity)
+  scored.capacity = Number.isFinite(cap) ? Math.round(cap * 1000) / 1000 : null
+  return scored
 }
 
 /** Append current complete-lot values onto running SPC histories (mutates). */

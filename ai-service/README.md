@@ -157,6 +157,25 @@ CHAT_VLLM_MODEL=local-model
 
 clf는 capacity/residual을 입력으로 쓰지 않는다. What-if: 불량 최소 → residual 최소 → capacity 최대.
 
+### 추론·불량확률 (운영 연동)
+
+학습 파이프라인 순서(clf → reg → residual)는 **아티팩트 생성 순서**일 뿐, HTTP 추론과는 무관하다. 세 엔드포인트는 서로 독립이며, backend 채점(`lotScore`)은 **`Promise.all`로 병렬** 호출한다.
+
+| 응답 | 출처 | backend DB |
+|------|------|------------|
+| `probability` (불량 확률 0~1) | `/predict`만 | `judgment_lots.probability` · `analysis_lots.defect_prob` |
+| `defect_status` / O·X | `/predict` · `probability ≥ fillThreshold`(또는 `ensemble_config.default_threshold`) | `judgment_lots.quality_defect` |
+| `capacity` | `/predict-capacity` | `judgment_lots.capacity` |
+| `residual_li` | `/predict-residual` | `judgment_lots.residual_li` |
+
+**clf 확률 원리**
+
+1. XGBoost · CatBoost 각각 P(불량) 산출  
+2. 앙상블 **평균 0.5 / 0.5** → `probability`  
+3. 임계값과 비교 → `defect_status`(불량/양품) · cost형 FP+FN 가중 임계값은 학습·`metadata`에 저장, 요청 시 `fillThreshold`로 덮어쓸 수 있음  
+
+`judgment_lots` 쪽 쓰기 주기·NULL-only 정책은 [`../backend/README.md`](../backend/README.md) SPC 싱크·채점 절을 본다 (기본 **60초** 폴링).
+
 ### Secure RAG · SSE · analytics (요약)
 
 - 하이브리드 검색 + rerank soft fallback · chunk 400/50 · `min_score` 기본 0.15

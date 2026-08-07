@@ -21,10 +21,11 @@ CREATE TABLE IF NOT EXISTS user_settings (
     ON DELETE CASCADE
 );
 
--- LOT SSOT + scoring (Risk Top = query, no separate top table)
+-- LOT process SSOT (CSV column names). Scores live in analysis_lots.
+-- PK `id` is referenced by child tables as lot_id (FK name may differ).
 CREATE TABLE IF NOT EXISTS lots (
-  lot_id            VARCHAR(64)  NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME     NOT NULL,
+  id                VARCHAR(64)  NOT NULL PRIMARY KEY,
+  `timestamp`       DATETIME     NOT NULL,
   d50               DOUBLE       NULL,
   d90               DOUBLE       NULL,
   metal_impurity    DOUBLE       NULL,
@@ -35,82 +36,38 @@ CREATE TABLE IF NOT EXISTS lots (
   humidity          DOUBLE       NULL,
   tank_pressure     DOUBLE       NULL,
   operator_id       VARCHAR(32)  NULL,
-  quality_defect    TINYINT(1)   NOT NULL DEFAULT 0,
-  defect_prob       DOUBLE       NULL,
-  residual_lithium  DOUBLE       NULL,
-  spc_status        VARCHAR(32)  NULL,
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '안정',
-  risk_reason       VARCHAR(255) NULL,
-  scored_at         DATETIME     NULL,
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_lots_recorded (recorded_at),
-  INDEX idx_lots_risk (risk_level)
+  INDEX idx_lots_recorded (`timestamp`)
 );
 
--- Raw CSV sources. Kept separate because each dataset has a different missing-value pattern.
--- No FK to operational lots: that table may contain only an SPC-cleaned subset.
-CREATE TABLE IF NOT EXISTS cathode_clf_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  quality_defect    TINYINT(1)  NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_clf_recorded (recorded_at),
-  INDEX idx_cathode_clf_operator (operator_id),
-  INDEX idx_cathode_clf_target (quality_defect)
+CREATE TABLE IF NOT EXISTS analysis_lots (
+  lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
+  defect_prob              DOUBLE       NULL,
+  spc_status               VARCHAR(32)  NULL,
+  risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정',
+  risk_reason              VARCHAR(255) NULL,
+  clf_model_version        VARCHAR(64)  NULL,
+  residual_model_version   VARCHAR(64)  NULL,
+  spc_limit_version        VARCHAR(64)  NULL,
+  scored_at                DATETIME     NULL,
+  created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_analysis_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE,
+  INDEX idx_analysis_risk (risk_level),
+  INDEX idx_analysis_scored (scored_at)
 );
 
-CREATE TABLE IF NOT EXISTS cathode_capacity_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  capacity          DOUBLE      NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_capacity_recorded (recorded_at),
-  INDEX idx_cathode_capacity_operator (operator_id),
-  INDEX idx_cathode_capacity_target (capacity)
-);
-
-CREATE TABLE IF NOT EXISTS cathode_residual_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  residual_li       DOUBLE      NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_residual_recorded (recorded_at),
-  INDEX idx_cathode_residual_operator (operator_id),
-  INDEX idx_cathode_residual_target (residual_li)
+-- Judgment outcomes: clf quality_defect + reg capacity + residual_li + probability (0~1)
+CREATE TABLE IF NOT EXISTS judgment_lots (
+  lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,
+  quality_defect  TINYINT(1)   NOT NULL,
+  capacity        DOUBLE       NULL,
+  residual_li     DOUBLE       NULL,
+  probability     DOUBLE       NULL,
+  CONSTRAINT fk_judgment_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS issues (
@@ -123,7 +80,7 @@ CREATE TABLE IF NOT EXISTS issues (
   action_content    TEXT         NULL,
   assignee_user_id  VARCHAR(50)  NULL,
   completed_at      DATETIME     NULL,
-  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(lot_id),
+  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
   INDEX idx_issues_status (status),
@@ -152,7 +109,7 @@ CREATE TABLE IF NOT EXISTS handover_history (
     FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
     ON DELETE RESTRICT,
   CONSTRAINT fk_handover_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(lot_id)
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE RESTRICT,
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)

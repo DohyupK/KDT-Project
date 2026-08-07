@@ -12,7 +12,7 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 ## 한 줄 역할
 
-- `DB/schema.sql` (repo root): `users`, settings, lots, cathode CSV sources, issues, handover, inquiries
+- `DB/schema.sql` (repo root): `users`, settings, `lots` (공정), `analysis_lots` (채점), `judgment_lots` (품질·용량·잔류), issues, handover, inquiries
 - `DB/inquiries.sql`: inquiries only (or `npm run migrate:inquiries`)
 - `DB/chat_schema.sql`: chat sessions/messages (when using MariaDB chat store)
 
@@ -48,7 +48,7 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 ### DB · 스토어
 
 - DB명은 **루트 `.env`의 `DB_*`** 기준 (예: `kdt` / `kdt_project`)
-- 스키마: `../DB/schema.sql` (users, lots, issues, inquiries, …) · `../DB/chat_schema.sql`
+- 스키마: `../DB/schema.sql` (users, lots, analysis_lots, issues, inquiries, …) · `../DB/chat_schema.sql`
 - 채팅 세션 기본: `CHAT_STORE=sqlite` → `DB/data/chat.sqlite` (MariaDB 없이도 챗 가능)
 - `CHAT_STORE=mariadb`일 때 chat 스키마 적용
 - LLM 키: `DB/data/llm_keys.sqlite` · 마스터 `LLM_KEYS_ENCRYPTION_KEY`
@@ -95,42 +95,38 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 ```bash
 cd backend
-# 잘못된 전량 채점 롤백
+# 잘못된 전량 채점 롤백 (analysis_lots + judgment_lots.residual_li)
 npm run rollback:score-lots
-# ai-service(:8800) ready 후 샘플 SSOT 재채점
+# ai-service(:8800) ready 후 lots 공정 → analysis_lots 재채점
 npm run score:lots
 npm run score:lots -- --limit=100 --concurrency=4
+# QC CSV로 lots 재적재 (residual 제외 · 자식 id 유지)
+npm run reload:lots-qc
+# SPC_LOT → lots 미러 + 신규/미채점 score (judgment NULL만 AI)
+npm run sync:spc-lots
+npm run sync:spc-lots -- --skip-score
 ```
 
 - 위험등급: `심각` \| `주의` \| `안정` · SPC: `이탈` \| `주의` \| `안정` \| `이탈, 주의`
-- 여유량 = `4000 - residual_lithium` (API 계산)
-- 채점 입력: `cathode_clf_samples` → 불량확률, `cathode_residual_samples` → 잔류리튬, SPC는 완전사례만
+- 여유량 = `4000 - residual_li` (API `residualLithium` · DB `judgment_lots.residual_li`)
+- **테이블:** `lots` PK=`id` (공정만) · 채점=`analysis_lots` · 판정=`judgment_lots` (`quality_defect`·`capacity`·`residual_li`·`probability`) · 자식 FK `lot_id` → `lots.id`
+- **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 유지
+- **채점·판정 쓰기 (운영):**
+  - 입력: `lots` 공정값 → ai-service **`Promise.all`로 3헤드 병렬** (`/predict` · `/predict-capacity` · `/predict-residual`) — 학습 순서(clf→reg→residual)와 무관
+  - `analysis_lots`: AI+SPC 점수 **UPSERT**(재채점 시 갱신)
+  - `judgment_lots`: `quality_defect`·`capacity`·`residual_li`·`probability`는 **NULL일 때만** 채움 (`COALESCE` · 이미 값이 있으면 유지)
+  - `probability` ← `/predict` 앙상블 **불량확률** (0~1) · `quality_defect` ← 같은 응답의 임계값 판정(0/1) · 용량·잔류는 각 회귀 헤드
+  - 모델 원리·임계값: [`../ai-service/README.md`](../ai-service/README.md) 「추론·불량확률」
+- LOT CSV 적재: `POST /api/lots/import` (`id`/`timestamp`/공정 → `lots`)
+- QC 재적재: `npm run reload:lots-qc` · `../DB/reload_lots_from_qc_csv.sql`
+- **SPC 싱크 주기:** 기동 시 즉시 1회 + **60초 폴링** (`spcLotSyncPoller` · `SPC_SYNC_ENABLED` 기본 on · `SPC_SYNC_INTERVAL_MS=60000` · `0`/off면 비활성) · 틱마다 `SPC_LOT`→`lots` 미러 + `scored_at` NULL 미채점 score(상한) · 수동 `npm run sync:spc-lots`
+- 구조 SQL: `../DB/align_lots_csv_column_names.sql` · `../DB/migrate_lots_to_analysis_lots.sql`
 - 상세 계약: `../docs/references/issue-lot-api.md`
 - 챗봇 인수인계: `../docs/references/chatbot-handoff-2026-08-04.md`
 
 - 담당자는 저장 요청 JWT의 `userId`를 `issues.assignee_user_id`에 기록합니다.
 - 목업 기본 데이터 8건: `../DB/issues_seed.sql` · `npm run seed:issues`
-
-## Cathode CSV 원천 테이블
-
-세 CSV는 서로 다른 결측 패턴을 보존하기 위해 독립 테이블에 적재합니다.
-
-| CSV | 테이블 | 타깃 |
-|-----|--------|------|
-| `cathode_clf_data.csv` | `cathode_clf_samples` | `quality_defect` |
-| `cathode_reg_data.csv` | `cathode_capacity_samples` | `capacity` |
-| `cathode_qc_reg_data.csv` | `cathode_residual_samples` | `residual_li` |
-
-```bash
-npm run migrate:cathode-sources
-npm run import:cathode-sources
-npm run verify:cathode-sources
-```
-
-- 공정값 결측치는 삭제·대체하지 않고 `NULL`로 저장합니다.
-- importer는 UPSERT 방식이라 재실행할 수 있으며 운영 `lots`를 수정하지 않습니다.
-- 다른 데이터 경로를 사용할 때는 `CATHODE_DATA_DIR` 환경 변수를 지정합니다.
-- 페이지 조회 API와 프론트 연결은 후속 범위입니다.
+- 판정 테이블: `../DB/judgment_lots.sql` · `npm run seed:judgment-lots` (clf+reg CSV ∩ lots → `judgment_lots`)
 
 ## 변경·설치 이력 (2026-07-24)
 
