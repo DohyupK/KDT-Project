@@ -14,6 +14,7 @@ import {
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -1856,8 +1857,8 @@ export default function DashBoardPage() {
     setIsMounted(true);
   }, []);
 
-  const refreshDashboardData = useCallback(async () => {
-    if (fetchingRef.current) return;
+  const refreshDashboardData = useCallback(async (options?: { force?: boolean }) => {
+    if (fetchingRef.current && !options?.force) return;
     fetchingRef.current = true;
     setLiveStatus('updating');
     try {
@@ -1929,6 +1930,10 @@ export default function DashBoardPage() {
   useEffect(() => {
     void refreshDashboardData();
   }, [refreshDashboardData]);
+
+  useShellRefresh(() => {
+    void refreshDashboardData({ force: true });
+  });
 
   const defectAnalysis: DefectAnalysis = useMemo(() => {
     const dailyRates = dailyAggregates.map((d) => ({

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 type SpcCardTitle =
   | 'd50'
@@ -115,12 +116,15 @@ function PresetEmbed({
   isDark,
   className,
   compact = false,
+  refreshKey = 0,
 }: {
   dashboardId: string
   isDark: boolean
   className?: string
   /** 카드처럼 좁은 영역에 맞출 때 Preset을 확대해서 그린 뒤 축소 */
   compact?: boolean
+  /** ShellHeader 새로고침 시 embed 재마운트 */
+  refreshKey?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mountRef = useRef<HTMLDivElement>(null)
@@ -200,7 +204,7 @@ function PresetEmbed({
       cancelled = true
       el.innerHTML = ''
     }
-  }, [dashboardId, compact])
+  }, [dashboardId, compact, refreshKey])
 
   return (
     <div
@@ -255,11 +259,13 @@ function SpcGraphCard({
   isDark,
   onExpand,
   expandButtonRef,
+  embedRefreshKey,
 }: {
   title: SpcCardTitle
   isDark: boolean
   onExpand: (title: SpcCardTitle) => void
   expandButtonRef: (element: HTMLButtonElement | null) => void
+  embedRefreshKey: number
 }) {
   const embedId = PRESET_EMBED_IDS[title]
 
@@ -297,7 +303,12 @@ function SpcGraphCard({
       </div>
       <div className="relative h-[360px] overflow-hidden">
         {embedId ? (
-          <PresetEmbed dashboardId={embedId} isDark={isDark} compact />
+          <PresetEmbed
+            dashboardId={embedId}
+            isDark={isDark}
+            compact
+            refreshKey={embedRefreshKey}
+          />
         ) : (
           <div className="flex h-full items-center justify-center px-5 py-8">
             <p className={`m-0 text-base ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -312,6 +323,7 @@ function SpcGraphCard({
 
 export default function SpcManagementPage() {
   const { isDark, language, copy } = useUiSettings()
+  const [embedRefreshKey, setEmbedRefreshKey] = useState(0)
   const [expandedTitle, setExpandedTitle] = useState<SpcCardTitle | null>(null)
   const expandButtonRefs = useRef<Partial<Record<SpcCardTitle, HTMLButtonElement | null>>>({})
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -326,6 +338,10 @@ export default function SpcManagementPage() {
     lastExpandedRef.current = title
     setExpandedTitle(title)
   }, [])
+
+  useShellRefresh(() => {
+    setEmbedRefreshKey((key) => key + 1)
+  })
 
   useEffect(() => {
     if (!expandedTitle) return
@@ -398,54 +414,63 @@ export default function SpcManagementPage() {
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('d50')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="d90"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('d90')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="metal_impurity"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('metal_impurity')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="lithium_input"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('lithium_input')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="additive_ratio"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('additive_ratio')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="process_time"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('process_time')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="sintering_temp"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('sintering_temp')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="humidity"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('humidity')}
+            embedRefreshKey={embedRefreshKey}
           />
           <SpcGraphCard
             title="tank_pressure"
             isDark={isDark}
             onExpand={openModal}
             expandButtonRef={setExpandButtonRef('tank_pressure')}
+            embedRefreshKey={embedRefreshKey}
           />
         </div>
       </div>
@@ -495,7 +520,12 @@ export default function SpcManagementPage() {
             </div>
             <div className="relative h-[70vh] overflow-hidden">
               {expandedEmbedId ? (
-                <PresetEmbed dashboardId={expandedEmbedId} isDark={isDark} className="h-full" />
+                <PresetEmbed
+                  dashboardId={expandedEmbedId}
+                  isDark={isDark}
+                  className="h-full"
+                  refreshKey={embedRefreshKey}
+                />
               ) : (
                 <div className="flex h-full items-center justify-center px-6 py-10">
                   <p className={`m-0 text-base ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
