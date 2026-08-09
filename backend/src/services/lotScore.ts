@@ -1,7 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { predictCapacity, predictDefect, predictResidual } from './aiProxy.js'
+import {
+  predictCapacity,
+  predictDefect,
+  predictResidual,
+  predictVoting,
+} from './aiProxy.js'
 import {
   evaluateLotSpc,
   isProcessComplete,
@@ -242,13 +247,42 @@ export async function scoreLotWithAi(
   const spcInput = spcFeatures ?? clfFeatures
   const clfBody = featuresToPredictBody(clfFeatures)
   const residualBody = featuresToPredictBody(residualFeatures)
+  const spc = evaluateSpcForFeatures(spcInput, historyByParam)
+  const std = await loadStandard()
+
+  // Prefer cascade voting when ai-service voting models are ready.
+  try {
+    const voted = await predictVoting(clfBody)
+    const scored = combineLotScore({
+      defectProb: voted.probability,
+      residualLi: voted.residual_li,
+      spcStatus: spc.status,
+      incompleteProcess: !spc.complete,
+      thresholds: {
+        defect_prob_caution: std.defect_prob_caution,
+        defect_prob_severe: std.defect_prob_severe,
+        residual_caution: std.residual_caution,
+        residual_severe: std.residual_severe,
+      },
+    })
+    if (voted.quality_defect != null) {
+      scored.quality_defect = Number(voted.quality_defect) === 1 ? 1 : 0
+    } else {
+      scored.quality_defect =
+        voted.probability >= DEFECT_JUDGE_THRESHOLD ? 1 : 0
+    }
+    const cap = Number(voted.capacity)
+    scored.capacity = Number.isFinite(cap) ? Math.round(cap * 1000) / 1000 : null
+    return scored
+  } catch {
+    // Fallback: legacy 3-head parallel endpoints
+  }
+
   const [clf, residual, capacity] = await Promise.all([
     predictDefect(clfBody),
     predictResidual(residualBody),
     predictCapacity(clfBody),
   ])
-  const spc = evaluateSpcForFeatures(spcInput, historyByParam)
-  const std = await loadStandard()
   const scored = combineLotScore({
     defectProb: clf.probability,
     residualLi: residual.residual_li,

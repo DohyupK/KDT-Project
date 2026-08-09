@@ -1,0 +1,7 @@
+{
+  "weights": {
+    "xgb": 0.5,
+    "cat": 0.5
+  },
+  "task": "regression"
+}

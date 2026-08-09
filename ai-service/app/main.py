@@ -75,6 +75,7 @@ from app.schemas import (
     ResidualResponse,
     SecurityChatRequest,
     SecurityChatResponse,
+    VotingPredictResponse,
 )
 from agent.api_llm.graph import run_chat
 from agent.api_llm.model_registry import list_ready_heads
@@ -202,11 +203,41 @@ def get_chat_thread_messages(
     return ChatThreadMessagesResponse(thread_id=thread_id, messages=msgs)
 
 
+@app.post("/predict-voting", response_model=VotingPredictResponse)
+def predict_voting_endpoint(body: PredictRequest) -> VotingPredictResponse:
+    """Cascade multi-model voting (capacity → residual → probability /15)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=503, detail="voting_config.json missing")
+    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
+    if body.id is not None:
+        row["id"] = body.id
+    if body.timestamp is not None:
+        row["timestamp"] = body.timestamp
+    try:
+        from voting_predict import predict_voting
+
+        result = predict_voting(
+            row,
+            fill_threshold=(
+                float(body.fillThreshold) if body.fillThreshold is not None else None
+            ),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"predict-voting failed: {exc}") from exc
+    return VotingPredictResponse(**result)
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict_endpoint(body: PredictRequest) -> PredictResponse:
     """
     Single-row O/X inference.
     Accepts raw process features; domain engineering runs inside train_pipeline.predict.
+    Prefer /predict-voting when multi-model voting artifacts are ready.
     """
     required = MODELS_DIR / "xgb_model.json"
     if not required.exists():

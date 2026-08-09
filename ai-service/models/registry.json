@@ -1,28 +1,34 @@
 {
-  "version": 1,
-  "note": "Chat runs every head with ready=true. Add future datasets as new heads + register_builtin in agent/tools.py.",
+  "version": 2,
+  "note": "Voting ensemble for judgment_lots. Legacy single-head dirs may remain under temp backup.",
   "heads": {
+    "voting": {
+      "task": "cascade_voting",
+      "dir": "models",
+      "ready": false,
+      "entrypoint": "voting_predict.predict_voting",
+      "config": "models/voting_config.json",
+      "train": "python scripts/train_all_voting_models.py",
+      "note": "Set ready=true after all 15 members trained"
+    },
     "clf": {
       "task": "ox_classification",
       "dir": "models",
-      "ready": true,
-      "entrypoint": "train_pipeline.predict"
+      "ready": false,
+      "entrypoint": "train_pipeline.predict",
+      "note": "Legacy; backed up under ai-service/temp/"
     },
     "reg": {
       "task": "capacity_regression",
       "dir": "models/reg",
-      "ready": true,
-      "entrypoint": "train_reg_pipeline.predict_capacity",
-      "data": "data/cathode_reg_data.csv",
-      "train": "python train_reg_pipeline.py"
+      "ready": false,
+      "entrypoint": "train_reg_pipeline.predict_capacity"
     },
     "residual": {
       "task": "residual_li_regression",
       "dir": "models/residual",
-      "ready": true,
+      "ready": false,
       "entrypoint": "train_residual_pipeline.predict_residual_li",
-      "data": "data/cathode_qc_reg_data.csv",
-      "train": "python train_residual_pipeline.py",
       "unit": "ppm"
     }
   }

@@ -1,0 +1,118 @@
+[
+  {
+    "feature": "metal_impurity",
+    "importance": 0.8549891820378482
+  },
+  {
+    "feature": "temp_x_humidity",
+    "importance": 0.5063206842700887
+  },
+  {
+    "feature": "temp_dev_from_800_sq",
+    "importance": 0.4473993374614355
+  },
+  {
+    "feature": "humidity",
+    "importance": 0.4207287488376289
+  },
+  {
+    "feature": "temp_dev_from_800",
+    "importance": 0.4180564599075902
+  },
+  {
+    "feature": "flag_metal_ge10pct",
+    "importance": 0.26013043674082437
+  },
+  {
+    "feature": "flag_humidity_ge10pct",
+    "importance": 0.1839156297699408
+  },
+  {
+    "feature": "d90",
+    "importance": 0.17771522712672996
+  },
+  {
+    "feature": "flag_metal_ge5pct",
+    "importance": 0.1516225108115255
+  },
+  {
+    "feature": "process_time",
+    "importance": 0.11443559621906575
+  },
+  {
+    "feature": "tank_pressure",
+    "importance": 0.10100487458874595
+  },
+  {
+    "feature": "additive_ratio",
+    "importance": 0.08509382273857655
+  },
+  {
+    "feature": "flag_temp_high_ge5pct",
+    "importance": 0.07163244875166185
+  },
+  {
+    "feature": "sintering_temp",
+    "importance": 0.06999187041480812
+  },
+  {
+    "feature": "flag_humidity_ge5pct",
+    "importance": 0.06928738974617664
+  },
+  {
+    "feature": "flag_metal_ge20pct",
+    "importance": 0.06491552727890204
+  },
+  {
+    "feature": "d50",
+    "importance": 0.060607388996840275
+  },
+  {
+    "feature": "lithium_input",
+    "importance": 0.047834179726238046
+  },
+  {
+    "feature": "particle_span",
+    "importance": 0.04167769308389628
+  },
+  {
+    "feature": "flag_metal_ge40pct",
+    "importance": 0.03768560080173316
+  },
+  {
+    "feature": "flag_humidity_ge20pct",
+    "importance": 0.03206898254992623
+  },
+  {
+    "feature": "flag_temp_low_ge20pct",
+    "importance": 0.026760883098491613
+  },
+  {
+    "feature": "flag_humidity_ge30pct",
+    "importance": 0.018743234791099614
+  },
+  {
+    "feature": "flag_temp_low_ge5pct",
+    "importance": 0.016270695978308013
+  },
+  {
+    "feature": "operator_id",
+    "importance": 0.014271177706076527
+  },
+  {
+    "feature": "flag_temp_high_ge20pct",
+    "importance": 0.006544558048241391
+  },
+  {
+    "feature": "flag_temp_high_ge25pct",
+    "importance": 0.005964901153450138
+  },
+  {
+    "feature": "flag_lithium_ge10pct",
+    "importance": 0.004183187533110263
+  },
+  {
+    "feature": "flag_temp_humidity_danger_zone",
+    "importance": 0.0006044210933290291
+  }
+]

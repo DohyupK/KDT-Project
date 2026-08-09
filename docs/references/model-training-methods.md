@@ -168,6 +168,18 @@ cd ai-service
 python train_pipeline.py
 # USE_GPU=0 OPTUNA_TRIALS=100 python train_reg_pipeline.py
 # USE_GPU=0 OPTUNA_TRIALS=100 python train_residual_pipeline.py
+# 투표 멤버: USE_GPU=0 python scripts/train_all_voting_models.py
 ```
 
 재학습·Optuna·스모크는 `.cursor/rules/ask-before-run.mdc`에 따라 **사용자 승인 후**만.
+
+---
+
+## 9. 다중 모델 투표 (2026-08-10)
+
+상세 SSOT: [`multi-model-voting.md`](./multi-model-voting.md)
+
+- 기존 `models/` → `ai-service/temp/models_backup_2026-08-10/`
+- Test 미사용 · `N_FOLDS=6` · 가중 capacity/11 · residual/11 · probability/**15** (reg 제외)
+- residual→확률 점수: `standard` 3000/4000
+- 임계 후순위
