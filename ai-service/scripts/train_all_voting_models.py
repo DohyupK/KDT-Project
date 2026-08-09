@@ -6,6 +6,10 @@ import logging
 import sys
 from pathlib import Path
 
+_AI_ROOT = Path(__file__).resolve().parent.parent
+if str(_AI_ROOT) not in sys.path:
+    sys.path.insert(0, str(_AI_ROOT))
+
 from train_voting_member import MEMBERS, train_member
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
