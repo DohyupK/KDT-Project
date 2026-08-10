@@ -53,7 +53,6 @@ def _configure_file_logging() -> None:
     root.addHandler(handler)
 
 
-import polars as pl
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -80,7 +79,7 @@ from app.schemas import (
 from agent.api_llm.graph import run_chat
 from agent.api_llm.model_registry import list_ready_heads
 from agent.secure_llm import compose_secure, compose_secure_stream
-from train_pipeline import MODELS_DIR, predict
+from train_pipeline import MODELS_DIR
 
 # After train_pipeline (which may clear root handlers) attach rotating server log.
 _configure_file_logging()
@@ -138,20 +137,38 @@ RAW_FEATURE_KEYS = (
 
 
 def _default_threshold() -> float:
-    cfg_path = MODELS_DIR / "ensemble_config.json"
+    """Voting default_threshold from voting_config.json (fallback 0.4)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
     if cfg_path.exists():
         with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
-        return float(cfg.get("default_threshold", 0.5))
-    return 0.5
+        thr = (cfg.get("threshold") or {}).get("default_threshold")
+        if thr is not None:
+            return float(thr)
+    return 0.4
 
 
 def _model_version() -> str | None:
-    meta_path = MODELS_DIR / "metadata.json"
-    if not meta_path.exists():
-        return None
-    with open(meta_path, encoding="utf-8") as f:
-        return json.load(f).get("model_version")
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if cfg_path.exists():
+        return "2.0.0-voting"
+    return None
+
+
+def _features_row(body: PredictRequest) -> dict:
+    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
+    if body.id is not None:
+        row["id"] = body.id
+    if body.timestamp is not None:
+        row["timestamp"] = body.timestamp
+    return row
+
+
+def _run_voting(body: PredictRequest) -> dict:
+    from voting_predict import predict_voting
+
+    thr = body.fillThreshold if body.fillThreshold is not None else None
+    return predict_voting(_features_row(body), fill_threshold=thr)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -209,20 +226,8 @@ def predict_voting_endpoint(body: PredictRequest) -> VotingPredictResponse:
     cfg_path = MODELS_DIR / "voting_config.json"
     if not cfg_path.exists():
         raise HTTPException(status_code=503, detail="voting_config.json missing")
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
     try:
-        from voting_predict import predict_voting
-
-        result = predict_voting(
-            row,
-            fill_threshold=(
-                float(body.fillThreshold) if body.fillThreshold is not None else None
-            ),
-        )
+        result = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -234,29 +239,15 @@ def predict_voting_endpoint(body: PredictRequest) -> VotingPredictResponse:
 
 @app.post("/predict", response_model=PredictResponse)
 def predict_endpoint(body: PredictRequest) -> PredictResponse:
-    """
-    Single-row O/X inference.
-    Accepts raw process features; domain engineering runs inside train_pipeline.predict.
-    Prefer /predict-voting when multi-model voting artifacts are ready.
-    """
-    required = MODELS_DIR / "xgb_model.json"
-    if not required.exists():
+    """O/X from cascade voting probability (legacy single-head models disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Model artifacts missing. Train first (ai-service/models/).",
+            detail="Voting models missing. Legacy clf artifacts removed; use voting under models/voting/.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    thr = body.fillThreshold if body.fillThreshold is not None else _default_threshold()
-    df = pl.DataFrame([row])
-
     try:
-        result = predict(df, fillThreshold=float(thr))
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -264,34 +255,35 @@ def predict_endpoint(body: PredictRequest) -> PredictResponse:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"predict failed: {exc}") from exc
 
-    return PredictResponse(**result)
+    thr = voted.get("applied_threshold")
+    if thr is None:
+        thr = (
+            float(body.fillThreshold)
+            if body.fillThreshold is not None
+            else _default_threshold()
+        )
+    qd = voted.get("quality_defect")
+    if qd is None:
+        qd = 1 if float(voted["probability"]) >= float(thr) else 0
+    return PredictResponse(
+        defect_status=int(qd),
+        probability=float(voted["probability"]),
+        applied_threshold=float(thr),
+        top_risk_factors=[],
+    )
 
 
 @app.post("/predict-capacity", response_model=CapacityResponse)
 def predict_capacity_endpoint(body: PredictRequest) -> CapacityResponse:
-    """
-    Single-row capacity (mAh/g) inference.
-    Same raw features as /predict; domain engineering inside train_reg_pipeline.
-    """
-    from train_reg_pipeline import MODELS_DIR as REG_DIR
-    from train_reg_pipeline import predict_capacity
-
-    required = REG_DIR / "xgb_model.json"
-    if not required.exists():
+    """Capacity from cascade voting (legacy models/reg disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Reg model artifacts missing. Train first (ai-service/models/reg/).",
+            detail="Voting models missing. Legacy reg artifacts removed.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    df = pl.DataFrame([row])
     try:
-        result = predict_capacity(df)
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -300,35 +292,20 @@ def predict_capacity_endpoint(body: PredictRequest) -> CapacityResponse:
         raise HTTPException(
             status_code=500, detail=f"predict-capacity failed: {exc}"
         ) from exc
-
-    return CapacityResponse(**result)
+    return CapacityResponse(capacity=float(voted["capacity"]), unit="mAh/g", top_factors=[])
 
 
 @app.post("/predict-residual", response_model=ResidualResponse)
 def predict_residual_endpoint(body: PredictRequest) -> ResidualResponse:
-    """
-    Single-row residual_li inference.
-    Same raw features as /predict; domain engineering inside train_residual_pipeline.
-    """
-    from train_residual_pipeline import MODELS_DIR as RES_DIR
-    from train_residual_pipeline import predict_residual_li
-
-    required = RES_DIR / "xgb_model.json"
-    if not required.exists():
+    """residual_li from cascade voting (legacy models/residual disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Residual model artifacts missing. Train first (ai-service/models/residual/).",
+            detail="Voting models missing. Legacy residual artifacts removed.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    df = pl.DataFrame([row])
     try:
-        result = predict_residual_li(df)
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -337,8 +314,9 @@ def predict_residual_endpoint(body: PredictRequest) -> ResidualResponse:
         raise HTTPException(
             status_code=500, detail=f"predict-residual failed: {exc}"
         ) from exc
-
-    return ResidualResponse(**result)
+    return ResidualResponse(
+        residual_li=float(voted["residual_li"]), unit="ppm", top_factors=[]
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)

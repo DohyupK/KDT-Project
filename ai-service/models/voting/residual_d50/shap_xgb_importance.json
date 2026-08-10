@@ -1,0 +1,46 @@
+[
+  {
+    "feature": "lithium_input",
+    "importance": 287.79119873046875
+  },
+  {
+    "feature": "humidity",
+    "importance": 208.2388916015625
+  },
+  {
+    "feature": "temp_dev_from_800",
+    "importance": 162.88760375976562
+  },
+  {
+    "feature": "temp_x_humidity",
+    "importance": 82.79859924316406
+  },
+  {
+    "feature": "temp_dev_from_800_sq",
+    "importance": 69.50362396240234
+  },
+  {
+    "feature": "process_time",
+    "importance": 43.00132369995117
+  },
+  {
+    "feature": "sintering_temp",
+    "importance": 27.64082145690918
+  },
+  {
+    "feature": "metal_impurity",
+    "importance": 5.524991035461426
+  },
+  {
+    "feature": "additive_ratio",
+    "importance": 4.368945121765137
+  },
+  {
+    "feature": "d50",
+    "importance": 3.7629473209381104
+  },
+  {
+    "feature": "tank_pressure",
+    "importance": 2.9159817695617676
+  }
+]

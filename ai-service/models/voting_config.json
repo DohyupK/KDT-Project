@@ -6,9 +6,9 @@
   "seed": 42,
   "xgb_cat_weights": { "xgb": 0.5, "cat": 0.5 },
   "threshold": {
-    "status": "deferred",
-    "default_threshold": null,
-    "note": "Set later; not used in training"
+    "status": "ops",
+    "default_threshold": 0.4,
+    "note": "quality_defect = 1 if probability >= 0.4 else 0 (last step)"
   },
   "standard_residual": {
     "caution": 3000,

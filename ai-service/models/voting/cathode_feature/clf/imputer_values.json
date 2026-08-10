@@ -1,0 +1,14 @@
+{
+  "numeric_means": {
+    "metal_impurity": 0.024054540265354488,
+    "process_time": 72.18589255973978,
+    "sintering_temp": 799.8528091113548,
+    "humidity": 50.03898932302767,
+    "capacity": 199.99753280000016,
+    "residual_li": 3200.182767199999,
+    "temp_dev_from_800": 19.701797497261264,
+    "temp_dev_from_800_sq": 604.5028666232134,
+    "temp_x_humidity": 40015.10208129853
+  },
+  "categorical_fill": "__MISSING__"
+}

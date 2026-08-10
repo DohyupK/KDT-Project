@@ -1,14 +1,10 @@
-"""Chatbot Tools. Diagnosis via registered model heads (clf + reg + future)."""
+"""Chatbot Tools. Diagnosis via cascade voting (legacy single-head disconnected)."""
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import polars as pl
-
 from agent.api_llm.model_registry import register_builtin, run_all_ready_heads
-from train_pipeline import MODELS_DIR, predict
 
 RAW_FEATURE_KEYS = (
     "d50",
@@ -25,12 +21,17 @@ RAW_FEATURE_KEYS = (
 
 
 def default_threshold() -> float:
-    cfg_path = MODELS_DIR / "ensemble_config.json"
+    from pathlib import Path
+    import json
+
+    cfg_path = Path("models/voting_config.json")
     if cfg_path.exists():
         with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
-        return float(cfg.get("default_threshold", 0.5))
-    return 0.5
+        thr = (cfg.get("threshold") or {}).get("default_threshold")
+        if thr is not None:
+            return float(thr)
+    return 0.8
 
 
 def _row_from_features(features: dict[str, Any]) -> dict[str, Any]:
@@ -45,63 +46,79 @@ def _row_from_features(features: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _vote(features: dict[str, Any], fillThreshold: float | None = None) -> dict[str, Any]:
+    from pathlib import Path
+
+    from voting_predict import predict_voting
+
+    if not Path("models/voting_config.json").exists():
+        raise FileNotFoundError(
+            "Voting config missing. Legacy models disconnected; train voting members first.",
+        )
+    return predict_voting(
+        _row_from_features(features),
+        fill_threshold=float(fillThreshold) if fillThreshold is not None else None,
+    )
+
+
 def run_predict_tool(
     features: dict[str, Any],
     fillThreshold: float | None = None,
 ) -> dict[str, Any]:
-    """
-    Single-row O/X diagnosis Tool.
-
-    Returns predict() JSON only — no remediation / control advice.
-    """
-    required = MODELS_DIR / "xgb_model.json"
-    if not required.exists():
-        raise FileNotFoundError(
-            "Model artifacts missing. Train first (ai-service/models/).",
-        )
-
-    thr = float(fillThreshold) if fillThreshold is not None else default_threshold()
-    df = pl.DataFrame([_row_from_features(features)])
-    return predict(df, fillThreshold=thr)
+    """O/X from voting probability."""
+    voted = _vote(features, fillThreshold)
+    thr = voted.get("applied_threshold")
+    if thr is None:
+        thr = float(fillThreshold) if fillThreshold is not None else default_threshold()
+    qd = voted.get("quality_defect")
+    if qd is None:
+        qd = 1 if float(voted["probability"]) >= float(thr) else 0
+    return {
+        "defect_status": int(qd),
+        "probability": float(voted["probability"]),
+        "applied_threshold": float(thr),
+        "top_risk_factors": [],
+    }
 
 
 def run_capacity_tool(features: dict[str, Any]) -> dict[str, Any]:
-    """Single-row capacity (mAh/g) Tool via train_reg_pipeline.predict_capacity."""
-    from train_reg_pipeline import MODELS_DIR as REG_DIR
-    from train_reg_pipeline import predict_capacity
-
-    required = REG_DIR / "xgb_model.json"
-    if not required.exists():
-        raise FileNotFoundError(
-            "Reg model artifacts missing. Train first (ai-service/models/reg/).",
-        )
-    df = pl.DataFrame([_row_from_features(features)])
-    return predict_capacity(df)
+    """Capacity from voting."""
+    voted = _vote(features)
+    return {
+        "capacity": float(voted["capacity"]),
+        "unit": "mAh/g",
+        "top_factors": [],
+    }
 
 
 def run_residual_tool(features: dict[str, Any]) -> dict[str, Any]:
-    """Single-row residual_li Tool via train_residual_pipeline.predict_residual_li."""
-    from train_residual_pipeline import MODELS_DIR as RES_DIR
-    from train_residual_pipeline import predict_residual_li
+    """residual_li from voting."""
+    voted = _vote(features)
+    return {
+        "residual_li": float(voted["residual_li"]),
+        "unit": "ppm",
+        "top_factors": [],
+    }
 
-    required = RES_DIR / "xgb_model.json"
-    if not required.exists():
-        raise FileNotFoundError(
-            "Residual model artifacts missing. Train first (ai-service/models/residual/).",
-        )
-    df = pl.DataFrame([_row_from_features(features)])
-    return predict_residual_li(df)
+
+def run_voting_tool(
+    features: dict[str, Any],
+    fillThreshold: float | None = None,
+) -> dict[str, Any]:
+    """Full cascade voting payload."""
+    return _vote(features, fillThreshold)
 
 
 def run_registered_heads(
     features: dict[str, Any],
     fillThreshold: float | None = None,
 ) -> dict[str, Any]:
-    """Run all ready heads from models/registry.json (extensible)."""
+    """Run all ready heads from models/registry.json (voting)."""
     return run_all_ready_heads(features, fillThreshold=fillThreshold)
 
 
-# Register built-ins so registry entrypoints stay stable even if import paths change.
+register_builtin("voting", run_voting_tool)
+# Compatibility aliases for older prompts/call sites
 register_builtin("clf", run_predict_tool)
 register_builtin("reg", run_capacity_tool)
 register_builtin("residual", run_residual_tool)

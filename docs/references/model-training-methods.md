@@ -179,7 +179,8 @@ python train_pipeline.py
 
 상세 SSOT: [`multi-model-voting.md`](./multi-model-voting.md)
 
-- 기존 `models/` → `ai-service/temp/models_backup_2026-08-10/`
+- 기존 `models/` 단일 헤드 → `ai-service/temp/models_backup_2026-08-10/` (활성 `models/`에서는 **삭제·미로드**)
 - Test 미사용 · `N_FOLDS=6` · 가중 capacity/11 · residual/11 · probability/**15** (reg 제외)
 - residual→확률 점수: `standard` 3000/4000
 - 임계 후순위
+- 추론 진입점: `voting_predict` / `POST /predict-voting` (레거시 `/predict*`도 voting으로 프록시)

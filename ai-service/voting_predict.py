@@ -1,13 +1,15 @@
 """
-Cascade voting inference for judgment_lots fields.
+Cascade voting inference for judgment_lots-like fields.
 
 CWD: ai-service/
-Loads models/voting_config.json and member artifacts under models/voting/.
+Schedule within each stage: *_d50 || *_d90 (parallel), then *_feature, then remaining.
+Stages: capacity → residual_li → probability → quality_defect (threshold last).
 """
 
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,7 @@ from train_pipeline import CAT_COL, CAT_FILL, OPTIMAL_SINTERING_TEMP, add_domain
 VOTING_CONFIG_PATH = Path("models/voting_config.json")
 _cache: dict[str, dict[str, Any]] = {}
 _config: dict[str, Any] | None = None
+_DEFAULT_THRESHOLD = 0.4
 
 
 def load_voting_config(path: Path = VOTING_CONFIG_PATH) -> dict[str, Any]:
@@ -104,7 +107,6 @@ def _row_from_features(features: dict[str, Any], feature_columns: list[str]) -> 
             row[c] = CAT_FILL
         else:
             row[c] = None
-    # include raw keys that domain engineering may need
     for k, v in features.items():
         if k not in row:
             row[k] = v
@@ -138,14 +140,12 @@ def _predict_member(dir_rel: str, features: dict[str, Any]) -> float:
     cat_cols: list[str] = meta.get("cat_features") or []
     df = _row_from_features(features, feature_columns)
     df = _maybe_domain(df)
-    # ensure all feature columns exist
     for c in feature_columns:
         if c not in df.columns:
             df = df.with_columns(pl.lit(None).alias(c))
     df = _apply_imputer(df, bundle["imputer"])
     df = df.select([c for c in feature_columns if c in df.columns])
 
-    # XGB matrix
     parts: list[np.ndarray] = []
     nums = [c for c in numeric_cols if c in df.columns]
     if nums:
@@ -175,12 +175,109 @@ def _predict_member(dir_rel: str, features: dict[str, Any]) -> float:
     return 0.5 * p_xgb + 0.5 * p_cat
 
 
-def _weighted_avg(members: list[dict[str, Any]], features: dict[str, Any]) -> float:
+def _split_d50_d90_rest(
+    members: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    d50: list[dict[str, Any]] = []
+    d90: list[dict[str, Any]] = []
+    rest: list[dict[str, Any]] = []
+    for m in members:
+        mid = str(m.get("id", ""))
+        if mid.endswith("_d50") or mid == "d50":
+            d50.append(m)
+        elif mid.endswith("_d90") or mid == "d90":
+            d90.append(m)
+        else:
+            rest.append(m)
+    return d50, d90, rest
+
+
+def _score_member(
+    m: dict[str, Any],
+    features: dict[str, Any],
+    *,
+    kind: str | None = None,
+    caution: float = 3000.0,
+    usl: float = 4000.0,
+) -> tuple[str, float, float]:
+    """Returns (id, weight, value)."""
+    mid = str(m["id"])
+    w = float(m["weight"])
+    k = kind or m.get("kind") or "raw"
+    if k == "clf_proba" or k == "clf_proba_cascade" or k == "raw":
+        val = _predict_member(m["dir"], features)
+    elif k == "residual_score":
+        r = _predict_member(m["dir"], features)
+        val = residual_to_score(r, caution=caution, usl=usl)
+    else:
+        raise ValueError(f"Unknown kind: {k}")
+    return mid, w, float(val)
+
+
+def _weighted_avg_scheduled(
+    members: list[dict[str, Any]],
+    features: dict[str, Any],
+    *,
+    kind_default: str = "raw",
+    caution: float = 3000.0,
+    usl: float = 4000.0,
+    detail: dict[str, float] | None = None,
+) -> float:
+    """
+    Parallel: all *_d50 with all *_d90.
+    Then sequential: remaining in config order (feature first typically).
+    """
+    d50, d90, rest = _split_d50_d90_rest(members)
+    scores: dict[str, tuple[float, float]] = {}
+
+    parallel = d50 + d90
+    if len(parallel) >= 2:
+        with ThreadPoolExecutor(max_workers=min(4, len(parallel))) as ex:
+            futs = {
+                ex.submit(
+                    _score_member,
+                    m,
+                    features,
+                    kind=m.get("kind") or kind_default,
+                    caution=caution,
+                    usl=usl,
+                ): m
+                for m in parallel
+            }
+            for fut in as_completed(futs):
+                mid, w, val = fut.result()
+                scores[mid] = (w, val)
+                if detail is not None:
+                    detail[mid] = val
+    else:
+        for m in parallel:
+            mid, w, val = _score_member(
+                m,
+                features,
+                kind=m.get("kind") or kind_default,
+                caution=caution,
+                usl=usl,
+            )
+            scores[mid] = (w, val)
+            if detail is not None:
+                detail[mid] = val
+
+    # feature and later members: keep config order among rest
+    for m in rest:
+        mid, w, val = _score_member(
+            m,
+            features,
+            kind=m.get("kind") or kind_default,
+            caution=caution,
+            usl=usl,
+        )
+        scores[mid] = (w, val)
+        if detail is not None:
+            detail[mid] = val
+
     num = 0.0
     den = 0.0
-    for m in members:
-        w = float(m["weight"])
-        val = _predict_member(m["dir"], features)
+    for mid, (w, val) in scores.items():
         num += w * val
         den += w
     return num / den if den else 0.0
@@ -191,54 +288,80 @@ def predict_voting(
     fill_threshold: float | None = None,
 ) -> dict[str, Any]:
     """
-    Returns judgment-oriented fields:
-      capacity, residual_li, probability, quality_defect (if threshold set), details
+    capacity → residual_li → probability → quality_defect (last, from threshold).
     """
     cfg = load_voting_config()
-    capacity = _weighted_avg(cfg["capacity"]["members"], features)
-    residual_li = _weighted_avg(cfg["residual_li"]["members"], features)
+    detail: dict[str, float] = {}
+
+    capacity = _weighted_avg_scheduled(
+        cfg["capacity"]["members"],
+        features,
+        kind_default="raw",
+        detail=detail,
+    )
+    residual_li = _weighted_avg_scheduled(
+        cfg["residual_li"]["members"],
+        features,
+        kind_default="raw",
+        detail=detail,
+    )
 
     std = cfg.get("standard_residual", {})
     caution = float(std.get("caution", 3000))
     usl = float(std.get("usl_spare", 4000))
-
     cascade = {**features, "capacity": capacity, "residual_li": residual_li}
-    num = 0.0
-    den = 0.0
-    detail: dict[str, float] = {}
-    for m in cfg["probability"]["members"]:
-        w = float(m["weight"])
-        kind = m["kind"]
-        if kind == "clf_proba":
-            val = _predict_member(m["dir"], features)
-        elif kind == "clf_proba_cascade":
-            val = _predict_member(m["dir"], cascade)
-        elif kind == "residual_score":
-            r = _predict_member(m["dir"], features)
-            val = residual_to_score(r, caution=caution, usl=usl)
-        else:
-            raise ValueError(f"Unknown probability kind: {kind}")
-        detail[m["id"]] = val
-        num += w * val
-        den += w
+
+    # Probability members: schedule d50||d90 then rest; cascade uses cascade features
+    prob_members = cfg["probability"]["members"]
+    d50, d90, rest = _split_d50_d90_rest(prob_members)
+    scores: dict[str, tuple[float, float]] = {}
+
+    def _run_prob(m: dict[str, Any]) -> tuple[str, float, float]:
+        kind = str(m.get("kind") or "clf_proba")
+        feats = cascade if kind == "clf_proba_cascade" else features
+        return _score_member(m, feats, kind=kind, caution=caution, usl=usl)
+
+    parallel = d50 + d90
+    if len(parallel) >= 2:
+        with ThreadPoolExecutor(max_workers=min(4, len(parallel))) as ex:
+            futs = [ex.submit(_run_prob, m) for m in parallel]
+            for fut in as_completed(futs):
+                mid, w, val = fut.result()
+                scores[mid] = (w, val)
+                detail[mid] = val
+    else:
+        for m in parallel:
+            mid, w, val = _run_prob(m)
+            scores[mid] = (w, val)
+            detail[mid] = val
+
+    for m in rest:
+        mid, w, val = _run_prob(m)
+        scores[mid] = (w, val)
+        detail[mid] = val
+
+    num = sum(w * v for w, v in scores.values())
+    den = sum(w for w, _ in scores.values())
     probability = num / den if den else 0.0
 
+    # quality_defect LAST from probability + threshold
     thr_cfg = cfg.get("threshold") or {}
     thr = fill_threshold
     if thr is None:
         thr = thr_cfg.get("default_threshold")
-    quality_defect = None
-    if thr is not None:
-        quality_defect = 1 if probability >= float(thr) else 0
+    if thr is None:
+        thr = _DEFAULT_THRESHOLD
+    thr_f = float(thr)
+    quality_defect = 1 if probability >= thr_f else 0
 
     return {
         "capacity": float(capacity),
         "residual_li": float(residual_li),
         "probability": float(probability),
-        "quality_defect": quality_defect,
-        "applied_threshold": thr,
+        "quality_defect": int(quality_defect),
+        "applied_threshold": thr_f,
         "unit_capacity": "mAh/g",
         "unit_residual": "ppm",
-        "probability_denominator": den,
+        "probability_denominator": float(den),
         "member_scores": detail,
     }

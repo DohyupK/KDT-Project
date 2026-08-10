@@ -3,6 +3,8 @@
 최종 갱신: 2026-08-10  
 관련: [`model-training-methods.md`](./model-training-methods.md) · [`ai-service/models/voting_config.json`](../../ai-service/models/voting_config.json)
 
+활성 경로: cascade voting만. 레거시 clf/reg/residual 가중치는 `ai-service/temp/models_backup_2026-08-10/`에만 보관하며 **로드하지 않음**.
+
 ## 1. 목적
 
 `lots` 공정 파라미터로 추론하여 `judgment_lots`의  
@@ -19,7 +21,7 @@
 - 기존 파이프라인과 동일 + **`N_FOLDS = 6`**
 - **Test holdout 미사용** (100% Train; Optuna는 Train 내 TimeSeriesSplit만)
 - 멤버별 완료 시 `Downloads/data/<member_id>_완료.md` 기록
-- 임계값(`default_threshold`)은 **후순위** (학습 비포함)
+- 임계값 **`default_threshold = 0.4`** (`quality_defect` 마지막 단계만; 학습 비포함)
 
 ## 4. 투표 가중
 
@@ -40,7 +42,9 @@
    `s(r) = clip((r - 3000) / (4000 - 3000), 0, 1)`  
    - caution 3000 · severe 3500(위험등급) · USL spare **4000**(규격 대비)
 4. `probability = Σ w_i · score_i / 15`  
-5. `quality_defect` = `probability ≥ threshold` (threshold 추후)
+5. `quality_defect` = `probability ≥ 0.4` (**마지막** 단계; `voting_config.threshold.default_threshold`)
+
+스테이지 내 스케줄: `*_d50 || *_d90` 병렬 → `*_feature` → 나머지. 스테이지는 capacity → residual → probability → quality_defect 순.
 
 ## 6. 코드 진입점
 
@@ -49,4 +53,7 @@
 | 멤버 학습 | `ai-service/train_voting_member.py` |
 | 일괄 학습 | `ai-service/scripts/train_all_voting_models.py` |
 | 추론 | `ai-service/voting_predict.py` → `POST /predict-voting` |
-| backend | `aiProxy.predictVoting` · `lotScore.scoreLotWithAi` (voting 우선, 실패 시 레거시 3헤드) |
+| backend | `aiProxy.predictVoting` · `lotScore.scoreLotWithAi` (voting만) |
+| 임계 | **0.4** → `quality_defect` |
+| `judgment_lots` | 운영 UPSERT는 **NULL-fill만** (`COALESCE`). 스키마·기존 행 수정 없음. 채점 검증은 `` `temp` `` |
+| temp 채점 | [`DB/temp_judgment_like.sql`](../../DB/temp_judgment_like.sql) · `npm run score:lots-to-temp` (`lots ORDER BY id LIMIT 10000`) |

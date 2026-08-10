@@ -401,7 +401,6 @@ async function updateLotScore(
       scored.capacity,
       scored.residual_lithium,
       scored.probability,
-      scored.defect_prob,
       scored.spc_status,
     ],
   )
