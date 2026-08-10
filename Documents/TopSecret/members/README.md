@@ -3,7 +3,7 @@
 최종 갱신: 2026-08-10  
 앙상블(가중 합산) 보고서: [`../model_quality.md`](../model_quality.md) · [`../report.md`](../report.md)  
 **15개 한눈에(비전문가용):** [`summary_15_models_plain.md`](./summary_15_models_plain.md) (기존모델=`judgment_lots` + **재추론 temp2** 절)  
-재추론 상세: [`legacy_temp2_test.md`](./legacy_temp2_test.md)
+재추론 상세: [`legacy_temp2_test.md`](./legacy_temp2_test.md) · 추천가중 실험: [`recommended_temp3_test.md`](./recommended_temp3_test.md)
 
 ## 왜 「11」인가
 
