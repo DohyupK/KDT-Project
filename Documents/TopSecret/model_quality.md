@@ -207,5 +207,6 @@ CSV의 `quality_defect`는 이미 0/1 타깃이다.
 ## 8. 관련 문서
 
 - 임계값별 검사·포착 리포트: [`report.md`](./report.md)
+- **멤버 단독(가중 전) 평가**: [`members/README.md`](./members/README.md) · 한눈에 [`members/summary_15_models_plain.md`](./members/summary_15_models_plain.md)
 - Public(레거시 judgment) 동형: [`../Public/model_quality.md`](../Public/model_quality.md)
 - 투표 결정: [`docs/references/multi-model-voting.md`](../../docs/references/multi-model-voting.md)
