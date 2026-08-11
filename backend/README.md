@@ -88,7 +88,7 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 | GET | `/api/issues` | 미완료 이슈 목록. query: search, date, lotId, riskLevel (`risk`는 analysis_lots JOIN) |
 | GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
 | PUT | `/api/issues/:issueId` | 조치 내용·완료 여부 저장 (JWT) · `status` 없음 |
-| GET | `/api/lots/risk-top` | 최근 3일·SPC 이탈·심각 LOT Top (page/pageSize) |
+| GET | `/api/lots/risk-top` | 최근 3일·심각 LOT Top (page/pageSize) |
 | GET | `/api/lots/daily-kpi` | 당일 probability 양품/불량 KPI (임계 0.8) |
 | POST | `/api/lots/import` | CSV 공정값 적재 (`?score=1` 시 채점) |
 | POST | `/api/lots/score` | AI+SPC 재채점 (JWT) |
@@ -101,6 +101,9 @@ npm run rollback:score-lots
 # ai-service(:8800) ready 후 lots 공정 → analysis_lots 재채점
 npm run score:lots
 npm run score:lots -- --limit=100 --concurrency=4
+# SPC+위험등급만 재계산 (AI 없음 · stale SPC 교정)
+npm run refresh:spc-risk
+npm run refresh:spc-risk -- --lot=LOT-YYYYMMDD-xxxxx
 # QC CSV로 lots 재적재 (residual 제외 · 자식 id 유지)
 npm run reload:lots-qc
 # SPC_LOT → lots 미러 + 신규/미채점 score (judgment NULL만 AI)

@@ -18,7 +18,6 @@ import {
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
 import ShellHeader from '@/components/layout/ShellHeader'
-import { SelectedLotProvider } from '@/context/SelectedLotContext'
 import { authApi } from '@/api/authApi'
 import { isLoggedIn } from '@/lib/authStorage'
 
@@ -421,7 +420,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { isDark, copy } = useUiSettings()
 
   return (
-    <SelectedLotProvider>
+    <>
       <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
@@ -509,6 +508,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <GlobalChatbot />
-    </SelectedLotProvider>
+    </>
   )
 }

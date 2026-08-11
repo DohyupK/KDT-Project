@@ -170,6 +170,8 @@ export type LotRiskListQuery = {
   minProb?: number
   maxProb?: number
   marginLevel?: string
+  /** residual_li bands: low <3000, mid 3000–3500, high ≥3500 */
+  residualLevel?: string
 }
 
 export async function listLotRisks(q: LotRiskListQuery) {
@@ -203,13 +205,21 @@ export async function listLotRisks(q: LotRiskListQuery) {
     where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) > 1000')
     params.push(usl)
   }
+  if (q.residualLevel === 'low') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li < 3000')
+  } else if (q.residualLevel === 'mid') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li >= 3000 AND j.residual_li < 3500')
+  } else if (q.residualLevel === 'high') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li >= 3500')
+  }
   if (q.riskLevel && q.riskLevel !== 'all') {
     where.push('a.risk_level = ?')
     params.push(q.riskLevel)
   }
   if (q.spc && q.spc !== 'all') {
+    // analysis_lots is SPC/risk SSOT; judgment.spc is a mirror
     where.push(
-      `(COALESCE(j.spc, a.spc_status) = ? OR ( ? = '이탈' AND COALESCE(j.spc, a.spc_status) LIKE '%이탈%' ))`,
+      `(COALESCE(a.spc_status, j.spc) = ? OR ( ? = '이탈' AND COALESCE(a.spc_status, j.spc) LIKE '%이탈%' ))`,
     )
     params.push(q.spc, q.spc)
   }
@@ -261,7 +271,7 @@ export async function listLotRisks(q: LotRiskListQuery) {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
     const prob = r.probability != null ? Number(r.probability) : null
     const processComplete = isLotProcessComplete(r)
-    const spcRaw = r.j_spc || r.a_spc
+    const spcRaw = r.a_spc || r.j_spc
     const spcStatus = !processComplete
       ? '-'
       : spcRaw != null
@@ -332,11 +342,11 @@ export async function getLotRiskDetail(lotId: string) {
   const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
   const prob = r.probability != null ? Number(r.probability) : null
   const processComplete = isLotProcessComplete(r)
-  const spcRaw = r.j_spc || r.a_spc
-  const spcStatus = !processComplete
+  const storedSpcRaw = r.a_spc || r.j_spc
+  const storedSpcStatus = !processComplete
     ? '-'
-    : spcRaw != null
-      ? normalizeSpcStatus(spcRaw)
+    : storedSpcRaw != null
+      ? normalizeSpcStatus(storedSpcRaw)
       : null
 
   let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
@@ -346,12 +356,13 @@ export async function getLotRiskDetail(lotId: string) {
     spc = null
   }
 
+  // Prefer live Phase-I recompute so detail matches the control-chart panel
   const resolvedSpc = !processComplete
     ? '-'
-    : spcStatus != null
-      ? spcStatus
-      : spc?.spcStatus
-        ? normalizeSpcStatus(spc.spcStatus)
+    : spc?.spcStatus
+      ? normalizeSpcStatus(spc.spcStatus)
+      : storedSpcStatus != null
+        ? storedSpcStatus
         : '-'
 
   return {

@@ -28,7 +28,6 @@ import {
   readLlmProvidersCache,
   type LlmKeyPublic,
 } from '@/api/llmKeysApi'
-import { useSelectedLot } from '@/context/SelectedLotContext'
 
 type ChatRole = 'user' | 'ai'
 
@@ -125,15 +124,7 @@ function formatThreadTime(iso?: string | null): string {
 }
 
 export default function GlobalChatbot() {
-  const {
-    selectedLotId,
-    selectedFeatures,
-    chatOpen,
-    setChatOpen,
-    clearLot,
-    diagnoseRequested,
-    clearDiagnoseRequest,
-  } = useSelectedLot()
+  const [chatOpen, setChatOpen] = useState(false)
 
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
@@ -155,9 +146,6 @@ export default function GlobalChatbot() {
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const sendRef = useRef<(raw: string, features?: ChatFeatures | null) => Promise<void>>(
-    async () => {},
-  )
 
   const refreshThreads = async () => {
     let api: ChatThreadItem[] = []
@@ -352,7 +340,7 @@ export default function GlobalChatbot() {
   }
 
   const resolveFeatures = (explicit: ChatFeatures | null | undefined) =>
-    explicit ?? selectedFeatures ?? null
+    explicit ?? null
 
   const send = async (raw: string, features: ChatFeatures | null = null) => {
     const text = raw.trim()
@@ -430,23 +418,6 @@ export default function GlobalChatbot() {
       if (!ac.signal.aborted) setPending(false)
     }
   }
-  sendRef.current = send
-
-  // Main LOT 행 클릭(diagnose) → features 주입 후 자동 진단 1회
-  useEffect(() => {
-    if (!diagnoseRequested || !selectedFeatures || pending) return
-    clearDiagnoseRequest()
-    void sendRef.current(
-      `연결된 LOT(${selectedFeatures.id ?? selectedLotId ?? ''})를 O/X 진단해 주세요.`,
-      selectedFeatures,
-    )
-  }, [
-    diagnoseRequested,
-    selectedFeatures,
-    selectedLotId,
-    pending,
-    clearDiagnoseRequest,
-  ])
 
   const approveRecommendation = async (msgId: number, recommendation: ChatRecommendation) => {
     setMessages((prev) =>
@@ -456,7 +427,6 @@ export default function GlobalChatbot() {
       const lotId =
         recommendation.baseline.features.id ??
         recommendation.suggestion?.after_features.id ??
-        selectedLotId ??
         null
       const res = await postApproveControl({
         lot_id: lotId,
@@ -632,21 +602,13 @@ export default function GlobalChatbot() {
       features: SAMPLE_CHAT_FEATURES,
     },
   ]
-  if (selectedFeatures) {
-    chips.splice(1, 0, {
-      label: '선택된 LOT 진단',
-      message: '이거 지금 어때? 연결된 LOT을 O/X 진단해 주세요.',
-      features: selectedFeatures,
-    })
-  }
 
   const HELP_TEXT =
     '사용 안내입니다.\n\n' +
-    '1. Main 「위험 LOT Top」에서 LOT 행을 클릭 → 챗봇이 자동으로 O/X 진단합니다.\n' +
-    '2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n' +
-    '3. What-if 제안이 나오면 「제안 승인」후 5초 안 「실행 취소」가능.\n' +
-    '4. 공정 한계치는 Setting에서 변경합니다.\n' +
-    '5. 보안·기밀은 /security 탭을 이용해 주세요.'
+    '1. 「샘플 LOT 진단」칩으로 진단을 시험할 수 있습니다.\n' +
+    '2. What-if 제안이 나오면 「제안 승인」후 5초 안 「실행 취소」가능.\n' +
+    '3. 공정 한계치는 Setting에서 변경합니다.\n' +
+    '4. 보안·기밀은 /security 탭을 이용해 주세요.'
 
   const onChip = (q: (typeof chips)[number]) => {
     if (q.localHelp) {

@@ -1,6 +1,7 @@
 /**
  * Every 10 minutes: score lots missing analysis_lots (or null probability),
- * then fill risk_reason via local vLLM. Complements per-insert syncSpcLots.
+ * then fill risk_reason via local vLLM. Always re-seed open issues for 심각 lots
+ * (even when there is nothing left to score). Complements per-insert syncSpcLots.
  */
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
@@ -42,16 +43,17 @@ async function tick() {
     const lotIds = rows.map((r) => r.id)
     if (lotIds.length === 0) {
       console.log('[analysis-sync] nothing to score')
-      return
+    } else {
+      console.log('[analysis-sync] score_start', { count: lotIds.length })
+      const scored = await lotService.scoreAllLots({
+        lotIds,
+        concurrency: 4,
+      })
+      console.log('[analysis-sync] score_done', scored)
+      const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
+      console.log('[analysis-sync] risk_reasons', reasons)
     }
-    console.log('[analysis-sync] score_start', { count: lotIds.length })
-    const scored = await lotService.scoreAllLots({
-      lotIds,
-      concurrency: 4,
-    })
-    console.log('[analysis-sync] score_done', scored)
-    const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
-    console.log('[analysis-sync] risk_reasons', reasons)
+    // Backfill issues for already-scored 심각 lots (seed is not scoring-dependent).
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {
