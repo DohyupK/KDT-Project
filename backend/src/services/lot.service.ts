@@ -180,10 +180,9 @@ export type RiskTopResult = {
 }
 
 const RISK_TOP_WHERE = `a.risk_level = '심각'
-  AND a.spc_status LIKE '%이탈%'
   AND l.\`timestamp\` >= DATE_SUB(NOW(), INTERVAL 3 DAY)`
 
-/** Recent 3 days · SPC OOC · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
+/** Recent 3 days · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
 export async function getRiskTop(opts: {
   page?: number
   pageSize?: number
@@ -708,7 +707,7 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
 /**
- * Create open issues when analysis_lots is 심각 AND spc_status is 주의|이탈.
+ * Create open issues when analysis_lots is 심각 (SPC 이탈 등은 이미 risk_level에 반영).
  * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
  */
 export async function ensureIssuesForRiskLots(): Promise<number> {
@@ -719,7 +718,6 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
      FROM lots l
      INNER JOIN analysis_lots a ON a.lot_id = l.id
      WHERE a.risk_level = '심각'
-       AND a.spc_status IN ('주의', '이탈')
        AND (${COMPLETE_PROCESS_SQL_L})`,
   )
 

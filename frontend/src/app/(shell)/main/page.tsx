@@ -117,27 +117,27 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
   return [1, 'ellipsis', current, 'ellipsis', total];
 }
 
-/** 금일 00시 기준 · analysis_lots.probability · 임계 0.8 */
+/** 금일 00시 기준 · analysis_lots.probability · 임계 0.8 (기준 시각은 섹션 헤더에 표시) */
 const SUMMARY_KPI_META: Omit<SummaryKpi, 'value'>[] = [
   {
     id: 'yield-rate',
     title: '실시간 양품률',
-    description: '금일 00시~ · probability < 0.8 비율',
+    description: '불량확률 < 0.8',
   },
   {
     id: 'yield-count',
     title: '양품수',
-    description: '금일 00시~ · probability < 0.8 건수',
+    description: '불량확률 < 0.8',
   },
   {
     id: 'defect-rate',
     title: '불량률',
-    description: '금일 00시~ · probability ≥ 0.8 비율',
+    description: '불량확률 ≥ 0.8',
   },
   {
     id: 'defect-count',
     title: '불량수',
-    description: '금일 00시~ · probability ≥ 0.8 건수',
+    description: '불량확률 ≥ 0.8',
   },
 ];
 
@@ -421,9 +421,14 @@ export default function MainPage() {
             isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
           }`}
         >
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-            {language === 'en' ? 'Sintering Process Forecast' : '소성 공정 예측 현황'}
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+              {language === 'en' ? 'Sintering Process Forecast' : '소성 공정 예측 현황'}
+            </h2>
+            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              금일 00시 기준
+            </span>
+          </div>
           <div
             className={`mt-4 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
           >
@@ -513,7 +518,7 @@ export default function MainPage() {
                   </span>
                 </div>
                 <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  최근 3일 · SPC 이탈 · 위험등급 심각 LOT를 확인합니다.
+                  최근 3일 · 위험등급 심각 LOT를 확인합니다.
                 </p>
               </div>
               <Link href="/issue" className={detailLinkClass}>
