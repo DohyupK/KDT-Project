@@ -5,8 +5,10 @@ import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import {
   buildIssueTitle,
+  combineLotScore,
   DEFECT_JUDGE_THRESHOLD,
   emptySpcHistory,
+  evaluateSpcForFeatures,
   normalizeRiskLevel,
   pushCompleteLotHistory,
   residualMargin,
@@ -15,6 +17,7 @@ import {
   type RiskLevel,
   RESIDUAL_USL,
 } from './lotScore.js'
+import { loadStandard } from './standard.js'
 import { evaluateLotSpc, isProcessComplete, loadPhase1Limits, SPC_PARAM_KEYS, type SpcParamKey } from './spcEngine.js'
 
 export type LotDto = {
@@ -401,7 +404,6 @@ async function updateLotScore(
       scored.capacity,
       scored.residual_lithium,
       scored.probability,
-      scored.defect_prob,
       scored.spc_status,
     ],
   )
@@ -565,6 +567,140 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   }
 
   return { scored, failed, errors: errors.slice(0, 20) }
+}
+
+export type RefreshSpcRiskOptions = {
+  /** If set, only these lot ids are rewritten (SPC history still walks all lots). */
+  lotIds?: string[]
+  onProgress?: (done: number, total: number, lotId: string) => void
+}
+
+/**
+ * Recompute SPC + risk_level from existing AI probability/residual (no ai-service call).
+ * Fixes stale analysis_lots.spc_status after prior-lot backfill, and mirrors judgment_lots.spc.
+ */
+export async function refreshSpcAndRiskScores(
+  options: RefreshSpcRiskOptions = {},
+): Promise<{ updated: number; unchanged: number; skipped: number; syncedJudgment: number }> {
+  const idFilter =
+    options.lotIds != null && options.lotIds.length > 0
+      ? new Set(options.lotIds.map(String))
+      : null
+  const std = await loadStandard()
+  const thresholds = {
+    defect_prob_caution: std.defect_prob_caution,
+    defect_prob_severe: std.defect_prob_severe,
+    residual_caution: std.residual_caution,
+    residual_severe: std.residual_severe,
+  }
+
+  const lotRows = await query<
+    (LotScoreSourceRow & {
+      a_probability: number | null
+      a_spc: string | null
+      a_risk: string | null
+      j_residual: number | null
+      j_spc: string | null
+    })[]
+  >(
+    `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, l.d50, l.d90, l.metal_impurity,
+            l.lithium_input, l.additive_ratio, l.process_time, l.sintering_temp, l.humidity,
+            l.tank_pressure, l.operator_id, 0 AS quality_defect,
+            a.probability AS a_probability, a.spc_status AS a_spc, a.risk_level AS a_risk,
+            j.residual_li AS j_residual, j.spc AS j_spc
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     ORDER BY l.\`timestamp\` ASC, l.id ASC`,
+  )
+
+  const history = emptySpcHistory()
+  let updated = 0
+  let unchanged = 0
+  let skipped = 0
+  let syncedJudgment = 0
+  const targets = idFilter
+    ? lotRows.filter((r) => idFilter.has(r.lot_id) && r.lot_id !== 'LOT-SYS-HANDOVER')
+    : lotRows.filter((r) => r.lot_id !== 'LOT-SYS-HANDOVER')
+  const total = targets.length
+  let done = 0
+
+  for (const row of lotRows) {
+    const features = lotRowToFeatures(row)
+    const bag: Partial<Record<SpcParamKey, number | null>> = {}
+    for (const k of SPC_PARAM_KEYS) bag[k] = features[k]
+    const complete = isProcessComplete(bag)
+    if (complete) {
+      for (const k of SPC_PARAM_KEYS) history[k].push(Number(features[k]))
+    }
+
+    if (row.lot_id === 'LOT-SYS-HANDOVER') continue
+    if (idFilter != null && !idFilter.has(row.lot_id)) continue
+
+    const prob = row.a_probability != null ? Number(row.a_probability) : null
+    if (prob == null || !Number.isFinite(prob)) {
+      skipped++
+      done++
+      options.onProgress?.(done, total, row.lot_id)
+      continue
+    }
+
+    const residual =
+      row.j_residual != null && Number.isFinite(Number(row.j_residual))
+        ? Number(row.j_residual)
+        : 0
+    const histSnapshot = {} as Record<SpcParamKey, number[]>
+    for (const k of SPC_PARAM_KEYS) {
+      histSnapshot[k] = complete ? history[k].slice() : []
+    }
+    const spc = evaluateSpcForFeatures(features, histSnapshot)
+    const scored = combineLotScore({
+      defectProb: prob,
+      residualLi: residual,
+      spcStatus: spc.status,
+      incompleteProcess: !spc.complete,
+      thresholds,
+    })
+
+    const prevSpc = row.a_spc ?? null
+    const prevRisk = row.a_risk ?? null
+    const spcChanged = prevSpc !== scored.spc_status
+    const riskChanged = prevRisk !== scored.risk_level
+
+    if (spcChanged || riskChanged) {
+      await query(
+        `INSERT INTO analysis_lots (lot_id, probability, spc_status, risk_level, risk_reason)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           spc_status = VALUES(spc_status),
+           risk_level = VALUES(risk_level),
+           risk_reason = VALUES(risk_reason)`,
+        [
+          row.lot_id,
+          prob,
+          scored.spc_status,
+          scored.risk_level,
+          scored.risk_reason,
+        ],
+      )
+      updated++
+    } else {
+      unchanged++
+    }
+
+    if (row.j_spc !== scored.spc_status) {
+      await query(`UPDATE judgment_lots SET spc = ? WHERE lot_id = ?`, [
+        scored.spc_status,
+        row.lot_id,
+      ])
+      syncedJudgment++
+    }
+
+    done++
+    options.onProgress?.(done, total, row.lot_id)
+  }
+
+  return { updated, unchanged, skipped, syncedJudgment }
 }
 
 const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.metal_impurity IS NOT NULL

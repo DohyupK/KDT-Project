@@ -5,8 +5,6 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
 import { mainApi, RISK_TOP_PAGE_SIZE, type RiskTopLot } from '@/api/mainApi';
-import { useSelectedLot } from '@/context/SelectedLotContext';
-import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import {
   useRefreshSettings,
   useUiSettings,
@@ -20,12 +18,26 @@ import { useShellRefresh } from '@/hooks/useShellRefresh';
 
 type RiskGrade = '심각' | '주의' | '안정';
 
+type LotProcessRecord = {
+  id: string;
+  date: string;
+  hour: string;
+  sintering_temp: number;
+  lithium_input: number;
+  humidity: number;
+  metal_impurity: number;
+  tank_pressure: number;
+  process_time: number;
+  additive_ratio: number;
+  quality_defect: 0 | 1;
+};
+
 type RiskLotView = {
   id: string;
   riskScore: number;
   status: RiskGrade;
   riskReason: string;
-  record: LotSensorRecord & { quality_defect: 0 | 1 };
+  record: LotProcessRecord;
 };
 
 type SummaryKpi = {
@@ -353,14 +365,6 @@ export default function MainPage() {
     };
   }, []);
 
-  const { connectLot } = useSelectedLot();
-
-  /** 「챗봇으로 진단」→ features 주입 + 패널 오픈 + 자동 O/X 진단 */
-  const handleSelectLotForDiagnose = (lot: RiskLotView) => {
-    connectLot(lot.record, { openChat: true, diagnose: true });
-    pushToast(`${lot.id} 연결 · 챗봇 진단 시작`, 'info');
-  };
-
   const handleOpenLotDetail = (lot: RiskLotView) => {
     setSelectedLot(lot);
   };
@@ -376,9 +380,6 @@ export default function MainPage() {
   const tableDetailBtnClass = isDark
     ? 'inline-flex h-7 items-center justify-center rounded-md border border-slate-600 px-2.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
     : 'inline-flex h-7 items-center justify-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
-  const tableDiagnoseBtnClass = isDark
-    ? 'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-700 bg-blue-950/40 px-2.5 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
-    : 'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
   const rowHoverClass = isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50';
   const tableBorderClass = isDark ? 'border-slate-700' : 'border-slate-100';
 
@@ -522,12 +523,11 @@ export default function MainPage() {
             </div>
 
             <div className="mt-5 -mx-1 min-h-0 flex-1 overflow-x-auto overflow-y-auto px-1">
-              <table className="w-full min-w-[480px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[400px] border-collapse text-left text-sm">
                 <thead>
                   <tr className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>LOT</th>
                     <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>위험 원인</th>
-                    <th className={`border-b pb-2.5 pr-3 ${tableBorderClass}`}>챗봇으로 진단</th>
                     <th className={`border-b pb-2.5 pl-1 text-right ${tableBorderClass}`}>상세보기</th>
                   </tr>
                 </thead>
@@ -549,16 +549,6 @@ export default function MainPage() {
                       >
                         {lot.riskReason}
                       </td>
-                      <td className={`border-b py-3 pr-3 ${tableBorderClass}`}>
-                        <button
-                          type="button"
-                          className={tableDiagnoseBtnClass}
-                          aria-label={`${lot.id} 챗봇으로 진단`}
-                          onClick={() => handleSelectLotForDiagnose(lot)}
-                        >
-                          챗봇으로 진단
-                        </button>
-                      </td>
                       <td className={`border-b py-3 pl-1 text-right ${tableBorderClass}`}>
                         <button
                           type="button"
@@ -574,7 +564,7 @@ export default function MainPage() {
                   {riskLotsLoading && topRiskLots.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={3}
                         className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
                       >
                         불러오는 중…
@@ -584,7 +574,7 @@ export default function MainPage() {
                   {!riskLotsLoading && topRiskLots.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={3}
                         className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
                       >
                         표시할 위험 LOT가 없습니다.
@@ -731,16 +721,6 @@ export default function MainPage() {
                 </div>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                handleSelectLotForDiagnose(selectedLot);
-                setSelectedLot(null);
-              }}
-              className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
-            >
-              챗봇으로 진단
-            </button>
           </div>
         ) : null}
       </Modal>

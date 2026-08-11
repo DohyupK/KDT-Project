@@ -23,6 +23,7 @@ export const dashboardApi = {
     minProb?: number
     maxProb?: number
     marginLevel?: 'low' | 'caution' | 'sufficient'
+    residualLevel?: 'low' | 'mid' | 'high'
   } = {}) {
     return apiClient.get<{
       items: DashboardLotRiskItem[]

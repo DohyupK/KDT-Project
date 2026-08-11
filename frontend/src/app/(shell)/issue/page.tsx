@@ -12,20 +12,9 @@ import {
 } from '@/api/issueApi';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
-import { useSelectedLot } from '@/context/SelectedLotContext';
-import type { LotSensorRecord } from '@/lib/lotToChatFeatures';
 import DateInput from '@/components/DateInput';
 import { getAuthUser } from '@/lib/authStorage';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
-
-interface ProcessData {
-  time: string;
-  temperature: number;
-  pressure: number;
-  humidity: number;
-  riskBefore: number;
-  riskAfter: number;
-}
 
 type SpcStatus = '이상' | '주의' | '안정';
 
@@ -50,8 +39,6 @@ interface Issue {
   } | null;
   /** 목록 SPC 필터용 (analysis_lots.spc_status) */
   listSpcStatus: string | null;
-  /** 챗봇 connectLot용 — 공정 시계열 API 전 placeholder */
-  processData: ProcessData[];
 }
 
 interface FilterState {
@@ -106,13 +93,10 @@ interface IssueListSectionProps {
   onPageInputChange: (value: string) => void;
   onPageInputSubmit: () => void;
   onSelect: (id: string) => void;
-  /** 메인「위험 LOT Top」과 동일 — 챗봇 features 주입 + 자동 진단 */
-  onDiagnose: (issue: Issue) => void;
 }
 
 interface DetailAnalysisSectionProps {
   issue: Issue | null;
-  onDiagnose?: (issue: Issue) => void;
 }
 
 interface ManagementSectionProps {
@@ -353,39 +337,6 @@ function formatAnalysisProbability(probability: number | null | undefined): {
   return { pct: clamped, label: `${pct.toFixed(1)}%` };
 }
 
-const EMPTY_PROCESS_DATA: ProcessData[] = [];
-
-/**
- * 이슈 processData → 챗봇 LotSensorRecord.
- * 메인 위험 LOT 연결과 동일한 connectLot 입력 형태.
- */
-function issueToLotSensorRecord(issue: Issue): LotSensorRecord {
-  const points = issue.processData;
-  const last = points[points.length - 1];
-  const peakTemp =
-    points.length > 0 ? Math.max(...points.map((p) => p.temperature)) : 740;
-  const peakPressure =
-    points.length > 0 ? Math.max(...points.map((p) => p.pressure)) : 1.8;
-  const timePart = issue.createdAt.includes(' ')
-    ? issue.createdAt.split(' ')[1] ?? '00:00'
-    : '00:00';
-  const hour = timePart.length >= 5 ? timePart.slice(0, 5) : timePart;
-  const riskBoost = issue.risk === '심각' ? 1 : issue.risk === '주의' ? 0.5 : 0;
-
-  return {
-    id: issue.lot,
-    date: issue.date,
-    hour,
-    sintering_temp: last?.temperature ?? peakTemp,
-    tank_pressure: last?.pressure ?? peakPressure,
-    process_time: Math.max(60, points.length * 20),
-    lithium_input: Math.round((1.02 + riskBoost * 0.04) * 1000) / 1000,
-    humidity: Math.round(38 + riskBoost * 4),
-    metal_impurity: Math.round((0.022 + riskBoost * 0.01) * 1000) / 1000,
-    additive_ratio: Math.round((2.5 + riskBoost * 0.3) * 10) / 10,
-  };
-}
-
 /** 목록 API → UI. 담당자·조치·analysis는 상세 API에서 채움. */
 function mapIssueListItem(item: IssueApiListItem): Issue {
   return {
@@ -400,7 +351,6 @@ function mapIssueListItem(item: IssueApiListItem): Issue {
     completed: false,
     analysis: null,
     listSpcStatus: item.spcStatus ?? null,
-    processData: EMPTY_PROCESS_DATA,
   };
 }
 
@@ -1339,7 +1289,6 @@ const IssueListSection = ({
   onPageInputChange,
   onPageInputSubmit,
   onSelect,
-  onDiagnose,
 }: IssueListSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
@@ -1350,7 +1299,7 @@ const IssueListSection = ({
       <div>
         <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 목록</h2>
         <p style={{ margin: '4px 0 0', color: c.slate, fontSize: 12 }}>
-          행 클릭 → 상세 선택 · 「진단」으로 챗봇 자동 진단
+          행 클릭 → 상세 선택
         </p>
       </div>
       <span style={{ color: c.slate, fontSize: 13, fontWeight: 700 }}>
@@ -1482,7 +1431,7 @@ const IssueListSection = ({
     ) : (
       <>
       <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-[960px] border-collapse text-left">
+        <table className="w-full min-w-[820px] border-collapse text-left">
           <thead>
             <tr
               className={`border-y text-xs font-semibold ${
@@ -1496,7 +1445,6 @@ const IssueListSection = ({
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
               <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
-              <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">진단</th>
             </tr>
           </thead>
           <tbody>
@@ -1581,22 +1529,6 @@ const IssueListSection = ({
                   >
                     <span className="line-clamp-2">{issue.issueContent}</span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                        isDark
-                          ? 'border-blue-700 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60'
-                          : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                      }`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDiagnose(issue);
-                      }}
-                    >
-                      챗봇으로 진단
-                    </button>
-                  </td>
                 </tr>
               );
             })}
@@ -1606,7 +1538,7 @@ const IssueListSection = ({
                 aria-hidden="true"
                 className={isDark ? 'border-b border-slate-700' : 'border-b border-slate-100'}
               >
-                <td colSpan={6} className="h-[57px] px-4 py-3">
+                <td colSpan={5} className="h-[57px] px-4 py-3">
                   &nbsp;
                 </td>
               </tr>
@@ -1735,7 +1667,7 @@ function renderHighlightedAnomaly(anomaly: string) {
   return anomaly;
 }
 
-const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps) => {
+const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
 
@@ -1835,17 +1767,6 @@ const DetailAnalysisSection = ({ issue, onDiagnose }: DetailAnalysisSectionProps
           <span className={spcStatusBadgeClass(spcFilter, isDark)}>
             SPC {analysis?.spcStatus?.trim() || spcFilter}
           </span>
-          {onDiagnose ? (
-            <button
-              type="button"
-              onClick={() => onDiagnose(issue)}
-              className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-white ${
-                isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              챗봇으로 진단
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -2180,7 +2101,6 @@ function clearLegacyHandoverActionLogs() {
 
 export default function IssuePage() {
   const { isDark } = useUiSettings();
-  const { connectLot } = useSelectedLot();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2421,14 +2341,6 @@ export default function IssuePage() {
     setAppliedFilters(draftFilters);
     setCurrentPage(1);
     setPageInput('1');
-  };
-
-  /** 메인 위험 LOT Top과 동일 — 챗봇 패널 오픈 + 자동 O/X 진단 */
-  const handleDiagnoseIssue = (issue: Issue) => {
-    connectLot(issueToLotSensorRecord(issue), { openChat: true, diagnose: true });
-    setSelectedId(issue.id);
-    setToastMessage(`${issue.lot} 연결 · 챗봇 진단 시작`);
-    setShowToast(true);
   };
 
   const handleResetFilter = () => {
@@ -2761,7 +2673,6 @@ ${issues
             onPageInputChange={setPageInput}
             onPageInputSubmit={handlePageInputSubmit}
             onSelect={handleSelectIssue}
-            onDiagnose={handleDiagnoseIssue}
           />
           <div
             style={{
@@ -2772,7 +2683,7 @@ ${issues
             }}
           >
             <div style={{ minHeight: 0, height: '100%' }}>
-              <DetailAnalysisSection issue={selectedIssue} onDiagnose={handleDiagnoseIssue} />
+              <DetailAnalysisSection issue={selectedIssue} />
             </div>
             <div style={{ minHeight: 0, height: '100%' }}>
               <ManagementSection

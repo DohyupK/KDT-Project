@@ -180,7 +180,7 @@ export function combineLotScore(input: {
   const t = input.thresholds
 
   const dTier = defectProbTier(
-    defect_prob,
+    probability,
     t?.defect_prob_caution,
     t?.defect_prob_severe,
   )

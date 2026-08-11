@@ -101,6 +101,9 @@ npm run rollback:score-lots
 # ai-service(:8800) ready 후 lots 공정 → analysis_lots 재채점
 npm run score:lots
 npm run score:lots -- --limit=100 --concurrency=4
+# SPC+위험등급만 재계산 (AI 없음 · stale SPC 교정)
+npm run refresh:spc-risk
+npm run refresh:spc-risk -- --lot=LOT-YYYYMMDD-xxxxx
 # QC CSV로 lots 재적재 (residual 제외 · 자식 id 유지)
 npm run reload:lots-qc
 # SPC_LOT → lots 미러 + 신규/미채점 score (judgment NULL만 AI)

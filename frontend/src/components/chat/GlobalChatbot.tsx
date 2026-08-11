@@ -28,7 +28,6 @@ import {
   readLlmProvidersCache,
   type LlmKeyPublic,
 } from '@/api/llmKeysApi'
-import { useSelectedLot } from '@/context/SelectedLotContext'
 
 type ChatRole = 'user' | 'ai'
 
@@ -62,19 +61,11 @@ const WELCOME_GENERAL: ChatMessage = {
   id: 1,
   role: 'ai',
   text:
-    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 /security 탭을 이용해 주세요.',
+    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n시험: 「샘플 LOT 진단」칩을 눌러 진단을 시작할 수 있습니다.\n안내: 「챗봇 안내」칩 · 보안은 /security 탭을 이용해 주세요.',
 }
 
 export default function GlobalChatbot() {
-  const {
-    selectedLotId,
-    selectedFeatures,
-    chatOpen,
-    setChatOpen,
-    clearLot,
-    diagnoseRequested,
-    clearDiagnoseRequest,
-  } = useSelectedLot()
+  const [chatOpen, setChatOpen] = useState(false)
 
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
@@ -94,9 +85,6 @@ export default function GlobalChatbot() {
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const undoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const sendRef = useRef<(raw: string, features?: ChatFeatures | null) => Promise<void>>(
-    async () => {},
-  )
 
   const refreshThreads = async () => {
     try {
@@ -216,7 +204,7 @@ export default function GlobalChatbot() {
   }
 
   const resolveFeatures = (explicit: ChatFeatures | null | undefined) =>
-    explicit ?? selectedFeatures ?? null
+    explicit ?? null
 
   const send = async (raw: string, features: ChatFeatures | null = null) => {
     const text = raw.trim()
@@ -282,23 +270,6 @@ export default function GlobalChatbot() {
       if (!ac.signal.aborted) setPending(false)
     }
   }
-  sendRef.current = send
-
-  // Main LOT 행 클릭(diagnose) → features 주입 후 자동 진단 1회
-  useEffect(() => {
-    if (!diagnoseRequested || !selectedFeatures || pending) return
-    clearDiagnoseRequest()
-    void sendRef.current(
-      `연결된 LOT(${selectedFeatures.id ?? selectedLotId ?? ''})를 O/X 진단해 주세요.`,
-      selectedFeatures,
-    )
-  }, [
-    diagnoseRequested,
-    selectedFeatures,
-    selectedLotId,
-    pending,
-    clearDiagnoseRequest,
-  ])
 
   const approveRecommendation = async (msgId: number, recommendation: ChatRecommendation) => {
     setMessages((prev) =>
@@ -308,7 +279,6 @@ export default function GlobalChatbot() {
       const lotId =
         recommendation.baseline.features.id ??
         recommendation.suggestion?.after_features.id ??
-        selectedLotId ??
         null
       const res = await postApproveControl({
         lot_id: lotId,
@@ -484,21 +454,13 @@ export default function GlobalChatbot() {
       features: SAMPLE_CHAT_FEATURES,
     },
   ]
-  if (selectedFeatures) {
-    chips.splice(1, 0, {
-      label: '선택된 LOT 진단',
-      message: '이거 지금 어때? 연결된 LOT을 O/X 진단해 주세요.',
-      features: selectedFeatures,
-    })
-  }
 
   const HELP_TEXT =
     '사용 안내입니다.\n\n' +
-    '1. Main 「위험 LOT Top」에서 LOT 행을 클릭 → 챗봇이 자동으로 O/X 진단합니다.\n' +
-    '2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n' +
-    '3. What-if 제안이 나오면 「제안 승인」후 5초 안 「실행 취소」가능.\n' +
-    '4. 공정 한계치는 Setting에서 변경합니다.\n' +
-    '5. 보안·기밀은 /security 탭을 이용해 주세요.'
+    '1. 「샘플 LOT 진단」칩으로 진단을 시험할 수 있습니다.\n' +
+    '2. What-if 제안이 나오면 「제안 승인」후 5초 안 「실행 취소」가능.\n' +
+    '3. 공정 한계치는 Setting에서 변경합니다.\n' +
+    '4. 보안·기밀은 /security 탭을 이용해 주세요.'
 
   const onChip = (q: (typeof chips)[number]) => {
     if (q.localHelp) {
@@ -574,18 +536,6 @@ export default function GlobalChatbot() {
                   </button>
                 )
               })}
-            </div>
-          ) : null}
-          {selectedLotId ? (
-            <div className="flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-1 text-[11px] text-slate-600">
-              <span className="truncate">연결 LOT: {selectedLotId}</span>
-              <button
-                type="button"
-                onClick={clearLot}
-                className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-slate-50"
-              >
-                해제
-              </button>
             </div>
           ) : null}
 
@@ -756,11 +706,7 @@ export default function GlobalChatbot() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
                 disabled={pending}
-                placeholder={
-                  selectedLotId
-                    ? '연결된 LOT 기준으로 질문…'
-                    : '메시지를 입력하세요...'
-                }
+                placeholder="메시지를 입력하세요..."
                 className="h-10 flex-1 rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50"
               />
               <button

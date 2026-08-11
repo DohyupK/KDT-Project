@@ -258,6 +258,7 @@ type LotRiskFilterState = {
   grade: 'all' | '심각' | '주의' | '안정';
   spc: 'all' | '안정' | '주의' | '이탈';
   probLevel: 'all' | 'high' | 'mid' | 'low';
+  residualLevel: 'all' | 'low' | 'mid' | 'high';
   marginLevel: 'all' | 'low' | 'caution' | 'sufficient';
 };
 
@@ -266,6 +267,7 @@ const EMPTY_LOT_RISK_FILTER: LotRiskFilterState = {
   grade: 'all',
   spc: 'all',
   probLevel: 'all',
+  residualLevel: 'all',
   marginLevel: 'all',
 };
 
@@ -280,6 +282,7 @@ function isLotRiskFilterActive(filter: LotRiskFilterState): boolean {
   return (
     filter.lotQuery.trim() !== '' ||
     filter.marginLevel !== 'all' ||
+    filter.residualLevel !== 'all' ||
     filter.probLevel !== 'all' ||
     filter.grade !== 'all' ||
     filter.spc !== 'all'
@@ -298,7 +301,8 @@ function formatSpecDistance(margin: number | null, includeUnit = false): string 
   if (margin == null) return '-';
   const amount = formatNumber(Math.round(Math.abs(margin)));
   const unit = includeUnit ? ' ppm' : '';
-  return `${amount}${unit} ${margin < 0 ? '초과' : '이내'}`;
+  if (margin < 0) return `${amount}${unit} 초과`;
+  return `${amount}${unit}`;
 }
 
 function lotRiskProbPercent(prob: number): number {
@@ -356,6 +360,7 @@ function lotRiskListParams(filter: LotRiskFilterState, page: number, pageSize: n
     pageSize,
     search: filter.lotQuery || undefined,
     marginLevel: filter.marginLevel === 'all' ? undefined : filter.marginLevel,
+    residualLevel: filter.residualLevel === 'all' ? undefined : filter.residualLevel,
     riskLevel: filter.grade === 'all' ? undefined : filter.grade,
     spc: filter.spc === 'all' ? undefined : filter.spc,
     ...probParams,
@@ -380,7 +385,7 @@ function escapeCsvCell(value: string | number): string {
 }
 
 function downloadLotRiskCsv(rows: LotRiskRow[]) {
-  const header = ['LOT ID', '불량확률(%)', '잔류리튬', '규격 대비', 'SPC', '위험등급', '위험 원인'];
+  const header = ['LOT ID', '불량확률(%)', '잔류리튬', '여유량', 'SPC', '위험등급', '위험 원인'];
   const lines = [
     header.map(escapeCsvCell).join(','),
     ...rows.map((r) =>
@@ -446,7 +451,7 @@ function downloadLotRiskPdf(rows: LotRiskRow[]) {
 <h1>LOT 위험등급</h1>
 <div class="meta">내보내기 시각: ${formatDate(new Date())} · ${rows.length}건</div>
 <table>
-<tr><th>LOT ID</th><th>불량확률</th><th>잔류리튬</th><th>규격 대비</th><th>SPC</th><th>위험등급</th><th>위험 원인</th></tr>
+<tr><th>LOT ID</th><th>불량확률</th><th>잔류리튬</th><th>여유량</th><th>SPC</th><th>위험등급</th><th>위험 원인</th></tr>
 ${tableRows}
 </table>
 <script>window.onload = function () { window.print(); };</script>
@@ -1416,7 +1421,7 @@ export default function DashBoardPage() {
     const margin = selectedLotRiskDetail.residualMargin ?? selectedLotRisk.margin;
     const marginText =
       margin == null
-        ? '규격 대비 산출 불가'
+        ? '여유량 산출 불가'
         : margin < 0
           ? `USL 대비 ${formatNumber(Math.round(Math.abs(margin)))} ppm 초과`
           : `규격까지 ${formatNumber(Math.round(margin))} ppm`;
@@ -2283,9 +2288,9 @@ export default function DashBoardPage() {
 
           {dataPanelTab === 'lot-risk' ? (
           <>
-          <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-            <label className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-xs sm:max-w-[280px] sm:flex-none">
+          <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-2">
+            <label className="inline-flex w-[140px] shrink-0 items-center gap-1.5 text-xs">
               <span className={`shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 LOT
               </span>
@@ -2303,7 +2308,7 @@ export default function DashBoardPage() {
                     applyLotRiskFilters();
                   }
                 }}
-                className={`h-9 w-full min-w-0 rounded-lg border px-2.5 text-sm outline-none ${
+                className={`h-9 w-full min-w-0 rounded-lg border px-1.5 text-xs outline-none ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100 placeholder:text-slate-500'
                     : 'border-slate-200 bg-white text-slate-700 placeholder:text-slate-400'
@@ -2322,7 +2327,7 @@ export default function DashBoardPage() {
                     probLevel: e.target.value as LotRiskFilterState['probLevel'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
@@ -2336,7 +2341,31 @@ export default function DashBoardPage() {
             </label>
 
             <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>규격 대비</span>
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>잔류리튬</span>
+              <select
+                aria-label="잔류리튬 필터"
+                value={lotRiskFilterDraft.residualLevel}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    residualLevel: e.target.value as LotRiskFilterState['residualLevel'],
+                  }))
+                }
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <option value="all">전체</option>
+                <option value="low">3,000 미만</option>
+                <option value="mid">3,000~3,500</option>
+                <option value="high">3,500 이상</option>
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>여유량</span>
               <select
                 aria-label="여유량 필터"
                 value={lotRiskFilterDraft.marginLevel}
@@ -2346,16 +2375,16 @@ export default function DashBoardPage() {
                     marginLevel: e.target.value as LotRiskFilterState['marginLevel'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 max-w-[7.5rem] rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="low">500ppm 이하</option>
-                <option value="caution">500ppm 초과~1,000ppm</option>
-                <option value="sufficient">1,000ppm 초과</option>
+                <option value="low">≤500</option>
+                <option value="caution">500~1,000</option>
+                <option value="sufficient">{`>1,000`}</option>
               </select>
             </label>
 
@@ -2370,7 +2399,7 @@ export default function DashBoardPage() {
                     spc: e.target.value as LotRiskFilterState['spc'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
@@ -2394,7 +2423,7 @@ export default function DashBoardPage() {
                     grade: e.target.value as LotRiskFilterState['grade'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
@@ -2421,6 +2450,7 @@ export default function DashBoardPage() {
                 !lotRiskFilterActive &&
                 lotRiskFilterDraft.lotQuery === '' &&
                 lotRiskFilterDraft.marginLevel === 'all' &&
+                lotRiskFilterDraft.residualLevel === 'all' &&
                 lotRiskFilterDraft.probLevel === 'all'
               }
               className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -2472,7 +2502,7 @@ export default function DashBoardPage() {
                       잔류리튬
                     </th>
                     <th scope="col" className="px-3 py-3 text-right font-normal">
-                      규격 대비
+                      여유량
                     </th>
                     <th scope="col" className="px-3 py-3 text-center font-normal">
                       SPC
@@ -2872,7 +2902,7 @@ export default function DashBoardPage() {
                           : selectedLotRisk.predLi || '-',
                       },
                       {
-                        label: '규격 대비',
+                        label: '여유량',
                         value: formatSpecDistance(selectedLotRisk.margin, true),
                         valueClass: lotRiskMarginClass(selectedLotRisk.margin, isDark),
                       },
@@ -3582,7 +3612,7 @@ export default function DashBoardPage() {
                       <th className="px-3 py-2.5 text-left">LOT ID</th>
                       <th className="px-3 py-2.5 text-left">불량확률</th>
                       <th className="px-3 py-2.5 text-right">잔류리튬</th>
-                      <th className="px-3 py-2.5 text-right">규격 대비</th>
+                      <th className="px-3 py-2.5 text-right">여유량</th>
                       <th className="px-3 py-2.5 text-center">SPC</th>
                       <th className="px-3 py-2.5 text-center">위험등급</th>
                       <th className="px-3 py-2.5 text-left">위험 원인</th>
