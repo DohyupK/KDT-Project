@@ -24,6 +24,13 @@ import { Ruler, UserRound } from 'lucide-react'
  */
 const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1785471624684&to=1786076424684&timezone=browser&refresh=5m&panelId=panel-10'
 
+/**
+ * 실시간 생산 게이지 Embed URL.
+ * Share → Embed의 src만 넣으세요. theme=light 권장(패널 검정 배경 완화).
+ */
+const GRAFANA_GAUGE_PANEL_URL =
+  'http://3.36.100.128:4000/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1'
+
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -875,8 +882,8 @@ function ProductionTrendChart({
   } | null>(null);
 
   const width = 720;
-  const height = 320;
-  const pad = { top: 28, right: 52, bottom: 40, left: 52 };
+  const height = 332;
+  const pad = { top: 48, right: 58, bottom: 44, left: 58 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
 
@@ -895,6 +902,7 @@ function ProductionTrendChart({
   const n = points.length;
   const barW = Math.min(34, Math.max(12, (innerW / n) * 0.52));
   const slotX = (i: number) => pad.left + (innerW / n) * i + (innerW / n) / 2;
+  const labelStep = n <= 6 ? 1 : n <= 12 ? 2 : Math.ceil(n / 6);
 
   const plotted = points.map((d, i) => {
     const x = slotX(i);
@@ -904,6 +912,17 @@ function ProductionTrendChart({
       rate == null ? null : pad.top + innerH - (rate / maxRate) * innerH;
     return { ...d, x, y, rate, rateY };
   });
+
+  const peakProduction = Math.max(...plotted.map((p) => p.production));
+  const ratedPoints = plotted.filter((p) => p.rate != null);
+  const maxRateValue =
+    ratedPoints.length > 0
+      ? Math.max(...ratedPoints.map((p) => p.rate as number))
+      : null;
+  const minRateValue =
+    ratedPoints.length > 0
+      ? Math.min(...ratedPoints.map((p) => p.rate as number))
+      : null;
 
   const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => {
     const v = (maxY / tickCount) * i;
@@ -917,13 +936,45 @@ function ProductionTrendChart({
   }));
 
   const defectPoints = plotted.filter((p) => p.rateY !== null);
-  const gridStroke = isDark ? '#334155' : '#e2e8f0';
-  const tickFill = isDark ? '#cbd5e1' : undefined;
-  const labelFill = isDark ? '#cbd5e1' : undefined;
+  const gridStroke = isDark ? '#475569' : '#e2e8f0';
+  const tickFillLeft = isDark ? '#94a3b8' : '#64748b';
+  const tickFillRight = isDark ? '#f87171' : '#dc2626';
+  const axisTitleLeft = isDark ? '#94a3b8' : '#64748b';
+  const axisTitleRight = isDark ? '#f87171' : '#dc2626';
   const pointStroke = isDark ? '#1e293b' : '#ffffff';
+  const legendText = isDark ? 'text-slate-300' : 'text-slate-600';
+
+  const showTooltip = (
+    e: React.MouseEvent<SVGElement, MouseEvent>,
+    point: DailyAggregate,
+  ) => {
+    const parent = (e.currentTarget.ownerSVGElement as SVGElement).parentElement as HTMLElement;
+    const prect = parent.getBoundingClientRect();
+    setHover({
+      x: e.clientX - prect.left,
+      y: e.clientY - prect.top,
+      point,
+    });
+  };
 
   return (
     <div className="relative min-h-0 flex-1 overflow-x-auto pb-1">
+      <div
+        className={`mb-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 px-0.5 sm:px-1 ${legendText}`}
+        aria-hidden
+      >
+        <div className="inline-flex items-center gap-2 text-sm font-medium">
+          <span className="inline-block h-3 w-3 rounded-sm bg-blue-600" />
+          생산량
+        </div>
+        <div className="inline-flex items-center gap-2 text-sm font-medium">
+          <span className="relative inline-flex h-3 w-5 items-center" aria-hidden>
+            <span className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-red-600" />
+            <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-600 ring-2 ring-white dark:ring-slate-900" />
+          </span>
+          불량률
+        </div>
+      </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="h-[300px] w-full lg:h-[320px]"
@@ -932,20 +983,21 @@ function ProductionTrendChart({
         aria-label="생산량 막대와 불량률 선 차트"
       >
         <text
-          x={12}
-          y={16}
-          className={isDark ? 'text-[10px]' : 'fill-slate-500 text-[10px]'}
-          fill={labelFill}
+          x={pad.left}
+          y={20}
+          className="text-xs font-semibold"
+          fill={axisTitleLeft}
         >
           생산량
         </text>
         <text
-          x={width - 12}
-          y={16}
+          x={width - pad.right}
+          y={20}
           textAnchor="end"
-          className="fill-red-600 text-[10px]"
+          className="text-xs font-semibold"
+          fill={axisTitleRight}
         >
-          불량률
+          불량률 (%)
         </text>
         {yTicks.map((t) => (
           <g key={`prod-${t.v}`}>
@@ -956,13 +1008,15 @@ function ProductionTrendChart({
               y2={t.y}
               stroke={gridStroke}
               strokeWidth={1}
+              strokeDasharray={t.v === 0 ? undefined : '4 4'}
+              opacity={t.v === 0 ? 1 : 0.85}
             />
             <text
-              x={pad.left - 8}
+              x={pad.left - 10}
               y={t.y + 4}
               textAnchor="end"
-              className={isDark ? 'text-[10px]' : 'fill-slate-400 text-[10px]'}
-              fill={tickFill}
+              className="text-[11px]"
+              fill={tickFillLeft}
             >
               {formatNumber(Math.round(t.v))}
             </text>
@@ -971,70 +1025,57 @@ function ProductionTrendChart({
         {rateTicks.map((t) => (
           <text
             key={`rate-${t.v}`}
-            x={width - pad.right + 8}
+            x={width - pad.right + 10}
             y={t.y + 4}
             textAnchor="start"
-            className="fill-red-600 text-[10px]"
+            className="text-[11px] font-medium"
+            fill={tickFillRight}
           >
             {formatPercent(t.v)}
           </text>
         ))}
-        {plotted.map((p) => (
-          <rect
-            key={p.date}
-            x={p.x - barW / 2}
-            y={p.y}
-            width={barW}
-            height={Math.max(0, pad.top + innerH - p.y)}
-            fill="#2563eb"
-            rx={1.5}
-            className="cursor-pointer"
-            onMouseEnter={(e) => {
-              const rect = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-              const parent = (e.currentTarget.ownerSVGElement as SVGElement)
-                .parentElement as HTMLElement;
-              const prect = parent.getBoundingClientRect();
-              setHover({
-                x: e.clientX - prect.left,
-                y: e.clientY - prect.top,
-                point: {
-                  date: p.date,
-                  production: p.production,
-                  goodCount: p.goodCount,
-                  defectCount: p.defectCount,
-                  defectRate: p.defectRate,
-                },
-              });
-              void rect;
-            }}
-            onMouseMove={(e) => {
-              const parent = (e.currentTarget.ownerSVGElement as SVGElement)
-                .parentElement as HTMLElement;
-              const prect = parent.getBoundingClientRect();
-              setHover({
-                x: e.clientX - prect.left,
-                y: e.clientY - prect.top,
-                point: {
-                  date: p.date,
-                  production: p.production,
-                  goodCount: p.goodCount,
-                  defectCount: p.defectCount,
-                  defectRate: p.defectRate,
-                },
-              });
-            }}
-            onMouseLeave={() => setHover(null)}
-            onClick={() =>
-              onBarClick?.({
-                date: p.date,
-                production: p.production,
-                goodCount: p.goodCount,
-                defectCount: p.defectCount,
-                defectRate: p.defectRate,
-              })
-            }
-          />
-        ))}
+        {plotted.map((p) => {
+          const isPeak = p.production === peakProduction && peakProduction > 0;
+          const barHeight = Math.max(0, pad.top + innerH - p.y);
+          return (
+            <g key={p.date}>
+              <rect
+                x={p.x - barW / 2}
+                y={p.y}
+                width={barW}
+                height={barHeight}
+                fill={isPeak ? '#1d4ed8' : '#2563eb'}
+                rx={3}
+                ry={3}
+                className="cursor-pointer transition-opacity hover:opacity-90"
+                onMouseEnter={(e) => showTooltip(e, p)}
+                onMouseMove={(e) => showTooltip(e, p)}
+                onMouseLeave={() => setHover(null)}
+                onClick={() =>
+                  onBarClick?.({
+                    date: p.date,
+                    production: p.production,
+                    goodCount: p.goodCount,
+                    defectCount: p.defectCount,
+                    defectRate: p.defectRate,
+                  })
+                }
+              />
+              {isPeak ? (
+                <text
+                  x={p.x}
+                  y={Math.max(pad.top + 12, p.y - 8)}
+                  textAnchor="middle"
+                  className="text-[10px] font-semibold"
+                  fill={isDark ? '#93c5fd' : '#1d4ed8'}
+                  pointerEvents="none"
+                >
+                  {formatNumber(p.production)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
         {defectPoints.length > 0 ? (
           <>
             <polyline
@@ -1046,59 +1087,95 @@ function ProductionTrendChart({
               points={defectPoints.map((p) => `${p.x},${p.rateY}`).join(' ')}
               pointerEvents="none"
             />
-            {defectPoints.map((p) => (
-              <circle
-                key={`rate-${p.date}`}
-                cx={p.x}
-                cy={p.rateY as number}
-                r={3}
-                fill="#dc2626"
-                stroke={pointStroke}
-                strokeWidth={2}
-                pointerEvents="none"
-              />
-            ))}
+            {defectPoints.map((p) => {
+              const rate = p.rate as number;
+              const isMaxRate = maxRateValue != null && rate === maxRateValue;
+              const isMinRate =
+                minRateValue != null &&
+                rate === minRateValue &&
+                minRateValue !== maxRateValue;
+              const isZero = rate === 0;
+              const r = isMaxRate || isMinRate ? 4.5 : isZero ? 3.5 : 3;
+              return (
+                <g key={`rate-${p.date}`}>
+                  <circle
+                    cx={p.x}
+                    cy={p.rateY as number}
+                    r={12}
+                    fill="transparent"
+                    className="cursor-pointer"
+                    onMouseEnter={(e) => showTooltip(e, p)}
+                    onMouseMove={(e) => showTooltip(e, p)}
+                    onMouseLeave={() => setHover(null)}
+                  />
+                  <circle
+                    cx={p.x}
+                    cy={p.rateY as number}
+                    r={r}
+                    fill="#dc2626"
+                    stroke={pointStroke}
+                    strokeWidth={isMaxRate || isMinRate ? 2.5 : 2}
+                    pointerEvents="none"
+                  />
+                  {isMaxRate || isMinRate ? (
+                    <text
+                      x={p.x}
+                      y={(p.rateY as number) - 10}
+                      textAnchor="middle"
+                      className="text-[9px] font-semibold"
+                      fill={tickFillRight}
+                      pointerEvents="none"
+                    >
+                      {formatPercent(rate)}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
           </>
         ) : null}
-        {plotted.map((p) => (
-          <text
-            key={`label-${p.date}`}
-            x={p.x}
-            y={height - 12}
-            textAnchor="middle"
-            className={isDark ? 'text-xs' : 'fill-slate-500 text-xs'}
-            fill={labelFill}
-          >
-            {formatTrendXLabel(p.date, trendGrain)}
-          </text>
-        ))}
+        {plotted.map((p, i) =>
+          i % labelStep === 0 || i === n - 1 ? (
+            <text
+              key={`label-${p.date}`}
+              x={p.x}
+              y={height - 14}
+              textAnchor="middle"
+              className="text-[11px]"
+              fill={isDark ? '#94a3b8' : '#64748b'}
+            >
+              {formatTrendXLabel(p.date, trendGrain)}
+            </text>
+          ) : null,
+        )}
       </svg>
       {hover ? (
         <div
-          className={`pointer-events-none absolute z-10 rounded-md border px-2.5 py-2 text-[11px] shadow-sm ${
+          className={`pointer-events-none absolute z-10 min-w-[148px] rounded-lg border px-3 py-2.5 text-xs shadow-md ${
             isDark
               ? 'border-slate-600 bg-slate-800 text-slate-100'
               : 'border-slate-200 bg-white text-slate-700'
           }`}
           style={{
             left: Math.min(hover.x + 12, 240),
-            top: Math.max(8, hover.y - 96),
+            top: Math.max(8, hover.y - 88),
           }}
         >
-          <div className={`mb-1 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+          <div
+            className={`mb-1.5 border-b pb-1.5 text-sm font-semibold ${
+              isDark ? 'border-slate-600 text-slate-100' : 'border-slate-100 text-slate-900'
+            }`}
+          >
             {formatTrendTooltipTitle(hover.point.date, trendGrain)}
           </div>
-          <div className={isDark ? 'text-sky-400' : 'text-blue-700'}>
-            {productionVolumeLabel(trendGrain)}: {formatNumber(hover.point.production)}
+          <div className={`font-medium ${isDark ? 'text-sky-300' : 'text-blue-700'}`}>
+            생산량: {formatNumber(hover.point.production)}
           </div>
-          <div className={isDark ? 'text-teal-300' : 'text-teal-700'}>
-            양품: {formatNumber(hover.point.goodCount)}
-          </div>
-          <div className={isDark ? 'text-red-400' : 'text-red-600'}>
-            불량: {formatNumber(hover.point.defectCount)}
-          </div>
-          <div className={isDark ? 'text-orange-400' : 'text-orange-600'}>
-            불량률: {formatPercent(hover.point.defectRate)}
+          <div className={`mt-1 font-medium ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+            불량률:{' '}
+            {hover.point.defectRate != null
+              ? formatPercent(hover.point.defectRate)
+              : '0.0%'}
           </div>
         </div>
       ) : null}
@@ -3226,64 +3303,51 @@ export default function DashBoardPage() {
           )}
         </section>
 
-        {/* Charts: 게이지(~30%) + 생산 추이(~70%) | Feature Importance */}
+        {/* Charts: 게이지 | 생산 추이 | Feature Importance */}
         <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <div className={`flex min-h-[380px] min-w-0 flex-col p-5 xl:col-span-8 ${cardClass}`}>
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,3fr)_minmax(0,7fr)]">
-              {/* 실시간 잔류리튬 자리 (비움) */}
-              <div className="flex min-h-[200px] flex-col lg:min-h-0 lg:pr-3">
+          <div
+            className={`flex min-h-[360px] min-w-0 flex-col p-5 xl:col-span-3 ${cardClass}`}
+          >
+            <h2
+              className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+            >
+              실시간 생산 게이지
+            </h2>
+            <div className="flex min-h-[280px] w-full flex-1 items-center justify-center">
+              {GRAFANA_GAUGE_PANEL_URL.trim() ? (
+                <div className="relative aspect-square w-full max-w-[300px] overflow-hidden rounded-full bg-transparent shadow-none ring-0">
+                  <iframe
+                    src={GRAFANA_GAUGE_PANEL_URL}
+                    title="실시간 생산 게이지"
+                    scrolling="no"
+                    className="pointer-events-auto absolute left-1/2 top-1/2 h-[118%] w-[118%] max-w-none -translate-x-1/2 -translate-y-1/2 border-0 bg-transparent"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[280px] w-full items-center justify-center px-3">
+                  <p
+                    className={`m-0 text-center text-xs leading-relaxed ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    GRAFANA_GAUGE_PANEL_URL에 Embed URL을 넣으세요.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`flex min-h-[380px] min-w-0 flex-col p-5 xl:col-span-5 ${cardClass}`}
+          >
+            <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 flex-col gap-3">
                 <h2
                   className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
                 >
-                  실시간 잔류리튬 측정 결과
+                  생산 추이 그래프
                 </h2>
-                <div className="mt-2 min-h-[220px] w-full flex-1" aria-hidden />
-              </div>
-
-              {/* 생산 추이 그래프 */}
-              <div className="flex min-h-[280px] min-w-0 flex-col pt-4 lg:min-h-0 lg:pl-3 lg:pt-0">
-                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                  <h2
-                    className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-                  >
-                    생산 추이 그래프
-                  </h2>
-                  <div
-                    className={`inline-flex shrink-0 rounded-md border p-0.5 ${
-                      isDark ? 'border-slate-600' : 'border-slate-200'
-                    }`}
-                  >
-                    {(
-                      [
-                        { id: 'day', label: '일 별' },
-                        { id: 'week', label: '주간 별' },
-                        { id: 'month', label: '월 별' },
-                      ] as const
-                    ).map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedTrendBucket(null);
-                          setTrendGrain(opt.id);
-                        }}
-                        className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                          trendGrain === opt.id
-                            ? isDark
-                              ? 'bg-slate-700 text-slate-100'
-                              : 'bg-slate-900 text-white'
-                            : isDark
-                              ? 'text-slate-400 hover:text-slate-200'
-                              : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mb-2 flex flex-nowrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <DateInput
                     aria-label="생산 추이 시작일"
                     value={trendFilterDraft.startDate}
@@ -3298,10 +3362,10 @@ export default function DashBoardPage() {
                     }}
                     isDark={isDark}
                     compact
-                    className="!w-[112px] !max-w-[112px] shrink-0"
+                    className="!h-9 !w-[112px] !max-w-[112px] shrink-0"
                   />
                   <span
-                    className={`shrink-0 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                    className={`shrink-0 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
                   >
                     –
                   </span>
@@ -3319,7 +3383,7 @@ export default function DashBoardPage() {
                     }}
                     isDark={isDark}
                     compact
-                    className="!w-[112px] !max-w-[112px] shrink-0"
+                    className="!h-9 !w-[112px] !max-w-[112px] shrink-0"
                   />
                   <button
                     type="button"
@@ -3328,7 +3392,7 @@ export default function DashBoardPage() {
                       setTrendFilterApplied({ startDate: '', endDate: '' });
                       setTrendGrain('day');
                     }}
-                    className={`inline-flex h-8 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                    className={`inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                       isDark
                         ? 'border-slate-600 text-slate-300 hover:bg-slate-800'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -3337,20 +3401,55 @@ export default function DashBoardPage() {
                     초기화
                   </button>
                 </div>
-
-                <div className="flex min-h-0 flex-1 flex-col">
-                  {trendHasData ? (
-                    <ProductionTrendChart
-                      points={dailyAggregates}
-                      isDark={isDark}
-                      trendGrain={trendGrain}
-                      onBarClick={setSelectedTrendBucket}
-                    />
-                  ) : (
-                    <EmptyState plain message="표시할 생산 데이터가 없습니다." />
-                  )}
-                </div>
               </div>
+              <div
+                className={`inline-flex shrink-0 rounded-xl border p-1 ${
+                  isDark ? 'border-slate-600 bg-slate-900/60' : 'border-slate-200 bg-white'
+                }`}
+                role="group"
+                aria-label="생산 추이 조회 단위"
+              >
+                {(
+                  [
+                    { id: 'day', label: '일 별' },
+                    { id: 'week', label: '주간 별' },
+                    { id: 'month', label: '월 별' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTrendBucket(null);
+                      setTrendGrain(opt.id);
+                    }}
+                    className={`inline-flex h-9 items-center rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                      trendGrain === opt.id
+                        ? isDark
+                          ? 'bg-slate-700 text-white shadow-sm'
+                          : 'bg-slate-900 text-white shadow-sm'
+                        : isDark
+                          ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              {trendHasData ? (
+                <ProductionTrendChart
+                  points={dailyAggregates}
+                  isDark={isDark}
+                  trendGrain={trendGrain}
+                  onBarClick={setSelectedTrendBucket}
+                />
+              ) : (
+                <EmptyState plain message="표시할 생산 데이터가 없습니다." />
+              )}
             </div>
           </div>
 

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import Link from 'next/link'
-import { Maximize2, MessageCircle, Minimize2, X } from 'lucide-react'
+import { Maximize2, MessageCircle, Minimize2, Shield, X } from 'lucide-react'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import {
   postApproveControl,
@@ -62,7 +62,66 @@ const WELCOME_GENERAL: ChatMessage = {
   id: 1,
   role: 'ai',
   text:
-    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 /security 탭을 이용해 주세요.',
+    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 헤더의 「보안」모드를 이용해 주세요.',
+}
+
+type ChatMode = 'general' | 'secure'
+
+const LOCAL_THREADS_KEY = 'kdt_general_chat_recent_threads'
+const LOCAL_THREADS_MAX = 20
+
+type LocalStoredMsg = {
+  role: ChatRole
+  text: string
+  mode?: string
+}
+
+type LocalThreadStore = {
+  id: string
+  title: string
+  updated_at: string
+  messages: LocalStoredMsg[]
+}
+
+function readLocalThreads(): LocalThreadStore[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(LOCAL_THREADS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as LocalThreadStore[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeLocalThreads(list: LocalThreadStore[]) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(
+    LOCAL_THREADS_KEY,
+    JSON.stringify(list.slice(0, LOCAL_THREADS_MAX)),
+  )
+}
+
+function titleFromMessages(msgs: { role: string; text: string }[]): string {
+  const firstUser = msgs.find((m) => m.role === 'user' && m.text.trim())
+  if (!firstUser) return '새 대화'
+  const t = firstUser.text.trim().replace(/\s+/g, ' ')
+  return t.length > 28 ? `${t.slice(0, 28)}…` : t
+}
+
+function upsertLocalThread(thread: LocalThreadStore) {
+  const prev = readLocalThreads().filter((t) => t.id !== thread.id)
+  writeLocalThreads([thread, ...prev])
+}
+
+function getLocalThread(id: string): LocalThreadStore | null {
+  return readLocalThreads().find((t) => t.id === id) ?? null
+}
+
+function formatThreadTime(iso?: string | null): string {
+  if (!iso) return ''
+  return iso.replace('T', ' ').slice(0, 16)
 }
 
 export default function GlobalChatbot() {
@@ -85,8 +144,10 @@ export default function GlobalChatbot() {
   const [outcomeDefect, setOutcomeDefect] = useState<'0' | '1' | ''>('')
   const [outcomeCapacity, setOutcomeCapacity] = useState('')
   const [outcomeResidual, setOutcomeResidual] = useState('')
-  /** Fullscreen overlay with SecurityChatbot (separate from general chat session). */
-  const [fullscreenOpen, setFullscreenOpen] = useState(false)
+  /** Popup vs fullscreen — independent of general/secure mode. */
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [chatMode, setChatMode] = useState<ChatMode>('general')
+  const [secureNewThreadNonce, setSecureNewThreadNonce] = useState(0)
   const [threads, setThreads] = useState<ChatThreadItem[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_GENERAL])
@@ -99,38 +160,113 @@ export default function GlobalChatbot() {
   )
 
   const refreshThreads = async () => {
+    let api: ChatThreadItem[] = []
     try {
-      const list = await listChatThreads({ channel: 'general' })
-      setThreads(list)
+      api = await listChatThreads({ channel: 'general' })
     } catch {
       /* soft-fail */
     }
+    const byId = new Map<string, ChatThreadItem>()
+    for (const t of api) byId.set(t.id, t)
+    for (const t of readLocalThreads()) {
+      const existing = byId.get(t.id)
+      if (
+        !existing ||
+        (t.updated_at &&
+          (!existing.updated_at || t.updated_at > existing.updated_at))
+      ) {
+        byId.set(t.id, {
+          id: t.id,
+          user_id: existing?.user_id ?? 'local',
+          channel: 'general',
+          title: t.title || existing?.title,
+          updated_at: t.updated_at || existing?.updated_at,
+          created_at: existing?.created_at ?? t.updated_at,
+        })
+      } else if (existing && !existing.title && t.title) {
+        byId.set(t.id, { ...existing, title: t.title })
+      }
+    }
+    const merged = Array.from(byId.values()).sort((a, b) =>
+      (b.updated_at || '').localeCompare(a.updated_at || ''),
+    )
+    setThreads(merged.slice(0, LOCAL_THREADS_MAX))
+  }
+
+  const applyStoredMessages = (rows: LocalStoredMsg[]) => {
+    let n = 1
+    const mapped: ChatMessage[] = rows.map((r) => {
+      n += 1
+      return {
+        id: n,
+        role: r.role === 'user' ? 'user' : 'ai',
+        text: r.text || '',
+        mode: r.mode,
+      }
+    })
+    idRef.current = n + 1
+    setMessages(mapped.length ? mapped : [WELCOME_GENERAL])
+  }
+
+  const persistCurrentThread = (msgs: ChatMessage[], threadId?: string | null) => {
+    const tid = threadId ?? getChatThreadId() ?? activeThreadId
+    if (!tid) return
+    const meaningful = msgs.filter((m) => m.text.trim())
+    if (!meaningful.some((m) => m.role === 'user')) return
+    upsertLocalThread({
+      id: tid,
+      title: titleFromMessages(meaningful),
+      updated_at: new Date().toISOString(),
+      messages: meaningful.map((m) => ({
+        role: m.role,
+        text: m.text,
+        mode: m.mode,
+      })),
+    })
+    void refreshThreads()
   }
 
   const hydrateThread = async (threadId: string) => {
     try {
       const rows = await loadChatThreadMessages({ thread_id: threadId })
-      if (!rows.length) {
-        setMessages([WELCOME_GENERAL])
-        idRef.current = 2
+      if (rows.length) {
+        let n = 1
+        const mapped: ChatMessage[] = rows.map((r) => {
+          n += 1
+          return {
+            id: n,
+            role: r.role === 'user' ? 'user' : 'ai',
+            text: r.content || '',
+            mode: r.mode ?? undefined,
+          }
+        })
+        idRef.current = n + 1
+        setMessages(mapped)
+        upsertLocalThread({
+          id: threadId,
+          title: titleFromMessages(
+            mapped.map((m) => ({ role: m.role, text: m.text })),
+          ),
+          updated_at: new Date().toISOString(),
+          messages: mapped.map((m) => ({
+            role: m.role,
+            text: m.text,
+            mode: m.mode,
+          })),
+        })
+        void refreshThreads()
         return
       }
-      let n = 1
-      const mapped: ChatMessage[] = rows.map((r) => {
-        n += 1
-        return {
-          id: n,
-          role: r.role === 'user' ? 'user' : 'ai',
-          text: r.content || '',
-          mode: r.mode ?? undefined,
-        }
-      })
-      idRef.current = n + 1
-      setMessages(mapped)
     } catch {
-      setMessages([WELCOME_GENERAL])
-      idRef.current = 2
+      /* fall through to local */
     }
+    const local = getLocalThread(threadId)
+    if (local?.messages?.length) {
+      applyStoredMessages(local.messages)
+      return
+    }
+    setMessages([WELCOME_GENERAL])
+    idRef.current = 2
   }
 
   const startNewThread = () => {
@@ -178,13 +314,13 @@ export default function GlobalChatbot() {
   }, [])
 
   useEffect(() => {
-    if (!fullscreenOpen) return
+    if (!isExpanded) return
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') setFullscreenOpen(false)
+      if (e.key === 'Escape') setIsExpanded(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fullscreenOpen])
+  }, [isExpanded])
 
   const clearUndoTimer = () => {
     if (undoTimerRef.current) {
@@ -222,6 +358,10 @@ export default function GlobalChatbot() {
     const text = raw.trim()
     if (!text || pending) return
 
+    let tid = getChatThreadId()
+    if (!tid) tid = newChatThreadId()
+    setActiveThreadId(tid)
+
     const attached = resolveFeatures(features)
 
     idRef.current += 1
@@ -241,20 +381,26 @@ export default function GlobalChatbot() {
         llm_mode: llmMode || 'auto',
       })
       if (ac.signal.aborted) return
+      const replyTid = getChatThreadId() ?? tid
+      if (replyTid) {
+        setActiveThreadId(replyTid)
+        setChatThreadId(replyTid)
+      }
       idRef.current += 1
       const replyText =
         res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.')
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: idRef.current,
-          role: 'ai',
-          text: replyText,
-          mode: res.mode,
-          recommendation: res.recommendation ?? null,
-        },
-      ])
-      void refreshThreads()
+      const aiMsg: ChatMessage = {
+        id: idRef.current,
+        role: 'ai',
+        text: replyText,
+        mode: res.mode,
+        recommendation: res.recommendation ?? null,
+      }
+      setMessages((prev) => {
+        const next = [...prev, aiMsg]
+        queueMicrotask(() => persistCurrentThread(next, replyTid))
+        return next
+      })
     } catch (err) {
       if (ac.signal.aborted) return
       let detail = '요청에 실패했습니다.'
@@ -269,15 +415,17 @@ export default function GlobalChatbot() {
         if (ax.response?.status) detail = `[${ax.response.status}] ${detail}`
       }
       idRef.current += 1
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: idRef.current,
-          role: 'ai',
-          text:
-            `챗봇 연결에 실패했습니다. backend(:3001) · ai-service(:8800)를 확인해 주세요.\n(${detail})`,
-        },
-      ])
+      const failMsg: ChatMessage = {
+        id: idRef.current,
+        role: 'ai',
+        text:
+          `챗봇 연결에 실패했습니다. backend(:3001) · ai-service(:8800)를 확인해 주세요.\n(${detail})`,
+      }
+      setMessages((prev) => {
+        const next = [...prev, failMsg]
+        queueMicrotask(() => persistCurrentThread(next, tid))
+        return next
+      })
     } finally {
       if (!ac.signal.aborted) setPending(false)
     }
@@ -519,301 +667,411 @@ export default function GlobalChatbot() {
 
   return (
     <>
-      {chatOpen && !fullscreenOpen ? (
-        <div className="fixed bottom-24 right-4 z-[60] flex h-[min(520px,70vh)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:right-6">
-          <div className="flex items-start gap-2 border-b border-slate-200 bg-slate-50 px-3 py-3">
-            <button
-              type="button"
-              aria-label="보안 챗 전체화면"
-              title="보안 챗 전체화면"
-              onClick={() => setFullscreenOpen(true)}
-              className="mt-0.5 rounded-md p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800"
+      {chatOpen ? (
+        <div
+          className={
+            isExpanded
+              ? 'fixed inset-0 z-[70] flex flex-col bg-slate-900/50 p-3 sm:p-6'
+              : 'fixed bottom-20 right-3 z-[60] sm:bottom-24 sm:right-5'
+          }
+        >
+          <div
+            className={
+              isExpanded
+                ? 'mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl'
+                : 'flex h-[min(680px,calc(100vh-24px))] max-h-[calc(100vh-24px)] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:w-[420px]'
+            }
+          >
+            <div
+              className={`flex-none border-b ${
+                chatMode === 'secure' ? 'border-amber-200' : 'border-blue-200'
+              }`}
             >
-              <Maximize2 size={16} />
-            </button>
-            <div className="min-w-0 flex-1">
-              <strong className="block text-sm text-slate-800">공정 지원 챗봇</strong>
-              <span className="text-[10px] text-slate-400">일반 · Groq/Gemini</span>
-            </div>
-            <button
-              type="button"
-              onClick={startNewThread}
-              disabled={pending}
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-700 disabled:opacity-50"
-            >
-              새 대화
-            </button>
-            <button
-              type="button"
-              aria-label="챗봇 닫기"
-              onClick={() => setChatOpen(false)}
-              className="rounded-md p-1 text-slate-500 hover:bg-slate-200"
-            >
-              <X size={16} />
-            </button>
-          </div>
-          {threads.length > 0 ? (
-            <div className="flex max-h-20 shrink-0 gap-1 overflow-x-auto border-b border-slate-100 bg-white px-2 py-1.5">
-              {threads.map((t) => {
-                const label = (t.title && t.title.trim()) || t.id.slice(0, 8)
-                const active = t.id === activeThreadId
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void selectThread(t.id)}
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
-                      active
-                        ? 'bg-slate-800 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                    title={t.id}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-          {selectedLotId ? (
-            <div className="flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-1 text-[11px] text-slate-600">
-              <span className="truncate">연결 LOT: {selectedLotId}</span>
-              <button
-                type="button"
-                onClick={clearLot}
-                className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-slate-50"
-              >
-                해제
-              </button>
-            </div>
-          ) : null}
-
-          <div className="flex flex-1 flex-col gap-2 overflow-y-auto bg-slate-50/60 p-3">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed ${
-                  m.role === 'user'
-                    ? 'ml-auto rounded-br-md bg-blue-600 text-white'
-                    : m.mode === 'security_redirect'
-                      ? 'mr-auto rounded-bl-md border border-amber-200 bg-amber-50 text-amber-950'
-                      : 'mr-auto rounded-bl-md border border-slate-200 bg-white text-slate-800'
-                }`}
-              >
-                {m.text}
-                {m.mode === 'security_redirect' ? (
-                  <div className="mt-2">
-                    <Link
-                      href="/security"
-                      className="text-xs font-semibold text-amber-800 underline"
-                      onClick={() => setChatOpen(false)}
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <div
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                    chatMode === 'secure'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}
+                >
+                  {chatMode === 'secure' ? (
+                    <Shield size={18} aria-hidden />
+                  ) : (
+                    <MessageCircle size={18} aria-hidden />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <strong className="truncate text-base font-bold text-slate-900">
+                      공정 지원 챗봇
+                    </strong>
+                    <span
+                      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        chatMode === 'secure'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-blue-100 text-blue-700'
+                      }`}
                     >
-                      보안 탭(/security)으로 이동
-                    </Link>
+                      {chatMode === 'secure' ? '보안 상담' : '일반 상담'}
+                    </span>
                   </div>
-                ) : null}
-                {m.recommendation?.suggestion && m.role === 'ai' ? (
-                  <div className="mt-2 space-y-2">
-                    {m.approved ? (
-                      <span className="text-[11px] font-medium text-emerald-700">
-                        {m.reverted ? '취소됨' : '승인됨'}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={pending || m.approving}
-                        onClick={() => void approveRecommendation(m.id, m.recommendation!)}
-                        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                      >
-                        {m.approving ? '기록 중…' : '제안 승인'}
-                      </button>
-                    )}
-                    {m.approved &&
-                    m.eventId != null &&
-                    m.outcomeEligible &&
-                    !m.reverted &&
-                    !m.outcomeSaved ? (
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
-                        <div className="font-medium text-slate-800">실측 기록</div>
-                        <p className="mt-0.5 text-[10px] text-slate-500">
-                          작업자 실측만 저장합니다. 값을 만들지 않습니다.
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <label className="flex items-center gap-1">
-                            양/불
-                            <select
-                              value={outcomeDefect}
-                              onChange={(e) =>
-                                setOutcomeDefect(e.target.value as '0' | '1' | '')
-                              }
-                              disabled={m.outcomeSaving}
-                              className="h-7 rounded border border-slate-200 bg-white px-1"
-                            >
-                              <option value="">선택</option>
-                              <option value="0">정상(0)</option>
-                              <option value="1">불량(1)</option>
-                            </select>
-                          </label>
-                          <label className="flex items-center gap-1">
-                            용량
-                            <input
-                              type="number"
-                              step="0.01"
-                              min={130}
-                              max={250}
-                              placeholder="mAh/g"
-                              value={outcomeCapacity}
-                              onChange={(e) => setOutcomeCapacity(e.target.value)}
-                              disabled={m.outcomeSaving}
-                              className="h-7 w-20 rounded border border-slate-200 bg-white px-1"
-                            />
-                          </label>
-                          <label className="flex items-center gap-1">
-                            잔여리튬
-                            <input
-                              type="number"
-                              step="0.01"
-                              min={500}
-                              max={8000}
-                              placeholder="ppm"
-                              value={outcomeResidual}
-                              onChange={(e) => setOutcomeResidual(e.target.value)}
-                              disabled={m.outcomeSaving}
-                              className="h-7 w-24 rounded border border-slate-200 bg-white px-1"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            disabled={
-                              m.outcomeSaving ||
-                              (outcomeDefect !== '0' && outcomeDefect !== '1')
-                            }
-                            onClick={() => void submitOutcome(m.id, m.eventId!)}
-                            className="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                          >
-                            {m.outcomeSaving ? '저장 중…' : '실측 저장'}
-                          </button>
-                        </div>
+                  <p className="truncate text-xs text-slate-500">
+                    {chatMode === 'secure'
+                      ? '보안 문서 · 로컬 vLLM'
+                      : '일반 상담 · Groq/Gemini'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label={isExpanded ? '팝업으로 축소' : '전체화면으로 확대'}
+                  title={isExpanded ? '팝업으로 축소' : '전체화면으로 확대'}
+                  onClick={() => setIsExpanded((prev) => !prev)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                >
+                  {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (chatMode === 'general') startNewThread()
+                    else setSecureNewThreadNonce((n) => n + 1)
+                  }}
+                  disabled={chatMode === 'general' ? pending : false}
+                  className="hidden h-9 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:inline-flex"
+                >
+                  새 대화
+                </button>
+                <button
+                  type="button"
+                  aria-label="챗봇 닫기"
+                  onClick={() => {
+                    setChatOpen(false)
+                    setIsExpanded(false)
+                  }}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div
+                role="group"
+                aria-label="챗봇 모드 선택"
+                className="grid grid-cols-2 gap-2 border-t border-slate-100 px-4 py-3"
+              >
+                <button
+                  type="button"
+                  aria-pressed={chatMode === 'general'}
+                  onClick={() => setChatMode('general')}
+                  className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                    chatMode === 'general'
+                      ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
+                  }`}
+                >
+                  <MessageCircle size={14} aria-hidden />
+                  일반 상담
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={chatMode === 'secure'}
+                  onClick={() => setChatMode('secure')}
+                  className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                    chatMode === 'secure'
+                      ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500'
+                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
+                  }`}
+                >
+                  <Shield size={14} aria-hidden />
+                  보안 상담
+                </button>
+              </div>
+            </div>
+
+            {chatMode === 'secure' ? (
+              <div className="mx-4 mt-3 flex flex-none items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                <Shield size={14} className="mt-0.5 shrink-0 text-amber-700" aria-hidden />
+                <div>
+                  <p className="font-semibold">보안 상담 모드</p>
+                  <p className="mt-0.5 leading-relaxed">
+                    비밀번호, API 키, 인증 토큰 및 개인정보는 입력하지 마세요.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              className={
+                chatMode === 'general'
+                  ? 'flex min-h-0 flex-1 flex-col'
+                  : 'hidden'
+              }
+            >
+              {threads.length > 0 ? (
+                <div className="flex flex-none flex-col border-b border-slate-100 bg-white">
+                  <div className="flex items-center justify-between gap-2 px-3 pt-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                      최근 대화
+                    </span>
+                    <span className="text-[10px] text-slate-400">{threads.length}개</span>
+                  </div>
+                  <div className="flex max-h-24 gap-1 overflow-x-auto px-2 py-1.5">
+                    {threads.map((t) => {
+                      const label = (t.title && t.title.trim()) || t.id.slice(0, 8)
+                      const active = t.id === activeThreadId
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={pending}
+                          onClick={() => void selectThread(t.id)}
+                          className={`max-w-[140px] shrink-0 truncate rounded-full px-2.5 py-1 text-[10px] ${
+                            active
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                          title={
+                            t.updated_at
+                              ? `${label} · ${formatThreadTime(t.updated_at)}`
+                              : label
+                          }
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-none items-center border-b border-slate-100 bg-white px-3 py-2">
+                  <span className="text-[10px] text-slate-400">
+                    최근 대화 없음 · 메시지를 보내면 여기에 저장됩니다
+                  </span>
+                </div>
+              )}
+              {selectedLotId ? (
+                <div className="flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-1 text-[11px] text-slate-600">
+                  <span className="truncate">연결 LOT: {selectedLotId}</span>
+                  <button
+                    type="button"
+                    onClick={clearLot}
+                    className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-slate-50"
+                  >
+                    해제
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto bg-slate-50/60 px-4 py-4">
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`break-words whitespace-pre-wrap px-3.5 py-3 text-sm leading-6 ${
+                      m.role === 'user'
+                        ? 'ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-blue-600 text-white'
+                        : m.mode === 'security_redirect'
+                          ? 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50/70 text-amber-950'
+                          : 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-blue-200 bg-blue-50/70 text-slate-800'
+                    }`}
+                  >
+                    {m.text}
+                    {m.mode === 'security_redirect' ? (
+                      <div className="mt-2">
+                        <Link
+                          href="/security"
+                          className="text-xs font-semibold text-amber-800 underline"
+                          onClick={() => setChatOpen(false)}
+                        >
+                          보안 탭(/security)으로 이동
+                        </Link>
                       </div>
                     ) : null}
-                    {m.outcomeSaved ? (
-                      <span className="block text-[11px] text-slate-500">실측 저장됨</span>
+                    {m.recommendation?.suggestion && m.role === 'ai' ? (
+                      <div className="mt-2 space-y-2">
+                        {m.approved ? (
+                          <span className="text-[11px] font-medium text-emerald-700">
+                            {m.reverted ? '취소됨' : '승인됨'}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={pending || m.approving}
+                            onClick={() => void approveRecommendation(m.id, m.recommendation!)}
+                            className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                          >
+                            {m.approving ? '기록 중…' : '제안 승인'}
+                          </button>
+                        )}
+                        {m.approved &&
+                        m.eventId != null &&
+                        m.outcomeEligible &&
+                        !m.reverted &&
+                        !m.outcomeSaved ? (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
+                            <div className="font-medium text-slate-800">실측 기록</div>
+                            <p className="mt-0.5 text-[10px] text-slate-500">
+                              작업자 실측만 저장합니다. 값을 만들지 않습니다.
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <label className="flex items-center gap-1">
+                                양/불
+                                <select
+                                  value={outcomeDefect}
+                                  onChange={(e) =>
+                                    setOutcomeDefect(e.target.value as '0' | '1' | '')
+                                  }
+                                  disabled={m.outcomeSaving}
+                                  className="h-7 rounded border border-slate-200 bg-white px-1"
+                                >
+                                  <option value="">선택</option>
+                                  <option value="0">정상(0)</option>
+                                  <option value="1">불량(1)</option>
+                                </select>
+                              </label>
+                              <label className="flex items-center gap-1">
+                                용량
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={130}
+                                  max={250}
+                                  placeholder="mAh/g"
+                                  value={outcomeCapacity}
+                                  onChange={(e) => setOutcomeCapacity(e.target.value)}
+                                  disabled={m.outcomeSaving}
+                                  className="h-7 w-20 rounded border border-slate-200 bg-white px-1"
+                                />
+                              </label>
+                              <label className="flex items-center gap-1">
+                                잔여리튬
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={500}
+                                  max={8000}
+                                  placeholder="ppm"
+                                  value={outcomeResidual}
+                                  onChange={(e) => setOutcomeResidual(e.target.value)}
+                                  disabled={m.outcomeSaving}
+                                  className="h-7 w-24 rounded border border-slate-200 bg-white px-1"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                disabled={
+                                  m.outcomeSaving ||
+                                  (outcomeDefect !== '0' && outcomeDefect !== '1')
+                                }
+                                onClick={() => void submitOutcome(m.id, m.eventId!)}
+                                className="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                              >
+                                {m.outcomeSaving ? '저장 중…' : '실측 저장'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                        {m.outcomeSaved ? (
+                          <span className="block text-[11px] text-slate-500">실측 저장됨</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {m.mode && m.mode !== 'security_redirect' && m.role === 'ai' ? (
+                      <div className="mt-1 text-[10px] text-slate-400">mode={m.mode}</div>
                     ) : null}
                   </div>
-                ) : null}
-                {m.mode && m.mode !== 'security_redirect' && m.role === 'ai' ? (
-                  <div className="mt-1 text-[10px] text-slate-400">mode={m.mode}</div>
-                ) : null}
-              </div>
-            ))}
-            {pending ? (
-              <div className="mr-auto rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400">
-                응답 대기 중…
-              </div>
-            ) : null}
-            <div ref={endRef} />
-          </div>
-
-          <div className="border-t border-slate-200 p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <label className="shrink-0 text-[10px] font-medium text-slate-500">API</label>
-              <select
-                value={llmMode}
-                onChange={(e) => setLlmMode(e.target.value)}
-                disabled={pending}
-                className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-700"
-              >
-                <option value="auto">Auto (단가·길이)</option>
-                {llmOptions.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.display_name}
-                  </option>
                 ))}
-              </select>
-            </div>
-            {llmOptions.length === 0 ? (
-              <p className="mb-2 text-[10px] text-slate-400">
-                등록된 API 없음 · /security 에서 키를 저장하세요
-              </p>
-            ) : null}
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {chips.map((q) => (
-                <button
-                  key={q.label}
-                  type="button"
-                  disabled={pending}
-                  onClick={() => onChip(q)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600 disabled:opacity-50"
-                >
-                  {q.label}
-                </button>
-              ))}
-            </div>
-            <form onSubmit={onSubmit} className="flex gap-2">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={onKeyDown}
-                disabled={pending}
-                placeholder={
-                  selectedLotId
-                    ? '연결된 LOT 기준으로 질문…'
-                    : '메시지를 입력하세요...'
-                }
-                className="h-10 flex-1 rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50"
-              />
-              <button
-                type="submit"
-                disabled={pending || !input.trim()}
-                className="rounded-xl bg-blue-600 px-3 text-sm font-bold text-white disabled:opacity-50"
-              >
-                전송
-              </button>
-            </form>
-            {undoSnack ? (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
-                <span>승인 기록됨 · {undoSnack.secondsLeft}초 내 취소 가능</span>
-                <button
-                  type="button"
-                  disabled={undoBusy}
-                  onClick={() => void handleUndoApprove()}
-                  className="shrink-0 rounded-lg bg-amber-700 px-2.5 py-1 font-bold text-white disabled:opacity-50"
-                >
-                  {undoBusy ? '취소 중…' : '실행 취소'}
-                </button>
+                {pending ? (
+                  <div className="mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-blue-200 bg-white px-3.5 py-3 text-sm text-slate-400">
+                    응답 생성 중…
+                  </div>
+                ) : null}
+                <div ref={endRef} />
               </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
-      {fullscreenOpen ? (
-        <div className="fixed inset-0 z-[70] flex flex-col bg-slate-900/50 p-3 sm:p-6">
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
-              <button
-                type="button"
-                aria-label="전체화면 닫기"
-                title="전체화면 닫기"
-                onClick={() => setFullscreenOpen(false)}
-                className="rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
-              >
-                <Minimize2 size={16} />
-              </button>
-              <strong className="text-sm text-slate-800">보안 전용 챗 · 전체화면</strong>
-              <span className="text-[10px] text-slate-400">Esc로 닫기 · 일반 챗과 세션 분리</span>
-              <button
-                type="button"
-                aria-label="전체화면 닫기"
-                onClick={() => setFullscreenOpen(false)}
-                className="ml-auto rounded-md p-1 text-slate-500 hover:bg-slate-200/80"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex-none border-t border-slate-200 bg-white p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <label className="shrink-0 text-xs font-medium text-slate-500">API</label>
+                  <select
+                    value={llmMode}
+                    onChange={(e) => setLlmMode(e.target.value)}
+                    disabled={pending}
+                    className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                  >
+                    <option value="auto">Auto (단가·길이)</option>
+                    {llmOptions.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {llmOptions.length === 0 ? (
+                  <p className="mb-2 text-xs text-slate-400">
+                    등록된 API 없음 · /security 에서 키를 저장하세요
+                  </p>
+                ) : null}
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {chips.map((q) => (
+                    <button
+                      key={q.label}
+                      type="button"
+                      disabled={pending}
+                      onClick={() => onChip(q)}
+                      className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-600 disabled:opacity-50"
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+                <form onSubmit={onSubmit} className="flex items-end gap-2">
+                  <input
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    disabled={pending}
+                    placeholder={
+                      selectedLotId
+                        ? '연결된 LOT 기준으로 질문…'
+                        : '질문을 입력하세요.'
+                    }
+                    className="h-11 min-h-[44px] flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50"
+                  />
+                  <button
+                    type="submit"
+                    aria-label="메시지 전송"
+                    disabled={pending || !input.trim()}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    전송
+                  </button>
+                </form>
+                {undoSnack ? (
+                  <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+                    <span>승인 기록됨 · {undoSnack.secondsLeft}초 내 취소 가능</span>
+                    <button
+                      type="button"
+                      disabled={undoBusy}
+                      onClick={() => void handleUndoApprove()}
+                      className="shrink-0 rounded-lg bg-amber-700 px-2.5 py-1 font-bold text-white disabled:opacity-50"
+                    >
+                      {undoBusy ? '취소 중…' : '실행 취소'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div className="min-h-0 flex-1 p-3 sm:p-4">
-              <SecurityChatbot variant="embedded" />
+
+            <div
+              className={
+                chatMode === 'secure' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
+              }
+            >
+              <SecurityChatbot
+                variant="embedded"
+                hideHeader
+                newThreadNonce={secureNewThreadNonce}
+                className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none"
+              />
             </div>
           </div>
         </div>
@@ -822,19 +1080,25 @@ export default function GlobalChatbot() {
       <button
         type="button"
         aria-label="AI 챗봇"
-        aria-expanded={chatOpen || fullscreenOpen}
+        aria-expanded={chatOpen}
         onClick={() => {
-          if (fullscreenOpen) {
-            setFullscreenOpen(false)
+          if (isExpanded) {
+            setIsExpanded(false)
             return
           }
-          setChatOpen(!chatOpen)
+          if (!chatOpen) {
+            setChatMode('general')
+            setIsExpanded(false)
+            setChatOpen(true)
+            return
+          }
+          setChatOpen(false)
         }}
         className={`fixed bottom-5 right-5 z-[75] flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 ${
-          fullscreenOpen ? 'hidden' : ''
+          chatOpen || isExpanded ? 'hidden' : ''
         }`}
       >
-        {chatOpen ? <X size={22} /> : <MessageCircle size={22} />}
+        <MessageCircle size={22} />
       </button>
     </>
   )
