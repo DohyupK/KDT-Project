@@ -1,0 +1,30 @@
+[
+  {
+    "feature": "metal_impurity",
+    "importance": 5.917826175689697
+  },
+  {
+    "feature": "humidity",
+    "importance": 3.6386396884918213
+  },
+  {
+    "feature": "temp_dev_from_800",
+    "importance": 2.450151205062866
+  },
+  {
+    "feature": "temp_x_humidity",
+    "importance": 1.1734123229980469
+  },
+  {
+    "feature": "temp_dev_from_800_sq",
+    "importance": 0.8827727437019348
+  },
+  {
+    "feature": "process_time",
+    "importance": 0.6842054128646851
+  },
+  {
+    "feature": "sintering_temp",
+    "importance": 0.4590833783149719
+  }
+]

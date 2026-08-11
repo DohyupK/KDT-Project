@@ -1,0 +1,10 @@
+[
+  {
+    "feature": "humidity",
+    "importance": 276.9146423339844
+  },
+  {
+    "feature": "metal_impurity",
+    "importance": 58.25331497192383
+  }
+]

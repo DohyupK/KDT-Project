@@ -103,7 +103,7 @@ Tool 후보(후속 설계):
 
 ### 4.4 Optuna
 
-- `OPTUNA_TRIALS = 100`, Train 내 5-Fold, 목적 = ROC-AUC maximize  
+- `OPTUNA_TRIALS = 100`, Train 내 6-Fold (TimeSeriesSplit), 목적 = ROC-AUC maximize  
 - Study 분리: `xgb_ox_clf`, `cat_ox_clf`  
 - `storage="sqlite:///optuna.db", load_if_exists=True`  
 - **필수:** best params로 **Train 전체 refit** → Test 1회 → 그 모델을 저장  

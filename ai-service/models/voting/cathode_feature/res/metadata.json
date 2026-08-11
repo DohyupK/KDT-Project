@@ -1,0 +1,57 @@
+{
+  "member_id": "cathode_feature_res",
+  "model_version": "2.0.0-voting",
+  "train_date": "2026-08-09T19:42:49.483892+00:00",
+  "dataset_hash": "ad9c92a39d7d9fb34cdd619a845d78c2ef4d6e732bd3eda282cb0b59f029fe8e",
+  "data_path": "data/voting/cathode_feature.csv",
+  "target": "residual_li",
+  "task": "regression",
+  "seed": 42,
+  "n_folds": 6,
+  "optuna_trials": 100,
+  "holdout": "none",
+  "feature_columns": [
+    "metal_impurity",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "feature_types": {
+    "metal_impurity": "Float64",
+    "process_time": "Float64",
+    "sintering_temp": "Float64",
+    "humidity": "Float64",
+    "temp_dev_from_800": "Float64",
+    "temp_dev_from_800_sq": "Float64",
+    "temp_x_humidity": "Float64"
+  },
+  "cat_features": [],
+  "numeric_cols": [
+    "metal_impurity",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "device_mode": "cpu",
+  "metrics": {
+    "train_rmse": 448.7846911062567,
+    "train_mae": 353.6854898901047,
+    "train_r2": 0.6002520977672983,
+    "holdout": "none"
+  },
+  "cv_best": {
+    "xgb_cv_rmse": 479.3532400286665,
+    "cat_cv_rmse": 477.3336711097989
+  },
+  "drop_extra": [
+    "capacity",
+    "quality_defect"
+  ],
+  "n_rows": 10000
+}

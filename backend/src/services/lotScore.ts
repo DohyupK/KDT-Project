@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { predictCapacity, predictDefect, predictResidual } from './aiProxy.js'
+import { predictVoting } from './aiProxy.js'
 import {
   evaluateLotSpc,
   isProcessComplete,
@@ -17,7 +17,10 @@ export type RiskLevel = '심각' | '주의' | '안정'
 /** @deprecated Prefer loadStandard().spare — kept as sync default for cold paths/tests */
 export const RESIDUAL_USL = getStandardDefaults().spare
 
-/** O/X defect judge cutoff (matches ensemble_config.default_threshold). */
+/**
+ * Legacy ops KPI cutoff (dashboard 불량률 등).
+ * Cascade voting O/X uses voting_config.default_threshold (0.4) via scoreLotWithAi.
+ */
 export const DEFECT_JUDGE_THRESHOLD = 0.8
 
 export const DEFECT_PROB_SEVERE = getStandardDefaults().defect_prob_severe
@@ -180,7 +183,7 @@ export function combineLotScore(input: {
   const t = input.thresholds
 
   const dTier = defectProbTier(
-    defect_prob,
+    probability,
     t?.defect_prob_caution,
     t?.defect_prob_severe,
   )
@@ -241,17 +244,14 @@ export async function scoreLotWithAi(
 ): Promise<LotScoreResult> {
   const spcInput = spcFeatures ?? clfFeatures
   const clfBody = featuresToPredictBody(clfFeatures)
-  const residualBody = featuresToPredictBody(residualFeatures)
-  const [clf, residual, capacity] = await Promise.all([
-    predictDefect(clfBody),
-    predictResidual(residualBody),
-    predictCapacity(clfBody),
-  ])
   const spc = evaluateSpcForFeatures(spcInput, historyByParam)
   const std = await loadStandard()
+
+  // Cascade voting: capacity → residual → probability → quality_defect (threshold last).
+  const voted = await predictVoting(clfBody)
   const scored = combineLotScore({
-    defectProb: clf.probability,
-    residualLi: residual.residual_li,
+    defectProb: voted.probability,
+    residualLi: voted.residual_li,
     spcStatus: spc.status,
     incompleteProcess: !spc.complete,
     thresholds: {
@@ -261,8 +261,20 @@ export async function scoreLotWithAi(
       residual_severe: std.residual_severe,
     },
   })
-  scored.quality_defect = Number(clf.defect_status) === 1 ? 1 : 0
-  const cap = Number(capacity.capacity)
+  // Prefer voting's last-step quality_defect (probability vs applied_threshold).
+  const thr =
+    voted.applied_threshold != null
+      ? Number(voted.applied_threshold)
+      : 0.4
+  scored.quality_defect =
+    voted.quality_defect != null
+      ? Number(voted.quality_defect) === 1
+        ? 1
+        : 0
+      : voted.probability >= thr
+        ? 1
+        : 0
+  const cap = Number(voted.capacity)
   scored.capacity = Number.isFinite(cap) ? Math.round(cap * 1000) / 1000 : null
   return scored
 }

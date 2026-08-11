@@ -92,7 +92,7 @@ XGBoost:
 # [5] Optuna · 최종 refit · MLOps
 # =====================================================================
 상수: OPTUNA_TRIALS = 100
-- Train 내부 5-Fold Stratified CV.
+- Train 내부 6-Fold **TimeSeriesSplit** CV (Stratified 아님; 구현과 동일).
 - 목적함수: Fold 평균 ROC-AUC **maximize**.
 - Study 2개 분리 (각각 resume):
   - storage="sqlite:///optuna.db", load_if_exists=True

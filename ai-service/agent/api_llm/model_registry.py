@@ -74,7 +74,7 @@ def run_head(
     task = str(head.get("task") or "")
     try:
         if hid in _BUILTIN:
-            if hid == "clf":
+            if hid in ("clf", "voting"):
                 result = _BUILTIN[hid](features, fillThreshold=fillThreshold)
             else:
                 result = _BUILTIN[hid](features)
