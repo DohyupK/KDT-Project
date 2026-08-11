@@ -38,7 +38,7 @@ from sklearn.preprocessing import OrdinalEncoder
 SEED = 42
 MODEL_VERSION = "1.2.0"
 OPTUNA_TRIALS = int(os.environ.get("OPTUNA_TRIALS", "100"))
-N_FOLDS = 5
+N_FOLDS = 6
 DATA_PATH = Path("data/cathode_clf_data.csv")
 MODELS_DIR = Path("models")
 LOGS_DIR = Path("logs")

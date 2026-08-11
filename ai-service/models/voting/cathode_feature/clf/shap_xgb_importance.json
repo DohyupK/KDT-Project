@@ -1,0 +1,38 @@
+[
+  {
+    "feature": "capacity",
+    "importance": 1.7223966121673584
+  },
+  {
+    "feature": "residual_li",
+    "importance": 0.31429895758628845
+  },
+  {
+    "feature": "metal_impurity",
+    "importance": 0.2605171501636505
+  },
+  {
+    "feature": "temp_dev_from_800",
+    "importance": 0.06455249339342117
+  },
+  {
+    "feature": "humidity",
+    "importance": 0.043097201734781265
+  },
+  {
+    "feature": "sintering_temp",
+    "importance": 0.03588325157761574
+  },
+  {
+    "feature": "temp_x_humidity",
+    "importance": 0.03444334492087364
+  },
+  {
+    "feature": "temp_dev_from_800_sq",
+    "importance": 0.02012523263692856
+  },
+  {
+    "feature": "process_time",
+    "importance": 0.011089451611042023
+  }
+]

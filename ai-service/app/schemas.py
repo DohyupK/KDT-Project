@@ -47,6 +47,20 @@ class ResidualResponse(BaseModel):
     top_factors: list[str] = Field(default_factory=list)
 
 
+class VotingPredictResponse(BaseModel):
+    """Cascade voting: capacity, residual_li, probability (+ optional quality_defect)."""
+
+    capacity: float
+    residual_li: float
+    probability: float
+    quality_defect: int | None = None
+    applied_threshold: float | None = None
+    unit_capacity: str = "mAh/g"
+    unit_residual: str = "ppm"
+    probability_denominator: float | None = None
+    member_scores: dict[str, float] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None

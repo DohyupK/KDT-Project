@@ -120,6 +120,23 @@ function sanitizePredictBody(features: PredictFeatureBody): Record<string, strin
   return out
 }
 
+export type AiVotingResult = {
+  capacity: number
+  residual_li: number
+  probability: number
+  quality_defect: number | null
+  applied_threshold: number | null
+  unit_capacity?: string
+  unit_residual?: string
+  probability_denominator?: number
+  member_scores?: Record<string, number>
+}
+
+/** Cascade multi-model voting (judgment_lots 4 fields). */
+export async function predictVoting(features: PredictFeatureBody): Promise<AiVotingResult> {
+  return postAiJson<AiVotingResult>('/predict-voting', sanitizePredictBody(features))
+}
+
 /** Single-row O/X defect probability (same contract as chatbot clf head). */
 export async function predictDefect(features: PredictFeatureBody): Promise<AiPredictResult> {
   return postAiJson<AiPredictResult>('/predict', sanitizePredictBody(features))

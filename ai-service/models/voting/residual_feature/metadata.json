@@ -1,0 +1,57 @@
+{
+  "member_id": "residual_feature",
+  "model_version": "2.0.0-voting",
+  "train_date": "2026-08-09T19:31:29.555086+00:00",
+  "dataset_hash": "72aac0aae95fabad958729eb3f797e4399a83b2441a97573a96e0b0d82526327",
+  "data_path": "data/voting/cathode_qc_reg_feature.csv",
+  "target": "residual_li",
+  "task": "regression",
+  "seed": 42,
+  "n_folds": 6,
+  "optuna_trials": 100,
+  "holdout": "none",
+  "feature_columns": [
+    "metal_impurity",
+    "lithium_input",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "feature_types": {
+    "metal_impurity": "Float64",
+    "lithium_input": "Float64",
+    "process_time": "Float64",
+    "sintering_temp": "Float64",
+    "humidity": "Float64",
+    "temp_dev_from_800": "Float64",
+    "temp_dev_from_800_sq": "Float64",
+    "temp_x_humidity": "Float64"
+  },
+  "cat_features": [],
+  "numeric_cols": [
+    "metal_impurity",
+    "lithium_input",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "device_mode": "cpu",
+  "metrics": {
+    "train_rmse": 288.04074475475545,
+    "train_mae": 224.44887007871094,
+    "train_r2": 0.8353286765558898,
+    "holdout": "none"
+  },
+  "cv_best": {
+    "xgb_cv_rmse": 307.96793734012607,
+    "cat_cv_rmse": 305.38771284703586
+  },
+  "drop_extra": [],
+  "n_rows": 10000
+}

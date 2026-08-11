@@ -25,4 +25,4 @@
 
 작업 일지: [work-log/](./work-log/) · [2026-07-31](./work-log/2026-07-31.md) · [2026-07-30](./work-log/2026-07-30.md) · [2026-07-29](./work-log/2026-07-29.md)
 
-관련 계획·참조: [LLM 튜닝](./references/LLM%20튜닝.md) · [보안 RAG](./references/secure-rag.md) · [vLLM 기동](./references/vllm-setup.md) · [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [모델 학습 방법 SSOT](./references/model-training-methods.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [residual 스키마](./references/cathode-residual-schema.md) · [중요 경로](./references/important-paths.md)
+관련 계획·참조: [LLM 튜닝](./references/LLM%20튜닝.md) · [보안 RAG](./references/secure-rag.md) · [vLLM 기동](./references/vllm-setup.md) · [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [모델 학습 방법 SSOT](./references/model-training-methods.md) · [다중 모델 투표](./references/multi-model-voting.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [residual 스키마](./references/cathode-residual-schema.md) · [중요 경로](./references/important-paths.md)

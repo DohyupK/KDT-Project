@@ -1,0 +1,18 @@
+[
+  {
+    "feature": "capacity",
+    "importance": 1.3554195165634155
+  },
+  {
+    "feature": "residual_li",
+    "importance": 0.35986587405204773
+  },
+  {
+    "feature": "metal_impurity",
+    "importance": 0.2517421245574951
+  },
+  {
+    "feature": "humidity",
+    "importance": 0.03810281306505203
+  }
+]

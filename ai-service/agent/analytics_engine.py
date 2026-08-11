@@ -35,7 +35,8 @@ def csv_lake_dir() -> Path:
 
 
 def xgb_model_path() -> Path:
-    return _ai_root() / "models" / "xgb_model.json"
+    """Legacy single-head path removed; voting readiness uses voting_config.json."""
+    return _ai_root() / "models" / "voting_config.json"
 
 
 def list_lake_csv_files() -> list[Path]:

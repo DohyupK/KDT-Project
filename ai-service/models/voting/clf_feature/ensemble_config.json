@@ -1,0 +1,8 @@
+{
+  "weights": {
+    "xgb": 0.5,
+    "cat": 0.5
+  },
+  "task": "classification",
+  "default_threshold": null
+}

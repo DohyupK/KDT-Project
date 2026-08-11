@@ -1,0 +1,67 @@
+{
+  "member_id": "clf_d90",
+  "model_version": "2.0.0-voting",
+  "train_date": "2026-08-09T18:40:01.385175+00:00",
+  "dataset_hash": "7916387334fa39cd07dcf8111a5ecad3a1734ab0b41aabf09ee3b6efae5faf82",
+  "data_path": "data/voting/cathode_clf_d90.csv",
+  "target": "quality_defect",
+  "task": "classification",
+  "seed": 42,
+  "n_folds": 6,
+  "optuna_trials": 100,
+  "holdout": "none",
+  "feature_columns": [
+    "d90",
+    "metal_impurity",
+    "lithium_input",
+    "additive_ratio",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "tank_pressure",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "feature_types": {
+    "d90": "Float64",
+    "metal_impurity": "Float64",
+    "lithium_input": "Float64",
+    "additive_ratio": "Float64",
+    "process_time": "Float64",
+    "sintering_temp": "Float64",
+    "humidity": "Float64",
+    "tank_pressure": "Float64",
+    "temp_dev_from_800": "Float64",
+    "temp_dev_from_800_sq": "Float64",
+    "temp_x_humidity": "Float64"
+  },
+  "cat_features": [],
+  "numeric_cols": [
+    "d90",
+    "metal_impurity",
+    "lithium_input",
+    "additive_ratio",
+    "process_time",
+    "sintering_temp",
+    "humidity",
+    "tank_pressure",
+    "temp_dev_from_800",
+    "temp_dev_from_800_sq",
+    "temp_x_humidity"
+  ],
+  "device_mode": "cpu",
+  "metrics": {
+    "train_roc_auc": 0.9679736294766502,
+    "train_accuracy": 0.8954,
+    "train_f1": 0.6034874905231236,
+    "train_pr_auc": 0.769519077115767,
+    "holdout": "none"
+  },
+  "cv_best": {
+    "xgb_cv_auc": 0.9182360964052535,
+    "cat_cv_auc": 0.9188189062533508
+  },
+  "drop_extra": [],
+  "n_rows": 10000
+}

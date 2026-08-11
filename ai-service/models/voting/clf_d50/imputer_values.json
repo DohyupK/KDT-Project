@@ -1,0 +1,16 @@
+{
+  "numeric_means": {
+    "d50": 4.508519754293813,
+    "metal_impurity": 0.024054540265354495,
+    "lithium_input": 2.4979699646264915,
+    "additive_ratio": 0.1479214738099216,
+    "process_time": 72.18589255973976,
+    "sintering_temp": 799.852809111355,
+    "humidity": 50.03898932302769,
+    "tank_pressure": 100.03017160963675,
+    "temp_dev_from_800": 19.70179749726126,
+    "temp_dev_from_800_sq": 604.5028666232131,
+    "temp_x_humidity": 40015.10208129852
+  },
+  "categorical_fill": "__MISSING__"
+}
