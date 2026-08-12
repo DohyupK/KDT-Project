@@ -88,7 +88,7 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 | GET | `/api/issues` | 미완료 이슈 목록. query: search, date, lotId, riskLevel (`risk`는 analysis_lots JOIN) |
 | GET | `/api/issues/:issueId` | 기본 상세와 담당자·조치 내용 조회 |
 | PUT | `/api/issues/:issueId` | 조치 내용·완료 여부 저장 (JWT) · `status` 없음 |
-| GET | `/api/lots/risk-top` | 최근 3일·SPC 이탈·심각 LOT Top (page/pageSize) |
+| GET | `/api/lots/risk-top` | 최근 3일·심각 LOT Top (page/pageSize) |
 | GET | `/api/lots/daily-kpi` | 당일 probability 양품/불량 KPI (임계 0.8) |
 | POST | `/api/lots/import` | CSV 공정값 적재 (`?score=1` 시 채점) |
 | POST | `/api/lots/score` | AI+SPC 재채점 (JWT) |
@@ -101,6 +101,11 @@ npm run rollback:score-lots
 # ai-service(:8800) ready 후 lots 공정 → analysis_lots 재채점
 npm run score:lots
 npm run score:lots -- --limit=100 --concurrency=4
+# SPC+위험등급만 재계산 (AI 없음 · stale SPC 교정) + analysis_lots.spc_chart_json 백필
+npm run refresh:spc-risk
+npm run refresh:spc-risk -- --lot=LOT-YYYYMMDD-xxxxx
+# analysis_lots.defect_prob 레거시 컬럼만 제거 (probability로 NULL-fill 후 DROP)
+npm run migrate:analysis-drop-defect-prob
 # QC CSV로 lots 재적재 (residual 제외 · 자식 id 유지)
 npm run reload:lots-qc
 # SPC_LOT → lots 미러 + 신규/미채점 score (judgment NULL만 AI)
@@ -112,15 +117,12 @@ npm run sync:spc-lots -- --skip-score
 - 여유량 = `4000 - residual_li` (API `residualLithium` · DB `judgment_lots.residual_li`)
 - **테이블:** `lots` PK=`id` (공정만) · 채점=`analysis_lots` · 판정=`judgment_lots` (`quality_defect`·`capacity`·`residual_li`·`probability`) · 자식 FK `lot_id` → `lots.id`
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 유지
-- **채점·판정 쓰기 (운영 · 3단 SSOT):**
-  - **backend 기동 시 ai-service 자동 기동** (`AI_SERVICE_AUTOSTART` 기본 `1` · 끄려면 `0`) — health 후 SPC/analysis 폴러 시작
-  - 입력: `lots` 공정값 → ai-service **`POST /predict-voting`**
-  - **1단** `lot_results`: 피더 produce 시 `lot_id` stub · `quality_defect`·`residual_li` **NULL만** AI 채움 (피더 실측 COALESCE 유지) · DDL `../DB/lot_results.sql`
-  - **2단** `judgment_lots`: qd/residual ← `lot_results` · capacity/probability ← voting · **NULL일 때만** (`COALESCE`)
-  - **3단** `analysis_lots`: **judgment 기준 2차 추론** (`probability`·`spc`·`risk`·**`scored_at`**) — judgment만 찬 경우 `scoreAnalysisFromJudgment`
-  - **폴러 우선순위:** A=judgment/analysis/`scored_at`/LR행 결손(**최신**) · B=LR qd/residual NULL 백필 · **score 후 락 해제 → risk_reason**
-  - **`lot_results` NULL / residual NULL:** 피더 +60분(qd)/+24h(residual) 지연 · 과거 미연동 · 폴러 굶주림(수정됨)
-  - 모델·가중: [`../docs/references/multi-model-voting.md`](../docs/references/multi-model-voting.md) · `ai-service/models/`
+- **채점·판정 쓰기 (운영):**
+  - 입력: `lots` 공정값 → ai-service **`Promise.all`로 3헤드 병렬** (`/predict` · `/predict-capacity` · `/predict-residual`) — 학습 순서(clf→reg→residual)와 무관
+  - `analysis_lots`: AI+SPC 점수 **UPSERT** (`probability`·`spc_status`·`risk_level`·`risk_reason`·`spc_chart_json`; 재채점/SPC refresh 시 갱신)
+  - `judgment_lots`: `quality_defect`·`capacity`·`residual_li`·`probability`는 **NULL일 때만** 채움 (`COALESCE` · 이미 값이 있으면 유지)
+  - `probability` ← `/predict` 앙상블 **불량확률** (0~1) · `quality_defect` ← 같은 응답의 임계값 판정(0/1) · 용량·잔류는 각 회귀 헤드
+  - 모델 원리·임계값: [`../ai-service/README.md`](../ai-service/README.md) 「추론·불량확률」
 - LOT CSV 적재: `POST /api/lots/import` (`id`/`timestamp`/공정 → `lots`)
 - QC 재적재: `npm run reload:lots-qc` · `../DB/reload_lots_from_qc_csv.sql`
 - **SPC 싱크 주기:** 기동 시(ai health 후) 즉시 1회 + **60초 폴링** · `SPC_LOT`→`lots` + 미채점 score  

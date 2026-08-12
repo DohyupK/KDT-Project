@@ -17,6 +17,7 @@ export const listLotRisks = asyncHandler(async (req, res) => {
     minProb: req.query.minProb != null ? Number(req.query.minProb) : undefined,
     maxProb: req.query.maxProb != null ? Number(req.query.maxProb) : undefined,
     marginLevel: req.query.marginLevel != null ? String(req.query.marginLevel) : undefined,
+    residualLevel: req.query.residualLevel != null ? String(req.query.residualLevel) : undefined,
   })
   res.status(200).json(result)
 })

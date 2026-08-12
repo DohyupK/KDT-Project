@@ -107,7 +107,7 @@ export function detectCompanyFromKey(apiKey: string): string {
   const k = apiKey.trim()
   if (k.startsWith('gsk_')) return 'groq'
   if (k.startsWith('sk-ant-')) return 'anthropic'
-  if (k.startsWith('AIza')) return 'gemini'
+  if (k.startsWith('AIza') || k.startsWith('AQ.')) return 'gemini'
   if (k.startsWith('nvapi-') || k.startsWith('nvapi_')) return 'nvidia'
   if (k.startsWith('xai-')) return 'xai'
   if (k.startsWith('sk-')) return 'openai'
@@ -142,7 +142,7 @@ export function defaultModel(company: string, tier: 'lite' | 'quality'): string 
     groq: 'llama-3.1-8b-instant',
     openai: 'gpt-4o-mini',
     deepseek: 'deepseek-v4-flash',
-    gemini: 'gemini-2.5-flash-lite',
+    gemini: 'gemini-2.0-flash',
     xai: 'grok-4-1-fast',
     nvidia: 'meta/llama-3.1-8b-instruct',
     anthropic: 'claude-haiku-4-5-20251001',

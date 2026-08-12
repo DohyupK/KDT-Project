@@ -7,7 +7,7 @@ import {
   DEFECT_JUDGE_THRESHOLD,
   type RiskLevel,
 } from './lotScore.js'
-import { getLotSpcDetail } from './lot.service.js'
+import { getLotSpcDetail, parseSpcChartSnapshot } from './lot.service.js'
 import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
@@ -170,6 +170,8 @@ export type LotRiskListQuery = {
   minProb?: number
   maxProb?: number
   marginLevel?: string
+  /** residual_li bands: low <3000, mid 3000–3500, high ≥3500 */
+  residualLevel?: string
 }
 
 export async function listLotRisks(q: LotRiskListQuery) {
@@ -203,13 +205,21 @@ export async function listLotRisks(q: LotRiskListQuery) {
     where.push('j.residual_li IS NOT NULL AND (? - j.residual_li) > 1000')
     params.push(usl)
   }
+  if (q.residualLevel === 'low') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li < 3000')
+  } else if (q.residualLevel === 'mid') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li >= 3000 AND j.residual_li < 3500')
+  } else if (q.residualLevel === 'high') {
+    where.push('j.residual_li IS NOT NULL AND j.residual_li >= 3500')
+  }
   if (q.riskLevel && q.riskLevel !== 'all') {
     where.push('a.risk_level = ?')
     params.push(q.riskLevel)
   }
   if (q.spc && q.spc !== 'all') {
+    // analysis_lots is SPC/risk SSOT; judgment.spc is a mirror
     where.push(
-      `(COALESCE(j.spc, a.spc_status) = ? OR ( ? = '이탈' AND COALESCE(j.spc, a.spc_status) LIKE '%이탈%' ))`,
+      `(COALESCE(a.spc_status, j.spc) = ? OR ( ? = '이탈' AND COALESCE(a.spc_status, j.spc) LIKE '%이탈%' ))`,
     )
     params.push(q.spc, q.spc)
   }
@@ -261,7 +271,7 @@ export async function listLotRisks(q: LotRiskListQuery) {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
     const prob = r.probability != null ? Number(r.probability) : null
     const processComplete = isLotProcessComplete(r)
-    const spcRaw = r.j_spc || r.a_spc
+    const spcRaw = r.a_spc || r.j_spc
     const spcStatus = !processComplete
       ? '-'
       : spcRaw != null
@@ -301,6 +311,7 @@ export async function getLotRiskDetail(lotId: string) {
       a_spc: string | null
       risk_level: string | null
       risk_reason: string | null
+      spc_chart_json: unknown
       action_content: string | null
       d50: number | null
       d90: number | null
@@ -315,7 +326,7 @@ export async function getLotRiskDetail(lotId: string) {
   >(
     `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
             j.probability, j.spc AS j_spc, a.spc_status AS a_spc,
-            a.risk_level, a.risk_reason,
+            a.risk_level, a.risk_reason, a.spc_chart_json,
             (SELECT i.action_content FROM issues i
              WHERE i.lot_id = j.lot_id
              ORDER BY i.created_at DESC LIMIT 1) AS action_content,
@@ -332,26 +343,36 @@ export async function getLotRiskDetail(lotId: string) {
   const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
   const prob = r.probability != null ? Number(r.probability) : null
   const processComplete = isLotProcessComplete(r)
-  const spcRaw = r.j_spc || r.a_spc
-  const spcStatus = !processComplete
+  const storedSpcRaw = r.a_spc || r.j_spc
+  const storedSpcStatus = !processComplete
     ? '-'
-    : spcRaw != null
-      ? normalizeSpcStatus(spcRaw)
+    : storedSpcRaw != null
+      ? normalizeSpcStatus(storedSpcRaw)
       : null
 
+  const storedSnapshot = parseSpcChartSnapshot(r.spc_chart_json)
   let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
-  try {
-    spc = await getLotSpcDetail(lotId)
-  } catch {
-    spc = null
+  if (storedSnapshot) {
+    spc = {
+      lotId: r.lot_id,
+      spcStatus: storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
+      metrics: storedSnapshot.metrics,
+    }
+  } else {
+    try {
+      spc = await getLotSpcDetail(lotId)
+    } catch {
+      spc = null
+    }
   }
 
+  // Prefer stored spc_chart_json; live recompute only if snapshot missing
   const resolvedSpc = !processComplete
     ? '-'
-    : spcStatus != null
-      ? spcStatus
-      : spc?.spcStatus
-        ? normalizeSpcStatus(spc.spcStatus)
+    : spc?.spcStatus
+      ? normalizeSpcStatus(spc.spcStatus)
+      : storedSpcStatus != null
+        ? storedSpcStatus
         : '-'
 
   return {

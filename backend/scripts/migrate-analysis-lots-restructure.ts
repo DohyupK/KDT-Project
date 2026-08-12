@@ -52,7 +52,6 @@ async function main() {
     'spc_limit_version',
     'updated_at',
     'defect_prob',
-    'spc_chart_json', // not in schema.sql — drop if present
   ]) {
     const now = await columnNames()
     if (now.has(col)) {
@@ -91,17 +90,10 @@ async function main() {
   console.log('AFTER_COLS', [...after].sort().join(', '))
   console.log('AFTER_ROWS', Number(countAfter[0]?.c ?? 0))
 
-  const expected = [
-    'lot_id',
-    'probability',
-    'spc_status',
-    'risk_level',
-    'risk_reason',
-    'created_at',
-    'scored_at',
-  ]
+  const expected = ['lot_id', 'probability', 'spc_status', 'risk_level', 'risk_reason', 'created_at']
+  const optional = ['spc_chart_json']
   const missing = expected.filter((c) => !after.has(c))
-  const unexpected = [...after].filter((c) => !expected.includes(c))
+  const unexpected = [...after].filter((c) => !expected.includes(c) && !optional.includes(c))
   if (missing.length || unexpected.length) {
     throw new Error(
       `Schema mismatch missing=${missing.join('|')} unexpected=${unexpected.join('|')}`,

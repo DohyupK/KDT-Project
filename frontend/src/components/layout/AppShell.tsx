@@ -18,7 +18,6 @@ import {
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
 import ShellHeader from '@/components/layout/ShellHeader'
-import { SelectedLotProvider } from '@/context/SelectedLotContext'
 import { authApi } from '@/api/authApi'
 import { isLoggedIn } from '@/lib/authStorage'
 
@@ -97,6 +96,9 @@ export const NAV_MENUS = [
   { name: 'Security', icon: Shield, path: '/security' },
   { name: 'Setting', icon: Settings, path: '/setting' },
 ] as const
+
+/** Sidebar-only hide; route and page stay available (e.g. direct URL). */
+const SIDEBAR_HIDDEN_PATHS = new Set<string>(['/security'])
 
 const UI_COPY = {
   ko: {
@@ -421,7 +423,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { isDark, copy } = useUiSettings()
 
   return (
-    <SelectedLotProvider>
+    <>
       <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
@@ -456,7 +458,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <ul className="flex flex-1 flex-col gap-2">
-            {NAV_MENUS.map((menu) => {
+            {NAV_MENUS.filter((menu) => !SIDEBAR_HIDDEN_PATHS.has(menu.path)).map((menu) => {
               const Icon = menu.icon
               const active = pathname === menu.path
               const label = copy.menus[menu.path] ?? menu.name
@@ -509,6 +511,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <GlobalChatbot />
-    </SelectedLotProvider>
+    </>
   )
 }

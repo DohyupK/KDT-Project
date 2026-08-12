@@ -1,9 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Bell, RefreshCw } from 'lucide-react'
-import { SHELL_REFRESH_EVENT, useUiSettings } from '@/components/layout/AppShell'
+import {
+  SHELL_REFRESH_EVENT,
+  useRefreshSettings,
+  useUiSettings,
+} from '@/components/layout/AppShell'
 import UserAuthMenu from '@/components/layout/UserAuthMenu'
 import { MOCK_HEADER_NOTIFICATIONS } from '@/config/headerNotificationMocks'
 import type { HeaderNotification } from '@/config/headerNotificationSpec'
@@ -24,6 +28,7 @@ export default function ShellHeader() {
   const pathname = usePathname()
   const router = useRouter()
   const { isDark } = useUiSettings()
+  const { autoRefreshEnabled, refreshInterval } = useRefreshSettings()
 
   const [now, setNow] = useState('')
 
@@ -40,6 +45,30 @@ export default function ShellHeader() {
   const unreadCount = notifications.filter((item) => item.unread).length
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
+  const triggerShellDataRefresh = useCallback(
+    (options?: { toast?: boolean; source?: 'auto' | 'manual' }) => {
+      const source = options?.source ?? 'manual'
+      setLastRefreshedAt(new Date())
+      if (options?.toast) {
+        setRefreshToast(true)
+        if (toastTimerRef.current !== null) {
+          window.clearTimeout(toastTimerRef.current)
+        }
+        toastTimerRef.current = window.setTimeout(() => {
+          setRefreshToast(false)
+          toastTimerRef.current = null
+        }, 2000)
+      }
+      router.refresh()
+      window.dispatchEvent(
+        new CustomEvent(SHELL_REFRESH_EVENT, {
+          detail: { source },
+        }),
+      )
+    },
+    [router],
+  )
+
   useEffect(() => {
     setNow(formatHeaderDateTime(new Date()))
     const timer = window.setInterval(() => {
@@ -47,6 +76,18 @@ export default function ShellHeader() {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  /** Settings → auto refresh (skipped on management — Grafana embeds handle their own refresh). */
+  useEffect(() => {
+    if (!autoRefreshEnabled) return
+    const ms = Math.max(1, refreshInterval) * 60_000
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (pathname.startsWith('/management')) return
+      triggerShellDataRefresh({ toast: false, source: 'auto' })
+    }, ms)
+    return () => window.clearInterval(timer)
+  }, [autoRefreshEnabled, refreshInterval, triggerShellDataRefresh, pathname])
 
   useEffect(() => {
     setIsNotifyOpen(false)
@@ -86,17 +127,7 @@ export default function ShellHeader() {
   const handleRefresh = () => {
     if (isRefreshing) return
     setIsRefreshing(true)
-    setLastRefreshedAt(new Date())
-    setRefreshToast(true)
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current)
-    }
-    toastTimerRef.current = window.setTimeout(() => {
-      setRefreshToast(false)
-      toastTimerRef.current = null
-    }, 2000)
-    router.refresh()
-    window.dispatchEvent(new Event(SHELL_REFRESH_EVENT))
+    triggerShellDataRefresh({ toast: true, source: 'manual' })
     refreshTimerRef.current = window.setTimeout(() => {
       setIsRefreshing(false)
       refreshTimerRef.current = null
