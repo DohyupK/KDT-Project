@@ -7,7 +7,7 @@ import {
   DEFECT_JUDGE_THRESHOLD,
   type RiskLevel,
 } from './lotScore.js'
-import { getLotSpcDetail } from './lot.service.js'
+import { getLotSpcDetail, parseSpcChartSnapshot } from './lot.service.js'
 import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
@@ -311,6 +311,7 @@ export async function getLotRiskDetail(lotId: string) {
       a_spc: string | null
       risk_level: string | null
       risk_reason: string | null
+      spc_chart_json: unknown
       action_content: string | null
       d50: number | null
       d90: number | null
@@ -325,7 +326,7 @@ export async function getLotRiskDetail(lotId: string) {
   >(
     `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
             j.probability, j.spc AS j_spc, a.spc_status AS a_spc,
-            a.risk_level, a.risk_reason,
+            a.risk_level, a.risk_reason, a.spc_chart_json,
             (SELECT i.action_content FROM issues i
              WHERE i.lot_id = j.lot_id
              ORDER BY i.created_at DESC LIMIT 1) AS action_content,
@@ -349,14 +350,23 @@ export async function getLotRiskDetail(lotId: string) {
       ? normalizeSpcStatus(storedSpcRaw)
       : null
 
+  const storedSnapshot = parseSpcChartSnapshot(r.spc_chart_json)
   let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
-  try {
-    spc = await getLotSpcDetail(lotId)
-  } catch {
-    spc = null
+  if (storedSnapshot) {
+    spc = {
+      lotId: r.lot_id,
+      spcStatus: storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
+      metrics: storedSnapshot.metrics,
+    }
+  } else {
+    try {
+      spc = await getLotSpcDetail(lotId)
+    } catch {
+      spc = null
+    }
   }
 
-  // Prefer live Phase-I recompute so detail matches the control-chart panel
+  // Prefer stored spc_chart_json; live recompute only if snapshot missing
   const resolvedSpc = !processComplete
     ? '-'
     : spc?.spcStatus

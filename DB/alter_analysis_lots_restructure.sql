@@ -19,5 +19,5 @@ ALTER TABLE analysis_lots DROP COLUMN IF EXISTS residual_model_version;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS spc_limit_version;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS scored_at;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS updated_at;
-ALTER TABLE analysis_lots DROP COLUMN IF EXISTS spc_chart_json;
+-- spc_chart_json is kept (dashboard SPC snapshot). Do not drop.
 ALTER TABLE analysis_lots DROP INDEX IF EXISTS idx_analysis_scored;

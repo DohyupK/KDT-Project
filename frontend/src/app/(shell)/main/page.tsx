@@ -5,6 +5,12 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
 import { mainApi, RISK_TOP_PAGE_SIZE, type RiskTopLot } from '@/api/mainApi';
+import { issueApi } from '@/api/issueApi';
+import {
+  IssueDetailAnalysis,
+  issueDetailToAnalysisModel,
+  type IssueDetailAnalysisModel,
+} from '@/components/IssueDetailAnalysis';
 import {
   useRefreshSettings,
   useUiSettings,
@@ -56,14 +62,6 @@ type ToastItem = {
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
-
-function riskGradeClass(grade: RiskGrade) {
-  const base =
-    'inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold';
-  if (grade === '심각') return `${base} bg-red-100 text-red-700`;
-  if (grade === '주의') return `${base} bg-amber-100 text-amber-700`;
-  return `${base} bg-emerald-100 text-emerald-700`;
-}
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
@@ -270,6 +268,10 @@ export default function MainPage() {
   const { autoRefreshEnabled, refreshInterval } = useRefreshSettings();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
+  const [issueAnalysis, setIssueAnalysis] = useState<IssueDetailAnalysisModel | null>(null);
+  const [issueAnalysisLoading, setIssueAnalysisLoading] = useState(false);
+  const [issueAnalysisError, setIssueAnalysisError] = useState<string | null>(null);
+  const issueDetailSeqRef = useRef(0);
   const [topRiskLots, setTopRiskLots] = useState<RiskLotView[]>([]);
   const [riskLotsLoading, setRiskLotsLoading] = useState(true);
   const [riskTopPage, setRiskTopPage] = useState(1);
@@ -367,6 +369,40 @@ export default function MainPage() {
 
   const handleOpenLotDetail = (lot: RiskLotView) => {
     setSelectedLot(lot);
+    setIssueAnalysis(null);
+    setIssueAnalysisError(null);
+    setIssueAnalysisLoading(true);
+    const seq = ++issueDetailSeqRef.current;
+    void (async () => {
+      try {
+        const { data: listData } = await issueApi.list({ lotId: lot.id });
+        const first = listData.issues[0];
+        if (!first) {
+          if (seq !== issueDetailSeqRef.current) return;
+          setIssueAnalysis(null);
+          setIssueAnalysisError('해당 LOT의 이슈가 없습니다.');
+          return;
+        }
+        const { data: detailData } = await issueApi.getById(first.issueId);
+        if (seq !== issueDetailSeqRef.current) return;
+        setIssueAnalysis(issueDetailToAnalysisModel(detailData.issue));
+        setIssueAnalysisError(null);
+      } catch (error) {
+        if (seq !== issueDetailSeqRef.current) return;
+        setIssueAnalysis(null);
+        setIssueAnalysisError(getApiErrorMessage(error, '이슈 상세 분석을 불러오지 못했습니다.'));
+      } finally {
+        if (seq === issueDetailSeqRef.current) setIssueAnalysisLoading(false);
+      }
+    })();
+  };
+
+  const handleCloseLotDetail = () => {
+    issueDetailSeqRef.current += 1;
+    setSelectedLot(null);
+    setIssueAnalysis(null);
+    setIssueAnalysisError(null);
+    setIssueAnalysisLoading(false);
   };
   const cardClass = isDark
     ? 'min-w-0 rounded-xl border border-slate-700 bg-slate-800 shadow-sm'
@@ -558,7 +594,7 @@ export default function MainPage() {
                         <button
                           type="button"
                           className={tableDetailBtnClass}
-                          aria-label={`${lot.id} 상세 공정 데이터 보기`}
+                          aria-label={`${lot.id} 이슈 상세 분석 보기`}
                           onClick={() => handleOpenLotDetail(lot)}
                         >
                           상세보기
@@ -672,62 +708,21 @@ export default function MainPage() {
 
       <ToastStack toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
 
-      <Modal open={!!selectedLot} title="LOT 상세 공정 데이터" onClose={() => setSelectedLot(null)}>
-        {selectedLot ? (
-          <div className={`space-y-4 text-sm ${isDark ? 'text-slate-200' : ''}`}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <div className="text-xs text-slate-500">LOT</div>
-                <div className={`font-bold break-all ${isDark ? 'text-slate-100' : ''}`}>
-                  {selectedLot.id}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">위험등급</div>
-                <span className={riskGradeClass(selectedLot.status)}>{selectedLot.status}</span>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">일시</div>
-                <div className={`font-semibold ${isDark ? 'text-slate-100' : ''}`}>
-                  {selectedLot.record.date} {selectedLot.record.hour}
-                </div>
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-500">위험 원인</div>
-              <div
-                className={`mt-1 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
-              >
-                {selectedLot.riskReason}
-              </div>
-            </div>
-            <div
-              className={`grid grid-cols-2 gap-3 rounded-xl p-3 ${
-                isDark ? 'bg-slate-900' : 'bg-slate-50'
-              }`}
-            >
-              {[
-                ['소성온도', `${selectedLot.record.sintering_temp} ℃`],
-                ['공정시간', `${selectedLot.record.process_time} min`],
-                ['습도', `${selectedLot.record.humidity} %`],
-                ['탱크 압력', `${selectedLot.record.tank_pressure} bar`],
-                ['리튬 투입량', `${selectedLot.record.lithium_input}`],
-                ['첨가제 비율', `${selectedLot.record.additive_ratio} %`],
-                ['금속 불순물', `${selectedLot.record.metal_impurity}`],
-                ['품질 불량', selectedLot.record.quality_defect === 1 ? 'Yes' : 'No'],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <div className="text-[11px] text-slate-500">{label}</div>
-                  <div
-                    className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-                  >
-                    {value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+      <Modal open={!!selectedLot} title="이슈 상세 분석" onClose={handleCloseLotDetail} wide>
+        {issueAnalysisLoading ? (
+          <p className={`py-10 text-center text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            불러오는 중…
+          </p>
+        ) : issueAnalysisError ? (
+          <p className={`py-10 text-center text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            {issueAnalysisError}
+          </p>
+        ) : (
+          <IssueDetailAnalysis
+            issue={issueAnalysis}
+            emptyMessage="해당 LOT의 이슈가 없습니다."
+          />
+        )}
       </Modal>
 
     </div>

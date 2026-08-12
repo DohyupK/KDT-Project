@@ -321,25 +321,116 @@ export async function importLotsFromCsv(csvPath?: string): Promise<{ imported: n
   return { imported, path: filePath }
 }
 
+/** Trailing LOT count shown on detail I-charts (must cover longest Nelson window: 15). */
+export const SPC_DETAIL_CHART_WINDOW = 30
+/** Fallback live recompute: enough complete priors for Nelson 15 + chart 30. */
+export const SPC_DETAIL_HISTORY_LIMIT = 50
+
+export type SpcChartMetric = {
+  key: SpcParamKey
+  label: string
+  status: string
+  currentValue: number
+  centerLine: number
+  upperControlLimit: number
+  lowerControlLimit: number
+  violatedRules: Array<{ rule: number; description: string }>
+  data: Array<{ timestamp: string; value: number }>
+}
+
+export type SpcChartSnapshot = { metrics: SpcChartMetric[] }
+
+export function buildSpcChartSnapshot(
+  history: Record<SpcParamKey, number[]>,
+  timestamps: string[],
+): SpcChartSnapshot {
+  if (timestamps.length === 0) return { metrics: [] }
+  const evaled = evaluateLotSpc(history)
+  const limits = loadPhase1Limits()
+  const window = SPC_DETAIL_CHART_WINDOW
+  const paramsToShow = evaled.params.filter((p) => p.status === '이탈' || p.status === '주의')
+  return {
+    metrics: paramsToShow.map((p) => {
+      const series = history[p.key]
+      const start = Math.max(0, series.length - window)
+      const lim = limits[p.key]
+      return {
+        key: p.key,
+        label: lim.label,
+        status: p.status,
+        currentValue: p.value,
+        centerLine: lim.CL_I,
+        upperControlLimit: lim.UCL_I,
+        lowerControlLimit: lim.LCL_I,
+        violatedRules: p.violatedRules,
+        data: series.slice(start).map((value, i) => ({
+          timestamp: timestamps[start + i] || String(start + i),
+          value,
+        })),
+      }
+    }),
+  }
+}
+
+export function parseSpcChartSnapshot(raw: unknown): SpcChartSnapshot | null {
+  if (raw == null || raw === '') return null
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const metrics = (parsed as { metrics?: unknown }).metrics
+  if (!Array.isArray(metrics)) return null
+  return { metrics: metrics as SpcChartMetric[] }
+}
+
 async function upsertAnalysisScore(
   lotId: string,
   scored: Awaited<ReturnType<typeof scoreLotWithAi>>,
+  spcChart?: SpcChartSnapshot | null,
 ) {
+  const chartJson = spcChart === undefined ? undefined : JSON.stringify(spcChart ?? { metrics: [] })
+  if (chartJson === undefined) {
+    await query(
+      `INSERT INTO analysis_lots (
+        lot_id, probability, spc_status, risk_level, risk_reason
+      ) VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        probability = VALUES(probability),
+        spc_status = VALUES(spc_status),
+        risk_level = VALUES(risk_level),
+        risk_reason = VALUES(risk_reason)`,
+      [
+        lotId,
+        scored.probability,
+        scored.spc_status,
+        scored.risk_level,
+        scored.risk_reason,
+      ],
+    )
+    return
+  }
   await query(
     `INSERT INTO analysis_lots (
-      lot_id, probability, spc_status, risk_level, risk_reason
-    ) VALUES (?, ?, ?, ?, ?)
+      lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json
+    ) VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       probability = VALUES(probability),
       spc_status = VALUES(spc_status),
       risk_level = VALUES(risk_level),
-      risk_reason = VALUES(risk_reason)`,
+      risk_reason = VALUES(risk_reason),
+      spc_chart_json = VALUES(spc_chart_json)`,
     [
       lotId,
       scored.probability,
       scored.spc_status,
       scored.risk_level,
       scored.risk_reason,
+      chartJson,
     ],
   )
 }
@@ -352,6 +443,7 @@ async function updateLotScore(
     qualityDefect: number
     features: ProcessFeatures
   },
+  spcChart?: SpcChartSnapshot | null,
 ) {
   if (seed) {
     const f = seed.features
@@ -406,7 +498,7 @@ async function updateLotScore(
       scored.spc_status,
     ],
   )
-  await upsertAnalysisScore(lotId, scored)
+  await upsertAnalysisScore(lotId, scored, spcChart)
 }
 
 /** Latest N lot ids by production time (for targeted rescoring). */
@@ -493,6 +585,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   )
 
   const history = emptySpcHistory()
+  const timestamps: string[] = []
   let scored = 0
   let failed = 0
   const errors: string[] = []
@@ -500,6 +593,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   type Job = {
     row: LotScoreSourceRow
     histSnapshot: Record<SpcParamKey, number[]>
+    chartSnapshot: SpcChartSnapshot
   }
   const jobs: Job[] = []
 
@@ -513,6 +607,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
     const complete = isProcessComplete(bag)
     if (complete) {
       for (const k of SPC_PARAM_KEYS) history[k].push(Number(features[k]))
+      timestamps.push(formatDateTime(row.recorded_at))
     }
 
     const inFilter = idFilter == null || idFilter.has(row.lot_id)
@@ -530,13 +625,16 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
     for (const k of SPC_PARAM_KEYS) {
       histSnapshot[k] = complete ? history[k].slice() : []
     }
-    jobs.push({ row, histSnapshot })
+    const chartSnapshot = complete
+      ? buildSpcChartSnapshot(histSnapshot, timestamps)
+      : { metrics: [] }
+    jobs.push({ row, histSnapshot, chartSnapshot })
   }
 
   for (let i = 0; i < jobs.length; i += concurrency) {
     const chunk = jobs.slice(i, i + concurrency)
     const results = await Promise.allSettled(
-      chunk.map(async ({ row, histSnapshot }) => {
+      chunk.map(async ({ row, histSnapshot, chartSnapshot }) => {
         const features = lotRowToFeatures(row)
         const scoredRow = await scoreLotWithAi(
           features,
@@ -544,11 +642,16 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
           histSnapshot,
           features,
         )
-        await updateLotScore(row.lot_id, scoredRow, {
-          recordedAt: formatDateTime(row.recorded_at),
-          qualityDefect: Number(row.quality_defect) === 1 ? 1 : 0,
-          features,
-        })
+        await updateLotScore(
+          row.lot_id,
+          scoredRow,
+          {
+            recordedAt: formatDateTime(row.recorded_at),
+            qualityDefect: Number(row.quality_defect) === 1 ? 1 : 0,
+            features,
+          },
+          chartSnapshot,
+        )
         return row.lot_id
       }),
     )
@@ -577,10 +680,17 @@ export type RefreshSpcRiskOptions = {
 /**
  * Recompute SPC + risk_level from existing AI probability/residual (no ai-service call).
  * Fixes stale analysis_lots.spc_status after prior-lot backfill, and mirrors judgment_lots.spc.
+ * Also writes analysis_lots.spc_chart_json (dashboard I-chart snapshot).
  */
 export async function refreshSpcAndRiskScores(
   options: RefreshSpcRiskOptions = {},
-): Promise<{ updated: number; unchanged: number; skipped: number; syncedJudgment: number }> {
+): Promise<{
+  updated: number
+  unchanged: number
+  skipped: number
+  syncedJudgment: number
+  chartsWritten: number
+}> {
   const idFilter =
     options.lotIds != null && options.lotIds.length > 0
       ? new Set(options.lotIds.map(String))
@@ -614,10 +724,12 @@ export async function refreshSpcAndRiskScores(
   )
 
   const history = emptySpcHistory()
+  const timestamps: string[] = []
   let updated = 0
   let unchanged = 0
   let skipped = 0
   let syncedJudgment = 0
+  let chartsWritten = 0
   const targets = idFilter
     ? lotRows.filter((r) => idFilter.has(r.lot_id) && r.lot_id !== 'LOT-SYS-HANDOVER')
     : lotRows.filter((r) => r.lot_id !== 'LOT-SYS-HANDOVER')
@@ -631,13 +743,28 @@ export async function refreshSpcAndRiskScores(
     const complete = isProcessComplete(bag)
     if (complete) {
       for (const k of SPC_PARAM_KEYS) history[k].push(Number(features[k]))
+      timestamps.push(formatDateTime(row.recorded_at))
     }
 
     if (row.lot_id === 'LOT-SYS-HANDOVER') continue
     if (idFilter != null && !idFilter.has(row.lot_id)) continue
 
+    const histSnapshot = {} as Record<SpcParamKey, number[]>
+    for (const k of SPC_PARAM_KEYS) {
+      histSnapshot[k] = complete ? history[k].slice() : []
+    }
+    const chartSnapshot = complete
+      ? buildSpcChartSnapshot(histSnapshot, timestamps)
+      : { metrics: [] }
+    const chartJson = JSON.stringify(chartSnapshot)
+
     const prob = row.a_probability != null ? Number(row.a_probability) : null
     if (prob == null || !Number.isFinite(prob)) {
+      await query(`UPDATE analysis_lots SET spc_chart_json = ? WHERE lot_id = ?`, [
+        chartJson,
+        row.lot_id,
+      ])
+      if (row.a_spc != null || row.a_risk != null) chartsWritten++
       skipped++
       done++
       options.onProgress?.(done, total, row.lot_id)
@@ -648,10 +775,6 @@ export async function refreshSpcAndRiskScores(
       row.j_residual != null && Number.isFinite(Number(row.j_residual))
         ? Number(row.j_residual)
         : 0
-    const histSnapshot = {} as Record<SpcParamKey, number[]>
-    for (const k of SPC_PARAM_KEYS) {
-      histSnapshot[k] = complete ? history[k].slice() : []
-    }
     const spc = evaluateSpcForFeatures(features, histSnapshot)
     const scored = combineLotScore({
       defectProb: prob,
@@ -668,23 +791,31 @@ export async function refreshSpcAndRiskScores(
 
     if (spcChanged || riskChanged) {
       await query(
-        `INSERT INTO analysis_lots (lot_id, probability, spc_status, risk_level, risk_reason)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO analysis_lots (lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            spc_status = VALUES(spc_status),
            risk_level = VALUES(risk_level),
-           risk_reason = VALUES(risk_reason)`,
+           risk_reason = VALUES(risk_reason),
+           spc_chart_json = VALUES(spc_chart_json)`,
         [
           row.lot_id,
           prob,
           scored.spc_status,
           scored.risk_level,
           scored.risk_reason,
+          chartJson,
         ],
       )
       updated++
+      chartsWritten++
     } else {
+      await query(`UPDATE analysis_lots SET spc_chart_json = ? WHERE lot_id = ?`, [
+        chartJson,
+        row.lot_id,
+      ])
       unchanged++
+      chartsWritten++
     }
 
     if (row.j_spc !== scored.spc_status) {
@@ -699,7 +830,7 @@ export async function refreshSpcAndRiskScores(
     options.onProgress?.(done, total, row.lot_id)
   }
 
-  return { updated, unchanged, skipped, syncedJudgment }
+  return { updated, unchanged, skipped, syncedJudgment, chartsWritten }
 }
 
 const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.metal_impurity IS NOT NULL
@@ -756,24 +887,11 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
   return created
 }
 
-/** Trailing LOT count shown on detail I-charts (must cover longest Nelson window: 15). */
-export const SPC_DETAIL_CHART_WINDOW = 30
-
 /** SPC series + per-param status for LOT detail (recomputed from Phase I limits). */
 export async function getLotSpcDetail(lotId: string): Promise<{
   lotId: string
   spcStatus: string
-  metrics: Array<{
-    key: SpcParamKey
-    label: string
-    status: string
-    currentValue: number
-    centerLine: number
-    upperControlLimit: number
-    lowerControlLimit: number
-    violatedRules: Array<{ rule: number; description: string }>
-    data: Array<{ timestamp: string; value: number }>
-  }>
+  metrics: SpcChartMetric[]
 }> {
   const targetRows = await query<LotRow[]>(`${LOT_SELECT} WHERE l.id = ? LIMIT 1`, [lotId])
   if (!targetRows[0]) throw new AppError(404, 'LOT를 찾을 수 없습니다.')
@@ -785,12 +903,15 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     return { lotId, spcStatus: '-', metrics: [] }
   }
 
-  const prior = await query<LotRow[]>(
+  const priorDesc = await query<LotRow[]>(
     `${LOT_SELECT}
-     WHERE l.\`timestamp\` < ? OR (l.\`timestamp\` = ? AND l.id <= ?)
-     ORDER BY l.\`timestamp\` ASC, l.id ASC`,
-    [target.recorded_at, target.recorded_at, lotId],
+     WHERE (${COMPLETE_PROCESS_SQL_L})
+       AND (l.\`timestamp\` < ? OR (l.\`timestamp\` = ? AND l.id <= ?))
+     ORDER BY l.\`timestamp\` DESC, l.id DESC
+     LIMIT ?`,
+    [target.recorded_at, target.recorded_at, lotId, SPC_DETAIL_HISTORY_LIMIT],
   )
+  const prior = priorDesc.slice().reverse()
 
   const history = emptySpcHistory()
   const timestamps: string[] = []
@@ -806,33 +927,9 @@ export async function getLotSpcDetail(lotId: string): Promise<{
   }
 
   const evaled = evaluateLotSpc(history)
-  const limits = loadPhase1Limits()
-  const window = SPC_DETAIL_CHART_WINDOW
-  const paramsToShow = evaled.params.filter((p) => p.status === '이탈' || p.status === '주의')
-  const metrics = paramsToShow.map((p) => {
-    const series = history[p.key]
-    const start = Math.max(0, series.length - window)
-    const data = series.slice(start).map((value, i) => ({
-      timestamp: timestamps[start + i] || String(start + i),
-      value,
-    }))
-    const lim = limits[p.key]
-    return {
-      key: p.key,
-      label: lim.label,
-      status: p.status,
-      currentValue: p.value,
-      centerLine: lim.CL_I,
-      upperControlLimit: lim.UCL_I,
-      lowerControlLimit: lim.LCL_I,
-      violatedRules: p.violatedRules,
-      data,
-    }
-  })
-
   return {
     lotId,
     spcStatus: evaled.status,
-    metrics,
+    metrics: buildSpcChartSnapshot(history, timestamps).metrics,
   }
 }

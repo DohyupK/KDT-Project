@@ -101,9 +101,11 @@ npm run rollback:score-lots
 # ai-service(:8800) ready 후 lots 공정 → analysis_lots 재채점
 npm run score:lots
 npm run score:lots -- --limit=100 --concurrency=4
-# SPC+위험등급만 재계산 (AI 없음 · stale SPC 교정)
+# SPC+위험등급만 재계산 (AI 없음 · stale SPC 교정) + analysis_lots.spc_chart_json 백필
 npm run refresh:spc-risk
 npm run refresh:spc-risk -- --lot=LOT-YYYYMMDD-xxxxx
+# analysis_lots.defect_prob 레거시 컬럼만 제거 (probability로 NULL-fill 후 DROP)
+npm run migrate:analysis-drop-defect-prob
 # QC CSV로 lots 재적재 (residual 제외 · 자식 id 유지)
 npm run reload:lots-qc
 # SPC_LOT → lots 미러 + 신규/미채점 score (judgment NULL만 AI)
@@ -117,7 +119,7 @@ npm run sync:spc-lots -- --skip-score
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번 유지
 - **채점·판정 쓰기 (운영):**
   - 입력: `lots` 공정값 → ai-service **`Promise.all`로 3헤드 병렬** (`/predict` · `/predict-capacity` · `/predict-residual`) — 학습 순서(clf→reg→residual)와 무관
-  - `analysis_lots`: AI+SPC 점수 **UPSERT** (`probability`·`spc_status`·`risk_level`·`risk_reason`; 재채점 시 갱신)
+  - `analysis_lots`: AI+SPC 점수 **UPSERT** (`probability`·`spc_status`·`risk_level`·`risk_reason`·`spc_chart_json`; 재채점/SPC refresh 시 갱신)
   - `judgment_lots`: `quality_defect`·`capacity`·`residual_li`·`probability`는 **NULL일 때만** 채움 (`COALESCE` · 이미 값이 있으면 유지)
   - `probability` ← `/predict` 앙상블 **불량확률** (0~1) · `quality_defect` ← 같은 응답의 임계값 판정(0/1) · 용량·잔류는 각 회귀 헤드
   - 모델 원리·임계값: [`../ai-service/README.md`](../ai-service/README.md) 「추론·불량확률」
