@@ -22,6 +22,13 @@ export const getDailyKpi = asyncHandler(async (_req, res) => {
   res.status(200).json(kpi)
 })
 
+export const getQCost = asyncHandler(async (req, res) => {
+  const from = req.query.from != null ? String(req.query.from) : undefined
+  const to = req.query.to != null ? String(req.query.to) : undefined
+  const summary = await lotService.getQCostSummary({ from, to })
+  res.status(200).json(summary)
+})
+
 export const getLot = asyncHandler(async (req, res) => {
   const lot = await lotService.getLotById(String(req.params.lotId))
   res.status(200).json({ lot })

@@ -97,6 +97,9 @@ export const NAV_MENUS = [
   { name: 'Setting', icon: Settings, path: '/setting' },
 ] as const
 
+/** Sidebar-only hide; route and page stay available (e.g. direct URL). */
+const SIDEBAR_HIDDEN_PATHS = new Set<string>(['/security'])
+
 const UI_COPY = {
   ko: {
     brandLine1: '양극재 품질 AI',
@@ -455,7 +458,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <ul className="flex flex-1 flex-col gap-2">
-            {NAV_MENUS.map((menu) => {
+            {NAV_MENUS.filter((menu) => !SIDEBAR_HIDDEN_PATHS.has(menu.path)).map((menu) => {
               const Icon = menu.icon
               const active = pathname === menu.path
               const label = copy.menus[menu.path] ?? menu.name

@@ -57,16 +57,25 @@ type UndoSnack = {
 
 const UNDO_SECONDS = 5
 
+const USAGE_GUIDE_TEXT =
+  '사용 안내입니다.\n\n' +
+  '1. Main 화면 「위험 LOT Top」에서 LOT 행을 클릭하면 챗봇에 센서가 연결되고 O/X·용량·잔여 리튬 진단이 자동으로 시작됩니다.\n' +
+  '2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n' +
+  '3. What-if 제안이 나오면 「제안 승인」→ 5초 안 「실행 취소」가능.\n' +
+  '4. 공정 한계치(온도·습도)는 Setting에서 바꿉니다.\n' +
+  '5. 보안·기밀은 /security 탭을 이용해 주세요.'
+
 const WELCOME_GENERAL: ChatMessage = {
   id: 1,
   role: 'ai',
   text:
-    '안녕하세요. AI 공정 지원 챗봇입니다.\n\n진단: Main 「위험 LOT Top」에서 LOT 행을 클릭하면 자동으로 O/X 진단이 시작됩니다.\n시험: 「샘플 LOT 진단」칩을 눌러도 됩니다.\n안내: 「챗봇 안내」칩 · 보안은 헤더의 「보안」모드를 이용해 주세요.',
+    '안녕하세요, YAHO입니다.\n\n공정 진단·분석을 도와드릴게요. 궁금한 점을 편하게 물어보세요.',
 }
 
 type ChatMode = 'general' | 'secure'
 
 const LOCAL_THREADS_KEY = 'kdt_general_chat_recent_threads'
+const DELETED_THREADS_KEY = 'kdt_general_chat_deleted_threads'
 const LOCAL_THREADS_MAX = 20
 
 type LocalStoredMsg = {
@@ -116,6 +125,32 @@ function upsertLocalThread(thread: LocalThreadStore) {
 
 function getLocalThread(id: string): LocalThreadStore | null {
   return readLocalThreads().find((t) => t.id === id) ?? null
+}
+
+function readDeletedThreadIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = window.localStorage.getItem(DELETED_THREADS_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function markThreadDeleted(id: string) {
+  if (typeof window === 'undefined') return
+  const next = readDeletedThreadIds()
+  next.add(id)
+  window.localStorage.setItem(
+    DELETED_THREADS_KEY,
+    JSON.stringify(Array.from(next).slice(-100)),
+  )
+}
+
+function deleteLocalThread(id: string) {
+  writeLocalThreads(readLocalThreads().filter((t) => t.id !== id))
 }
 
 function formatThreadTime(iso?: string | null): string {
@@ -175,10 +210,23 @@ export default function GlobalChatbot() {
         byId.set(t.id, { ...existing, title: t.title })
       }
     }
-    const merged = Array.from(byId.values()).sort((a, b) =>
-      (b.updated_at || '').localeCompare(a.updated_at || ''),
-    )
+    const deleted = readDeletedThreadIds()
+    const merged = Array.from(byId.values())
+      .filter((t) => !deleted.has(t.id))
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
     setThreads(merged.slice(0, LOCAL_THREADS_MAX))
+  }
+
+  const deleteThread = (threadId: string) => {
+    if (pending) return
+    deleteLocalThread(threadId)
+    markThreadDeleted(threadId)
+    setThreads((prev) => prev.filter((t) => t.id !== threadId))
+    if (activeThreadId === threadId || getChatThreadId() === threadId) {
+      startNewThread()
+      return
+    }
+    void refreshThreads()
   }
 
   const applyStoredMessages = (rows: LocalStoredMsg[]) => {
@@ -591,8 +639,8 @@ export default function GlobalChatbot() {
 
   const chips: { label: string; message: string; features: ChatFeatures | null; localHelp?: boolean }[] = [
     {
-      label: '챗봇 안내',
-      message: '무엇을 도와드릴 수 있나요?',
+      label: '사용법',
+      message: '사용법을 알려주세요.',
       features: null,
       localHelp: true,
     },
@@ -603,12 +651,13 @@ export default function GlobalChatbot() {
     },
   ]
 
-  const HELP_TEXT =
-    '사용 안내입니다.\n\n' +
-    '1. 「샘플 LOT 진단」칩으로 진단을 시험할 수 있습니다.\n' +
-    '2. What-if 제안이 나오면 「제안 승인」후 5초 안 「실행 취소」가능.\n' +
-    '3. 공정 한계치는 Setting에서 변경합니다.\n' +
-    '4. 보안·기밀은 /security 탭을 이용해 주세요.'
+  const showUsageGuide = () => {
+    idRef.current += 1
+    setMessages((prev) => [
+      ...prev,
+      { id: idRef.current, role: 'ai', text: USAGE_GUIDE_TEXT, mode: 'template' },
+    ])
+  }
 
   const onChip = (q: (typeof chips)[number]) => {
     if (q.localHelp) {
@@ -617,11 +666,7 @@ export default function GlobalChatbot() {
         ...prev,
         { id: idRef.current, role: 'user', text: q.message },
       ])
-      idRef.current += 1
-      setMessages((prev) => [
-        ...prev,
-        { id: idRef.current, role: 'ai', text: HELP_TEXT, mode: 'template' },
-      ])
+      showUsageGuide()
       return
     }
     void send(q.message, q.features)
@@ -666,7 +711,7 @@ export default function GlobalChatbot() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <strong className="truncate text-base font-bold text-slate-900">
-                      공정 지원 챗봇
+                      YAHO! AI 챗봇
                     </strong>
                     <span
                       className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -678,11 +723,6 @@ export default function GlobalChatbot() {
                       {chatMode === 'secure' ? '보안 상담' : '일반 상담'}
                     </span>
                   </div>
-                  <p className="truncate text-xs text-slate-500">
-                    {chatMode === 'secure'
-                      ? '보안 문서 · 로컬 vLLM'
-                      : '일반 상담 · Groq/Gemini'}
-                  </p>
                 </div>
                 <button
                   type="button"
@@ -777,29 +817,46 @@ export default function GlobalChatbot() {
                     </span>
                     <span className="text-[10px] text-slate-400">{threads.length}개</span>
                   </div>
-                  <div className="flex max-h-24 gap-1 overflow-x-auto px-2 py-1.5">
+                  <div className="flex max-h-24 gap-1.5 overflow-x-auto px-2 py-1.5">
                     {threads.map((t) => {
                       const label = (t.title && t.title.trim()) || t.id.slice(0, 8)
                       const active = t.id === activeThreadId
                       return (
-                        <button
+                        <div
                           key={t.id}
-                          type="button"
-                          disabled={pending}
-                          onClick={() => void selectThread(t.id)}
-                          className={`max-w-[140px] shrink-0 truncate rounded-full px-2.5 py-1 text-[10px] ${
-                            active
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          className={`inline-flex max-w-[168px] shrink-0 items-center gap-0.5 rounded-full pl-2.5 ${
+                            active ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
                           }`}
-                          title={
-                            t.updated_at
-                              ? `${label} · ${formatThreadTime(t.updated_at)}`
-                              : label
-                          }
                         >
-                          {label}
-                        </button>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => void selectThread(t.id)}
+                            className={`min-w-0 truncate py-1 text-[10px] ${
+                              active ? 'text-white' : 'hover:text-slate-900'
+                            }`}
+                            title={
+                              t.updated_at
+                                ? `${label} · ${formatThreadTime(t.updated_at)}`
+                                : label
+                            }
+                          >
+                            {label}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            aria-label={`${label} 대화 삭제`}
+                            onClick={() => deleteThread(t.id)}
+                            className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                              active
+                                ? 'text-blue-100 hover:bg-blue-500 hover:text-white'
+                                : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                            }`}
+                          >
+                            <X size={10} aria-hidden />
+                          </button>
+                        </div>
                       )
                     })}
                   </div>
@@ -811,18 +868,6 @@ export default function GlobalChatbot() {
                   </span>
                 </div>
               )}
-              {selectedLotId ? (
-                <div className="flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-1 text-[11px] text-slate-600">
-                  <span className="truncate">연결 LOT: {selectedLotId}</span>
-                  <button
-                    type="button"
-                    onClick={clearLot}
-                    className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] hover:bg-slate-50"
-                  >
-                    해제
-                  </button>
-                </div>
-              ) : null}
 
               <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto bg-slate-50/60 px-4 py-4">
                 {messages.map((m) => (
@@ -991,11 +1036,7 @@ export default function GlobalChatbot() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKeyDown}
                     disabled={pending}
-                    placeholder={
-                      selectedLotId
-                        ? '연결된 LOT 기준으로 질문…'
-                        : '질문을 입력하세요.'
-                    }
+                    placeholder="질문을 입력하세요."
                     className="h-11 min-h-[44px] flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50"
                   />
                   <button

@@ -39,7 +39,7 @@ export function createApp() {
       health: '/api/health',
       auth: '/api/auth',
       auth_settings: 'GET|PUT /api/auth/settings · POST /api/auth/settings/reset',
-      lots: 'GET /api/lots/risk-top · GET /api/lots/daily-kpi · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
+      lots: 'GET /api/lots/risk-top · GET /api/lots/daily-kpi · GET /api/lots/q-cost · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
       dashboard:
         'GET /api/dashboard/lot-risks · /lot-risks/:lotId · /production-trend · /production-daily · /lots.csv · /feature-importance',
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
