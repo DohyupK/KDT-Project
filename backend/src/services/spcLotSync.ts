@@ -87,19 +87,18 @@ export async function syncSpcLotsToApp(
   running = true
 
   let scoreIds: string[] = []
-  let result: { scored: number; failed: number; errors: string[] } = {
-    scored: 0,
-    failed: 0,
-    errors: [],
-  }
+  let skipRiskReason = false
+  let scored = 0
+  let failed = 0
   let issuesCreated = 0
   let insertedCount = 0
-  let skipRiskReason = false
+  let reasonsUpdated = 0
+  const errors: string[] = []
+  const quiet = opts.quiet
 
   try {
     const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16)
     const unscoredLimit = Math.min(Math.max(opts.unscoredLimit ?? 100, 1), 500)
-    const quiet = opts.quiet
 
     const missing = await query<SpcRow[]>(
       `SELECT s.lot_id, s.produced_at, s.d50, s.d90, s.metal_impurity, s.lithium_input,
@@ -168,21 +167,18 @@ export async function syncSpcLotsToApp(
       ),
     ]
 
-    let scored = 0
-    let failed = 0
-    let reasonsUpdated = 0
-    const errors: string[] = []
-
     if (scoreIds.length > 0) {
       log(quiet, '[spc-sync] score_start', {
         lotIds: scoreIds.length,
         inserted: inserted.length,
-        unscored: unscoredRows.length,
+        unscored: picked.rows.length,
+        queue_a: picked.reason.queue_a,
+        queue_b: picked.reason.queue_b,
         concurrency,
       })
       const started = Date.now()
       let lastLog = 0
-      const result = await lotService.scoreAllLots({
+      const scoreResult = await lotService.scoreAllLots({
         lotIds: scoreIds,
         concurrency,
         onProgress: (done, total, lotId) => {
@@ -196,46 +192,45 @@ export async function syncSpcLotsToApp(
       log(
         quiet,
         '[spc-sync] score_done',
-        JSON.stringify(result),
+        JSON.stringify(scoreResult),
         `elapsed_ms=${Date.now() - started}`,
       )
-      scored = result.scored
-      failed = result.failed
-      errors.push(...result.errors)
-
-      try {
-        const reasonResult = await fillRiskReasonsForLots(scoreIds, {
-          concurrency: 2,
-          quiet,
-        })
-        reasonsUpdated = reasonResult.updated
-        log(quiet, '[spc-sync] risk_reasons', reasonResult)
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        console.error('[spc-sync] risk_reason_failed', detail)
-        errors.push(`risk_reason: ${detail}`)
-      }
+      scored = scoreResult.scored
+      failed = scoreResult.failed
+      errors.push(...scoreResult.errors)
     }
 
     // Always seed: already-scored 심각 lots must still get open issues.
-    const issuesCreated = await lotService.ensureIssuesForRiskLots()
+    issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
   } finally {
     running = false
   }
 
-    return {
-      skipped: false,
-      table,
-      inserted: inserted.length,
-      scored,
-      failed,
-      issuesCreated,
-      reasonsUpdated,
-      errors,
+  if (!skipRiskReason && scoreIds.length > 0) {
+    try {
+      const reasonResult = await fillRiskReasonsForLots(scoreIds, {
+        concurrency: 2,
+        quiet,
+      })
+      reasonsUpdated = reasonResult.updated
+      log(quiet, '[spc-sync] risk_reasons', reasonResult)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.error('[spc-sync] risk_reason_failed', detail)
+      errors.push(`risk_reason: ${detail}`)
     }
-  } finally {
-    running = false
+  }
+
+  return {
+    skipped: false,
+    table,
+    inserted: insertedCount,
+    scored,
+    failed,
+    issuesCreated,
+    reasonsUpdated,
+    errors,
   }
 }
 
