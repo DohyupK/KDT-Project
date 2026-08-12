@@ -100,5 +100,6 @@
     "test_pr_auc": 0.7093354358213514,
     "applied_eval_threshold": 0.4
   },
-  "device_mode": "cpu"
+  "device_mode": "cpu",
+  "task": "classification"
 }
