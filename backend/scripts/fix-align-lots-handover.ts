@@ -124,7 +124,6 @@ async function alignAnalysisLots() {
     'scored_at',
     'updated_at',
     'defect_prob',
-    'spc_chart_json',
   ]) {
     set = await colSet('analysis_lots')
     if (set.has(col)) {

@@ -9,6 +9,7 @@ import {
   type IssueDetail as IssueApiDetail,
   type IssueListItem as IssueApiListItem,
 } from '@/api/issueApi';
+import { IssueDetailAnalysis } from '@/components/IssueDetailAnalysis';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
@@ -108,10 +109,6 @@ interface IssueListSectionProps {
   onPageInputChange: (value: string) => void;
   onPageInputSubmit: () => void;
   onSelect: (id: string) => void;
-}
-
-interface DetailAnalysisSectionProps {
-  issue: Issue | null;
 }
 
 interface ManagementSectionProps {
@@ -1613,239 +1610,6 @@ const IssueListSection = ({
   );
 };
 
-function renderHighlightedAnomaly(anomaly: string) {
-  return anomaly;
-}
-
-const DetailAnalysisSection = ({ issue }: DetailAnalysisSectionProps) => {
-  const { isDark } = useUiSettings();
-  const c = getUiColors(isDark);
-
-  if (!issue) {
-    return (
-      <section
-        id="issue-detail-analysis"
-        style={{
-          ...getPanelStyle(c),
-          height: '100%',
-          minHeight: 220,
-          display: 'grid',
-          placeItems: 'center',
-        }}
-      >
-        <div style={{ textAlign: 'center', color: c.slate }}>
-          <div style={{ fontSize: 38, marginBottom: 12 }}>⌁</div>
-          <strong>목록에서 이슈를 선택하면 상세 분석 데이터가 표시됩니다.</strong>
-        </div>
-      </section>
-    );
-  }
-
-  const analysis = issue.analysis;
-  const spcFilter = mapAnalysisSpcToFilter(analysis?.spcStatus ?? issue.listSpcStatus);
-  const risk = analysis?.riskLevel ?? issue.risk;
-  const { pct: probPct, label: probLabel } = formatAnalysisProbability(analysis?.probability ?? null);
-  const defectTone = !analysis || analysis.probability == null
-    ? '미정'
-    : probPct >= 80
-      ? '위험'
-      : probPct >= 40
-        ? '주의'
-        : '양호';
-  const reason = analysis?.riskReason?.trim() || '';
-
-  const fieldRows: Array<{ key: string; label: string; value: string }> = [
-    { key: 'lot_id', label: 'lot_id', value: analysis?.lotId || issue.lot || '—' },
-    { key: 'risk_level', label: 'risk_level', value: risk },
-    {
-      key: 'spc_status',
-      label: 'spc_status',
-      value: analysis?.spcStatus?.trim() || issue.listSpcStatus?.trim() || '—',
-    },
-    {
-      key: 'probability',
-      label: 'probability',
-      value:
-        analysis?.probability == null
-          ? '—'
-          : `${analysis.probability} (${probLabel})`,
-    },
-    {
-      key: 'risk_reason',
-      label: 'risk_reason',
-      value: reason || '—',
-    },
-    {
-      key: 'created_at',
-      label: 'created_at',
-      value: analysis?.createdAt || '—',
-    },
-  ];
-
-  const cardClass = isDark
-    ? 'rounded-xl border border-slate-700 bg-slate-900/40 p-4'
-    : 'rounded-xl border border-slate-200 bg-white p-4';
-  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
-  const strong = isDark ? 'text-slate-100' : 'text-slate-900';
-
-  return (
-    <section id="issue-detail-analysis" style={{ ...getPanelStyle(c), height: '100%' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 12,
-          flexWrap: 'wrap',
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, color: c.navy, fontSize: 19 }}>이슈 상세 분석</h2>
-          <div style={{ marginTop: 6, color: c.slate, fontSize: 13 }}>
-            {issue.id} · {issue.lot} · {issue.createdAt}
-          </div>
-          <div style={{ marginTop: 8, color: c.navy, fontSize: 14, fontWeight: 600 }}>
-            {issue.issueContent}
-          </div>
-          <div style={{ marginTop: 6, color: c.slate, fontSize: 11 }}>
-            소스: analysis_lots (시각화 초안 · 상세 목적은 후속 정의)
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ ...badgeBase, ...riskStyle(risk, isDark) }}>위험도 {risk}</span>
-          <span className={spcStatusBadgeClass(spcFilter, isDark)}>
-            SPC {analysis?.spcStatus?.trim() || spcFilter}
-          </span>
-        </div>
-      </div>
-
-      {!analysis ? (
-        <div
-          className={`rounded-xl border px-4 py-10 text-center text-sm ${
-            isDark
-              ? 'border-slate-700 bg-slate-900/40 text-slate-400'
-              : 'border-slate-200 bg-slate-50 text-slate-500'
-          }`}
-        >
-          <p className="m-0 font-medium">analysis_lots 행이 없거나 아직 불러오는 중입니다.</p>
-          <p className="mt-2 mb-0 text-xs">이슈를 다시 선택하거나 LOT 채점 데이터를 확인하세요.</p>
-        </div>
-      ) : (
-        <>
-          <div
-            style={{
-              border: isDark ? '1px solid #b45309' : '1px solid #fed7aa',
-              borderLeft: `4px solid ${c.amber}`,
-              borderRadius: 12,
-              background: c.amberSoft,
-              padding: 15,
-              color: isDark ? '#fcd34d' : '#92400e',
-              fontSize: 14,
-              lineHeight: 1.65,
-              marginBottom: 16,
-            }}
-          >
-            <strong>risk_reason</strong>
-            <div style={{ marginTop: 4 }}>
-              {reason ? renderHighlightedAnomaly(reason) : '위험 원인 문구가 비어 있습니다.'}
-            </div>
-          </div>
-
-          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className={cardClass}>
-              <div className={`text-xs font-semibold ${muted}`}>probability</div>
-              <div
-                className={`mt-1 text-2xl font-bold tabular-nums ${
-                  defectTone === '위험'
-                    ? 'text-rose-600'
-                    : defectTone === '주의'
-                      ? 'text-amber-600'
-                      : defectTone === '양호'
-                        ? 'text-emerald-600'
-                        : strong
-                }`}
-              >
-                {probLabel}
-              </div>
-              <div
-                className={`mt-2 h-2 overflow-hidden rounded-full ${
-                  isDark ? 'bg-slate-800' : 'bg-slate-100'
-                }`}
-              >
-                <div
-                  className={`h-full rounded-full transition-[width] ${
-                    defectTone === '위험'
-                      ? 'bg-rose-500'
-                      : defectTone === '주의'
-                        ? 'bg-amber-500'
-                        : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${probPct}%` }}
-                />
-              </div>
-              <p className={`mt-1 text-xs ${muted}`}>불량 확률(0~1 → %)</p>
-            </div>
-
-            <div className={cardClass}>
-              <div className={`text-xs font-semibold ${muted}`}>risk_level</div>
-              <div className="mt-2">
-                <span style={{ ...badgeBase, ...riskStyle(risk, isDark), fontSize: 14 }}>
-                  {risk}
-                </span>
-              </div>
-              <p className={`mt-3 text-xs ${muted}`}>analysis_lots.risk_level</p>
-            </div>
-
-            <div className={cardClass}>
-              <div className={`text-xs font-semibold ${muted}`}>spc_status</div>
-              <div className="mt-2">
-                <span className={spcStatusBadgeClass(spcFilter, isDark)}>
-                  {analysis.spcStatus?.trim() || '—'}
-                </span>
-              </div>
-              <p className={`mt-3 text-xs ${muted}`}>analysis_lots.spc_status</p>
-            </div>
-          </div>
-
-          <div
-            className={`overflow-hidden rounded-xl border ${
-              isDark ? 'border-slate-700' : 'border-slate-200'
-            }`}
-          >
-            <div
-              className={`border-b px-4 py-2.5 text-sm font-semibold ${
-                isDark
-                  ? 'border-slate-700 bg-slate-900/70 text-slate-200'
-                  : 'border-slate-200 bg-slate-50 text-slate-800'
-              }`}
-            >
-              analysis_lots 필드
-            </div>
-            <dl className="m-0">
-              {fieldRows.map((row, index) => (
-                <div
-                  key={row.key}
-                  className={`grid grid-cols-[140px_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${
-                    index > 0
-                      ? isDark
-                        ? 'border-t border-slate-700'
-                        : 'border-t border-slate-200'
-                      : ''
-                  }`}
-                >
-                  <dt className={`font-mono text-xs font-semibold ${muted}`}>{row.label}</dt>
-                  <dd className={`m-0 break-words ${strong}`}>{row.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        </>
-      )}
-    </section>
-  );
-};
-
 const ManagementSection = ({
   issue,
   form,
@@ -2335,7 +2099,21 @@ export default function IssuePage() {
             }}
           >
             <div style={{ minHeight: 0, height: '100%' }}>
-              <DetailAnalysisSection issue={selectedIssue} />
+              <IssueDetailAnalysis
+                issue={
+                  selectedIssue
+                    ? {
+                        issueId: selectedIssue.id,
+                        lotId: selectedIssue.lot,
+                        createdAt: selectedIssue.createdAt,
+                        issueContent: selectedIssue.issueContent,
+                        riskLevel: selectedIssue.analysis?.riskLevel ?? selectedIssue.risk,
+                        listSpcStatus: selectedIssue.listSpcStatus,
+                        analysis: selectedIssue.analysis,
+                      }
+                    : null
+                }
+              />
             </div>
             <div style={{ minHeight: 0, height: '100%' }}>
               <ManagementSection

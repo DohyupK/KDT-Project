@@ -22,6 +22,7 @@
     "seed:judgment-lots": "tsx scripts/seed-judgment-lots.ts",
     "migrate:judgment-probability": "tsx scripts/add-judgment-probability.ts",
     "migrate:analysis-lots-restructure": "tsx scripts/migrate-analysis-lots-restructure.ts",
+    "migrate:analysis-drop-defect-prob": "tsx scripts/migrate-analysis-drop-defect-prob.ts",
     "migrate:handover-restructure": "tsx scripts/migrate-handover-restructure.ts",
     "migrate:handover-drop-snapshot": "tsx scripts/migrate-handover-drop-snapshot.ts",
     "migrate:handover-drop-legacy-cols": "tsx scripts/migrate-handover-drop-legacy-cols.ts",

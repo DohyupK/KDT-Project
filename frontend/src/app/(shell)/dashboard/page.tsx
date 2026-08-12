@@ -1399,7 +1399,10 @@ export default function DashBoardPage() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const fetchingRef = useRef(false);
+  const inflightRef = useRef(0);
+  const lotFetchingRef = useRef(false);
+  const chartsFetchingRef = useRef(false);
+  const dailyFetchingRef = useRef(false);
   const [lotRiskRows, setLotRiskRows] = useState<LotRiskRow[]>([]);
   const [lotRiskTotal, setLotRiskTotal] = useState(0);
   const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
@@ -1479,14 +1482,16 @@ export default function DashBoardPage() {
       setSelectedLotRiskDetail(null);
       return;
     }
-    setSelectedLotRiskDetail(null);
+    setSelectedLotRiskDetail((prev) => (prev?.lotId === selectedLotRiskId ? prev : null));
     let cancelled = false;
     dashboardApi.getLotRiskDetail(selectedLotRiskId)
       .then(({ data }) => {
         if (!cancelled) setSelectedLotRiskDetail(data.item as unknown as LotRiskApiDetail);
       })
       .catch(() => {
-        if (!cancelled) setSelectedLotRiskDetail(null);
+        if (!cancelled) {
+          setSelectedLotRiskDetail((prev) => (prev?.lotId === selectedLotRiskId ? prev : null));
+        }
       });
     return () => {
       cancelled = true;
@@ -1494,20 +1499,20 @@ export default function DashBoardPage() {
   }, [selectedLotRiskId]);
 
   const selectedRiskSummary = useMemo(() => {
-    if (!selectedLotRisk || !selectedLotRiskDetail) return '';
-    const margin = selectedLotRiskDetail.residualMargin ?? selectedLotRisk.margin;
+    if (!selectedLotRisk) return '';
+    const margin = selectedLotRiskDetail?.residualMargin ?? selectedLotRisk.margin;
     const marginText =
       margin == null
         ? '여유량 산출 불가'
         : margin < 0
           ? `USL 대비 ${formatNumber(Math.round(Math.abs(margin)))} ppm 초과`
           : `규격까지 ${formatNumber(Math.round(margin))} ppm`;
-    const residual = selectedLotRiskDetail.residualLithium ?? selectedLotRisk.predLi;
+    const residual = selectedLotRiskDetail?.residualLithium ?? selectedLotRisk.predLi;
     const residualText =
       typeof residual === 'number'
         ? `${formatNumber(Math.round(residual))} ppm`
         : residual || '-';
-    const probability = selectedLotRiskDetail.defectProb ?? selectedLotRisk.prob;
+    const probability = selectedLotRiskDetail?.defectProb ?? selectedLotRisk.prob;
     const probPart =
       probability != null && Number.isFinite(probability)
         ? `불량확률 ${(probability * 100).toFixed(1)}%, `
@@ -1751,10 +1756,42 @@ export default function DashBoardPage() {
     setIsMounted(true);
   }, []);
 
-  const refreshDashboardData = useCallback(async (options?: { force?: boolean }) => {
-    if (fetchingRef.current && !options?.force) return;
-    fetchingRef.current = true;
+  const markFetchStart = useCallback(() => {
+    inflightRef.current += 1;
     setLiveStatus('updating');
+  }, []);
+
+  const markFetchEnd = useCallback((ok: boolean) => {
+    inflightRef.current = Math.max(0, inflightRef.current - 1);
+    if (ok) setLastUpdatedAt(new Date());
+    if (inflightRef.current === 0) {
+      setLiveStatus(ok ? 'connected' : 'error');
+    }
+  }, []);
+
+  const fetchLotRisks = useCallback(async (options?: { force?: boolean }) => {
+    if (lotFetchingRef.current && !options?.force) return;
+    lotFetchingRef.current = true;
+    markFetchStart();
+    try {
+      const lotResponse = await dashboardApi.listLotRisks(
+        lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
+      );
+      setLotRiskRows(lotResponse.data.items.map(mapDashboardLotRiskItem));
+      setLotRiskTotal(lotResponse.data.total);
+      setLotRiskTotalPages(lotResponse.data.totalPages);
+      markFetchEnd(true);
+    } catch {
+      markFetchEnd(false);
+    } finally {
+      lotFetchingRef.current = false;
+    }
+  }, [lotRiskFilterApplied, lotRiskPage, markFetchEnd, markFetchStart]);
+
+  const fetchTrendAndFi = useCallback(async (options?: { force?: boolean }) => {
+    if (chartsFetchingRef.current && !options?.force) return;
+    chartsFetchingRef.current = true;
+    markFetchStart();
     try {
       const trendParams =
         trendFilterApplied.startDate && trendFilterApplied.endDate
@@ -1772,22 +1809,10 @@ export default function DashBoardPage() {
               mode: 'selected' as const,
             }
           : { grain: trendGrain, mode: 'default' as const };
-      const [lotResponse, trendResponse, dailyResponse, fiResponse] = await Promise.all([
-        dashboardApi.listLotRisks(
-          lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
-        ),
+      const [trendResponse, fiResponse] = await Promise.all([
         dashboardApi.getProductionTrend(trendParams),
-        dashboardApi.getProductionDaily(
-          tablePage,
-          PRODUCTION_DAILY_PAGE_SIZE,
-          productionDailyApiFilters(productionDailyFilter),
-        ),
         dashboardApi.getFeatureImportance(fiParams),
       ]);
-      const mappedLots = lotResponse.data.items.map(mapDashboardLotRiskItem);
-      setLotRiskRows(mappedLots);
-      setLotRiskTotal(lotResponse.data.total);
-      setLotRiskTotalPages(lotResponse.data.totalPages);
       setTrendPoints(
         (trendResponse.data.points || []).map((row) => ({
           date: row.date,
@@ -1807,10 +1832,6 @@ export default function DashBoardPage() {
           endDate: trendResponse.data.to,
         });
       }
-      setDailyApiRows(dailyResponse.data.items as unknown as ProductionDailyRow[]);
-      setDailyTotal(dailyResponse.data.total);
-      setDailyTotalPages(dailyResponse.data.totalPages);
-      setDailyOperators(dailyResponse.data.operators ?? []);
       const importanceTotal = fiResponse.data.items.reduce(
         (sum, item) => sum + Math.max(0, Number(item.importance) || 0),
         0,
@@ -1824,27 +1845,63 @@ export default function DashBoardPage() {
         })),
       );
       setFeatureImportanceLabel(fiResponse.data.label || '당일');
-      setLastUpdatedAt(new Date());
-      setLiveStatus('connected');
+      markFetchEnd(true);
     } catch {
-      setLiveStatus('error');
+      markFetchEnd(false);
     } finally {
-      fetchingRef.current = false;
-      setInitialLoading(false);
+      chartsFetchingRef.current = false;
     }
   }, [
-    lotRiskFilterApplied,
-    lotRiskPage,
-    tablePage,
-    productionDailyFilter,
+    markFetchEnd,
+    markFetchStart,
+    selectedTrendBucket,
     trendFilterApplied,
     trendGrain,
-    selectedTrendBucket,
   ]);
 
+  const fetchProductionDaily = useCallback(async (options?: { force?: boolean }) => {
+    if (dailyFetchingRef.current && !options?.force) return;
+    dailyFetchingRef.current = true;
+    markFetchStart();
+    try {
+      const dailyResponse = await dashboardApi.getProductionDaily(
+        tablePage,
+        PRODUCTION_DAILY_PAGE_SIZE,
+        productionDailyApiFilters(productionDailyFilter),
+      );
+      setDailyApiRows(dailyResponse.data.items as unknown as ProductionDailyRow[]);
+      setDailyTotal(dailyResponse.data.total);
+      setDailyTotalPages(dailyResponse.data.totalPages);
+      setDailyOperators(dailyResponse.data.operators ?? []);
+      markFetchEnd(true);
+    } catch {
+      markFetchEnd(false);
+    } finally {
+      dailyFetchingRef.current = false;
+      setInitialLoading(false);
+    }
+  }, [markFetchEnd, markFetchStart, productionDailyFilter, tablePage]);
+
+  const refreshDashboardData = useCallback(async (options?: { force?: boolean }) => {
+    await Promise.all([
+      fetchLotRisks(options),
+      fetchTrendAndFi(options),
+      dataPanelTab === 'production-daily' ? fetchProductionDaily(options) : Promise.resolve(),
+    ]);
+  }, [dataPanelTab, fetchLotRisks, fetchProductionDaily, fetchTrendAndFi]);
+
   useEffect(() => {
-    void refreshDashboardData();
-  }, [refreshDashboardData]);
+    void fetchLotRisks();
+  }, [fetchLotRisks]);
+
+  useEffect(() => {
+    void fetchTrendAndFi();
+  }, [fetchTrendAndFi]);
+
+  useEffect(() => {
+    if (dataPanelTab !== 'production-daily') return;
+    void fetchProductionDaily();
+  }, [dataPanelTab, fetchProductionDaily]);
 
   useShellRefresh(() => {
     void refreshDashboardData({ force: true });
@@ -2901,7 +2958,7 @@ export default function DashBoardPage() {
                 isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50/60'
               }`}
             >
-              {!selectedLotRisk || !selectedLotRiskDetail ? (
+              {!selectedLotRisk ? (
                 <div
                   className={`flex flex-1 flex-col items-center justify-center gap-2 text-center ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -3061,7 +3118,10 @@ export default function DashBoardPage() {
                           isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
                         }`}
                       >
-                        표시할 SPC 관리도 데이터가 없습니다.
+                        {selectedLotRiskDetail == null ||
+                        selectedLotRiskDetail.lotId !== selectedLotRisk.lot
+                          ? 'SPC 관리도를 불러오는 중…'
+                          : '표시할 SPC 관리도 데이터가 없습니다.'}
                       </p>
                     )}
                   </div>
@@ -3080,7 +3140,7 @@ export default function DashBoardPage() {
                         isDark ? 'text-slate-100' : 'text-slate-900'
                       }`}
                     >
-                      {selectedLotRiskDetail.actionContent?.trim() || '\u00A0'}
+                      {selectedLotRiskDetail?.actionContent?.trim() || '\u00A0'}
                     </p>
                   </div>
                 </div>
