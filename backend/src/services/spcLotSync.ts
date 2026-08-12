@@ -6,11 +6,15 @@
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import {
+  pickUnscoredLotIds,
+  SYS_HANDOVER_LOT_ID,
+} from './unscoredLots.js'
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
   concurrency?: number
-  /** Max unscored lots to pick up per tick (no analysis row or probability IS NULL). */
+  /** Max unscored lots to pick up per tick. */
   unscoredLimit?: number
   quiet?: boolean
 }
@@ -67,21 +71,30 @@ export async function syncSpcLotsToApp(
   opts: SyncSpcLotsOptions = {},
 ): Promise<SyncSpcLotsResult> {
   const table = spcTableName()
-  const empty: SyncSpcLotsResult = {
-    skipped: true,
-    table,
-    inserted: 0,
-    scored: 0,
-    failed: 0,
-    issuesCreated: 0,
-    reasonsUpdated: 0,
-    errors: [],
-  }
   if (running) {
     log(opts.quiet, '[spc-sync] skipped (already running)')
-    return empty
+    return {
+      skipped: true,
+      table,
+      inserted: 0,
+      scored: 0,
+      failed: 0,
+      issuesCreated: 0,
+      reasonsUpdated: 0,
+      errors: [],
+    }
   }
   running = true
+
+  let scoreIds: string[] = []
+  let result: { scored: number; failed: number; errors: string[] } = {
+    scored: 0,
+    failed: 0,
+    errors: [],
+  }
+  let issuesCreated = 0
+  let insertedCount = 0
+  let skipRiskReason = false
 
   try {
     const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16)
@@ -131,9 +144,11 @@ export async function syncSpcLotsToApp(
         params,
       )
     }
+    insertedCount = inserted.length
     if (inserted.length) log(quiet, '[spc-sync] inserted', inserted.length)
 
     if (opts.skipScore) {
+      skipRiskReason = true
       return {
         skipped: false,
         table,
@@ -146,21 +161,10 @@ export async function syncSpcLotsToApp(
       }
     }
 
-    // Placeholder lot for handover notes (issue.service) — never score into analysis_lots.
-    const SYS_HANDOVER_LOT_ID = 'LOT-SYS-HANDOVER'
-    const unscoredRows = await query<{ id: string }[]>(
-      `SELECT l.id
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       WHERE (a.lot_id IS NULL OR a.probability IS NULL)
-         AND l.id <> ?
-       ORDER BY l.\`timestamp\` ASC, l.id ASC
-       LIMIT ?`,
-      [SYS_HANDOVER_LOT_ID, unscoredLimit],
-    )
-    const scoreIds = [
+    const picked = await pickUnscoredLotIds(unscoredLimit)
+    scoreIds = [
       ...new Set(
-        [...inserted, ...unscoredRows.map((r) => r.id)].filter((id) => id !== SYS_HANDOVER_LOT_ID),
+        [...inserted, ...picked.lotIds].filter((id) => id !== SYS_HANDOVER_LOT_ID),
       ),
     ]
 
@@ -216,6 +220,9 @@ export async function syncSpcLotsToApp(
     // Always seed: already-scored 심각 lots must still get open issues.
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+  } finally {
+    running = false
+  }
 
     return {
       skipped: false,

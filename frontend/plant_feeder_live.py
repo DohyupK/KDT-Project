@@ -5,7 +5,7 @@ plant_feeder_live.py — 가상 공장 실시간 데이터 피더 (학생 배포
 서비스를 켜두면 10분(설정 가능)마다 LOT 1개를 **그 자리에서 생성**하여
 현재 시각 기준으로 여러분의 MariaDB에 직접 적재한다. 별도 데이터 파일 불필요.
 
-  - 공정변수 10개 : 생산 즉시  → lots
+  - 공정변수 10개 : 생산 즉시  → lots (+ lot_results stub: lot_id만, qd/residual NULL)
   - 불량 판정     : 생산 +60분 → lot_results.quality_defect
   - 잔류 리튬     : 생산 +24h  → lot_results.residual_li
 
@@ -182,6 +182,9 @@ def produce(seq, produced_ts, state):
     ph = ", ".join([PH] * len(base_vals))
     q(f"{IGNORE} INTO {T_LOTS} (seq, lot_id, produced_at, {', '.join(NUM_VARS)}, operator_id) "
       f"VALUES ({ph})", base_vals)
+    # Immediate lot_results stub so lot_id exists; qd/residual filled later (+60m/+24h).
+    q(f"{IGNORE} INTO {T_RES} (seq, lot_id, quality_defect, residual_li, measured_at) "
+      f"VALUES ({PH}, {PH}, NULL, NULL, NULL)", (seq, lot_id))
     state[str(seq)] = {"lot_id": lot_id, "t": produced_ts,
                        "d": enc(defect), "r": enc(residual)}
     print(f"[생산] {lot_id}")
@@ -192,13 +195,17 @@ def deliver(state):
     for k, it in state.items():
         age = (time.time() - it["t"]) / 60.0 * SPEED
         if "d" in it and age >= DEFECT_DELAY:
+            # Feeder measurement wins over AI NULL-fill; match by lot_id (not seq).
+            q(f"UPDATE {T_RES} SET quality_defect = {PH}, "
+              f"measured_at = COALESCE(measured_at, {PH}) WHERE lot_id = {PH}",
+              (int(dec(it["d"])), now_str(), it["lot_id"]))
             q(f"{IGNORE} INTO {T_RES} (seq, lot_id, quality_defect, measured_at) "
               f"VALUES ({PH}, {PH}, {PH}, {PH})", (int(k), it["lot_id"], int(dec(it["d"])), now_str()))
             print(f"[실측 도착] {it['lot_id']} 불량판정={dec(it['d'])}")
             del it["d"]
         if "r" in it and age >= RESIDUAL_DELAY:
-            q(f"UPDATE {T_RES} SET residual_li = {PH}, measured_at = {PH} WHERE seq = {PH}",
-              (float(dec(it["r"])), now_str(), int(k)))
+            q(f"UPDATE {T_RES} SET residual_li = {PH}, measured_at = {PH} WHERE lot_id = {PH}",
+              (float(dec(it["r"])), now_str(), it["lot_id"]))
             print(f"[실측 도착] {it['lot_id']} 잔류리튬={dec(it['r'])}ppm")
             del it["r"]
         if "d" not in it and "r" not in it:

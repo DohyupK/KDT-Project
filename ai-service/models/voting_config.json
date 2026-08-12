@@ -1,15 +1,10 @@
 {
-  "version": 1,
-  "note": "Multi-model voting. Probability excludes reg (capacity) weights; denominator 15.",
+  "version": 2,
+  "note": "Operational cascade under models/ (former experiment name temp39). capacity /15 · residual /13 · defect = (blend≥0.55) OR (symbolic≥thr).",
   "holdout": "none",
   "n_folds": 6,
   "seed": 42,
   "xgb_cat_weights": { "xgb": 0.5, "cat": 0.5 },
-  "threshold": {
-    "status": "ops",
-    "default_threshold": 0.4,
-    "note": "quality_defect = 1 if probability >= 0.4 else 0 (last step)"
-  },
   "standard_residual": {
     "caution": 3000,
     "severe": 3500,
@@ -17,37 +12,52 @@
     "score_formula": "clip((r - 3000) / (4000 - 3000), 0, 1)"
   },
   "capacity": {
-    "denominator": 11,
+    "denominator": 15,
     "members": [
-      { "id": "reg_d50", "weight": 1, "dir": "models/voting/reg_d50" },
-      { "id": "reg_d90", "weight": 1, "dir": "models/voting/reg_d90" },
+      { "id": "legacy_reg", "weight": 4, "dir": "models/legacy/reg" },
+      { "id": "reg_d50", "weight": 3, "dir": "models/voting/reg_d50" },
+      { "id": "reg_d90", "weight": 3, "dir": "models/voting/reg_d90" },
       { "id": "reg_feature", "weight": 2, "dir": "models/voting/reg_feature" },
-      { "id": "cathode_feature_cap", "weight": 3, "dir": "models/voting/cathode_feature/cap" },
-      { "id": "cathode_special_cap", "weight": 4, "dir": "models/voting/cathode_special/cap" }
+      { "id": "cathode_feature_cap", "weight": 2, "dir": "models/voting/cathode_feature/cap" },
+      { "id": "cathode_special_cap", "weight": 1, "dir": "models/voting/cathode_special/cap" }
     ]
   },
   "residual_li": {
-    "denominator": 11,
+    "denominator": 13,
     "members": [
-      { "id": "residual_d50", "weight": 1, "dir": "models/voting/residual_d50" },
-      { "id": "residual_d90", "weight": 1, "dir": "models/voting/residual_d90" },
+      { "id": "legacy_res", "weight": 4, "dir": "models/legacy/residual" },
+      { "id": "residual_d50", "weight": 3, "dir": "models/voting/residual_d50" },
+      { "id": "residual_d90", "weight": 3, "dir": "models/voting/residual_d90" },
       { "id": "residual_feature", "weight": 2, "dir": "models/voting/residual_feature" },
-      { "id": "cathode_feature_res", "weight": 3, "dir": "models/voting/cathode_feature/res" },
-      { "id": "cathode_special_res", "weight": 4, "dir": "models/voting/cathode_special/res" }
+      { "id": "cathode_feature_res", "weight": 1, "dir": "models/voting/cathode_feature/res" }
     ]
   },
   "probability": {
-    "denominator": 15,
-    "excludes": ["reg_d50", "reg_d90", "reg_feature"],
-    "members": [
-      { "id": "clf_d50", "weight": 1, "kind": "clf_proba", "dir": "models/voting/clf_d50" },
-      { "id": "clf_d90", "weight": 1, "kind": "clf_proba", "dir": "models/voting/clf_d90" },
-      { "id": "clf_feature", "weight": 2, "kind": "clf_proba", "dir": "models/voting/clf_feature" },
-      { "id": "residual_d50", "weight": 1, "kind": "residual_score", "dir": "models/voting/residual_d50" },
-      { "id": "residual_d90", "weight": 1, "kind": "residual_score", "dir": "models/voting/residual_d90" },
-      { "id": "residual_feature", "weight": 2, "kind": "residual_score", "dir": "models/voting/residual_feature" },
-      { "id": "cathode_feature_clf", "weight": 3, "kind": "clf_proba_cascade", "dir": "models/voting/cathode_feature/clf" },
-      { "id": "cathode_special_clf", "weight": 4, "kind": "clf_proba_cascade", "dir": "models/voting/cathode_special/clf" }
-    ]
+    "mode": "blend_or_symbolic",
+    "blend": {
+      "denominator": 10,
+      "members": [
+        { "id": "clf_d90", "weight": 7, "kind": "clf_proba", "dir": "models/voting/clf_d90" },
+        { "id": "legacy_clf", "weight": 3, "kind": "clf_proba", "dir": "models/legacy" }
+      ]
+    },
+    "symbolic": {
+      "equation_path": "models/symbolic_model/equation.json"
+    },
+    "defect_rule": {
+      "type": "OR",
+      "blend_threshold": 0.55,
+      "symbolic_threshold": 0.08094146666984328
+    },
+    "store_probability": {
+      "mode": "hard_ox",
+      "pos": 0.9,
+      "neg": 0.1
+    }
+  },
+  "threshold": {
+    "status": "ops",
+    "default_threshold": 0.55,
+    "note": "Used only when probability.mode is classic weighted avg; OR mode uses defect_rule."
   }
 }

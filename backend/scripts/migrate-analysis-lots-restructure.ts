@@ -50,7 +50,6 @@ async function main() {
     'clf_model_version',
     'residual_model_version',
     'spc_limit_version',
-    'scored_at',
     'updated_at',
     'defect_prob',
   ]) {
@@ -63,9 +62,25 @@ async function main() {
     }
   }
 
-  if (await indexExists('idx_analysis_scored')) {
-    await query('ALTER TABLE analysis_lots DROP INDEX idx_analysis_scored')
-    console.log('DROPPED_INDEX idx_analysis_scored')
+  cols = await columnNames()
+  if (!cols.has('scored_at')) {
+    await query(
+      `ALTER TABLE analysis_lots
+       ADD COLUMN scored_at DATETIME NULL COMMENT '마지막 채점 시각' AFTER created_at`,
+    )
+    await query(
+      `UPDATE analysis_lots
+       SET scored_at = COALESCE(scored_at, created_at)
+       WHERE scored_at IS NULL`,
+    )
+    console.log('ADDED scored_at')
+  } else {
+    console.log('SKIP_ADD scored_at')
+  }
+
+  if (!(await indexExists('idx_analysis_scored'))) {
+    await query('ALTER TABLE analysis_lots ADD INDEX idx_analysis_scored (scored_at)')
+    console.log('ADDED_INDEX idx_analysis_scored')
   } else {
     console.log('SKIP_INDEX idx_analysis_scored')
   }

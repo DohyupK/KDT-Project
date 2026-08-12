@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "note": "Active path is cascade voting only. Legacy clf/reg/residual weights live under ai-service/temp/models_backup_2026-08-10/ and are not loaded.",
+  "version": 3,
+  "note": "Active path: models/ cascade (legacy + voting + symbolic OR). Former experiment name was temp39.",
   "heads": {
     "voting": {
       "task": "cascade_voting",
@@ -8,8 +8,10 @@
       "ready": true,
       "entrypoint": "voting_predict.predict_voting",
       "config": "models/voting_config.json",
-      "train": "python scripts/train_all_voting_models.py",
-      "note": "15 members; legacy single-head disconnected 2026-08-10"
+      "recipe": "models/recipe.json",
+      "legacy": "models/legacy",
+      "symbolic": "models/symbolic_model",
+      "note": "cap/15 · res/13 · (blend≥0.55)∨(symbolic≥≈0.0809) → judgment_lots"
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   pushCompleteLotHistory,
   residualMargin,
   scoreLotWithAi,
+  type LotScoreResult,
   type ProcessFeatures,
   type RiskLevel,
   RESIDUAL_USL,
@@ -561,9 +562,172 @@ async function upsertAnalysisScore(
   )
 }
 
+type LotResultsRow = {
+  seq: number
+  lot_id: string
+  quality_defect: number | null
+  residual_li: number | null
+  measured_at: Date | string | null
+}
+
+async function getLotResults(lotId: string): Promise<LotResultsRow | null> {
+  const rows = await query<LotResultsRow[]>(
+    `SELECT seq, lot_id, quality_defect, residual_li, measured_at
+     FROM lot_results WHERE lot_id = ? LIMIT 1`,
+    [lotId],
+  )
+  return rows[0] ?? null
+}
+
+/** AI NULL-fill only — feeder measurements are never overwritten. */
+async function upsertLotResultsNullFill(
+  lotId: string,
+  qualityDefect: number,
+  residualLi: number,
+): Promise<LotResultsRow | null> {
+  const qd = qualityDefect === 1 ? 1 : 0
+  const res = Number.isFinite(residualLi) ? residualLi : null
+
+  const applyCoalesceUpdate = async () => {
+    await query(
+      `UPDATE lot_results
+       SET quality_defect = COALESCE(quality_defect, ?),
+           residual_li = COALESCE(residual_li, ?),
+           measured_at = COALESCE(measured_at, NOW())
+       WHERE lot_id = ?`,
+      [qd, res, lotId],
+    )
+  }
+
+  const existing = await getLotResults(lotId)
+  if (existing) {
+    await applyCoalesceUpdate()
+    return getLotResults(lotId)
+  }
+
+  // Concurrent scorers race on MAX(seq)+1 — retry on PK clash; if another
+  // worker already inserted this lot_id, fall through to COALESCE update.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (await getLotResults(lotId)) {
+      await applyCoalesceUpdate()
+      return getLotResults(lotId)
+    }
+    const maxRows = await query<{ m: number | null }[]>(
+      `SELECT MAX(seq) AS m FROM lot_results`,
+    )
+    const seq = Number(maxRows[0]?.m ?? 0) + 1 + attempt
+    try {
+      await query(
+        `INSERT INTO lot_results (seq, lot_id, quality_defect, residual_li, measured_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [seq, lotId, qd, res],
+      )
+      return getLotResults(lotId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const dup = /Duplicate entry/i.test(msg) || /ER_DUP_ENTRY/i.test(msg)
+      if (!dup || attempt === 7) throw err
+    }
+  }
+  return getLotResults(lotId)
+}
+
+
+/**
+ * Prefer lot_results residual/qd for judgment write inputs.
+ */
+function judgmentInputsFromLotResults(
+  voted: LotScoreResult,
+  lr: LotResultsRow | null,
+): { quality_defect: number; residual_li: number; capacity: number | null; probability: number; spc: string } {
+  const residual =
+    lr?.residual_li != null && Number.isFinite(Number(lr.residual_li))
+      ? Number(lr.residual_li)
+      : voted.residual_lithium
+  const qd =
+    lr?.quality_defect != null
+      ? Number(lr.quality_defect) === 1
+        ? 1
+        : 0
+      : voted.quality_defect
+  return {
+    quality_defect: qd === 1 ? 1 : 0,
+    residual_li: residual,
+    capacity: voted.capacity,
+    probability: voted.probability,
+    spc: voted.spc_status,
+  }
+}
+
+type JudgmentRow = {
+  lot_id: string
+  quality_defect: number
+  capacity: number | null
+  residual_li: number | null
+  probability: number | null
+  spc: string | null
+}
+
+async function getJudgment(lotId: string): Promise<JudgmentRow | null> {
+  const rows = await query<JudgmentRow[]>(
+    `SELECT lot_id, quality_defect, capacity, residual_li, probability, spc
+     FROM judgment_lots WHERE lot_id = ? LIMIT 1`,
+    [lotId],
+  )
+  return rows[0] ?? null
+}
+
+/**
+ * 2nd pass: analysis_lots from judgment_lots (+ SPC label already on judgment.spc).
+ */
+async function mergeScoreFromJudgment(
+  j: JudgmentRow,
+  fallbackSpc?: string,
+): Promise<LotScoreResult> {
+  const std = await loadStandard()
+  const residual =
+    j.residual_li != null && Number.isFinite(Number(j.residual_li))
+      ? Number(j.residual_li)
+      : 0
+  const defectProb =
+    j.probability != null && Number.isFinite(Number(j.probability))
+      ? Number(j.probability)
+      : 0
+  const spcRaw = (j.spc || fallbackSpc || '안정').trim()
+  const incomplete = spcRaw === '-'
+  const merged = combineLotScore({
+    defectProb,
+    residualLi: residual,
+    spcStatus: incomplete ? null : spcRaw,
+    incompleteProcess: incomplete,
+    thresholds: {
+      defect_prob_caution: std.defect_prob_caution,
+      defect_prob_severe: std.defect_prob_severe,
+      residual_caution: std.residual_caution,
+      residual_severe: std.residual_severe,
+    },
+  })
+  merged.quality_defect = Number(j.quality_defect) === 1 ? 1 : 0
+  merged.capacity =
+    j.capacity != null && Number.isFinite(Number(j.capacity)) ? Number(j.capacity) : null
+  // analysis probability mirrors judgment (SSOT after stage 2)
+  merged.probability = defectProb
+  if (!incomplete) merged.spc_status = spcRaw
+  return merged
+}
+
+/** When judgment is already filled, rebuild analysis_lots only (2nd pass). */
+export async function scoreAnalysisFromJudgment(lotId: string): Promise<boolean> {
+  const j = await getJudgment(lotId)
+  if (!j || j.probability == null || j.residual_li == null) return false
+  const analysisScore = await mergeScoreFromJudgment(j)
+  await upsertAnalysisScore(lotId, analysisScore)
+  return true
+}
+
 async function updateLotScore(
   lotId: string,
-  scored: Awaited<ReturnType<typeof scoreLotWithAi>>,
+  scored: LotScoreResult,
   seed?: {
     recordedAt: string
     qualityDefect: number
@@ -606,6 +770,16 @@ async function updateLotScore(
       ],
     )
   }
+
+  // Stage 1: lot_results NULL-fill (feeder measurements never overwritten)
+  const lr = await upsertLotResultsNullFill(
+    lotId,
+    scored.quality_defect,
+    scored.residual_lithium,
+  )
+
+  // Stage 2: judgment_lots from lot_results (+ voting capacity/probability)
+  const jIn = judgmentInputsFromLotResults(scored, lr)
   await query(
     `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability, spc)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -617,11 +791,11 @@ async function updateLotScore(
        spc = VALUES(spc)`,
     [
       lotId,
-      scored.quality_defect === 1 ? 1 : 0,
-      scored.capacity,
-      scored.residual_lithium,
-      scored.probability,
-      scored.spc_status,
+      jIn.quality_defect,
+      jIn.capacity,
+      jIn.residual_li,
+      jIn.probability,
+      jIn.spc,
     ],
   )
   await upsertAnalysisScore(lotId, scored, spcChart)
@@ -686,10 +860,10 @@ const LOT_SCORE_FEATURE_SELECT = `id AS lot_id, \`timestamp\` AS recorded_at, d5
   0 AS quality_defect`
 
 /**
- * Re-score using operational `lots` SSOT:
- * - probability ← process features → /predict → analysis_lots (+ judgment NULL-fill)
- * - judgment NULL-fill: quality_defect / capacity / residual_li from AI
- * - SPC ← listwise-complete process features only (Phase I + Nelson 2–8)
+ * Re-score using operational `lots` SSOT (3-stage):
+ * 1) /predict-voting → lot_results NULL-fill (qd/residual)
+ * 2) judgment_lots from lot_results + voting capacity/prob
+ * 3) analysis_lots from judgment (combineLotScore + SPC / scored_at)
  */
 export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   scored: number

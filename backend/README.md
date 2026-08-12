@@ -125,8 +125,11 @@ npm run sync:spc-lots -- --skip-score
   - 모델 원리·임계값: [`../ai-service/README.md`](../ai-service/README.md) 「추론·불량확률」
 - LOT CSV 적재: `POST /api/lots/import` (`id`/`timestamp`/공정 → `lots`)
 - QC 재적재: `npm run reload:lots-qc` · `../DB/reload_lots_from_qc_csv.sql`
-- **SPC 싱크 주기:** 기동 시 즉시 1회 + **60초 폴링** (`spcLotSyncPoller` · `SPC_SYNC_ENABLED` 기본 on · `SPC_SYNC_INTERVAL_MS=60000` · `0`/off면 비활성) · 틱마다 `SPC_LOT`→`lots` 미러 + `analysis_lots` 행 없음/`probability` NULL 미채점 score(상한) · 수동 `npm run sync:spc-lots`
-- 구조 SQL: `../DB/align_lots_csv_column_names.sql` · `../DB/migrate_lots_to_analysis_lots.sql` · `../DB/alter_analysis_lots_restructure.sql`
+- **SPC 싱크 주기:** 기동 시(ai health 후) 즉시 1회 + **60초 폴링** · `SPC_LOT`→`lots` + 미채점 score  
+  - 미채점 = analysis/`probability`/judgment residual·capacity **또는** `lot_results` 행·residual·qd NULL
+- **analysis 폴러:** 기동 15초 후 + **10분** · 동일 미채점 조건 LIMIT 200
+- 수동: `npm run sync:spc-lots`
+- 구조 SQL: `../DB/lot_results.sql` · `../DB/alter_analysis_lots_add_scored_at.sql` · orphan DROP은 `lot_results` **유지**
 - 상세 계약: `../docs/references/issue-lot-api.md`
 - 챗봇 인수인계: `../docs/references/chatbot-handoff-2026-08-04.md`
 

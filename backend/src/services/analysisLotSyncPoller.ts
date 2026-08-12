@@ -3,11 +3,9 @@
  * then fill risk_reason via local vLLM. Always re-seed open issues for 심각 lots
  * (even when there is nothing left to score). Complements per-insert syncSpcLots.
  */
-import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
-
-const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
+import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
 
 let timer: ReturnType<typeof setInterval> | null = null
 let running = false
@@ -29,18 +27,11 @@ async function tick() {
     return
   }
   running = true
+
+  let lotIds: string[] = []
   try {
-    const rows = await query<{ id: string }[]>(
-      `SELECT l.id
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       WHERE (a.lot_id IS NULL OR a.probability IS NULL)
-         AND l.id <> ?
-       ORDER BY l.\`timestamp\` ASC, l.id ASC
-       LIMIT 200`,
-      [SYS_HANDOVER],
-    )
-    const lotIds = rows.map((r) => r.id)
+    const picked = await pickUnscoredLotIds(200)
+    lotIds = picked.lotIds
     if (lotIds.length === 0) {
       console.log('[analysis-sync] nothing to score')
     } else {
@@ -61,6 +52,14 @@ async function tick() {
   } finally {
     running = false
   }
+
+  if (lotIds.length === 0) return
+  try {
+    const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
+    console.log('[analysis-sync] risk_reasons', reasons)
+  } catch (err) {
+    console.error('[analysis-sync] risk_reason_failed', err)
+  }
 }
 
 export function startAnalysisLotSyncPoller(): void {
@@ -71,7 +70,6 @@ export function startAnalysisLotSyncPoller(): void {
   if (timer) return
   const ms = intervalMs()
   console.log(`[analysis-sync] started interval_ms=${ms}`)
-  // First tick delayed slightly so SPC sync can run first on boot.
   setTimeout(() => {
     void tick()
   }, 15_000)

@@ -7,12 +7,11 @@ import mariadb from 'mariadb'
 const DROP_NAMES = [
   'v_spc_charts',
   'lot_spc_results',
-  'lot_results',
   'spc_limits',
   'control_bounds',
 ] as const
 
-const KEEP_NAMES = ['SPC_LOT', 'SPC_LOT_results'] as const
+const KEEP_NAMES = ['SPC_LOT', 'SPC_LOT_results', 'lot_results'] as const
 
 async function main() {
   const sqlPath = path.resolve(
@@ -62,14 +61,14 @@ async function main() {
       after.map((r) => `${r.TABLE_NAME}(${r.TABLE_TYPE})`),
     )
     console.log('ORPHANS_GONE', droppedGone)
-    console.log('SPC_LOT_KEPT', keptPresent)
+    console.log('KEPT_TABLES', keptPresent)
 
     if (!droppedGone) {
       throw new Error(`Expected orphans gone; still present: ${remaining.filter((n) => (DROP_NAMES as readonly string[]).includes(n)).join(', ')}`)
     }
     if (!keptPresent) {
       console.warn(
-        'WARN: SPC_LOT and/or SPC_LOT_results missing (feeder may CREATE on next run)',
+        'WARN: SPC_LOT / SPC_LOT_results / lot_results missing (feeder or DDL may CREATE later)',
       )
     }
   } finally {
