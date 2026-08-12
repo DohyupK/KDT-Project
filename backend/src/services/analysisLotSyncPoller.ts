@@ -1,7 +1,6 @@
 /**
- * Every 10 minutes: score lots missing analysis_lots (or null probability),
- * then fill risk_reason via local vLLM. Always re-seed open issues for 심각 lots
- * (even when there is nothing left to score). Complements per-insert syncSpcLots.
+ * Periodic score for lots missing analysis / judgment / lot_results / scored_at.
+ * Complements per-insert syncSpcLots. Started after ai-service health (index.ts).
  */
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
@@ -34,17 +33,37 @@ async function tick() {
     lotIds = picked.lotIds
     if (lotIds.length === 0) {
       console.log('[analysis-sync] nothing to score')
-    } else {
-      console.log('[analysis-sync] score_start', { count: lotIds.length })
-      const scored = await lotService.scoreAllLots({
-        lotIds,
-        concurrency: 4,
-      })
-      console.log('[analysis-sync] score_done', scored)
-      const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
-      console.log('[analysis-sync] risk_reasons', reasons)
+      return
     }
-    // Backfill issues for already-scored 심각 lots (seed is not scoring-dependent).
+
+    const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
+    console.log('[analysis-sync] score_start', {
+      count: lotIds.length,
+      analysis_only: analysisOnlyIds.length,
+      full: fullScoreIds.length,
+      reason: picked.reason,
+    })
+
+    let analysisOnlyOk = 0
+    const fullIds = [...fullScoreIds]
+    for (const id of analysisOnlyIds) {
+      const ok = await lotService.scoreAnalysisFromJudgment(id)
+      if (ok) analysisOnlyOk++
+      else fullIds.push(id)
+    }
+    if (analysisOnlyOk) {
+      console.log('[analysis-sync] analysis_from_judgment', { ok: analysisOnlyOk })
+    }
+
+    const scored =
+      fullIds.length > 0
+        ? await lotService.scoreAllLots({
+            lotIds: fullIds,
+            concurrency: 4,
+          })
+        : { scored: 0, failed: 0, errors: [] as string[] }
+    console.log('[analysis-sync] score_done', scored)
+
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {

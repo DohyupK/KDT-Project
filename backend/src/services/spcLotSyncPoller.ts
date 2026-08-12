@@ -17,14 +17,7 @@ async function tick() {
   try {
     const result = await syncSpcLotsToApp({ quiet: false, concurrency: 4 })
     if (result.skipped) return
-    if (
-      result.inserted === 0 &&
-      result.scored === 0 &&
-      result.failed === 0 &&
-      result.issuesCreated === 0
-    ) {
-      return
-    }
+    if (result.inserted === 0 && result.scored === 0 && result.failed === 0) return
     console.log('[spc-sync-poller]', {
       inserted: result.inserted,
       scored: result.scored,

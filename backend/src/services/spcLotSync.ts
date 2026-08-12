@@ -1,7 +1,9 @@
 /**
  * Mirror SPC_LOT → lots (process only), then score new + unscored lots
- * (analysis_lots + judgment_lots NULL-only AI fill). Always re-seeds open
- * issues for risk_level=심각 after each tick.
+ * (analysis_lots + judgment_lots + lot_results NULL-fill).
+ *
+ * Priority: judgment/analysis/scored_at/missing LR (newest) then LR field backfill.
+ * risk_reason runs after the sync lock is released.
  */
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
@@ -168,74 +170,78 @@ export async function syncSpcLotsToApp(
       ),
     ]
 
-    let scored = 0
-    let failed = 0
-    let reasonsUpdated = 0
-    const errors: string[] = []
-
-    if (scoreIds.length > 0) {
-      log(quiet, '[spc-sync] score_start', {
-        lotIds: scoreIds.length,
+    if (scoreIds.length === 0) {
+      skipRiskReason = true
+      return {
+        skipped: false,
+        table,
         inserted: inserted.length,
-        unscored: unscoredRows.length,
-        concurrency,
-      })
-      const started = Date.now()
-      let lastLog = 0
-      const result = await lotService.scoreAllLots({
-        lotIds: scoreIds,
-        concurrency,
-        onProgress: (done, total, lotId) => {
-          if (quiet) return
-          if (done - lastLog >= 20 || done === total) {
-            lastLog = done
-            console.log(`[spc-sync] progress ${done}/${total} last=${lotId}`)
-          }
-        },
-      })
-      log(
-        quiet,
-        '[spc-sync] score_done',
-        JSON.stringify(result),
-        `elapsed_ms=${Date.now() - started}`,
-      )
-      scored = result.scored
-      failed = result.failed
-      errors.push(...result.errors)
-
-      try {
-        const reasonResult = await fillRiskReasonsForLots(scoreIds, {
-          concurrency: 2,
-          quiet,
-        })
-        reasonsUpdated = reasonResult.updated
-        log(quiet, '[spc-sync] risk_reasons', reasonResult)
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        console.error('[spc-sync] risk_reason_failed', detail)
-        errors.push(`risk_reason: ${detail}`)
+        scored: 0,
+        failed: 0,
+        issuesCreated: 0,
+        reasonsUpdated: 0,
+        errors: [],
       }
     }
 
-    // Always seed: already-scored 심각 lots must still get open issues.
-    const issuesCreated = await lotService.ensureIssuesForRiskLots()
+    log(quiet, '[spc-sync] score_start', {
+      lotIds: scoreIds.length,
+      inserted: inserted.length,
+      unscored: picked.lotIds.length,
+      reason: picked.reason,
+      concurrency,
+    })
+    const started = Date.now()
+    let lastLog = 0
+    result = await lotService.scoreAllLots({
+      lotIds: scoreIds,
+      concurrency,
+      onProgress: (done, total, lotId) => {
+        if (quiet) return
+        if (done - lastLog >= 20 || done === total) {
+          lastLog = done
+          console.log(`[spc-sync] progress ${done}/${total} last=${lotId}`)
+        }
+      },
+    })
+    log(
+      quiet,
+      '[spc-sync] score_done',
+      JSON.stringify(result),
+      `elapsed_ms=${Date.now() - started}`,
+    )
+
+    issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
   } finally {
     running = false
   }
 
-    return {
-      skipped: false,
-      table,
-      inserted: inserted.length,
-      scored,
-      failed,
-      issuesCreated,
-      reasonsUpdated,
-      errors,
+  let reasonsUpdated = 0
+  if (!skipRiskReason && scoreIds.length > 0) {
+    try {
+      const reasonResult = await fillRiskReasonsForLots(scoreIds, {
+        concurrency: 2,
+        quiet: opts.quiet,
+      })
+      reasonsUpdated = reasonResult.updated
+      log(opts.quiet, '[spc-sync] risk_reasons', reasonResult)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.error('[spc-sync] risk_reason_failed', detail)
+      result.errors.push(`risk_reason: ${detail}`)
     }
-  } finally {
-    running = false
+  }
+
+  return {
+    skipped: false,
+    table,
+    inserted: insertedCount,
+    scored: result.scored,
+    failed: result.failed,
+    issuesCreated,
+    reasonsUpdated,
+    errors: result.errors,
   }
 }
 
