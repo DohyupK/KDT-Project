@@ -1,10 +1,12 @@
 # DB 테이블 · 파라미터 R/W + 페이지 (2026-08-05)
 
+> **정정 노트 (2026-08-12):** `lot_results`는 **KEEP** (orphan DROP 대상 아님). 채점 3단 SSOT = `lot_results`(qd/residual NULL-fill) → `judgment_lots`(LR+voting) → `analysis_lots`(judgment 2차 추론). 아래 본문의 구 「`lot_results` 제거」표기는 이 노트로 덮어쓴다. NULL = 피더 지연(+60분/+24h)·과거 미연동·점진 백필.
+
 - **DB:** MariaDB `kdt_project` 라이브 18개 객체
 - **위치:** `Documents/Public`
 - **관련:** [`db-table-column-callsite-audit-2026-08-05.md`](./db-table-column-callsite-audit-2026-08-05.md)
 - **이름 변경 후 제거 (2026-08-05):** MariaDB `cathode_*_data` 테이블 제거 · score=`lots` · DROP SQL: [`DB/drop_cathode_source_tables.sql`](../../DB/drop_cathode_source_tables.sql)
-- **orphan SPC 제거 (2026-08-05):** `v_spc_charts` · `lot_results` · `lot_spc_results` · `spc_limits` · `control_bounds` TABLE — DROP: [`DB/drop_orphan_spc_objects.sql`](../../DB/drop_orphan_spc_objects.sql) · **유지:** `SPC_LOT` / `SPC_LOT_results`
+- **orphan SPC 제거 (2026-08-05):** `v_spc_charts` · ~~`lot_results`~~(**KEEP·정정**) · `lot_spc_results` · `spc_limits` · `control_bounds` TABLE — DROP: [`DB/drop_orphan_spc_objects.sql`](../../DB/drop_orphan_spc_objects.sql) · **유지:** `SPC_LOT` / `SPC_LOT_results` / **`lot_results`**
 - **추가 (2026-08-05):** `judgment_lots` — quality/capacity 시드 + residual API JOIN · [`DB/judgment_lots.sql`](../../DB/judgment_lots.sql)
 - **갱신 (2026-08-05):** `lots` = QC CSV 공정만 · `lots.residual_li` DROP · API `residualLithium` ← `judgment_lots`
 - **싱크 (2026-08-05):** `SPC_LOT` → `lots` 미러 + score · `judgment_lots` NULL-fill AI · `npm run sync:spc-lots`

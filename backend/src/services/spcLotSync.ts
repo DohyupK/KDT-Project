@@ -1,15 +1,22 @@
 /**
  * Mirror SPC_LOT → lots (process only), then score new + unscored lots
- * (analysis_lots + judgment_lots NULL-only AI fill).
+ * (analysis_lots + judgment_lots + lot_results NULL-fill).
+ *
+ * Priority: judgment/analysis/scored_at/missing LR (newest) then LR field backfill.
+ * risk_reason runs after the sync lock is released.
  */
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import {
+  pickUnscoredLotIds,
+  SYS_HANDOVER_LOT_ID,
+} from './unscoredLots.js'
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
   concurrency?: number
-  /** Max unscored lots to pick up per tick (no analysis row or probability IS NULL). */
+  /** Max unscored lots to pick up per tick. */
   unscoredLimit?: number
   quiet?: boolean
 }
@@ -66,21 +73,30 @@ export async function syncSpcLotsToApp(
   opts: SyncSpcLotsOptions = {},
 ): Promise<SyncSpcLotsResult> {
   const table = spcTableName()
-  const empty: SyncSpcLotsResult = {
-    skipped: true,
-    table,
-    inserted: 0,
-    scored: 0,
-    failed: 0,
-    issuesCreated: 0,
-    reasonsUpdated: 0,
-    errors: [],
-  }
   if (running) {
     log(opts.quiet, '[spc-sync] skipped (already running)')
-    return empty
+    return {
+      skipped: true,
+      table,
+      inserted: 0,
+      scored: 0,
+      failed: 0,
+      issuesCreated: 0,
+      reasonsUpdated: 0,
+      errors: [],
+    }
   }
   running = true
+
+  let scoreIds: string[] = []
+  let result: { scored: number; failed: number; errors: string[] } = {
+    scored: 0,
+    failed: 0,
+    errors: [],
+  }
+  let issuesCreated = 0
+  let insertedCount = 0
+  let skipRiskReason = false
 
   try {
     const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16)
@@ -130,9 +146,11 @@ export async function syncSpcLotsToApp(
         params,
       )
     }
+    insertedCount = inserted.length
     if (inserted.length) log(quiet, '[spc-sync] inserted', inserted.length)
 
     if (opts.skipScore) {
+      skipRiskReason = true
       return {
         skipped: false,
         table,
@@ -145,25 +163,15 @@ export async function syncSpcLotsToApp(
       }
     }
 
-    // Placeholder lot for handover notes (issue.service) — never score into analysis_lots.
-    const SYS_HANDOVER_LOT_ID = 'LOT-SYS-HANDOVER'
-    const unscoredRows = await query<{ id: string }[]>(
-      `SELECT l.id
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       WHERE (a.lot_id IS NULL OR a.probability IS NULL)
-         AND l.id <> ?
-       ORDER BY l.\`timestamp\` ASC, l.id ASC
-       LIMIT ?`,
-      [SYS_HANDOVER_LOT_ID, unscoredLimit],
-    )
-    const scoreIds = [
+    const picked = await pickUnscoredLotIds(unscoredLimit)
+    scoreIds = [
       ...new Set(
-        [...inserted, ...unscoredRows.map((r) => r.id)].filter((id) => id !== SYS_HANDOVER_LOT_ID),
+        [...inserted, ...picked.lotIds].filter((id) => id !== SYS_HANDOVER_LOT_ID),
       ),
     ]
 
     if (scoreIds.length === 0) {
+      skipRiskReason = true
       return {
         skipped: false,
         table,
@@ -179,12 +187,13 @@ export async function syncSpcLotsToApp(
     log(quiet, '[spc-sync] score_start', {
       lotIds: scoreIds.length,
       inserted: inserted.length,
-      unscored: unscoredRows.length,
+      unscored: picked.lotIds.length,
+      reason: picked.reason,
       concurrency,
     })
     const started = Date.now()
     let lastLog = 0
-    const result = await lotService.scoreAllLots({
+    result = await lotService.scoreAllLots({
       lotIds: scoreIds,
       concurrency,
       onProgress: (done, total, lotId) => {
@@ -202,35 +211,37 @@ export async function syncSpcLotsToApp(
       `elapsed_ms=${Date.now() - started}`,
     )
 
-    const issuesCreated = await lotService.ensureIssuesForRiskLots()
+    issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+  } finally {
+    running = false
+  }
 
-    let reasonsUpdated = 0
+  let reasonsUpdated = 0
+  if (!skipRiskReason && scoreIds.length > 0) {
     try {
       const reasonResult = await fillRiskReasonsForLots(scoreIds, {
         concurrency: 2,
-        quiet,
+        quiet: opts.quiet,
       })
       reasonsUpdated = reasonResult.updated
-      log(quiet, '[spc-sync] risk_reasons', reasonResult)
+      log(opts.quiet, '[spc-sync] risk_reasons', reasonResult)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       console.error('[spc-sync] risk_reason_failed', detail)
       result.errors.push(`risk_reason: ${detail}`)
     }
+  }
 
-    return {
-      skipped: false,
-      table,
-      inserted: inserted.length,
-      scored: result.scored,
-      failed: result.failed,
-      issuesCreated,
-      reasonsUpdated,
-      errors: result.errors,
-    }
-  } finally {
-    running = false
+  return {
+    skipped: false,
+    table,
+    inserted: insertedCount,
+    scored: result.scored,
+    failed: result.failed,
+    issuesCreated,
+    reasonsUpdated,
+    errors: result.errors,
   }
 }
 

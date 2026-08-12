@@ -17,7 +17,6 @@ ALTER TABLE analysis_lots DROP COLUMN IF EXISTS defect_prob;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS clf_model_version;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS residual_model_version;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS spc_limit_version;
-ALTER TABLE analysis_lots DROP COLUMN IF EXISTS scored_at;
+-- scored_at kept (last score time) — see alter_analysis_lots_add_scored_at.sql / schema.sql
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS updated_at;
 ALTER TABLE analysis_lots DROP COLUMN IF EXISTS spc_chart_json;
-ALTER TABLE analysis_lots DROP INDEX IF EXISTS idx_analysis_scored;

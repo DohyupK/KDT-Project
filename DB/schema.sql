@@ -46,10 +46,12 @@ CREATE TABLE IF NOT EXISTS analysis_lots (
   risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정',
   risk_reason              VARCHAR(255) NULL,
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  scored_at                DATETIME     NULL COMMENT '마지막 채점 시각',
   CONSTRAINT fk_analysis_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE,
-  INDEX idx_analysis_risk (risk_level)
+  INDEX idx_analysis_risk (risk_level),
+  INDEX idx_analysis_scored (scored_at)
 );
 
 -- Judgment outcomes: clf quality_defect + reg capacity + residual_li + probability (0~1)
@@ -63,6 +65,16 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
   CONSTRAINT fk_judgment_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE
+);
+
+-- Feeder + AI NULL-fill buffer (quality_defect / residual_li). Not dropped as orphan.
+CREATE TABLE IF NOT EXISTS lot_results (
+  seq             INT          NOT NULL PRIMARY KEY,
+  lot_id          VARCHAR(64)  NOT NULL,
+  quality_defect  TINYINT      NULL,
+  residual_li     DOUBLE       NULL,
+  measured_at     DATETIME     NULL,
+  UNIQUE KEY uq_lot_results_lot_id (lot_id)
 );
 
 CREATE TABLE IF NOT EXISTS issues (

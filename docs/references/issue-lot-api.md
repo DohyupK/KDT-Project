@@ -1,6 +1,6 @@
 # Issue / LOT / 과거 자료 API (백엔드)
 
-최종 갱신: 2026-08-08
+최종 갱신: 2026-08-12
 
 ## 규칙
 
@@ -15,7 +15,15 @@
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
 - 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `spc_status` 이탈 · `risk_level` 심각 (`analysis_lots` JOIN)
 - 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
-- 채점: `lotScore.ts` + ai-service → **`analysis_lots`** (공정은 `lots`) · `judgment_lots.probability`는 NULL만 COALESCE
+- **채점 3단 SSOT** (`lot.service` `updateLotScore`):  
+  1. `/predict-voting` → **`lot_results`** NULL-fill (`quality_defect`·`residual_li`만; 피더 실측은 COALESCE로 불변)  
+  2. **`judgment_lots`** — qd/residual ← `lot_results`, capacity/probability ← voting, `spc` ← SPC; 기존 실측/시드는 `COALESCE` 유지  
+  3. **`analysis_lots`** — **judgment 기준 2차 추론** (`combineLotScore` + SPC → risk/`scored_at`); judgment만 찬·analysis만 빈 경우 `scoreAnalysisFromJudgment`  
+- **`lot_results`:** 피더 `produce` 시 **`lot_id` stub 즉시** (qd/residual NULL) · +60분 qd · +24h residual · 그 전·미연동은 AI NULL-fill. `lot_id` UNIQUE.  
+- **`lot_results` / residual NULL FAQ:** 추론 실패가 아님. 피더 지연(+60분/+24h) · 과거 미연동 · **폴러가 옛 LR만 ASC로 집어 신규를 굶기면** AI fill도 안 돌아 NULL 고착(버그→큐 우선순위 수정).  
+- **폴러:** A큐(judgment/analysis/`scored_at`/LR행 결손·**최신 DESC**) ~70% → B큐(LR qd/residual NULL·ASC). **score 락 해제 후** `risk_reason`(vLLM).  
+  - 미채점: analysis/`probability`/`scored_at`/judgment residual·capacity **또는** `lot_results` 행/`residual_li`/`quality_defect` NULL  
+  - 피더 실측이 `lot_results`에 있으면 AI가 **덮지 않음**(COALESCE) · 대시보드 잔류는 계속 `judgment_lots`
 - 목록의 `date`, `riskLevel`은 잘못된 값을 보내면 `400`을 반환 (**`status` 필터 없음**)
 
 ## 테이블 분리 (`lots` / `analysis_lots` / `issues`)
@@ -23,11 +31,13 @@
 | 테이블 | 역할 |
 |--------|------|
 | `lots` | CSV명 SSOT: `id`, `timestamp`, 공정 9, `operator_id` |
-| `analysis_lots` | 채점: `lot_id` **FK → `lots.id`**, `probability`, `spc_status`, `risk_level`, `risk_reason`, `created_at` |
+| `lot_results` | **1단** 결과 버퍼: `quality_defect`·`residual_li`(피더 실측 또는 AI NULL-fill) · DDL [`DB/lot_results.sql`](../../DB/lot_results.sql) |
+| `judgment_lots` | **2단** 판정: qd/residual←`lot_results`, capacity/prob←voting · 대시보드 잔류 JOIN |
+| `analysis_lots` | **3단** 채점(judgment 2차 추론): `lot_id` **FK → `lots.id`**, `probability`, `spc_status`, `risk_level`, `risk_reason`, `created_at`, **`scored_at`** |
 | `issues` | `issue_id`, `lot_id`, `issue_content`, `action_content`, `assignee_user_id`, `completed_at`, `created_at` — **no status / no risk_level** |
 
 - 마이그레이션: `npm run migrate:issues-refactor` ([`backend/scripts/migrate-issues-refactor.ts`](../../backend/scripts/migrate-issues-refactor.ts)) — **기존 issues 행 전량 삭제** 후 스키마 정렬
-- DDL: [`DB/schema.sql`](../../DB/schema.sql), [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql), [`DB/alter_issues_refactor.sql`](../../DB/alter_issues_refactor.sql)
+- DDL: [`DB/schema.sql`](../../DB/schema.sql), [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql), [`DB/alter_issues_refactor.sql`](../../DB/alter_issues_refactor.sql), [`DB/alter_analysis_lots_add_scored_at.sql`](../../DB/alter_analysis_lots_add_scored_at.sql)
 
 ## 엔드포인트
 
@@ -56,7 +66,7 @@
 | `issueContent` | `issues.issue_content` |
 | `actionContent` | `issues.action_content` |
 | `completed` / `completedAt` | `completed_at IS NOT NULL` / `completed_at` |
-| `analysis` (상세) | `analysis_lots` 스냅샷: `lotId`, `probability`, `spcStatus`, `riskLevel`, `riskReason`, `createdAt` |
+| `analysis` (상세) | `analysis_lots` 스냅샷: `lotId`, `probability`, `spcStatus`, `riskLevel`, `riskReason`, `createdAt` (`scored_at`은 DB·채점 upsert에 기록, API DTO 노출은 후속) |
 
 ## 이슈 상세 분석 UI (시각화 초안)
 
