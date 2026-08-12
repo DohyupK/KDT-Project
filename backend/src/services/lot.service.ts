@@ -171,6 +171,132 @@ export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
   }
 }
 
+/** Tier-based Q-Cost unit prices (KRW) — keep in sync with frontend/src/lib/qCost.ts */
+const Q_COST_APPRAISAL = {
+  stable: 50_000,
+  warning: 100_000,
+  critical: 150_000,
+} as const
+const Q_COST_INTERNAL_UNIT = 500_000
+const Q_COST_EXTERNAL_UNIT = 3_000_000
+const Q_COST_PREVENTION = 20_000_000
+
+export type QCostSummary = {
+  from: string
+  to: string
+  stableCount: number
+  warningCount: number
+  criticalCount: number
+  internalDefectCount: number
+  /** Not tracked in DB yet — always 0 until leak source is defined */
+  externalLeakCount: number
+  appraisalCost: number
+  appraisalBreakdown: {
+    stable: number
+    warning: number
+    critical: number
+  }
+  internalCost: number
+  externalCost: number
+  preventionCost: number
+  totalQCost: number
+}
+
+function toDateOnlyIso(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * Period Q-Cost counts + costs.
+ * Default window: current calendar month (prevention is monthly fixed).
+ * - Appraisal tiers: analysis_lots.risk_level
+ * - Internal defects: judgment_lots.quality_defect = 1
+ * - External leaks: 0 (no column yet)
+ */
+export async function getQCostSummary(opts: {
+  from?: string
+  to?: string
+} = {}): Promise<QCostSummary> {
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEndExclusive = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+  const fromStr =
+    opts.from && /^\d{4}-\d{2}-\d{2}$/.test(opts.from)
+      ? opts.from
+      : toDateOnlyIso(monthStart)
+  const toExclusiveStr =
+    opts.to && /^\d{4}-\d{2}-\d{2}$/.test(opts.to)
+      ? opts.to
+      : toDateOnlyIso(monthEndExclusive)
+
+  const riskRows = await query<
+    {
+      stable_count: number | null
+      warning_count: number | null
+      critical_count: number | null
+    }[]
+  >(
+    `SELECT
+       SUM(CASE WHEN a.risk_level = '안정' THEN 1 ELSE 0 END) AS stable_count,
+       SUM(CASE WHEN a.risk_level = '주의' THEN 1 ELSE 0 END) AS warning_count,
+       SUM(CASE WHEN a.risk_level = '심각' THEN 1 ELSE 0 END) AS critical_count
+     FROM lots l
+     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     WHERE l.\`timestamp\` >= ?
+       AND l.\`timestamp\` < ?`,
+    [fromStr, toExclusiveStr],
+  )
+
+  const defectRows = await query<{ c: number | null }[]>(
+    `SELECT COUNT(*) AS c
+     FROM judgment_lots j
+     INNER JOIN lots l ON l.id = j.lot_id
+     WHERE j.quality_defect = 1
+       AND l.\`timestamp\` >= ?
+       AND l.\`timestamp\` < ?`,
+    [fromStr, toExclusiveStr],
+  )
+
+  const stableCount = Number(riskRows[0]?.stable_count ?? 0)
+  const warningCount = Number(riskRows[0]?.warning_count ?? 0)
+  const criticalCount = Number(riskRows[0]?.critical_count ?? 0)
+  const internalDefectCount = Number(defectRows[0]?.c ?? 0)
+  const externalLeakCount = 0
+
+  const appraisalBreakdown = {
+    stable: stableCount * Q_COST_APPRAISAL.stable,
+    warning: warningCount * Q_COST_APPRAISAL.warning,
+    critical: criticalCount * Q_COST_APPRAISAL.critical,
+  }
+  const appraisalCost =
+    appraisalBreakdown.stable +
+    appraisalBreakdown.warning +
+    appraisalBreakdown.critical
+  const internalCost = internalDefectCount * Q_COST_INTERNAL_UNIT
+  const externalCost = externalLeakCount * Q_COST_EXTERNAL_UNIT
+  const preventionCost = Q_COST_PREVENTION
+
+  return {
+    from: fromStr,
+    to: toExclusiveStr,
+    stableCount,
+    warningCount,
+    criticalCount,
+    internalDefectCount,
+    externalLeakCount,
+    appraisalCost,
+    appraisalBreakdown,
+    internalCost,
+    externalCost,
+    preventionCost,
+    totalQCost: appraisalCost + internalCost + externalCost + preventionCost,
+  }
+}
+
 export type RiskTopResult = {
   lots: LotDto[]
   total: number

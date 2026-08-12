@@ -24,7 +24,7 @@ from agent.api_llm.providers import (
 
 AUTO_FALLBACK_NOTICE = "\n\n[안내] 이전 API 한도/오류로 다른 등록 API가 답변했습니다."
 NO_CREDENTIALS_NOTICE = (
-    "등록된 API 키가 없습니다. /security 탭에서 API 키를 저장한 뒤 다시 시도해 주세요."
+    "등록된 API 키가 없습니다. 설정 페이지에서 API 키를 저장한 뒤 다시 시도해 주세요."
 )
 
 
@@ -116,22 +116,27 @@ def compose_with_failover(
     if mode != "auto":
         chosen = next((c for c in creds if c.id == mode), None)
         if chosen is None:
-            return None, None, "선택한 API를 찾을 수 없습니다. 보안 탭에서 다시 저장해 주세요."
-        text = invoke_credential(chosen, messages)
+            return None, None, "선택한 API를 찾을 수 없습니다. 설정 페이지에서 다시 저장해 주세요."
+        invoke_errors: list[str] = []
+        text = invoke_credential(chosen, messages, invoke_errors)
         if text:
             return text, chosen.display_name or chosen.company, None
-        return None, chosen.display_name, translate_llm_error("invoke failed")
+        err_detail = invoke_errors[-1] if invoke_errors else "invoke failed"
+        return None, chosen.display_name, translate_llm_error(err_detail)
 
     # Auto: cost ladder from floor(len/100), failover to next registered API
     ordered = select_auto_order(creds, message)
     last_err: str | None = None
     for i, cred in enumerate(ordered):
-        text = invoke_credential(cred, messages)
+        invoke_errors = []
+        text = invoke_credential(cred, messages, invoke_errors)
         if text:
             if i > 0:
                 if AUTO_FALLBACK_NOTICE.strip() not in text:
                     text = text.rstrip() + AUTO_FALLBACK_NOTICE
             return text, cred.display_name or cred.company, None
-        last_err = translate_llm_error("auto candidate failed")
+        last_err = translate_llm_error(
+            invoke_errors[-1] if invoke_errors else "auto candidate failed",
+        )
 
     return None, None, last_err

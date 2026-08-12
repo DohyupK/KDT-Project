@@ -41,6 +41,27 @@ export type DailyKpiResponse = {
   defectRate: number | null
 }
 
+/** Matches backend getQCostSummary */
+export type QCostSummaryResponse = {
+  from: string
+  to: string
+  stableCount: number
+  warningCount: number
+  criticalCount: number
+  internalDefectCount: number
+  externalLeakCount: number
+  appraisalCost: number
+  appraisalBreakdown: {
+    stable: number
+    warning: number
+    critical: number
+  }
+  internalCost: number
+  externalCost: number
+  preventionCost: number
+  totalQCost: number
+}
+
 export const RISK_TOP_PAGE_SIZE = 8
 
 export const mainApi = {
@@ -55,5 +76,14 @@ export const mainApi = {
 
   getDailyKpi() {
     return apiClient.get<DailyKpiResponse>('/lots/daily-kpi')
+  },
+
+  getQCost(params: { from?: string; to?: string } = {}) {
+    return apiClient.get<QCostSummaryResponse>('/lots/q-cost', {
+      params: {
+        ...(params.from ? { from: params.from } : {}),
+        ...(params.to ? { to: params.to } : {}),
+      },
+    })
   },
 }
