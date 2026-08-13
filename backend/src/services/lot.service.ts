@@ -524,13 +524,14 @@ async function upsertAnalysisScore(
   if (chartJson === undefined) {
     await query(
       `INSERT INTO analysis_lots (
-        lot_id, probability, spc_status, risk_level, risk_reason
-      ) VALUES (?, ?, ?, ?, ?)
+        lot_id, probability, spc_status, risk_level, risk_reason, scored_at
+      ) VALUES (?, ?, ?, ?, ?, NOW())
       ON DUPLICATE KEY UPDATE
         probability = VALUES(probability),
         spc_status = VALUES(spc_status),
         risk_level = VALUES(risk_level),
-        risk_reason = VALUES(risk_reason)`,
+        risk_reason = VALUES(risk_reason),
+        scored_at = NOW()`,
       [
         lotId,
         scored.probability,
@@ -543,14 +544,15 @@ async function upsertAnalysisScore(
   }
   await query(
     `INSERT INTO analysis_lots (
-      lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NOW())
     ON DUPLICATE KEY UPDATE
       probability = VALUES(probability),
       spc_status = VALUES(spc_status),
       risk_level = VALUES(risk_level),
       risk_reason = VALUES(risk_reason),
-      spc_chart_json = VALUES(spc_chart_json)`,
+      spc_chart_json = VALUES(spc_chart_json),
+      scored_at = NOW()`,
     [
       lotId,
       scored.probability,
@@ -798,7 +800,13 @@ async function updateLotScore(
       jIn.spc,
     ],
   )
-  await upsertAnalysisScore(lotId, scored, spcChart)
+
+  // Stage 3: analysis_lots from judgment (2nd pass) + scored_at
+  const j = await getJudgment(lotId)
+  const analysisScore = j
+    ? await mergeScoreFromJudgment(j, scored.spc_status)
+    : scored
+  await upsertAnalysisScore(lotId, analysisScore, spcChart)
 }
 
 /** Latest N lot ids by production time (for targeted rescoring). */
