@@ -1,7 +1,6 @@
 /**
- * Every 10 minutes: score lots missing analysis_lots (or null probability),
- * then fill risk_reason via local vLLM. Always re-seed open issues for 심각 lots
- * (even when there is nothing left to score). Complements per-insert syncSpcLots.
+ * Periodic score for lots missing analysis / judgment / lot_results / scored_at.
+ * Complements per-insert syncSpcLots. Started after ai-service health (index.ts).
  */
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'

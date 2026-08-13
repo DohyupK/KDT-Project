@@ -1,7 +1,9 @@
 /**
  * Mirror SPC_LOT → lots (process only), then score new + unscored lots
- * (analysis_lots + judgment_lots NULL-only AI fill). Always re-seeds open
- * issues for risk_level=심각 after each tick.
+ * (analysis_lots + judgment_lots + lot_results NULL-fill).
+ *
+ * Priority: judgment/analysis/scored_at/missing LR (newest) then LR field backfill.
+ * risk_reason runs after the sync lock is released.
  */
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
