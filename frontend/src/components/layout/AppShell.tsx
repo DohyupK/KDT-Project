@@ -327,7 +327,7 @@ export function useUiSettings() {
                 fontSize: s.fontSize,
                 autoRefreshEnabled: s.autoRefreshEnabled ?? currentSystem.autoRefreshEnabled ?? true,
                 refreshInterval: s.refreshInterval,
-                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? true,
+                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? false,
               }),
             )
           } catch {

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   font_size             INT          NOT NULL DEFAULT 18,
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
+  email_check           CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=receive issue-report mail, X=opt-out',
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -210,4 +211,43 @@ CREATE TABLE IF NOT EXISTS AI_Library_analysis (
     ON DELETE CASCADE,
   INDEX idx_ai_library_analysis_user_created (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- OCR / empty-text sidecar: source image|scan PDF ↔ Markdown/*.md (path meta only).
+CREATE TABLE IF NOT EXISTS text_match (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_path     VARCHAR(512) NOT NULL COMMENT 'repo-relative e.g. Documents/Public/a.pdf',
+  md_path         VARCHAR(512) NOT NULL COMMENT 'repo-relative Markdown sidecar',
+  clearance       VARCHAR(32)  NOT NULL,
+  source_ext      VARCHAR(16)  NOT NULL,
+  extract_method  VARCHAR(32)  NOT NULL DEFAULT 'ocr',
+  source_sha1     CHAR(40)     NULL,
+  status          VARCHAR(16)  NOT NULL DEFAULT 'ready' COMMENT 'ready|failed|stale',
+  error_message   VARCHAR(255) NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_text_match_source (source_path),
+  INDEX idx_text_match_md (md_path),
+  INDEX idx_text_match_clearance (clearance)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Issue report mail log (n8n / Gmail API). HTML in mail_contents.
+CREATE TABLE IF NOT EXISTS send_email (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lot_id        VARCHAR(64)  NOT NULL,
+  user_id       VARCHAR(50)  NOT NULL,
+  email         VARCHAR(100) NOT NULL COMMENT 'users.email snapshot at insert',
+  mail_contents LONGTEXT     NOT NULL COMMENT 'LOT report HTML (not JSON/PDF)',
+  send          CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=sent X=unsent/failed',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at       DATETIME     NULL,
+  error         VARCHAR(255) NULL,
+  CONSTRAINT fk_send_email_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
+  CONSTRAINT fk_send_email_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+  UNIQUE KEY uq_send_email_lot_user (lot_id, user_id),
+  INDEX idx_send_email_send (send),
+  INDEX idx_send_email_lot (lot_id),
+  INDEX idx_send_email_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- See also DB/spc_limits_and_standard.sql (spc_limits, standard, judgment_lots.spc)
+-- See also DB/send_email.sql (ALTER user_settings.email_check + send_email)

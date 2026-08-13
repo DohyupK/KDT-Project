@@ -10,6 +10,7 @@ import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 import { pickUnscoredLotIds, SYS_HANDOVER_LOT_ID } from './unscoredLots.js'
+import { dispatchNewRiskTopIssueReports } from './issueReportN8n.js'
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
@@ -254,6 +255,16 @@ let actionsUpdated = 0
     if (!skipIssues) {
       issuesCreated = await lotService.ensureIssuesForRiskLots()
       if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+      try {
+        const mailed = await dispatchNewRiskTopIssueReports()
+        if (mailed.enabled && (mailed.inserted || mailed.baseline)) {
+          log(quiet, '[spc-sync] issue_reports', mailed)
+        }
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err)
+        console.error('[spc-sync] issue_reports_failed', detail)
+        errors.push(`issue_reports: ${detail}`)
+      }
     }
     return {
       skipped: false,

@@ -1,7 +1,8 @@
 """
 Dual-engine Documents watcher (FastAPI lifespan background thread).
 
-- PDF/TXT under Documents/<Clearance>/ → Markdown/ → full ingest
+- TXT / text PDF → native ingest (no matching .md)
+- Scan PDF / images → OCR Markdown + text_match → ingest
 - CSV/XLSX → ai-service/data/csv_lake/ → profile MD under Confidential/Markdown
 - Watches all four clearance roots + csv_lake
 - Debounce + ingest lock/coalesce so burst drops do not stack full rebuilds
@@ -24,10 +25,11 @@ from agent.doc_clearance import (
     ensure_clearance_tree,
     is_under_any_markdown,
 )
+from agent.document_convert import CONVERT_SUFFIXES, ConvertResult
 
 logger = logging.getLogger(__name__)
 
-UNSTRUCTURED_SUFFIXES = {".pdf", ".txt"}
+UNSTRUCTURED_SUFFIXES = set(CONVERT_SUFFIXES)
 TABLE_SUFFIXES = {".csv", ".xlsx"}
 DEBOUNCE_S = float(os.environ.get("SECURE_DOCS_WATCH_DEBOUNCE", "4.0"))
 STABLE_CHECKS = 3
@@ -163,9 +165,25 @@ def _handle_path(path: Path, docs_dir: Path, ai_root: Path, lake_dir: Path) -> b
         out = convert_file_to_md(
             path, secure_docs_dir=docs_dir, repo_root=ai_root.parent
         )
+        if isinstance(out, ConvertResult):
+            return bool(out.needs_ingest)
         return out is not None
 
     return False
+
+
+def _handle_deleted(path: Path, docs_dir: Path, ai_root: Path) -> bool:
+    """Drop OCR sidecar + text_match when source removed."""
+    suffix = path.suffix.lower()
+    if suffix not in UNSTRUCTURED_SUFFIXES:
+        return False
+    if is_under_any_markdown(path, docs_dir):
+        return False
+    from agent.document_convert import remove_pair_for_deleted_source
+
+    return remove_pair_for_deleted_source(
+        path, secure_docs_dir=docs_dir, repo_root=ai_root.parent
+    )
 
 
 def _schedule_flush(docs_dir: Path, ai_root: Path, lake_dir: Path) -> None:
@@ -260,6 +278,16 @@ def start_document_watcher(
         def on_moved(self, event):  # noqa: ANN001
             if not event.is_directory:
                 _enqueue(Path(event.dest_path), root_docs, root_ai, lake)
+
+        def on_deleted(self, event):  # noqa: ANN001
+            if event.is_directory:
+                return
+            path = Path(event.src_path)
+            try:
+                if _handle_deleted(path, root_docs, root_ai):
+                    _request_ingest()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[document_watcher] delete %s: %s", path, exc)
 
     observer = Observer()
     # One recursive watch on Documents covers Public/Confidential/Secret/TopSecret

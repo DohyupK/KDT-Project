@@ -70,7 +70,8 @@ CHAT_VLLM_MODEL=<served-model-name>
 
 ```bash
 # Qdrant Docker 예
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+docker run -p 6333:6333 -p 6334:6334 -v "%CD%/DB/data/qdrant_storage:/qdrant/storage" --name kdt-qdrant qdrant/qdrant
+# 또는 ai-service 기동 시 QDRANT_AUTOSTART=1 (기본) 이 Docker로 동일 컨테이너를 올림
 
 cd ai-service
 # Full rebuild: deletes Qdrant collection then re-chunks (400/50) + embeds
@@ -78,11 +79,11 @@ python scripts/rebuild_secure_rag_clean.py
 # 또는 (동일 run_ingest, 레거시 MD 정리 없음): python ingest_secure.py
 #
 # BM25 반영:
-# - Documents 워처(`SECURE_DOCS_WATCH=1`) 자동 ingest → 서버 내 `reload_bm25()` 핫리로드 (재시작 불필요)
+# - backend가 띄운 Documents 워처 자동 ingest → ai-service 내 `reload_bm25()` 핫리로드
 # - 터미널 CLI(`ingest_secure.py` / rebuild 스크립트)는 **별 프로세스** → ai-service(:8800) **재시작** 필요
 ```
 
-문서: `Documents/*.{md,txt,pdf}` (`.md` YAML frontmatter, PDF는 선택 `*.meta.json` sidecar).
+문서: `Documents/<Clearance>/` — 수동 `.md`(Markdown/), 텍스트 `.txt`/`.pdf`(네이티브 ingest), 스캔 PDF·이미지는 OCR sidecar `.md` + MariaDB `text_match`. PDF 메타는 선택 `*.meta.json`.
 
 환경 (선택):
 
@@ -92,10 +93,12 @@ SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (�
                              # gemma@q2_k 등 초소형 양자화는 chat/completions가 ""/"." 로 stop하는 경우 많음 → 0 유지
                              # 요약 LLM이 필요하면 채팅용 더 큰 모델 + SECURE_GENERATE=1
 SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
-SECURE_DOCS_WATCH=1          # FastAPI lifespan dual-engine watcher
-SECURE_DOCS_WATCH_DEBOUNCE=4.0  # coalesce bursts before convert/profile + ingest
+SECURE_DOCS_WATCH=1          # document watcher daemon (backend-spawned)
+DOCUMENT_WATCHER_AUTOSTART=1 # Express starts scripts/run_document_watcher.py
+QDRANT_AUTOSTART=1           # ai-service lifespan starts Docker kdt-qdrant if /readyz fails
+QDRANT_URL=http://127.0.0.1:6333
 # Tables: Documents CSV/XLSX → move ai-service/data/csv_lake/ → Documents/Confidential/Markdown/*-profile.md
-# Unstructured: PDF/TXT under Documents/<Clearance>/ → Markdown/*.md → full ingest
+# Text pdf/txt: native ingest (no matching .md). Scan PDF/images: OCR → Markdown/*.md + text_match → ingest
 SECURE_SELF_QUERY_TIMEOUT=20
 SECURE_SELF_QUERY_MAX_TOKENS=256
 # Chunk (ingest defaults): SentenceSplitter chunk_size=400 · overlap=50
@@ -133,7 +136,8 @@ D. rerank + SECURE_RERANK_MIN_SCORE (기본 0.15) · soft fallback + max_score �
 
 ## 듀얼 엔진 문서 유입
 
-- PDF/TXT → `Documents/<Clearance>/Markdown/*.md` → ingest
+- 텍스트 PDF/TXT → clearance root에서 네이티브 ingest (매칭 `.md` 없음)
+- 스캔 PDF/이미지 → OCR → `Documents/<Clearance>/Markdown/*.md` + MariaDB `text_match` → ingest
 - CSV/XLSX → `ai-service/data/csv_lake/` + `Documents/Confidential/Markdown/*-profile.md` → ingest
 - Watch: `SECURE_DOCS_WATCH=1` · debounce `SECURE_DOCS_WATCH_DEBOUNCE` · 4등급 루트
 - 옛 CSV **풀 테이블 MD**는 품질 오염 → `scripts/rebuild_secure_rag_clean.py`로 정리 후 재ingest

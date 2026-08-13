@@ -209,6 +209,20 @@ export async function listOpenIssues(q: IssueListQuery): Promise<{
   }
 }
 
+export async function listOpenIssueDetailsByLotId(lotId: string): Promise<IssueDetail[]> {
+  const rows = await query<IssueRow[]>(
+    `SELECT ${ISSUE_DETAIL_SELECT},
+            u.name AS assignee_name
+     FROM issues i
+     LEFT JOIN analysis_lots a ON a.lot_id = i.lot_id
+     LEFT JOIN users u ON u.user_id = i.assignee_user_id
+     WHERE i.lot_id = ? AND i.completed_at IS NULL
+     ORDER BY i.created_at DESC`,
+    [lotId],
+  )
+  return rows.map(toDetail)
+}
+
 export async function getIssueById(issueId: string): Promise<IssueDetail> {
   const rows = await query<IssueRow[]>(
     `SELECT ${ISSUE_DETAIL_SELECT},
