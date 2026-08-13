@@ -1,0 +1,46 @@
+{
+    "enable_api_llm":  false,
+    "message":  "이 화면 KPI 요약해줘",
+    "session_id":  "pagectx-114357",
+    "page_context":  {
+                         "pagePayload":  {
+                                             "riskTop":  {
+                                                             "total":  3,
+                                                             "lots":  [
+                                                                          {
+                                                                              "status":  "심각",
+                                                                              "riskScore":  0.91,
+                                                                              "lotId":  "LOT-SMOKE-001"
+                                                                          }
+                                                                      ]
+                                                         },
+                                             "dailyKpi":  [
+                                                              {
+                                                                  "title":  "실시간 양품률",
+                                                                  "id":  "yield-rate",
+                                                                  "value":  "92.5%"
+                                                              },
+                                                              {
+                                                                  "title":  "불량률",
+                                                                  "id":  "defect-rate",
+                                                                  "value":  "7.5%"
+                                                              },
+                                                              {
+                                                                  "title":  "양품수",
+                                                                  "id":  "yield-count",
+                                                                  "value":  "185"
+                                                              },
+                                                              {
+                                                                  "title":  "불량수",
+                                                                  "id":  "defect-count",
+                                                                  "value":  "15"
+                                                              }
+                                                          ]
+                                         },
+                         "supplementHints":  [
+                                                 "daily-kpi",
+                                                 "risk-top"
+                                             ],
+                         "route":  "/main"
+                     }
+}

@@ -15,6 +15,7 @@ import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import DateInput from '@/components/DateInput'
 import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
+import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 import { Ruler, UserRound } from 'lucide-react'
 
@@ -1468,6 +1469,7 @@ function ProductionTrendDateFilter({
 
 export default function DashBoardPage() {
   const { isDark } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
 
@@ -1596,6 +1598,139 @@ export default function DashBoardPage() {
         : '';
     return `${probPart}잔류리튬 ${residualText}, ${marginText}`;
   }, [selectedLotRisk, selectedLotRiskDetail]);
+
+  useEffect(() => {
+    const detailMetrics = selectedLotRiskDetail?.spc?.metrics?.slice(0, 9).map((m) => ({
+      key: m.key,
+      label: m.label,
+      status: m.status,
+      currentValue: m.currentValue,
+      violatedRules: m.violatedRules?.slice(0, 3),
+    }));
+    setPagePayload(
+      '/dashboard',
+      {
+        lotRisks: {
+          page: lotRiskPage,
+          total: lotRiskTotal,
+          filter: lotRiskFilterApplied,
+          items: lotRiskRows.slice(0, 10).map((r) => ({
+            lotId: r.lot,
+            grade: r.grade,
+            prob: r.prob,
+            predLi: r.predLi,
+            margin: r.margin,
+            spc: r.spc,
+          })),
+        },
+        selectedLot: selectedLotRisk
+          ? {
+              lotId: selectedLotRisk.lot,
+              summary: selectedRiskSummary,
+              detail: selectedLotRiskDetail
+                ? {
+                    lotId: selectedLotRiskDetail.lotId,
+                    defectProb: selectedLotRiskDetail.defectProb,
+                    residualLithium: selectedLotRiskDetail.residualLithium,
+                    residualMargin: selectedLotRiskDetail.residualMargin,
+                    spcStatus: selectedLotRiskDetail.spcStatus,
+                    riskLevel: selectedLotRiskDetail.riskLevel,
+                    riskReason: selectedLotRiskDetail.riskReason,
+                    metrics: detailMetrics,
+                  }
+                : null,
+            }
+          : null,
+        productionTrend: {
+          filter: trendFilterApplied,
+          points: trendPoints.slice(0, 14),
+          selectedBucket: selectedTrendBucket,
+        },
+        featureImportance: {
+          label: featureImportanceLabel,
+          items: featureImportanceItems.slice(0, 10),
+        },
+        productionDaily: {
+          page: tablePage,
+          total: dailyTotal,
+          rows: dailyApiRows.slice(0, 5).map((r) => ({
+            date: r.date,
+            production: r.production,
+            defectCount: r.defectCount,
+            defectRate: r.defectRate,
+          })),
+        },
+        dataPanelTab,
+      },
+      ['dashboard-lot-risks', 'dashboard-trend', 'dashboard-fi'],
+    );
+  }, [
+    setPagePayload,
+    lotRiskPage,
+    lotRiskTotal,
+    lotRiskFilterApplied,
+    lotRiskRows,
+    selectedLotRisk,
+    selectedLotRiskDetail,
+    selectedRiskSummary,
+    trendFilterApplied,
+    trendPoints,
+    selectedTrendBucket,
+    featureImportanceLabel,
+    featureImportanceItems,
+    tablePage,
+    dailyTotal,
+    dailyApiRows,
+    dataPanelTab,
+  ]);
+
+  useEffect(() => {
+    if (!selectedLotRiskId || !selectedLotRisk) {
+      trackPageChatEvent({ type: 'clear', route: '/dashboard', target: 'lot-risk-detail' })
+      return
+    }
+    const spcStatus =
+      selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc ?? null
+    const spcText = spcStatus != null ? String(spcStatus).trim() : ''
+    const metrics = selectedLotRiskDetail?.spc?.metrics?.slice(0, 9).map((m) => ({
+      key: m.key,
+      label: m.label,
+      status: m.status,
+      currentValue: m.currentValue,
+    }))
+    const spcBlank = !spcText || spcText === '-' || spcText === '—'
+    const metricsEmpty = !metrics || metrics.length === 0
+    trackPageChatEvent({
+      type: 'row_select',
+      route: '/dashboard',
+      target: 'lot-risk-detail',
+      entityId: selectedLotRisk.lot,
+      payload: {
+        lotId: selectedLotRisk.lot,
+        spcStatus: spcStatus ?? '-',
+        spcGraph: spcBlank || metricsEmpty ? 'none' : 'present',
+        row: {
+          grade: selectedLotRisk.grade,
+          prob: selectedLotRisk.prob,
+          predLi: selectedLotRisk.predLi,
+          margin: selectedLotRisk.margin,
+          spc: selectedLotRisk.spc ?? '-',
+        },
+        detail: selectedLotRiskDetail
+          ? {
+              defectProb: selectedLotRiskDetail.defectProb,
+              residualLithium: selectedLotRiskDetail.residualLithium,
+              residualMargin: selectedLotRiskDetail.residualMargin,
+              spcStatus: selectedLotRiskDetail.spcStatus ?? '-',
+              riskLevel: selectedLotRiskDetail.riskLevel,
+              riskReason: selectedLotRiskDetail.riskReason,
+              metrics: metrics ?? [],
+            }
+          : null,
+        summary: selectedRiskSummary,
+      },
+    })
+  }, [selectedLotRiskId, selectedLotRisk, selectedLotRiskDetail, selectedRiskSummary, trackPageChatEvent]);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -3537,7 +3672,16 @@ export default function DashBoardPage() {
                 <ProductionTrendChart
                   points={dailyAggregates}
                   isDark={isDark}
-                  onBarClick={setSelectedTrendBucket}
+                  onBarClick={(bucket) => {
+                    setSelectedTrendBucket(bucket);
+                    trackPageChatEvent({
+                      type: 'filter_apply',
+                      route: '/dashboard',
+                      target: 'production-trend-bar',
+                      entityId: String(bucket?.date ?? bucket?.label ?? ''),
+                      payload: bucket,
+                    });
+                  }}
                 />
               ) : (
                 <EmptyState plain message="표시할 생산 데이터가 없습니다." />

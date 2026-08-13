@@ -9,8 +9,7 @@ import {
   postApproveControl,
   postOutcomeControl,
   postRevertControl,
-  postChat,
-  SAMPLE_CHAT_FEATURES,
+  postChatStream,
   getChatThreadId,
   listChatThreads,
   loadChatThreadMessages,
@@ -20,6 +19,7 @@ import {
   type ChatRecommendation,
   type ChatThreadItem,
 } from '@/api/aiApi'
+import { usePageChatOptional } from '@/context/PageChatContext'
 import {
   parseOutcomeCapacityInput,
   parseOutcomeResidualLiInput,
@@ -59,17 +59,17 @@ const UNDO_SECONDS = 5
 
 const USAGE_GUIDE_TEXT =
   '사용 안내입니다.\n\n' +
-  '1. Main 화면 「위험 LOT Top」에서 LOT 행을 클릭하면 챗봇에 센서가 연결되고 O/X·용량·잔여 리튬 진단이 자동으로 시작됩니다.\n' +
-  '2. 「샘플 LOT 진단」칩으로도 시험할 수 있습니다.\n' +
-  '3. What-if 제안이 나오면 「제안 승인」→ 5초 안 「실행 취소」가능.\n' +
-  '4. 공정 한계치(온도·습도)는 Setting에서 바꿉니다.\n' +
+  '1. 지금 보고 있는 화면(Main·Dashboard·Issue·Knowledge·SPC) 데이터를 기준으로 질문하세요.\n' +
+  '2. 목록·카드·버튼을 누른 뒤 질문하면 그 항목을 우선 참조합니다.\n' +
+  '3. 공개·대외비 문서는 RAG로 검색됩니다. 기밀은 보안 탭을 이용하세요.\n' +
+  '4. 추가 질문으로 모델 진단·What-if를 요청할 수 있습니다.\n' +
   '5. 보안·기밀은 /security 탭을 이용해 주세요.'
 
 const WELCOME_GENERAL: ChatMessage = {
   id: 1,
   role: 'ai',
   text:
-    '안녕하세요, YAHO입니다.\n\n공정 진단·분석을 도와드릴게요. 궁금한 점을 편하게 물어보세요.',
+    '안녕하세요, YAHO입니다.\n\n지금 보고 있는 화면에 대해 질문해 주세요. 화면 데이터와 문서를 참고해 답합니다.',
 }
 
 type ChatMode = 'general' | 'secure'
@@ -159,6 +159,7 @@ function formatThreadTime(iso?: string | null): string {
 }
 
 export default function GlobalChatbot() {
+  const pageChat = usePageChatOptional()
   const [chatOpen, setChatOpen] = useState(false)
 
   const [input, setInput] = useState('')
@@ -411,32 +412,85 @@ export default function GlobalChatbot() {
     abortRef.current = ac
 
     try {
-      const res = await postChat({
-        message: text,
-        features: attached ?? undefined,
-        llm_mode: llmMode || 'auto',
-      })
-      if (ac.signal.aborted) return
-      const replyTid = getChatThreadId() ?? tid
-      if (replyTid) {
-        setActiveThreadId(replyTid)
-        setChatThreadId(replyTid)
-      }
+      const page_context = pageChat?.getChatPageContext()
       idRef.current += 1
-      const replyText =
-        res.reply || (res.error ? `오류: ${res.error}` : '응답이 비어 있습니다.')
-      const aiMsg: ChatMessage = {
-        id: idRef.current,
-        role: 'ai',
-        text: replyText,
-        mode: res.mode,
-        recommendation: res.recommendation ?? null,
-      }
-      setMessages((prev) => {
-        const next = [...prev, aiMsg]
-        queueMicrotask(() => persistCurrentThread(next, replyTid))
-        return next
-      })
+      const aiId = idRef.current
+      setMessages((prev) => [
+        ...prev,
+        { id: aiId, role: 'ai', text: '', mode: 'llm' },
+      ])
+
+      let streamed = ''
+      await postChatStream(
+        {
+          message: text,
+          features: attached ?? undefined,
+          llm_mode: llmMode || 'auto',
+          page_context: page_context
+            ? {
+                route: page_context.route,
+                focusId: page_context.focusId,
+                focusPayload: page_context.focusPayload,
+                pagePayload: page_context.pagePayload,
+                supplementHints: page_context.supplementHints,
+              }
+            : undefined,
+          // Models run whenever features exist on the AI side.
+          enable_api_llm: Boolean(attached) || undefined,
+        },
+        {
+          onDelta: (chunk) => {
+            streamed += chunk
+            setMessages((prev) =>
+              prev.map((m) => (m.id === aiId ? { ...m, text: streamed } : m)),
+            )
+          },
+          onDone: (data) => {
+            const replyTid = data.thread_id || getChatThreadId() || tid
+            if (replyTid) {
+              setActiveThreadId(replyTid)
+              setChatThreadId(replyTid)
+            }
+            const replyText =
+              (typeof data.reply === 'string' && data.reply.trim()
+                ? data.reply
+                : '') ||
+              streamed ||
+              (data.error ? `오류: ${data.error}` : '응답이 비어 있습니다.')
+            setMessages((prev) => {
+              const next = prev.map((m) =>
+                m.id === aiId
+                  ? {
+                      ...m,
+                      // Prefer normalized done.reply over raw streamed deltas
+                      text: replyText,
+                      mode: data.mode,
+                      recommendation: data.recommendation ?? null,
+                    }
+                  : m,
+              )
+              queueMicrotask(() => persistCurrentThread(next, replyTid))
+              return next
+            })
+          },
+          onError: (msg) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === aiId
+                  ? {
+                      ...m,
+                      text:
+                        m.text ||
+                        `챗봇 연결에 실패했습니다. backend(:3001) · ai-service(:8800)를 확인해 주세요.\n(${msg})`,
+                    }
+                  : m,
+              ),
+            )
+          },
+        },
+        ac.signal,
+      )
+      if (ac.signal.aborted) return
     } catch (err) {
       if (ac.signal.aborted) return
       let detail = '요청에 실패했습니다.'
@@ -458,6 +512,13 @@ export default function GlobalChatbot() {
           `챗봇 연결에 실패했습니다. backend(:3001) · ai-service(:8800)를 확인해 주세요.\n(${detail})`,
       }
       setMessages((prev) => {
+        // Replace empty streaming bubble if present
+        const last = prev[prev.length - 1]
+        if (last?.role === 'ai' && !last.text) {
+          const next = [...prev.slice(0, -1), { ...failMsg, id: last.id }]
+          queueMicrotask(() => persistCurrentThread(next, tid))
+          return next
+        }
         const next = [...prev, failMsg]
         queueMicrotask(() => persistCurrentThread(next, tid))
         return next
@@ -645,9 +706,9 @@ export default function GlobalChatbot() {
       localHelp: true,
     },
     {
-      label: '샘플 LOT 진단',
-      message: '이 샘플 LOT를 O/X 진단해 주세요.',
-      features: SAMPLE_CHAT_FEATURES,
+      label: '이 화면 요약',
+      message: '지금 보고 있는 화면 데이터를 요약해 주세요.',
+      features: null,
     },
   ]
 

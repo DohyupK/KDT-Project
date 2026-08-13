@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Home,
   LayoutDashboard,
@@ -18,6 +18,7 @@ import {
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
 import ShellHeader from '@/components/layout/ShellHeader'
+import { PageChatProvider, usePageChat } from '@/context/PageChatContext'
 import { authApi } from '@/api/authApi'
 import { isLoggedIn } from '@/lib/authStorage'
 
@@ -417,13 +418,28 @@ export function useRefreshSettings() {
   return { autoRefreshEnabled, refreshInterval }
 }
 
+/** Drop stale pagePayload/focus when navigating between shell pages. */
+function PageChatRouteReset() {
+  const pathname = usePathname()
+  const { resetForRoute } = usePageChat()
+  const prevPath = useRef(pathname)
+  useEffect(() => {
+    if (prevPath.current !== pathname) {
+      resetForRoute(pathname)
+      prevPath.current = pathname
+    }
+  }, [pathname, resetForRoute])
+  return null
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const { isDark, copy } = useUiSettings()
 
   return (
-    <>
+    <PageChatProvider>
+      <PageChatRouteReset />
       <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
@@ -511,6 +527,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <GlobalChatbot />
-    </>
+    </PageChatProvider>
   )
 }

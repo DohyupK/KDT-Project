@@ -18,6 +18,7 @@ import {
 } from '@/components/IssueDetailAnalysis';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
+import { usePageChat } from '@/context/PageChatContext';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import {
   APPRAISAL_UNIT,
@@ -687,6 +688,7 @@ function Modal({
 
 export default function MainPage() {
   const { isDark, language } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
   const [issueAnalysis, setIssueAnalysis] = useState<IssueDetailAnalysisModel | null>(null);
@@ -792,6 +794,55 @@ export default function MainPage() {
     void loadQCost();
   }, [loadQCost]);
 
+  useEffect(() => {
+    setPagePayload(
+      '/main',
+      {
+        riskTop: {
+          page: riskTopPage,
+          total: riskTopTotal,
+          totalPages: riskTopTotalPages,
+          lots: topRiskLots.slice(0, 10).map((l) => ({
+            lotId: l.id,
+            riskScore: l.riskScore,
+            status: l.status,
+            riskReason: l.riskReason,
+          })),
+        },
+        dailyKpi: summaryKpis.map((k) => ({ id: k.id, title: k.title, value: k.value })),
+        qCost: qCostSummary
+          ? {
+              month: qCostMonth,
+              from: qCostSummary.from,
+              to: qCostSummary.to,
+              stableCount: qCostSummary.stableCount,
+              warningCount: qCostSummary.warningCount,
+              criticalCount: qCostSummary.criticalCount,
+              appraisalCost: qCostSummary.appraisalCost,
+              internalCost: qCostSummary.internalCost,
+              externalCost: qCostSummary.externalCost,
+              preventionCost: qCostSummary.preventionCost,
+              totalQCost: qCostSummary.totalQCost,
+            }
+          : { month: qCostMonth, loading: qCostLoading, error: qCostError },
+        selectedLotId: selectedLot?.id ?? null,
+      },
+      ['risk-top', 'daily-kpi', 'q-cost'],
+    );
+  }, [
+    setPagePayload,
+    riskTopPage,
+    riskTopTotal,
+    riskTopTotalPages,
+    topRiskLots,
+    summaryKpis,
+    qCostSummary,
+    qCostMonth,
+    qCostLoading,
+    qCostError,
+    selectedLot?.id,
+  ]);
+
   useShellRefresh(() => {
     void loadMainData();
     void loadQCost();
@@ -804,6 +855,13 @@ export default function MainPage() {
     }
     try {
       setQCostExporting('csv');
+      trackPageChatEvent({
+        type: 'download',
+        route: '/main',
+        target: 'q-cost-download-csv',
+        entityId: qCostMonth,
+        payload: { month: qCostMonth, summary: qCostSummary },
+      });
       const csv = `\uFEFF${buildQCostCsv(qCostSummary, qCostMonth)}`;
       downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `qcost_${qCostMonth}.csv`);
       pushToast('Q-Cost CSV를 다운로드했습니다.', 'success');
@@ -812,7 +870,7 @@ export default function MainPage() {
     } finally {
       setQCostExporting(null);
     }
-  }, [qCostMonth, qCostSummary, pushToast]);
+  }, [qCostMonth, qCostSummary, pushToast, trackPageChatEvent]);
 
   const handleDownloadQCostPdf = useCallback(async () => {
     if (!qCostSummary) {
@@ -821,6 +879,13 @@ export default function MainPage() {
     }
     try {
       setQCostExporting('pdf');
+      trackPageChatEvent({
+        type: 'download',
+        route: '/main',
+        target: 'q-cost-download-pdf',
+        entityId: qCostMonth,
+        payload: { month: qCostMonth, summary: qCostSummary },
+      });
       const blob = await buildQCostPdfBlob(qCostSummary, qCostMonth);
       downloadBlob(blob, `qcost_${qCostMonth}.pdf`);
       pushToast('Q-Cost PDF를 다운로드했습니다.', 'success');
@@ -829,7 +894,7 @@ export default function MainPage() {
     } finally {
       setQCostExporting(null);
     }
-  }, [qCostMonth, qCostSummary, pushToast]);
+  }, [qCostMonth, qCostSummary, pushToast, trackPageChatEvent]);
 
   const qCostResult = useMemo(
     () => (qCostSummary ? resultFromQCostSummary(qCostSummary) : null),
@@ -861,6 +926,31 @@ export default function MainPage() {
 
   const handleOpenLotDetail = (lot: RiskLotView) => {
     setSelectedLot(lot);
+    const slimRecord = {
+      sintering_temp: lot.record.sintering_temp,
+      humidity: lot.record.humidity,
+      d50: lot.record.d50,
+      d90: lot.record.d90,
+      lithium_input: lot.record.lithium_input,
+      additive_ratio: lot.record.additive_ratio,
+      process_time: lot.record.process_time,
+      metal_impurity: lot.record.metal_impurity,
+    };
+    trackPageChatEvent({
+      type: 'row_click',
+      route: '/main',
+      target: 'risk-top-row',
+      entityId: lot.id,
+      payload: {
+        lotId: lot.id,
+        riskScore: lot.riskScore,
+        status: lot.status,
+        riskReason: lot.riskReason,
+        spcStatus: null,
+        spcGraph: 'none',
+        record: slimRecord,
+      },
+    });
     setIssueAnalysis(null);
     setIssueAnalysisError(null);
     setIssueAnalysisLoading(true);
@@ -873,12 +963,59 @@ export default function MainPage() {
           if (seq !== issueDetailSeqRef.current) return;
           setIssueAnalysis(null);
           setIssueAnalysisError('해당 LOT의 이슈가 없습니다.');
+          trackPageChatEvent({
+            type: 'row_select',
+            route: '/main',
+            target: 'risk-top-detail',
+            entityId: lot.id,
+            payload: {
+              lotId: lot.id,
+              riskScore: lot.riskScore,
+              status: lot.status,
+              riskReason: lot.riskReason,
+              spcStatus: '-',
+              spcGraph: 'none',
+              record: slimRecord,
+              issueId: null,
+            },
+          });
           return;
         }
         const { data: detailData } = await issueApi.getById(first.issueId);
         if (seq !== issueDetailSeqRef.current) return;
-        setIssueAnalysis(issueDetailToAnalysisModel(detailData.issue));
+        const analysis = issueDetailToAnalysisModel(detailData.issue);
+        setIssueAnalysis(analysis);
         setIssueAnalysisError(null);
+        const spcRaw =
+          analysis.analysis?.spcStatus ?? analysis.listSpcStatus ?? null;
+        const spcText = spcRaw != null ? String(spcRaw).trim() : '';
+        const spcBlank = !spcText || spcText === '-' || spcText === '—';
+        trackPageChatEvent({
+          type: 'row_select',
+          route: '/main',
+          target: 'risk-top-detail',
+          entityId: lot.id,
+          payload: {
+            lotId: lot.id,
+            riskScore: lot.riskScore,
+            status: lot.status,
+            riskReason: lot.riskReason,
+            record: slimRecord,
+            issueId: analysis.issueId,
+            issueContent: analysis.issueContent.slice(0, 300),
+            riskLevel: analysis.riskLevel,
+            spcStatus: spcRaw ?? '-',
+            spcGraph: spcBlank ? 'none' : 'present',
+            analysis: analysis.analysis
+              ? {
+                  probability: analysis.analysis.probability,
+                  spcStatus: analysis.analysis.spcStatus,
+                  riskLevel: analysis.analysis.riskLevel,
+                  riskReason: analysis.analysis.riskReason,
+                }
+              : null,
+          },
+        });
       } catch (error) {
         if (seq !== issueDetailSeqRef.current) return;
         setIssueAnalysis(null);
@@ -892,6 +1029,7 @@ export default function MainPage() {
   const handleCloseLotDetail = () => {
     issueDetailSeqRef.current += 1;
     setSelectedLot(null);
+    trackPageChatEvent({ type: 'clear', route: '/main', target: 'risk-top-row' });
     setIssueAnalysis(null);
     setIssueAnalysisError(null);
     setIssueAnalysisLoading(false);
@@ -962,7 +1100,20 @@ export default function MainPage() {
           >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4 lg:gap-5">
               {summaryKpis.map((kpi) => (
-                <div key={kpi.id} className={`${subpanelClass} p-4 md:p-5`}>
+                <button
+                  key={kpi.id}
+                  type="button"
+                  className={`${subpanelClass} p-4 text-left md:p-5`}
+                  onClick={() =>
+                    trackPageChatEvent({
+                      type: 'kpi_click',
+                      route: '/main',
+                      target: `kpi-${kpi.id}`,
+                      entityId: kpi.id,
+                      payload: { id: kpi.id, title: kpi.title, value: kpi.value },
+                    })
+                  }
+                >
                   <div
                     className={`mb-3 text-sm font-medium ${
                       isDark ? 'text-slate-400' : 'text-slate-500'
@@ -984,7 +1135,7 @@ export default function MainPage() {
                     {kpi.value}
                   </div>
                   <div className="mt-2 text-xs text-slate-400">{kpi.description}</div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1035,7 +1186,16 @@ export default function MainPage() {
                 </div>
                 <QCostMonthPicker
                   value={qCostMonth}
-                  onChange={setQCostMonth}
+                  onChange={(month) => {
+                    setQCostMonth(month);
+                    trackPageChatEvent({
+                      type: 'filter_apply',
+                      route: '/main',
+                      target: 'q-cost-month',
+                      entityId: month,
+                      payload: { month },
+                    });
+                  }}
                   isDark={isDark}
                 />
               </div>

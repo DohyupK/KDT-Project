@@ -21,6 +21,19 @@ export type AiChatRequest = {
   /** "auto" | stored key id */
   llm_mode?: string | null
   llm_credentials?: AiLlmCredential[]
+  page_context?: {
+    route?: string
+    focusId?: string | null
+    focus_id?: string | null
+    focusPayload?: unknown
+    focus_payload?: unknown
+    pagePayload?: unknown
+    page_payload?: unknown
+    supplement?: Record<string, unknown> | null
+    supplementHints?: string[]
+    supplement_hints?: string[]
+  } | null
+  enable_api_llm?: boolean | null
 }
 
 export type AiPredictResult = {
@@ -60,6 +73,7 @@ export type AiChatResponse = {
   heads?: Record<string, unknown> | null
   recommendation?: AiRecommendation | null
   error: string | null
+  timing?: Record<string, unknown> | null
 }
 
 function aiServiceBase(): string {
@@ -138,6 +152,18 @@ export async function predictVoting(features: PredictFeatureBody): Promise<AiVot
 }
 
 export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
+  const pc = body.page_context
+  const page_context = pc
+    ? {
+        route: pc.route ?? '/',
+        focus_id: pc.focus_id ?? pc.focusId ?? null,
+        focus_payload: pc.focus_payload ?? pc.focusPayload ?? null,
+        page_payload: pc.page_payload ?? pc.pagePayload ?? null,
+        supplement: pc.supplement ?? null,
+        supplement_hints: pc.supplement_hints ?? pc.supplementHints ?? [],
+      }
+    : undefined
+
   const res = await fetch(`${aiServiceBase()}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -150,6 +176,8 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
       need_guideline: body.need_guideline ?? false,
       llm_mode: body.llm_mode ?? undefined,
       llm_credentials: body.llm_credentials ?? undefined,
+      page_context,
+      enable_api_llm: body.enable_api_llm ?? undefined,
     }),
   })
 
@@ -159,6 +187,42 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
   }
 
   return (await res.json()) as AiChatResponse
+}
+
+/** Open upstream SSE for general chat; caller pipes the body. */
+export async function proxyChatStream(body: AiChatRequest): Promise<Response> {
+  const pc = body.page_context
+  const page_context = pc
+    ? {
+        route: pc.route ?? '/',
+        focus_id: pc.focus_id ?? pc.focusId ?? null,
+        focus_payload: pc.focus_payload ?? pc.focusPayload ?? null,
+        page_payload: pc.page_payload ?? pc.pagePayload ?? null,
+        supplement: pc.supplement ?? null,
+        supplement_hints: pc.supplement_hints ?? pc.supplementHints ?? [],
+      }
+    : undefined
+
+  const res = await fetch(`${aiServiceBase()}/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({
+      message: body.message,
+      thread_id: body.thread_id ?? undefined,
+      user_id: body.user_id ?? undefined,
+      features: body.features ?? undefined,
+      fillThreshold: body.fillThreshold ?? undefined,
+      need_guideline: body.need_guideline ?? false,
+      llm_mode: body.llm_mode ?? undefined,
+      llm_credentials: body.llm_credentials ?? undefined,
+      page_context,
+      enable_api_llm: body.enable_api_llm ?? undefined,
+    }),
+  })
+  return res
 }
 
 export type AiKnowledgeAnalyzeRequest = {

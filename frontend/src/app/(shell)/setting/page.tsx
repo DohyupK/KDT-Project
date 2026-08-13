@@ -20,6 +20,7 @@ import {
 import type { UserSettingsDto } from '@/types'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
+import { usePageChat } from '@/context/PageChatContext'
 import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
@@ -181,6 +182,7 @@ function ToggleSwitch({
 }
 
 export default function SettingPage() {
+  const { setPagePayload } = usePageChat()
   const [fontSize, setFontSize] = useState<FontSize>(DEFAULT_FONT_SIZE)
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE)
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(DEFAULT_REFRESH_INTERVAL)
@@ -209,6 +211,30 @@ export default function SettingPage() {
   useEffect(() => {
     return () => clearToastTimer()
   }, [])
+
+  useEffect(() => {
+    setPagePayload(
+      '/setting',
+      {
+        page: 'setting',
+        fontSize,
+        themeMode: themeMode === 0 ? 'dark' : 'light',
+        autoRefreshEnabled,
+        refreshIntervalMinutes: refreshInterval,
+        n8nAlertEnabled: n8nAlert,
+        sections: ['font', 'theme', 'autoRefresh', 'n8nAlert', 'llmApiKeys', 'controlBounds'],
+        llmApiKeysNote: 'API key values are not sent to chat; manage keys in this page vault only.',
+      },
+      ['setting'],
+    )
+  }, [
+    setPagePayload,
+    fontSize,
+    themeMode,
+    autoRefreshEnabled,
+    refreshInterval,
+    n8nAlert,
+  ])
 
   const [vaultRefreshKey, setVaultRefreshKey] = useState(0)
 

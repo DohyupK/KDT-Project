@@ -93,6 +93,18 @@ async def lifespan(_app: FastAPI):
         stop_watch = start_document_watcher()
     except Exception as exc:  # noqa: BLE001
         print(f"[document_watcher] start skipped: {exc}")
+    # Warm RAG embed/rerank on CPU so first chat is not a cold load.
+    try:
+        from agent.rag_engine import get_engine
+
+        eng = get_engine()
+        eng.ensure()
+        print(
+            f"[rag] warm ready={eng.ready} err={eng.init_error!r}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[rag] warm skipped: {exc}", flush=True)
     yield
     if stop_watch is not None:
         try:
@@ -336,6 +348,24 @@ def chat_endpoint(
     from agent import chat_history_vector as vec
 
     features = body.features.model_dump(exclude_none=True) if body.features else None
+    page_ctx = None
+    if body.page_context is not None:
+        raw = body.page_context.model_dump(exclude_none=True)
+        # normalize camelCase aliases from FE
+        page_ctx = {
+            "route": raw.get("route") or "/",
+            "focus_id": raw.get("focus_id") or raw.get("focusId"),
+            "focus_payload": raw.get("focus_payload")
+            if "focus_payload" in raw
+            else raw.get("focusPayload"),
+            "page_payload": raw.get("page_payload")
+            if "page_payload" in raw
+            else raw.get("pagePayload"),
+            "supplement": raw.get("supplement"),
+            "supplement_hints": raw.get("supplement_hints")
+            or raw.get("supplementHints"),
+        }
+
     tid = store.ensure_thread(
         thread_id=body.thread_id,
         user_id=body.user_id,
@@ -343,13 +373,20 @@ def chat_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
-    history_text = vec.merge_history_with_semantic(
-        window_text,
-        semantic,
-        heuristic_truncate_fn=store.heuristic_truncate,
-        format_compact_fn=store.format_history_text_compact,
-    )
+    from agent.api_llm.grounding import detect_topic_shift
+
+    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    if topic_shift:
+        # Facts come from page_context only; keep a tiny history window for pronouns.
+        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
+    else:
+        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
+        history_text = vec.merge_history_with_semantic(
+            window_text,
+            semantic,
+            heuristic_truncate_fn=store.heuristic_truncate,
+            format_compact_fn=store.format_history_text_compact,
+        )
     if tid and body.user_id:
         mid = store.insert_message(
             thread_id=tid,
@@ -377,6 +414,8 @@ def chat_endpoint(
             llm_mode=body.llm_mode,
             llm_credentials=body.llm_credentials,
             history_text=history_text,
+            page_context=page_ctx,
+            enable_api_llm=body.enable_api_llm,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"chat failed: {exc}") from exc
@@ -418,6 +457,134 @@ def chat_endpoint(
         heads=out.get("heads"),
         recommendation=recommendation,
         error=out.get("error"),
+        timing=out.get("timing"),
+    )
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(
+    body: ChatRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> StreamingResponse:
+    """SSE: meta → delta* → done (general chat with optional light RAG)."""
+    global _chat_request_count
+    _chat_request_count += 1
+
+    from agent import chat_history_store as store
+    from agent import chat_history_vector as vec
+    from agent.api_llm.graph import iter_chat_events
+
+    features = body.features.model_dump(exclude_none=True) if body.features else None
+    page_ctx = None
+    if body.page_context is not None:
+        raw = body.page_context.model_dump(exclude_none=True)
+        page_ctx = {
+            "route": raw.get("route") or "/",
+            "focus_id": raw.get("focus_id") or raw.get("focusId"),
+            "focus_payload": raw.get("focus_payload")
+            if "focus_payload" in raw
+            else raw.get("focusPayload"),
+            "page_payload": raw.get("page_payload")
+            if "page_payload" in raw
+            else raw.get("pagePayload"),
+            "supplement": raw.get("supplement"),
+            "supplement_hints": raw.get("supplement_hints")
+            or raw.get("supplementHints"),
+        }
+
+    tid = store.ensure_thread(
+        thread_id=body.thread_id,
+        user_id=body.user_id,
+        channel="general",
+    )
+    history = store.load_messages(tid) if tid else []
+    window_text = store.format_history_text_compact(history)
+    from agent.api_llm.grounding import detect_topic_shift
+
+    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    if topic_shift:
+        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
+    else:
+        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
+        history_text = vec.merge_history_with_semantic(
+            window_text,
+            semantic,
+            heuristic_truncate_fn=store.heuristic_truncate,
+            format_compact_fn=store.format_history_text_compact,
+        )
+    if tid and body.user_id:
+        mid = store.insert_message(
+            thread_id=tid,
+            role="user",
+            content=body.message,
+            mode="general_user",
+            provider="general",
+        )
+        background_tasks.add_task(
+            vec.upsert_chat_message,
+            thread_id=tid,
+            user_id=body.user_id,
+            channel="general",
+            role="user",
+            text=body.message,
+            message_id=mid,
+        )
+
+    def event_gen():
+        final_reply = ""
+        final_mode = "template"
+        final_provider = "template"
+        try:
+            for item in iter_chat_events(
+                message=body.message,
+                features=features,
+                fillThreshold=body.fillThreshold,
+                need_guideline=body.need_guideline,
+                llm_mode=body.llm_mode,
+                llm_credentials=body.llm_credentials,
+                history_text=history_text,
+                page_context=page_ctx,
+                enable_api_llm=body.enable_api_llm,
+            ):
+                ev = str(item.get("event") or "message")
+                data = dict(item.get("data") or {})
+                if ev == "done":
+                    final_reply = str(data.get("reply") or "")
+                    final_mode = str(data.get("mode") or "template")
+                    final_provider = str(data.get("provider") or "template")
+                    data["thread_id"] = tid
+                yield _format_sse(ev, data)
+        except Exception as exc:  # noqa: BLE001
+            yield _format_sse("error", {"error": str(exc)[:400], "stage": "chat_stream"})
+            return
+
+        if tid and body.user_id and final_reply:
+            mid_a = store.insert_message(
+                thread_id=tid,
+                role="assistant",
+                content=final_reply,
+                mode=final_mode,
+                provider=final_provider,
+            )
+            background_tasks.add_task(
+                vec.upsert_chat_message,
+                thread_id=tid,
+                user_id=body.user_id,
+                channel="general",
+                role="assistant",
+                text=final_reply,
+                message_id=mid_a,
+            )
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -583,6 +750,7 @@ def root() -> dict[str, str]:
         "predict_capacity": "POST /predict-capacity",
         "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
+        "chat_stream": "POST /chat/stream",
         "knowledge_analyze": "POST /knowledge-analyze",
         "security_chat": "POST /security-chat",
         "security_chat_stream": "POST /security-chat/stream",
