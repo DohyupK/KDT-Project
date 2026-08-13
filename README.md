@@ -202,6 +202,7 @@ Maximize / /security
 | 보안 RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
 | LLM·RAG 튜닝 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) |
 | 챗봇 가이드 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) |
+| 일반 챗 · 페이지 컨텍스트 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) |
 | 스모크 | `cd ai-service && python scripts/smoke_secure_rag_e2e.py` |
 
 우하단 챗봇 → 「샘플 LOT 진단」으로 predict 연동을 확인할 수 있습니다.
@@ -314,6 +315,7 @@ flowchart TD
 | [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 자연 흐름 · SYS_RAG_EMPTY · 다문서 · 인덱스 |
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |
+| [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) | 일반 챗 응답·페이지 참조 로직 SSOT |
 | [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |
 | [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 보안 RAG · E2E · 발췌 모드 |
 | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) | 보안 RAG · env · 스모크 |

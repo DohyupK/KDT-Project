@@ -13,6 +13,7 @@
 **보안 RAG:** [`docs/references/secure-rag.md`](./references/secure-rag.md)  
 **LLM·RAG 튜닝 총정리:** [`docs/references/LLM 튜닝.md`](./references/LLM%20튜닝.md)  
 **챗봇 가이드(스택·이용):** [`docs/references/security-chatbot-guide.md`](./references/security-chatbot-guide.md)  
+**일반 챗 · 페이지 컨텍스트 응답 로직:** [`docs/references/general-chatbot-page-context.md`](./references/general-chatbot-page-context.md)  
 **vLLM 수동 기동:** [`docs/references/vllm-setup.md`](./references/vllm-setup.md)  
 **보안 챗 타임아웃 플랜:** [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](./plans/2026-07-30-secure-chat-timeout-selfquery.md)  
 **일지:** [`docs/work-log/2026-08-08.md`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
