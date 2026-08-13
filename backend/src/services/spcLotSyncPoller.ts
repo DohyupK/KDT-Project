@@ -23,6 +23,7 @@ async function tick() {
       scored: result.scored,
       failed: result.failed,
       issuesCreated: result.issuesCreated,
+      reasonsUpdated: result.reasonsUpdated,
     })
   } catch (err) {
     console.error('[spc-sync-poller] error', err)

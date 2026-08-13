@@ -31,39 +31,32 @@ async function tick() {
   try {
     const picked = await pickUnscoredLotIds(200)
     lotIds = picked.lotIds
+    const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
     if (lotIds.length === 0) {
       console.log('[analysis-sync] nothing to score')
-      return
+    } else {
+      console.log('[analysis-sync] score_start', {
+        count: lotIds.length,
+        queue_a: picked.reason.queue_a,
+        queue_b: picked.reason.queue_b,
+        analysis_only: analysisOnlyIds.length,
+        full: fullScoreIds.length,
+      })
+      if (analysisOnlyIds.length > 0) {
+        let rebuilt = 0
+        for (const id of analysisOnlyIds) {
+          if (await lotService.scoreAnalysisFromJudgment(id)) rebuilt++
+        }
+        console.log('[analysis-sync] analysis_only_done', { rebuilt })
+      }
+      if (fullScoreIds.length > 0) {
+        const scored = await lotService.scoreAllLots({
+          lotIds: fullScoreIds,
+          concurrency: 4,
+        })
+        console.log('[analysis-sync] score_done', scored)
+      }
     }
-
-    const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
-    console.log('[analysis-sync] score_start', {
-      count: lotIds.length,
-      analysis_only: analysisOnlyIds.length,
-      full: fullScoreIds.length,
-      reason: picked.reason,
-    })
-
-    let analysisOnlyOk = 0
-    const fullIds = [...fullScoreIds]
-    for (const id of analysisOnlyIds) {
-      const ok = await lotService.scoreAnalysisFromJudgment(id)
-      if (ok) analysisOnlyOk++
-      else fullIds.push(id)
-    }
-    if (analysisOnlyOk) {
-      console.log('[analysis-sync] analysis_from_judgment', { ok: analysisOnlyOk })
-    }
-
-    const scored =
-      fullIds.length > 0
-        ? await lotService.scoreAllLots({
-            lotIds: fullIds,
-            concurrency: 4,
-          })
-        : { scored: 0, failed: 0, errors: [] as string[] }
-    console.log('[analysis-sync] score_done', scored)
-
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {

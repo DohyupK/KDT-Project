@@ -326,15 +326,38 @@ async function upsertAnalysisScore(
   lotId: string,
   scored: LotScoreResult,
 ) {
+  const chartJson = spcChart === undefined ? undefined : JSON.stringify(spcChart ?? { metrics: [] })
+  if (chartJson === undefined) {
+    await query(
+      `INSERT INTO analysis_lots (
+        lot_id, probability, spc_status, risk_level, risk_reason, scored_at
+      ) VALUES (?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        probability = VALUES(probability),
+        spc_status = VALUES(spc_status),
+        risk_level = VALUES(risk_level),
+        risk_reason = VALUES(risk_reason),
+        scored_at = NOW()`,
+      [
+        lotId,
+        scored.probability,
+        scored.spc_status,
+        scored.risk_level,
+        scored.risk_reason,
+      ],
+    )
+    return
+  }
   await query(
     `INSERT INTO analysis_lots (
-      lot_id, probability, spc_status, risk_level, risk_reason, scored_at
-    ) VALUES (?, ?, ?, ?, ?, NOW())
+      lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NOW())
     ON DUPLICATE KEY UPDATE
       probability = VALUES(probability),
       spc_status = VALUES(spc_status),
       risk_level = VALUES(risk_level),
       risk_reason = VALUES(risk_reason),
+      spc_chart_json = VALUES(spc_chart_json),
       scored_at = NOW()`,
     [
       lotId,
@@ -582,13 +605,12 @@ async function updateLotScore(
     ],
   )
 
-  // Stage 3: analysis_lots from judgment (2nd inference)
+  // Stage 3: analysis_lots from judgment (2nd pass) + scored_at
   const j = await getJudgment(lotId)
-  if (!j) {
-    throw new Error(`judgment_lots missing after upsert for ${lotId}`)
-  }
-  const analysisScore = await mergeScoreFromJudgment(j, scored.spc_status)
-  await upsertAnalysisScore(lotId, analysisScore)
+  const analysisScore = j
+    ? await mergeScoreFromJudgment(j, scored.spc_status)
+    : scored
+  await upsertAnalysisScore(lotId, analysisScore, spcChart)
 }
 
 /** Latest N lot ids by production time (for targeted rescoring). */

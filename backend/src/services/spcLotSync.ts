@@ -89,19 +89,18 @@ export async function syncSpcLotsToApp(
   running = true
 
   let scoreIds: string[] = []
-  let result: { scored: number; failed: number; errors: string[] } = {
-    scored: 0,
-    failed: 0,
-    errors: [],
-  }
+  let skipRiskReason = false
+  let scored = 0
+  let failed = 0
   let issuesCreated = 0
   let insertedCount = 0
-  let skipRiskReason = false
+  let reasonsUpdated = 0
+  const errors: string[] = []
+  const quiet = opts.quiet
 
   try {
     const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16)
     const unscoredLimit = Math.min(Math.max(opts.unscoredLimit ?? 100, 1), 500)
-    const quiet = opts.quiet
 
     const missing = await query<SpcRow[]>(
       `SELECT s.lot_id, s.produced_at, s.d50, s.d90, s.metal_impurity, s.lithium_input,
@@ -170,66 +169,58 @@ export async function syncSpcLotsToApp(
       ),
     ]
 
-    if (scoreIds.length === 0) {
-      skipRiskReason = true
-      return {
-        skipped: false,
-        table,
+    if (scoreIds.length > 0) {
+      log(quiet, '[spc-sync] score_start', {
+        lotIds: scoreIds.length,
         inserted: inserted.length,
-        scored: 0,
-        failed: 0,
-        issuesCreated: 0,
-        reasonsUpdated: 0,
-        errors: [],
-      }
+        unscored: picked.rows.length,
+        queue_a: picked.reason.queue_a,
+        queue_b: picked.reason.queue_b,
+        concurrency,
+      })
+      const started = Date.now()
+      let lastLog = 0
+      const scoreResult = await lotService.scoreAllLots({
+        lotIds: scoreIds,
+        concurrency,
+        onProgress: (done, total, lotId) => {
+          if (quiet) return
+          if (done - lastLog >= 20 || done === total) {
+            lastLog = done
+            console.log(`[spc-sync] progress ${done}/${total} last=${lotId}`)
+          }
+        },
+      })
+      log(
+        quiet,
+        '[spc-sync] score_done',
+        JSON.stringify(scoreResult),
+        `elapsed_ms=${Date.now() - started}`,
+      )
+      scored = scoreResult.scored
+      failed = scoreResult.failed
+      errors.push(...scoreResult.errors)
     }
 
-    log(quiet, '[spc-sync] score_start', {
-      lotIds: scoreIds.length,
-      inserted: inserted.length,
-      unscored: picked.lotIds.length,
-      reason: picked.reason,
-      concurrency,
-    })
-    const started = Date.now()
-    let lastLog = 0
-    result = await lotService.scoreAllLots({
-      lotIds: scoreIds,
-      concurrency,
-      onProgress: (done, total, lotId) => {
-        if (quiet) return
-        if (done - lastLog >= 20 || done === total) {
-          lastLog = done
-          console.log(`[spc-sync] progress ${done}/${total} last=${lotId}`)
-        }
-      },
-    })
-    log(
-      quiet,
-      '[spc-sync] score_done',
-      JSON.stringify(result),
-      `elapsed_ms=${Date.now() - started}`,
-    )
-
+    // Always seed: already-scored 심각 lots must still get open issues.
     issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
   } finally {
     running = false
   }
 
-  let reasonsUpdated = 0
   if (!skipRiskReason && scoreIds.length > 0) {
     try {
       const reasonResult = await fillRiskReasonsForLots(scoreIds, {
         concurrency: 2,
-        quiet: opts.quiet,
+        quiet,
       })
       reasonsUpdated = reasonResult.updated
-      log(opts.quiet, '[spc-sync] risk_reasons', reasonResult)
+      log(quiet, '[spc-sync] risk_reasons', reasonResult)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       console.error('[spc-sync] risk_reason_failed', detail)
-      result.errors.push(`risk_reason: ${detail}`)
+      errors.push(`risk_reason: ${detail}`)
     }
   }
 
@@ -237,11 +228,11 @@ export async function syncSpcLotsToApp(
     skipped: false,
     table,
     inserted: insertedCount,
-    scored: result.scored,
-    failed: result.failed,
+    scored,
+    failed,
     issuesCreated,
     reasonsUpdated,
-    errors: result.errors,
+    errors,
   }
 }
 
