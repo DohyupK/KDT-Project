@@ -24,6 +24,7 @@ export type IssueAnalysis = {
   riskLevel: RiskLevel
   riskReason: string | null
   createdAt: string | null
+  scoredAt: string | null
 }
 
 export type IssueDetail = IssueListItem & {
@@ -52,6 +53,7 @@ type IssueRow = {
   analysis_spc_status?: string | null
   analysis_risk_reason?: string | null
   analysis_created_at?: Date | string | null
+  analysis_scored_at?: Date | string | null
 }
 
 function formatDateTime(value: Date | string | null | undefined): string {
@@ -78,7 +80,8 @@ function toAnalysis(row: IssueRow): IssueAnalysis | null {
     row.analysis_probability != null ||
     row.analysis_spc_status != null ||
     row.analysis_risk_reason != null ||
-    row.analysis_created_at != null
+    row.analysis_created_at != null ||
+    row.analysis_scored_at != null
   if (!joined) return null
 
   const probability =
@@ -91,6 +94,7 @@ function toAnalysis(row: IssueRow): IssueAnalysis | null {
     riskLevel: toRisk(row.risk_level),
     riskReason: row.analysis_risk_reason ?? null,
     createdAt: row.analysis_created_at ? formatDateTime(row.analysis_created_at) : null,
+    scoredAt: row.analysis_scored_at ? formatDateTime(row.analysis_scored_at) : null,
   }
 }
 
@@ -153,7 +157,8 @@ const ISSUE_DETAIL_SELECT = `i.issue_id, i.lot_id, i.created_at, i.issue_content
             a.spc_status AS analysis_spc_status,
             a.risk_level,
             a.risk_reason AS analysis_risk_reason,
-            a.created_at AS analysis_created_at`
+            a.created_at AS analysis_created_at,
+            a.scored_at AS analysis_scored_at`
 
 export async function listOpenIssues(q: IssueListQuery): Promise<{
   issues: IssueListItem[]

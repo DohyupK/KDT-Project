@@ -128,3 +128,73 @@ export async function composeRiskReasonViaVllm(
     clearTimeout(timer)
   }
 }
+
+const ISSUE_SYSTEM = `당신은 양극재 LOT 이슈 제목/요약을 짧게 쓰는 작성기입니다.
+주어진 risk_reason·위험도·LOT ID만 근거로 한국어 한 문장(이슈 내용)을 씁니다.
+규칙:
+1. 255자 이내, 마크다운·코드펜스 없이 본문만.
+2. 수치를 지어내지 않습니다.
+3. 「기준 범위 내」는 위험도가 주의/심각일 때 쓰지 않습니다.
+4. LOT ID를 앞머리에 넣어도 됩니다.`
+
+/**
+ * Summarize analysis risk_reason into issues.issue_content via local vLLM.
+ * On failure the caller should fall back to buildIssueTitle.
+ */
+export async function composeIssueContentViaVllm(input: {
+  lotId: string
+  riskLevel: string
+  riskReason: string
+}): Promise<{ issue_content: string; error: string | null; usedFallback?: boolean }> {
+  const url = `${vllmBaseUrl()}/chat/completions`
+  const timeoutMs = Number(process.env.SECURE_VLLM_TIMEOUT || 45) * 1000
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 45_000)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: vllmModel(),
+        temperature: 0.2,
+        max_tokens: 100,
+        messages: [
+          { role: 'system', content: ISSUE_SYSTEM },
+          {
+            role: 'user',
+            content: `다음 JSON으로 issue_content 한 문장만 작성하세요.\n${JSON.stringify({
+              lot_id: input.lotId,
+              risk_level: input.riskLevel,
+              risk_reason: input.riskReason,
+            })}`,
+          },
+        ],
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      return {
+        issue_content: '',
+        error: `vllm ${res.status}: ${text.slice(0, 200)}`,
+      }
+    }
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[]
+    }
+    const content = (data.choices?.[0]?.message?.content || '').trim()
+    if (!content || /^[.:…·\-_/\\|*\s]+$/.test(content)) {
+      return { issue_content: '', error: 'empty_vllm_reply' }
+    }
+    const clipped = content.slice(0, 255)
+    if (!isRiskReasonAcceptable(input.riskLevel, clipped)) {
+      return { issue_content: '', error: 'unacceptable_issue_content' }
+    }
+    return { issue_content: clipped, error: null }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { issue_content: '', error: msg.slice(0, 300) }
+  } finally {
+    clearTimeout(timer)
+  }
+}

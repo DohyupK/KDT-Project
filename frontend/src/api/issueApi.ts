@@ -28,6 +28,7 @@ export type IssueAnalysis = {
   riskLevel: IssueRiskLevel
   riskReason: string | null
   createdAt: string | null
+  scoredAt: string | null
 }
 
 export type IssueDetail = IssueListItem & {

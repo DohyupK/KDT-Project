@@ -14,6 +14,7 @@ import { IssueDetailAnalysis } from '@/components/IssueDetailAnalysis';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
+import { usePageChat } from '@/context/PageChatContext';
 import { getAuthUser } from '@/lib/authStorage';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import {
@@ -41,6 +42,7 @@ interface Issue {
     riskLevel: '심각' | '주의' | '안정';
     riskReason: string | null;
     createdAt: string | null;
+    scoredAt: string | null;
   } | null;
   /** 목록 SPC 필터용 (analysis_lots.spc_status) */
   listSpcStatus: string | null;
@@ -342,6 +344,7 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
         riskLevel: normalizeIssueRiskLevel(detail.analysis.riskLevel),
         riskReason: detail.analysis.riskReason,
         createdAt: detail.analysis.createdAt,
+        scoredAt: detail.analysis.scoredAt,
       }
     : null;
 
@@ -535,7 +538,7 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
     payload.type === 'lot'
       ? `<h2>4. LOT 상세 분석</h2>
 <table>
-  <tr><th>이슈 ID</th><th>LOT</th><th>위험도</th><th>SPC</th><th>불량 확률</th><th>위험 원인</th><th>분석 시각</th></tr>
+  <tr><th>이슈 ID</th><th>LOT</th><th>위험도</th><th>SPC</th><th>불량 확률</th><th>위험 원인</th><th>채점 시각</th></tr>
   ${
     payload.issues.length === 0
       ? '<tr><td colspan="7" style="text-align:center;">대상 이슈가 없습니다.</td></tr>'
@@ -549,7 +552,7 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
               <td>${escapeHtml(a?.spcStatus ?? issue.listSpcStatus ?? '—')}</td>
               <td>${escapeHtml(formatAnalysisProbability(a?.probability).label)}</td>
               <td>${escapeHtml(a?.riskReason?.trim() || '—')}</td>
-              <td>${escapeHtml(a?.createdAt ?? '—')}</td>
+              <td>${escapeHtml(a?.scoredAt ?? a?.createdAt ?? '—')}</td>
             </tr>`;
           })
           .join('')
@@ -678,7 +681,7 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
   if (payload.type === 'lot') {
     lines.push(toRow([]));
     lines.push(toRow(['4. LOT 상세 분석']));
-    lines.push(toRow(['이슈 ID', 'LOT', '위험도', 'SPC', '불량 확률', '위험 원인', '분석 시각']));
+    lines.push(toRow(['이슈 ID', 'LOT', '위험도', 'SPC', '불량 확률', '위험 원인', '채점 시각']));
     if (payload.issues.length === 0) {
       lines.push(toRow(['대상 이슈가 없습니다.']));
     } else {
@@ -692,7 +695,7 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
             a?.spcStatus ?? issue.listSpcStatus ?? '',
             formatAnalysisProbability(a?.probability).label,
             a?.riskReason?.trim() || '',
-            a?.createdAt ?? '',
+            a?.scoredAt ?? a?.createdAt ?? '',
           ]),
         );
       }
@@ -1776,6 +1779,7 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
 
 export default function IssuePage() {
   const { isDark } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const searchParams = useSearchParams();
   const deepLinkAppliedRef = useRef(false);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -1900,11 +1904,55 @@ export default function IssuePage() {
   const pageRangeLabel = `${pageRangeStart}–${pageRangeEnd}`;
 
   useEffect(() => {
-    if (!selectedId) return;
+    setPagePayload(
+      '/issue',
+      {
+        filters: appliedFilters,
+        totalOpen: filteredIssues.length,
+        page: safePage,
+        issues: paginatedIssues.slice(0, 15).map((issue) => ({
+          issueId: issue.id,
+          lotId: issue.lot,
+          risk: issue.risk,
+          date: issue.date,
+          issueContent: issue.issueContent.slice(0, 200),
+          assignee: issue.assignee,
+          completed: issue.completed,
+          spc: issue.analysis?.spcStatus ?? issue.listSpcStatus,
+        })),
+        selected: selectedIssue
+          ? {
+              issueId: selectedIssue.id,
+              lotId: selectedIssue.lot,
+              risk: selectedIssue.risk,
+              issueContent: selectedIssue.issueContent.slice(0, 400),
+              assignee: selectedIssue.assignee,
+              action: selectedIssue.action.slice(0, 400),
+              completed: selectedIssue.completed,
+              analysis: selectedIssue.analysis,
+            }
+          : null,
+      },
+      ['issues'],
+    );
+  }, [
+    setPagePayload,
+    appliedFilters,
+    filteredIssues.length,
+    safePage,
+    paginatedIssues,
+    selectedIssue,
+  ]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      trackPageChatEvent({ type: 'clear', route: '/issue', target: 'issue-row' });
+      return;
+    }
     if (!filteredIssues.some((issue) => issue.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [filteredIssues, selectedId]);
+  }, [filteredIssues, selectedId, trackPageChatEvent]);
 
   /** 저장 = 완료 처리. 선택 이슈가 미완료이거나 조치 내용이 변경된 경우 저장 가능. */
   const canSave = useMemo(() => {
@@ -1973,6 +2021,13 @@ export default function IssuePage() {
   ) => {
     const requestId = ++detailRequestRef.current;
     setSelectedId(id);
+    trackPageChatEvent({
+      type: 'row_click',
+      route: '/issue',
+      target: 'issue-row',
+      entityId: id,
+      payload: { issueId: id },
+    });
     const scrollTarget =
       options?.scrollTo === 'action' ? 'manager-action' : 'issue-detail-analysis';
     window.setTimeout(() => {
@@ -1987,6 +2042,32 @@ export default function IssuePage() {
       setIssues((current) =>
         current.map((issue) => (issue.id === id ? mergeIssueDetail(issue, data.issue) : issue)),
       );
+      trackPageChatEvent({
+        type: 'row_select',
+        route: '/issue',
+        target: 'issue-detail',
+        entityId: data.issue.issueId,
+        payload: {
+          issueId: data.issue.issueId,
+          lotId: data.issue.lotId,
+          risk: normalizeIssueRiskLevel(data.issue.riskLevel),
+          issueContent: (data.issue.issueContent ?? '').slice(0, 400),
+          assignee: data.issue.assigneeName?.trim() || '미배정',
+          action: (data.issue.actionContent ?? '').slice(0, 400),
+          completed: data.issue.completed,
+          analysis: data.issue.analysis
+            ? {
+                lotId: data.issue.analysis.lotId,
+                probability: data.issue.analysis.probability,
+                spcStatus: data.issue.analysis.spcStatus,
+                riskLevel: normalizeIssueRiskLevel(data.issue.analysis.riskLevel),
+                riskReason: data.issue.analysis.riskReason,
+                createdAt: data.issue.analysis.createdAt,
+                scoredAt: data.issue.analysis.scoredAt,
+              }
+            : null,
+        },
+      });
       const copied = options?.actionOverride?.trim() || '';
       setManagementForm({
         assignee: data.issue.assigneeName?.trim() || '미배정',

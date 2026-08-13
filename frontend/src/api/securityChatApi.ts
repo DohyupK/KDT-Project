@@ -3,7 +3,7 @@ import { clearAuthSession, getAuthToken, getAuthUser } from '@/lib/authStorage'
 
 /**
  * Security-tab chat → POST /api/security-chat/stream (SSE) → ai-service /security-chat/stream.
- * JSON POST /api/security-chat kept for smoke/compat.
+ * Backend JSON POST /api/security-chat remains for smoke/compat (FE uses stream only).
  * Never uses general /api/chat (Groq/Gemini).
  *
  * Multi-turn (B): send message + thread_id + user_id only — never the history array.
@@ -196,28 +196,6 @@ export function formatSecurityChatFailure(opts: {
   }
   lines.push('(backend:3001 → ai:8800 → vLLM:8001 / Qdrant:6333)')
   return lines.join('\n')
-}
-
-export async function postSecurityChat(
-  body: SecurityChatRequest,
-): Promise<SecurityChatResponse> {
-  const thread_id =
-    body.thread_id ?? body.session_id ?? getSecurityChatThreadId()
-  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
-  const { data } = await securityApiClient.post<SecurityChatResponse>(
-    '/security-chat',
-    {
-      message: body.message,
-      thread_id: thread_id ?? undefined,
-      user_id: user_id ?? undefined,
-    },
-  )
-  const tid = data.thread_id || data.session_id
-  if (tid) setSecurityChatThreadId(tid)
-  if (data.trace?.length) {
-    console.debug('[security-chat] ok trace', data.trace, 'elapsed_ms', data.elapsed_ms)
-  }
-  return data
 }
 
 export type SecurityChatStreamHandlers = {

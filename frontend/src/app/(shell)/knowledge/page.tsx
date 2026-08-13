@@ -15,6 +15,7 @@ import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
 import { postChat } from '@/api/aiApi';
 import { knowledgeApi } from '@/api/knowledgeApi';
 import { fetchDocFileBlob } from '@/api/docsApi';
+import { usePageChat } from '@/context/PageChatContext';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import { isAxiosError } from 'axios';
 
@@ -199,10 +200,6 @@ function getHeadCellStyle(c: UiColors): CSSProperties {
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
-
-function isSpcMetricArray(value: unknown): value is SpcMetric[] {
-  return Array.isArray(value) && value.length > 0;
-}
 
 function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
   const from = item.handoverFrom?.trim() || '';
@@ -741,6 +738,7 @@ function useMasterCheckbox(
 export default function KnowledgePage() {
   const pathname = usePathname();
   const { isDark, language } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const uiColors = getUiColors(isDark);
   const panelStyle = getPanelStyle(uiColors);
   const inputStyle = getInputStyle(uiColors);
@@ -864,6 +862,9 @@ export default function KnowledgePage() {
 
   const libraryTotalCount = allDocuments.length + allActions.length;
 
+  // pagePayload is set after filtered* memos below
+
+
   const filteredDocuments = useMemo(() => {
     const keyword = appliedFilters.keyword.trim().toLowerCase();
     return allDocuments.filter((doc) => {
@@ -898,6 +899,83 @@ export default function KnowledgePage() {
         item.date.includes(keyword),
     );
   }, [allActions, appliedActionSearch]);
+
+  useEffect(() => {
+    setPagePayload(
+      '/knowledge',
+      {
+        page: 'knowledge',
+        activeTab,
+        visibleTables: ['pastIssues', 'handover', 'documents'],
+        filters: {
+          pastIssues: appliedFilters,
+          handoverSearch: appliedActionSearch,
+        },
+        pastIssues: {
+          total: allDocuments.length,
+          filteredTotal: filteredDocuments.length,
+          items: filteredDocuments.slice(0, 10).map((d) => ({
+            id: d.id,
+            title: d.title.slice(0, 160),
+            lot: d.lot,
+            date: d.date,
+          })),
+        },
+        handover: {
+          total: allActions.length,
+          filteredTotal: filteredActions.length,
+          items: filteredActions.slice(0, 10).map((a) => ({
+            id: a.id,
+            handoverContent: a.handoverContent.slice(0, 160),
+            action: a.action.slice(0, 120),
+            cause: a.cause.slice(0, 120),
+            manager: a.manager,
+            date: a.date,
+            category: a.category,
+          })),
+        },
+        documentsMeta: {
+          selectedPaths: selectedDocPaths.slice(0, 20),
+          selectedPathCount: selectedDocPaths.length,
+          note: 'Document file bodies are retrieved via RAG; only path meta is sent here.',
+        },
+        selection: {
+          pastIssueIds: selectedDocIds.slice(0, 20),
+          handoverIds: selectedActionIds.slice(0, 20),
+          count:
+            selectedDocIds.length + selectedActionIds.length + selectedDocPaths.length,
+        },
+        detail: detailTarget
+          ? detailTarget.kind === 'document'
+            ? {
+                kind: 'past-issue',
+                id: detailTarget.item.id,
+                title: detailTarget.item.title.slice(0, 200),
+                lot: detailTarget.item.lot,
+              }
+            : {
+                kind: 'handover',
+                id: detailTarget.item.id,
+                content: detailTarget.item.handoverContent.slice(0, 200),
+              }
+          : null,
+      },
+      ['handover', 'documents'],
+    );
+  }, [
+    setPagePayload,
+    activeTab,
+    allDocuments.length,
+    allActions.length,
+    filteredDocuments,
+    filteredActions,
+    appliedFilters,
+    appliedActionSearch,
+    selectedDocPaths,
+    selectedDocIds,
+    selectedActionIds,
+    detailTarget,
+  ]);
 
   const validSelectedDocIds = useMemo(
     () => selectedDocIds.filter((id) => allDocuments.some((doc) => doc.id === id)),
@@ -1069,6 +1147,18 @@ export default function KnowledgePage() {
   const openDocumentDetail = async (doc: DocumentItem) => {
     setSelectedDocId(doc.id);
     setDetailTarget({ kind: 'document', item: doc });
+    trackPageChatEvent({
+      type: 'row_click',
+      route: '/knowledge',
+      target: 'knowledge-past-issue',
+      entityId: doc.id,
+      payload: {
+        id: doc.id,
+        title: doc.title.slice(0, 200),
+        lot: doc.lot,
+        date: doc.date,
+      },
+    });
     setDiagnosisReply('');
     setDiagnosisError('');
     setDiagnosisLoading(true);
@@ -1125,6 +1215,20 @@ export default function KnowledgePage() {
 
   const openActionDetail = (item: ActionHistoryItem) => {
     setDetailTarget({ kind: 'action', item });
+    trackPageChatEvent({
+      type: 'row_click',
+      route: '/knowledge',
+      target: 'knowledge-handover',
+      entityId: String(item.id),
+      payload: {
+        id: item.id,
+        handoverContent: item.handoverContent.slice(0, 200),
+        action: item.action.slice(0, 120),
+        cause: item.cause.slice(0, 120),
+        manager: item.manager,
+        date: item.date,
+      },
+    });
   };
 
   const closeDetailModal = () => {
@@ -2055,7 +2159,18 @@ ${
               {/* 사내 문서 (Documents/ READ-ONLY) */}
               <DocumentsBrowser
                 selectedPaths={selectedDocPaths}
-                onSelectedPathsChange={setSelectedDocPaths}
+                onSelectedPathsChange={(paths) => {
+                  setSelectedDocPaths(paths);
+                  trackPageChatEvent({
+                    type: 'row_select',
+                    route: '/knowledge',
+                    target: 'knowledge-docs-paths',
+                    payload: {
+                      paths: paths.slice(0, 20),
+                      count: paths.length,
+                    },
+                  });
+                }}
               />
             </div>
           </section>

@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Iterator
 
 _log = logging.getLogger(__name__)
+
+
+def chat_llm_timeout_sec() -> float:
+    try:
+        return max(5.0, float(os.environ.get("CHAT_LLM_TIMEOUT_SEC", "20")))
+    except ValueError:
+        return 20.0
 
 _GEMINI_MODEL_FALLBACKS = (
     "gemini-2.0-flash",
@@ -144,6 +152,8 @@ def _invoke_openai_compatible(
         "temperature": 0,
         "api_key": cred.api_key,
         "max_retries": 0,
+        "request_timeout": chat_llm_timeout_sec(),
+        "timeout": chat_llm_timeout_sec(),
     }
     if cred.base_url:
         kwargs["base_url"] = cred.base_url.rstrip("/")
@@ -151,6 +161,30 @@ def _invoke_openai_compatible(
     out = llm.invoke(messages)
     text = _content_to_text(out.content)
     return text or None
+
+
+def stream_openai_compatible(
+    cred: LlmCredential, messages: list[BaseMessage]
+) -> Iterator[str]:
+    """Yield text deltas from an OpenAI-compatible chat model."""
+    from langchain_openai import ChatOpenAI
+
+    kwargs: dict[str, Any] = {
+        "model": cred.model,
+        "temperature": 0,
+        "api_key": cred.api_key,
+        "max_retries": 0,
+        "request_timeout": chat_llm_timeout_sec(),
+        "timeout": chat_llm_timeout_sec(),
+        "streaming": True,
+    }
+    if cred.base_url:
+        kwargs["base_url"] = cred.base_url.rstrip("/")
+    llm = ChatOpenAI(**kwargs)
+    for chunk in llm.stream(messages):
+        piece = _content_to_text(getattr(chunk, "content", "") or "")
+        if piece:
+            yield piece
 
 
 def _gemini_rest_generate(
@@ -180,7 +214,7 @@ def _gemini_rest_generate(
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
+    with urllib.request.urlopen(req, timeout=chat_llm_timeout_sec()) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
 
     candidates = payload.get("candidates") or []
@@ -274,7 +308,7 @@ def _invoke_anthropic(cred: LlmCredential, messages: list[BaseMessage]) -> str |
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        with urllib.request.urlopen(req, timeout=chat_llm_timeout_sec()) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"anthropic HTTP {exc.code}") from exc

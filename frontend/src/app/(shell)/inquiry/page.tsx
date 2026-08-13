@@ -25,6 +25,7 @@ import {
 } from '@/lib/authStorage';
 import type { AuthUser } from '@/types';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
+import { usePageChat } from '@/context/PageChatContext';
 
 function getApiErrorMessage(err: unknown, fallback: string) {
   if (axios.isAxiosError(err)) {
@@ -275,6 +276,7 @@ function visibilityBadgeStyle(visibility: Visibility, isDark: boolean): CSSPrope
 
 export default function InquiryPage() {
   const { isDark, language } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const [inquiries, setInquiries] = useState<InquiryItem[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -365,6 +367,68 @@ export default function InquiryPage() {
     () => inquiries.find((item) => item.id === selectedInquiryId) ?? null,
     [inquiries, selectedInquiryId],
   );
+
+  useEffect(() => {
+    setPagePayload(
+      '/inquiry',
+      {
+        page: 'inquiry',
+        filters: appliedFilters,
+        total: inquiries.length,
+        filteredTotal: filteredInquiries.length,
+        pageSize: PAGE_SIZE,
+        currentPage: safePage,
+        displayLabel: displayCountLabel,
+        items: visibleInquiries.slice(0, 10).map((item) => ({
+          id: item.id,
+          title: canViewInquiry(item) ? item.title.slice(0, 120) : '비공개 문의',
+          status: item.status,
+          category: item.category,
+          visibility: item.visibility,
+          date: item.date,
+        })),
+        selection: selectedInquiry
+          ? {
+              id: selectedInquiry.id,
+              title: canViewInquiry(selectedInquiry)
+                ? selectedInquiry.title.slice(0, 160)
+                : '비공개 문의',
+              status: selectedInquiry.status,
+              category: selectedInquiry.category,
+            }
+          : null,
+      },
+      ['inquiry'],
+    );
+  }, [
+    setPagePayload,
+    appliedFilters,
+    inquiries.length,
+    filteredInquiries.length,
+    safePage,
+    displayCountLabel,
+    visibleInquiries,
+    selectedInquiry,
+  ]);
+
+  useEffect(() => {
+    if (selectedInquiry && canViewInquiry(selectedInquiry)) {
+      trackPageChatEvent({
+        type: 'row_select',
+        route: '/inquiry',
+        target: 'inquiry-item',
+        entityId: selectedInquiry.id,
+        payload: {
+          id: selectedInquiry.id,
+          title: selectedInquiry.title.slice(0, 160),
+          status: selectedInquiry.status,
+          category: selectedInquiry.category,
+        },
+      });
+    } else {
+      trackPageChatEvent({ type: 'clear', route: '/inquiry', target: 'inquiry-item' });
+    }
+  }, [selectedInquiry, trackPageChatEvent]);
 
   const showAnswerForm =
     !!selectedInquiry &&

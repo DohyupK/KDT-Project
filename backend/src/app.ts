@@ -50,6 +50,7 @@ export function createApp() {
       docs: 'GET /api/docs/tree · GET /api/docs/file?path= (READ-ONLY, auth)',
       inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · GET /api/inquiries/:id/attachments/:attachmentId · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',
+      chat_stream: 'POST /api/chat/stream',
       chat_threads: 'GET /api/chat/threads · GET /api/chat/threads/:id/messages',
       security_chat: 'POST /api/security-chat',
       security_chat_stream: 'POST /api/security-chat/stream',

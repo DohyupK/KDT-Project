@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 type SpcCardTitle =
@@ -286,6 +287,7 @@ function SpcGraphCard({
 
 export default function SpcManagementPage() {
   const { isDark, language, copy } = useUiSettings()
+  const { setPagePayload, trackPageChatEvent } = usePageChat()
   const [embedRefreshKey, setEmbedRefreshKey] = useState(0)
   const [rangeDraft, setRangeDraft] = useState<DateRangeFilter>({ startDate: '', endDate: '' })
   const [rangeApplied, setRangeApplied] = useState<DateRangeFilter | null>(null)
@@ -297,12 +299,48 @@ export default function SpcManagementPage() {
 
   const closeModal = useCallback(() => {
     setExpandedTitle(null)
-  }, [])
+    trackPageChatEvent({ type: 'clear', route: '/management', target: 'spc-panel' })
+  }, [trackPageChatEvent])
 
-  const openModal = useCallback((title: SpcCardTitle) => {
-    lastExpandedRef.current = title
-    setExpandedTitle(title)
-  }, [])
+  const openModal = useCallback(
+    (title: SpcCardTitle) => {
+      lastExpandedRef.current = title
+      setExpandedTitle(title)
+      trackPageChatEvent({
+        type: 'panel_open',
+        route: '/management',
+        target: 'spc-panel',
+        entityId: title,
+        payload: {
+          panel: title,
+          label: SPC_CARD_LABELS[title],
+          dateRange: rangeApplied,
+        },
+      })
+    },
+    [trackPageChatEvent, rangeApplied],
+  )
+
+  useEffect(() => {
+    setPagePayload(
+      '/management',
+      {
+        page: 'spc',
+        panels: (Object.keys(SPC_CARD_LABELS) as SpcCardTitle[]).map((key) => ({
+          key,
+          label: SPC_CARD_LABELS[key],
+        })),
+        dateRange: rangeApplied,
+        expandedPanel: expandedTitle
+          ? { key: expandedTitle, label: SPC_CARD_LABELS[expandedTitle] }
+          : null,
+        note:
+          'SPC charts are Grafana embeds; chat context uses panel meta and date filters, not chart pixels. Panels may show No data when the selected range has no series.',
+        uiNote: 'Grafana embeds may show No data',
+      },
+      ['spc'],
+    )
+  }, [setPagePayload, rangeApplied, expandedTitle])
 
   useShellRefresh(() => {
     setEmbedRefreshKey((key) => key + 1)
@@ -315,14 +353,25 @@ export default function SpcManagementPage() {
   const handleApplyRange = useCallback(() => {
     if (!isValidRange(rangeDraft)) return
     setRangeApplied({ ...rangeDraft })
+    trackPageChatEvent({
+      type: 'filter_apply',
+      route: '/management',
+      target: 'spc-date-range',
+      payload: { ...rangeDraft },
+    })
     setEmbedRefreshKey((key) => key + 1)
-  }, [rangeDraft])
+  }, [rangeDraft, trackPageChatEvent])
 
   const handleResetRange = useCallback(() => {
     setRangeDraft({ startDate: '', endDate: '' })
     setRangeApplied(null)
+    trackPageChatEvent({
+      type: 'clear',
+      route: '/management',
+      target: 'spc-date-range-reset',
+    })
     setEmbedRefreshKey((key) => key + 1)
-  }, [])
+  }, [trackPageChatEvent])
 
   useEffect(() => {
     if (!expandedTitle) return

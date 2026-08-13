@@ -361,7 +361,9 @@ export async function getLotRiskDetail(lotId: string) {
 
   const storedSnapshot = parseSpcChartSnapshot(r.spc_chart_json)
   let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
-  if (storedSnapshot) {
+  // Prefer non-empty stored snapshot. Empty metrics[] is common for older
+  // "이상만 저장" 스냅샷 — live recompute so 안정 LOT도 관리도가 보이게 함.
+  if (storedSnapshot && storedSnapshot.metrics.length > 0) {
     spc = {
       lotId: r.lot_id,
       spcStatus: storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
@@ -371,11 +373,19 @@ export async function getLotRiskDetail(lotId: string) {
     try {
       spc = await getLotSpcDetail(lotId)
     } catch {
-      spc = null
+      spc =
+        storedSnapshot != null
+          ? {
+              lotId: r.lot_id,
+              spcStatus:
+                storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
+              metrics: storedSnapshot.metrics,
+            }
+          : null
     }
   }
 
-  // Prefer stored spc_chart_json; live recompute only if snapshot missing
+  // Prefer stored spc_chart_json; live recompute only if snapshot missing/empty
   const resolvedSpc = !processComplete
     ? '-'
     : spc?.spcStatus

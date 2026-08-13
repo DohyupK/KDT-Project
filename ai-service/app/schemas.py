@@ -97,6 +97,17 @@ class ChatFeatures(BaseModel):
     timestamp: str | None = None
 
 
+class PageContextModel(BaseModel):
+    """Screen context from FE (not shown in UI). Hybrid with optional BE supplement."""
+
+    route: str = "/"
+    focus_id: str | None = None
+    focus_payload: Any | None = None
+    page_payload: Any | None = None
+    supplement: dict[str, Any] | None = None
+    supplement_hints: list[str] | None = None
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User chat text")
     thread_id: str | None = Field(
@@ -110,9 +121,8 @@ class ChatRequest(BaseModel):
     features: ChatFeatures | None = Field(
         default=None,
         description=(
-            "If set, agent runs all ready registry heads "
-            "(clf O/X + reg capacity + residual + future) "
-            "then replies citing those JSON results only."
+            "If set on follow-up / explicit diagnosis, agent runs registry heads. "
+            "First-turn page Q&A prefers page_context + RAG."
         ),
     )
     fillThreshold: float | None = Field(
@@ -130,6 +140,17 @@ class ChatRequest(BaseModel):
     llm_credentials: list[dict[str, Any]] | None = Field(
         default=None,
         description="Decrypted credentials from Express (never stored in ai-service).",
+    )
+    page_context: PageContextModel | None = Field(
+        default=None,
+        description="Current screen focus/page payloads for context-aware Q&A.",
+    )
+    enable_api_llm: bool | None = Field(
+        default=None,
+        description=(
+            "Legacy flag. Learning heads run whenever features exist; "
+            "RAG is gated by document/analysis intent instead."
+        ),
     )
 
 
@@ -187,6 +208,10 @@ class ChatResponse(BaseModel):
     )
     recommendation: ChatRecommendation | None = None
     error: str | None = None
+    timing: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional [chat-timing] breakdown (predict/rag/compose ms).",
+    )
 
 
 class KnowledgeAnalyzeRequest(BaseModel):

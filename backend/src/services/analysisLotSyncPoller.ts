@@ -60,20 +60,26 @@ if (analysisOnlyIds.length > 0) {
         console.log('[analysis-sync] score_done', scored)
       }
     }
-    const issuesCreated = await lotService.ensureIssuesForRiskLots()
-    if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {
     console.error('[analysis-sync] error', err)
   } finally {
     running = false
   }
 
-  if (lotIds.length === 0) return
+  if (lotIds.length > 0) {
+    try {
+      const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
+      console.log('[analysis-sync] risk_reasons', reasons)
+    } catch (err) {
+      console.error('[analysis-sync] risk_reason_failed', err)
+    }
+  }
+
   try {
-    const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
-    console.log('[analysis-sync] risk_reasons', reasons)
+    const issuesCreated = await lotService.ensureIssuesForRiskLots()
+    if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {
-    console.error('[analysis-sync] risk_reason_failed', err)
+    console.error('[analysis-sync] issues_failed', err)
   }
 }
 
@@ -85,9 +91,8 @@ export function startAnalysisLotSyncPoller(): void {
   if (timer) return
   const ms = intervalMs()
   console.log(`[analysis-sync] started interval_ms=${ms}`)
-  setTimeout(() => {
-    void tick()
-  }, 15_000)
+  // Immediate tick on backend boot so unscored lots are scored without waiting.
+  void tick()
   timer = setInterval(() => {
     void tick()
   }, ms)
