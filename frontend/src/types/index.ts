@@ -71,6 +71,8 @@ export interface UserSettingsDto {
   autoRefreshEnabled: boolean
   refreshInterval: number
   n8nAlert: boolean
+  /** MariaDB user_settings.email_check — O/X. n8nAlert is the boolean view. */
+  emailCheck?: 'O' | 'X'
   updatedAt: string
 }
 

@@ -92,13 +92,15 @@ _configure_file_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _configure_file_logging()
-    stop_watch = None
+    # Qdrant (:6333) — auto Docker start when AI server boots
     try:
-        from agent.document_watcher import start_document_watcher
+        from agent.qdrant_supervisor import ensure_qdrant
 
-        stop_watch = start_document_watcher()
+        ok = ensure_qdrant()
+        print(f"[qdrant] ensure_ok={ok}", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"[document_watcher] start skipped: {exc}")
+        print(f"[qdrant] ensure skipped: {exc}", flush=True)
+    # Documents OCR/watchdog is owned by Express backend (documentWatcherSupervisor).
     # Warm RAG embed/rerank on CPU so first chat is not a cold load.
     try:
         from agent.rag_engine import get_engine
@@ -112,11 +114,6 @@ async def lifespan(_app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         print(f"[rag] warm skipped: {exc}", flush=True)
     yield
-    if stop_watch is not None:
-        try:
-            stop_watch()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[document_watcher] stop: {exc}")
 
 
 app = FastAPI(

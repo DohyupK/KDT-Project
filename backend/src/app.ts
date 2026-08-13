@@ -11,6 +11,7 @@ import { issueRouter } from './routes/issue.routes.js'
 import { dashboardRouter } from './routes/dashboard.routes.js'
 import inquiryRoutes from './routes/inquiry.routes.js'
 import { docsRouter } from './routes/docs.js'
+import { n8nRouter } from './routes/n8n.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 export function createApp() {
@@ -59,6 +60,7 @@ export function createApp() {
       control_revert: 'POST /api/control/approve/:id/revert',
       control_outcome: 'POST /api/control/approve/:id/outcome',
       control_bounds: 'GET|PUT /api/settings/control-bounds',
+      n8n_send_email: 'POST /api/internal/n8n/send-email-result',
     })
   })
 
@@ -73,6 +75,7 @@ export function createApp() {
   app.use('/api', llmKeysRouter)
   app.use('/api', controlRouter)
   app.use('/api', settingsRouter)
+  app.use('/api', n8nRouter)
   app.use(errorHandler)
 
   return app

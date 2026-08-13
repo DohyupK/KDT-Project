@@ -1,6 +1,6 @@
 # Issue / LOT / 과거 자료 API (백엔드)
 
-최종 갱신: 2026-08-12
+최종 갱신: 2026-08-13
 
 ## 규칙
 
@@ -14,6 +14,7 @@
 - **`issue_content`:** `risk_reason` → 로컬 vLLM 한 문장 요약 (`composeIssueContentViaVllm`). 실패 시 `buildIssueTitle` fallback. 폴러는 **score → risk_reason → 이슈 시드** 순.
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
 - 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `risk_level` 심각 (`analysis_lots` JOIN)
+- **이슈 보고서 메일:** 신규 Top LOT → HTML을 `send_email.mail_contents`에 넣고 n8n → Gmail API. 수신은 `user_settings.email_check = 'O'`. 계획: [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md)
 - 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
 - **채점 3단 SSOT** (`lot.service` `updateLotScore`):  
   1. `/predict-voting` → **`lot_results`** NULL-fill (`quality_defect`·`residual_li`만; 피더 실측은 COALESCE로 불변)  
@@ -37,7 +38,7 @@
 | `issues` | `issue_id`, `lot_id`, `issue_content`, `action_content`, `assignee_user_id`, `completed_at`, `created_at` — **no status / no risk_level** |
 
 - 마이그레이션: `npm run migrate:issues-refactor` ([`backend/scripts/migrate-issues-refactor.ts`](../../backend/scripts/migrate-issues-refactor.ts)) — **기존 issues 행 전량 삭제** 후 스키마 정렬
-- DDL: [`DB/schema.sql`](../../DB/schema.sql), [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql), [`DB/alter_issues_refactor.sql`](../../DB/alter_issues_refactor.sql), [`DB/alter_analysis_lots_add_scored_at.sql`](../../DB/alter_analysis_lots_add_scored_at.sql)
+- DDL: [`DB/schema.sql`](../../DB/schema.sql), [`DB/issue_lot_tables.sql`](../../DB/issue_lot_tables.sql), [`DB/alter_issues_refactor.sql`](../../DB/alter_issues_refactor.sql), [`DB/alter_analysis_lots_add_scored_at.sql`](../../DB/alter_analysis_lots_add_scored_at.sql), [`DB/send_email.sql`](../../DB/send_email.sql)
 
 ## 엔드포인트
 
@@ -53,6 +54,7 @@
 | GET | `/api/knowledge/past-issues` | 선택 | **과거 자료** (`completed_at IS NOT NULL`) |
 | GET | `/api/knowledge/past-issues/:issueId` | 선택 | 과거 자료 상세(조치·LOT JOIN) |
 | GET | `/api/knowledge/handover-history` | 선택 | 인수인계 (`?status=pending\|completed`) |
+| POST | `/api/internal/n8n/send-email-result` | `N8N_WEBHOOK_SECRET` | n8n 콜백. `{ id, send: 'O'\|'X' }` → `send_email.send` |
 
 ## DTO 필드
 

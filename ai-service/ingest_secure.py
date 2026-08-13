@@ -4,8 +4,10 @@ Manual secure-doc ingest → Qdrant + BM25 node cache.
 Usage (from ai-service/):
   python ingest_secure.py
 
-Docs directory: monorepo root Documents/<Clearance>/Markdown/ (override SECURE_DOCS_DIR).
-Supports: .md (YAML frontmatter), .txt, .pdf (pypdf).
+Docs directory: monorepo root Documents/<Clearance>/ (override SECURE_DOCS_DIR).
+Supports: .md under Markdown/ (YAML frontmatter); .txt / text PDF at clearance root
+(native extract, no matching .md); OCR sidecars under Markdown/ for scan PDF/images
+(linked via MariaDB text_match).
 CSV/XLSX: dual-engine — originals in data/csv_lake/; short profile MD under
 Documents/Confidential/Markdown/*-profile.md.
 
@@ -159,9 +161,10 @@ def _load_document(path: Path) -> tuple[dict, str] | None:
 def _iter_doc_files(root: Path) -> list[Path]:
     """
     Collect ingestible files under Documents/<Clearance>/...
-    - Prefer *.md under each Markdown/ folder.
-    - Include clearance-root .txt/.pdf only when Markdown/<stem>.md is absent.
-    - Never ingest raw .csv/.xlsx.
+    - Prefer *.md under each Markdown/ folder (manual + OCR sidecars).
+    - Include clearance-root .txt/.pdf only when Markdown/<stem>.md is absent
+      (text PDFs are ingested natively; scan PDFs should have OCR md via watcher).
+    - Never ingest raw .csv/.xlsx or raw images (images → OCR md only).
     """
     if not root.is_dir():
         return []
@@ -203,7 +206,11 @@ def _iter_doc_files(root: Path) -> list[Path]:
                     "move to data/csv_lake/ (profile MD only)"
                 )
                 continue
-            if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff"):
+                print(
+                    f"  skip {path.relative_to(root)}: "
+                    "image → OCR Markdown sidecar (document_convert / watcher)"
+                )
                 continue
             print(f"  skip {path.relative_to(root)}: unsupported extension")
     return files
@@ -222,7 +229,8 @@ def run_ingest() -> int:
     if not files:
         print(
             f"No ingestible docs in {SECURE_DOCS_DIR}/<Clearance>/. "
-            "Add .md under Markdown/ or convert pdf/txt then re-run."
+            "Add .md under Markdown/, place text pdf/txt at clearance root, "
+            "or OCR images/scan PDFs via document_convert then re-run."
         )
         return 1
 

@@ -63,17 +63,19 @@ frontend(:3000) + backend(:3001) + ai-service(:8800)를 함께 켭니다.
 
 | 패키지 | 포트 | 역할 |
 |--------|------|------|
-| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat · **멀티턴 MariaDB** |
-| `backend/` | **3001** | Express · auth · 게이트 · 프록시 · `CHAT_STORE` 세션 |
+| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat · **멀티턴 MariaDB** · **Qdrant 자동기동** |
+| `backend/` | **3001** | Express · auth · 게이트 · 프록시 · `CHAT_STORE` · **Documents 워처(OCR) 자식 프로세스** |
 | `frontend/` | **3000** | Next.js UI |
-| (선택) Qdrant | **6333** | secure RAG · chat_history 벡터 |
+| Qdrant | **6333** (grpc **6334**) | secure RAG 벡터 — ai-service 기동 시 Docker `kdt-qdrant` (기본 `QDRANT_AUTOSTART=1`) |
 | (선택) LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
+| MariaDB | **3306** (원격 가능) | auth · lots · `user_chat_*` · `text_match` |
 
 ### 0) 사전 요구
 
 - Node.js LTS, npm  
 - Python **3.11+**, `pip`  
-- (선택) Qdrant, 로컬 LLM(:8001)
+- Docker (Qdrant 자동기동용; Desktop 실행 필요)  
+- (선택) 로컬 LLM(:8001) · Tesseract OCR (`kor`+`eng`)
 
 ### 1) 루트 `.env`
 
@@ -203,6 +205,7 @@ Maximize / /security
 | LLM·RAG 튜닝 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) |
 | 챗봇 가이드 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) |
 | 일반 챗 · 페이지 컨텍스트 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) |
+| Documents 워처 · Qdrant · 포트 | [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) |
 | 스모크 | `cd ai-service && python scripts/smoke_secure_rag_e2e.py` |
 
 우하단 챗봇 → 「샘플 LOT 진단」으로 predict 연동을 확인할 수 있습니다.
@@ -236,7 +239,7 @@ Maximize / /security
 ### ai-service
 - Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib, openpyxl  
 - FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
-- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
+- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, pymupdf, Pillow, pytesseract, openpyxl, watchdog, SQLAlchemy, PyMySQL
   (bge-m3 / bge-reranker **CPU** · soft fallback · `FOLLOWUP_RE` · SSE `/security-chat/stream` · analytics `csv_lake`)  
 → [`ai-service/README.md`](./ai-service/README.md)
 
@@ -316,6 +319,7 @@ flowchart TD
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |
 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) | 일반 챗 응답·페이지 참조 로직 SSOT |
+| [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) | Documents 워처 · Qdrant 자동기동 · 포트 SSOT |
 | [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |
 | [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 보안 RAG · E2E · 발췌 모드 |
 | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) | 보안 RAG · env · 스모크 |

@@ -37,7 +37,7 @@ const DEFAULT_THEME_MODE = 1
 const DEFAULT_LANGUAGE = 'ko' as const
 const DEFAULT_REFRESH_INTERVAL = 1
 const DEFAULT_AUTO_REFRESH_ENABLED = true
-const DEFAULT_N8N_ALERT = true
+const DEFAULT_N8N_ALERT = false
 
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
@@ -254,7 +254,7 @@ export default function SettingPage() {
       fontSize: settings.fontSize as FontSize,
       autoRefreshEnabled: settings.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
       refreshInterval: settings.refreshInterval as RefreshInterval,
-      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? false,
     }
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(local))
@@ -300,7 +300,7 @@ export default function SettingPage() {
           language: s.language ?? currentConfig?.language ?? 'ko',
           refreshInterval: s.refreshInterval as RefreshInterval,
           autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
-          n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+          n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? false,
         })
         return
       } catch {
@@ -628,7 +628,7 @@ export default function SettingPage() {
               <h2 className={`text-lg font-bold ${textPrimary}`}>시스템 알림 설정</h2>
             </div>
             <p className={`mb-5 text-sm ${textSecondary}`}>
-              n8n 알림 수신 여부를 설정합니다. 실제 알림 발송이나 외부 연동은 수행하지 않습니다.
+              n8n 알림을 켜면 위험 LOT 이슈 보고서 메일을 받습니다. 메일은 발신 전용(No-reply)입니다.
             </p>
             <ToggleSwitch
               id="n8n-alert-toggle"
@@ -638,7 +638,7 @@ export default function SettingPage() {
                 setSaveMessage('')
               }}
               label="n8n 알림"
-              description="n8n 워크플로 기반 모니터링 알림을 사용합니다."
+              description="위험 LOT Top 이슈 보고서 메일 수신"
               isDarkMode={isDarkMode}
             />
           </section>

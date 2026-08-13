@@ -4,6 +4,11 @@
 .env.*.local
 **/.env
 
+# Google Cloud service-account / OAuth client JSON (never copy into this repo)
+**/*service-account*.json
+**/client_secret*.json
+**/secrets/*.json
+
 # Backend local chat DB
 backend/data/
 
