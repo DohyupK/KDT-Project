@@ -97,6 +97,8 @@ type DriverCause = {
   directionKo?: string
   valueText?: string
   refLabel?: string | null
+  /** Relative contribution (%). Used to rank causes in summaries. */
+  sharePct?: number | null
 }
 
 const STABLE_SUMMARY =

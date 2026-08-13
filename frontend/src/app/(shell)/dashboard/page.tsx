@@ -11,6 +11,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { Ruler, UserRound } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import DateInput from '@/components/DateInput'
@@ -3372,18 +3373,6 @@ export default function DashBoardPage() {
                         ))}
                       </div>
                     ) : (
-                      <p
-                        className={`rounded-md px-2.5 py-2 text-xs ${
-                          isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
-                        }`}
-                      >
-                        {selectedLotRiskDetail == null ||
-                        selectedLotRiskDetail.lotId !== selectedLotRisk.lot
-                          ? 'SPC 관리도를 불러오는 중…'
-                          : (selectedLotRiskDetail.spcStatus ?? selectedLotRisk.spc) === '안정'
-                            ? 'SPC 안정 상태입니다. 관리도 시리즈를 준비 중이면 잠시 후 다시 열어 주세요.'
-                            : '표시할 SPC 관리도 데이터가 없습니다.'}
-                      </p>
                       <SpcStatusNoteBlock
                         isDark={isDark}
                         paragraphs={
@@ -3394,9 +3383,13 @@ export default function DashBoardPage() {
                                   '필수 공정값 일부가 비어 SPC를 판정하지 않습니다.',
                                   '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
                                 ]
-                              : [
-                                  '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
-                                ]
+                              : (selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) ===
+                                  '안정'
+                                ? [
+                                    'SPC 안정 상태입니다. 관리도 시리즈를 준비 중이면 잠시 후 다시 열어 주세요.',
+                                    '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
+                                  ]
+                                : ['표시할 SPC 관리도 데이터가 없습니다.']
                         }
                       />
                     )}
@@ -3404,7 +3397,9 @@ export default function DashBoardPage() {
 
                   <LotRecommendedActionPanel
                     lotId={selectedLotRisk.lot}
-                    riskLevel={selectedLotRiskDetail?.riskLevel ?? selectedLotRisk.risk}
+                    riskLevel={
+                      selectedLotRiskDetail?.riskLevel ?? selectedLotRisk.grade
+                    }
                     action={selectedLotRiskDetail?.recommendedAction ?? null}
                     isDark={isDark}
                   />
@@ -3730,7 +3725,7 @@ export default function DashBoardPage() {
                       type: 'filter_apply',
                       route: '/dashboard',
                       target: 'production-trend-bar',
-                      entityId: String(bucket?.date ?? bucket?.label ?? ''),
+                      entityId: String(bucket?.date ?? ''),
                       payload: bucket,
                     });
                   }}

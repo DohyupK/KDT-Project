@@ -228,7 +228,8 @@ Maximize / /security
 - **런타임:** Express 5, TypeScript (tsx), Node  
 - **인프라:** MariaDB connector, CORS, dotenv · 채팅/제어는 sqlite 병행 가능 (`CHAT_STORE`)  
 - **Auth:** bcryptjs, jsonwebtoken  
-- **개발:** typescript, tsx, `@types/express` 등  
+- **업로드:** multer (문의 첨부)  
+- **개발:** typescript, tsx, `@types/express`, `@types/multer` 등  
 → 기능·설계: [`backend/README.md`](./backend/README.md)
 
 ### ai-service

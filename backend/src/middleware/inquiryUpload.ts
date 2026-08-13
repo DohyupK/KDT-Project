@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
-import multer from 'multer'
+import multer, { type FileFilterCallback } from 'multer'
 import { AppError } from './errorHandler.js'
 import {
   isAllowedInquiryFile,
@@ -13,7 +13,7 @@ const upload = multer({
     fileSize: MAX_INQUIRY_FILE_BYTES,
     files: MAX_INQUIRY_FILES,
   },
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (!isAllowedInquiryFile(file.originalname)) {
       cb(new AppError(400, '허용되지 않는 파일 형식입니다.'))
       return

@@ -44,6 +44,8 @@ type LotProcessRecord = {
   process_time: number;
   additive_ratio: number;
   quality_defect: 0 | 1;
+  d50?: number;
+  d90?: number;
 };
 
 type RiskLotView = {
@@ -112,6 +114,8 @@ function toRiskLotView(lot: RiskTopLot): RiskLotView {
       process_time: numOrZero(lot.processTime),
       additive_ratio: numOrZero(lot.additiveRatio),
       quality_defect: lot.qualityDefect ? 1 : 0,
+      d50: lot.d50 ?? undefined,
+      d90: lot.d90 ?? undefined,
     },
   };
 }

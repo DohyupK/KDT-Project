@@ -60,8 +60,8 @@ export const createInquiry = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
 
   const email = await loadAuthorEmail(req.auth.userId)
-  const uploaded = Array.isArray(req.files) ? req.files : []
-  const files = uploaded.map((file) => ({
+  const uploaded = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[]
+  const files = uploaded.map((file: Express.Multer.File) => ({
     originalName: decodeUploadName(file.originalname),
     mimeType: file.mimetype,
     size: file.size,
