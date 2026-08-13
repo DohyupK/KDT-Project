@@ -3197,7 +3197,9 @@ export default function DashBoardPage() {
                         {selectedLotRiskDetail == null ||
                         selectedLotRiskDetail.lotId !== selectedLotRisk.lot
                           ? 'SPC 관리도를 불러오는 중…'
-                          : '표시할 SPC 관리도 데이터가 없습니다.'}
+                          : (selectedLotRiskDetail.spcStatus ?? selectedLotRisk.spc) === '안정'
+                            ? 'SPC 안정 상태입니다. 관리도 시리즈를 준비 중이면 잠시 후 다시 열어 주세요.'
+                            : '표시할 SPC 관리도 데이터가 없습니다.'}
                       </p>
                     )}
                   </div>

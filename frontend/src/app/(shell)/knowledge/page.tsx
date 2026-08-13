@@ -200,10 +200,6 @@ function getHeadCellStyle(c: UiColors): CSSProperties {
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
 
-function isSpcMetricArray(value: unknown): value is SpcMetric[] {
-  return Array.isArray(value) && value.length > 0;
-}
-
 function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
   const from = item.handoverFrom?.trim() || '';
   const dateTime = item.archivedAt?.trim() || item.createdAt?.trim() || '';

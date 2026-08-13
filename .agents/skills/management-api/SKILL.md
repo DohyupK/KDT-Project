@@ -1,7 +1,10 @@
 ---
 name: management-api
-description: Guides work on the ManagementPage API module. Use when changing frontend/src/api/managementApi.ts.
+description: Guides work on the Management (SPC) page. Use when changing frontend/src/app/(shell)/management/page.tsx.
 ---
-# Management API
+# Management / SPC page
 
-API-specific workflow instructions will be defined here.
+There is no dedicated `managementApi.ts`. The SPC page embeds Grafana panels directly.
+
+When changing Management UI, keep page responsibilities in
+`frontend/src/app/(shell)/management/page.tsx` and do not reintroduce an empty API stub.

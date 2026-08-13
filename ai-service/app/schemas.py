@@ -208,22 +208,6 @@ class KnowledgeAnalyzeResponse(BaseModel):
     error: str | None = None
 
 
-class LotRiskReasonRequest(BaseModel):
-    lot_id: str = Field(..., min_length=1)
-    probability: float | None = None
-    spc_status: str | None = None
-    risk_level: str | None = None
-    residual_li: float | None = None
-    capacity: float | None = None
-    quality_defect: int | None = None
-
-
-class LotRiskReasonResponse(BaseModel):
-    risk_reason: str
-    provider: str | None = None
-    error: str | None = None
-
-
 class SecurityChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Security-tab user text")
     thread_id: str | None = Field(

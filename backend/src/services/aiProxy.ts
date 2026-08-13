@@ -137,25 +137,6 @@ export async function predictVoting(features: PredictFeatureBody): Promise<AiVot
   return postAiJson<AiVotingResult>('/predict-voting', sanitizePredictBody(features))
 }
 
-/** Single-row O/X defect probability (same contract as chatbot clf head). */
-export async function predictDefect(features: PredictFeatureBody): Promise<AiPredictResult> {
-  return postAiJson<AiPredictResult>('/predict', sanitizePredictBody(features))
-}
-
-/** Single-row residual lithium ppm (same contract as chatbot residual head). */
-export async function predictResidual(features: PredictFeatureBody): Promise<AiResidualResult> {
-  const body = sanitizePredictBody(features)
-  delete body.fillThreshold
-  return postAiJson<AiResidualResult>('/predict-residual', body)
-}
-
-/** Single-row capacity mAh/g (same contract as chatbot capacity head). */
-export async function predictCapacity(features: PredictFeatureBody): Promise<AiCapacityResult> {
-  const body = sanitizePredictBody(features)
-  delete body.fillThreshold
-  return postAiJson<AiCapacityResult>('/predict-capacity', body)
-}
-
 export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
   const res = await fetch(`${aiServiceBase()}/chat`, {
     method: 'POST',
@@ -213,38 +194,4 @@ export async function proxyKnowledgeAnalyze(
   }
 
   return (await res.json()) as AiKnowledgeAnalyzeResponse
-}
-
-export type AiLotRiskReasonRequest = {
-  lot_id: string
-  probability?: number | null
-  spc_status?: string | null
-  risk_level?: string | null
-  residual_li?: number | null
-  capacity?: number | null
-  quality_defect?: number | null
-}
-
-export type AiLotRiskReasonResponse = {
-  risk_reason: string
-  provider?: string | null
-  error: string | null
-}
-
-/** Local vLLM risk_reason for analysis_lots (no chat compose). */
-export async function proxyLotRiskReason(
-  body: AiLotRiskReasonRequest,
-): Promise<AiLotRiskReasonResponse> {
-  const res = await fetch(`${aiServiceBase()}/lot-risk-reason`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`ai-service /lot-risk-reason ${res.status}: ${text.slice(0, 200)}`)
-  }
-
-  return (await res.json()) as AiLotRiskReasonResponse
 }

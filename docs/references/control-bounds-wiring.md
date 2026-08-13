@@ -7,13 +7,13 @@ Setting UI · Express · ai-service whatif · 제어 로그가 어떻게 이어�
 ## 한계치 (control bounds)
 
 ```
-Setting page (frontend/src/app/(shell)/setting/page.tsx)
-  → settingsApi.get/putControlBounds
-  → Express GET|PUT /api/settings/control-bounds  (backend/src/routes/settings.ts)
+Express GET|PUT /api/settings/control-bounds  (backend/src/routes/settings.ts)
   → 파일 SSOT: ai-service/config/control_bounds.json
   → agent/bounds_cache.py (mtime 메모리 캐시, DB 없음)
   → agent/whatif.py (격자 clip + boundary_hit / limit_reason)
   → ChatResponse.recommendation → GlobalChatbot
+
+(Note: Setting page UI / settingsApi client 제거됨 — bounds는 API·파일로만 조정.)
 ```
 
 | env | 의미 |
@@ -41,9 +41,7 @@ GlobalChatbot 「제안 승인」
 
 각 진입점에 “Wiring: …” 주석이 있다.
 
-- `frontend/.../setting/page.tsx` — 한계치 저장
-- `frontend/src/api/settingsApi.ts`
-- `backend/src/routes/settings.ts`
+- `backend/src/routes/settings.ts` — GET|PUT control-bounds
 - `backend/src/routes/control.ts` — approve / revert
 - `ai-service/agent/bounds_cache.py`
 - `ai-service/agent/whatif.py`

@@ -1,8 +1,9 @@
 ---
-description: Rules for the ManagementPage API module
-globs: frontend/src/api/managementApi.ts
+description: Rules for the Management (SPC) page
+globs: frontend/src/app/(shell)/management/page.tsx
 alwaysApply: false
 ---
-# Management API
+# Management / SPC
 
-API-specific rules will be defined here.
+No dedicated `managementApi.ts`. Grafana embeds live in the page component.
+Do not reintroduce an empty API stub.

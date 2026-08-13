@@ -1170,9 +1170,9 @@ export function buildSpcChartSnapshot(
   const evaled = evaluateLotSpc(history)
   const limits = loadPhase1Limits()
   const window = SPC_DETAIL_CHART_WINDOW
-  const paramsToShow = evaled.params.filter((p) => p.status === '이탈' || p.status === '주의')
+  // Dashboard SPC 관리도: 안정 포함 전 파라미터 (이탈/주의만이면 안정 LOT이 빈 화면이 됨)
   return {
-    metrics: paramsToShow.map((p) => {
+    metrics: evaled.params.map((p) => {
       const series = history[p.key]
       const start = Math.max(0, series.length - window)
       const lim = limits[p.key]
@@ -1259,8 +1259,7 @@ export async function getLotSpcDetail(lotId: string): Promise<{
   const evaled = evaluateLotSpc(history)
   const limits = loadPhase1Limits()
   const window = SPC_DETAIL_CHART_WINDOW
-  const paramsToShow = evaled.params.filter((p) => p.status === '이탈' || p.status === '주의')
-  const metrics = paramsToShow.map((p) => {
+  const metrics = evaled.params.map((p) => {
     const series = history[p.key]
     const start = Math.max(0, series.length - window)
     const data = series.slice(start).map((value, i) => ({

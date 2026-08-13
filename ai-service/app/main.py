@@ -67,8 +67,6 @@ from app.schemas import (
     HealthResponse,
     KnowledgeAnalyzeRequest,
     KnowledgeAnalyzeResponse,
-    LotRiskReasonRequest,
-    LotRiskReasonResponse,
     PredictRequest,
     PredictResponse,
     ResidualResponse,
@@ -454,29 +452,6 @@ def knowledge_analyze_endpoint(body: KnowledgeAnalyzeRequest) -> KnowledgeAnalyz
     )
 
 
-@app.post("/lot-risk-reason", response_model=LotRiskReasonResponse)
-def lot_risk_reason_endpoint(body: LotRiskReasonRequest) -> LotRiskReasonResponse:
-    """analysis_lots.risk_reason via local vLLM only — no RAG / SYSTEM_COMPOSE."""
-    from agent.api_llm.lot_risk_reason import compose_lot_risk_reason
-
-    facts = {
-        "lot_id": body.lot_id,
-        "probability": body.probability,
-        "spc_status": body.spc_status,
-        "risk_level": body.risk_level,
-        "residual_li": body.residual_li,
-        "capacity": body.capacity,
-        "quality_defect": body.quality_defect,
-    }
-    text, err = compose_lot_risk_reason(facts)
-    if not text:
-        logging.getLogger(__name__).warning(
-            "[lot-risk-reason] empty_or_error lot=%s err=%s", body.lot_id, err
-        )
-        return LotRiskReasonResponse(risk_reason="", provider="vllm", error=err or "empty")
-    return LotRiskReasonResponse(risk_reason=text, provider="vllm", error=None)
-
-
 @app.post("/security-chat", response_model=SecurityChatResponse)
 def security_chat_endpoint(
     body: SecurityChatRequest,
@@ -609,7 +584,6 @@ def root() -> dict[str, str]:
         "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
         "knowledge_analyze": "POST /knowledge-analyze",
-        "lot_risk_reason": "POST /lot-risk-reason",
         "security_chat": "POST /security-chat",
         "security_chat_stream": "POST /security-chat/stream",
     }

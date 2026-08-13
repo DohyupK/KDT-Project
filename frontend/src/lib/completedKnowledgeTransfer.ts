@@ -1,9 +1,8 @@
-import type { SpcMetric } from '@/components/SpcAnalysisPanel'
-
 export const COMPLETED_KNOWLEDGE_STORAGE_KEY = 'completed_knowledge_logs'
 export const COMPLETED_ISSUE_IDS_STORAGE_KEY = 'completed_issue_ids'
 export const COMPLETED_KNOWLEDGE_UPDATED_EVENT = 'completed-knowledge-updated'
 
+/** Local-transfer payload for Knowledge LLM (spcMetrics kept as opaque for legacy storage). */
 export type TransferredKnowledgeLog = {
   id: string
   sourceIssueId: string
@@ -20,7 +19,7 @@ export type TransferredKnowledgeLog = {
   anomaly: string
   residualLiMargin: number
   defectProbability: number
-  spcMetrics: SpcMetric[]
+  spcMetrics?: unknown[]
 }
 
 export function toTransferredKnowledgeId(issueId: string) {
@@ -78,40 +77,31 @@ function notifyKnowledgeUpdated() {
 
 /** Read localStorage knowledge logs into memory, then clear keys (one-shot for LLM). */
 export function consumeLocalKnowledgeForLlm(): TransferredKnowledgeLog[] {
-  if (typeof window === 'undefined') return []
   const logs = readCompletedKnowledgeLogs()
-  try {
-    window.localStorage.removeItem(COMPLETED_KNOWLEDGE_STORAGE_KEY)
-    window.localStorage.removeItem(COMPLETED_ISSUE_IDS_STORAGE_KEY)
-    notifyKnowledgeUpdated()
-  } catch {
-    // ignore
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem(COMPLETED_KNOWLEDGE_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
   }
+  notifyKnowledgeUpdated()
   return logs
 }
 
 export function appendCompletedKnowledgeLog(
   log: TransferredKnowledgeLog,
-): 'added' | 'exists' | 'failed' {
-  if (typeof window === 'undefined') return 'failed'
+) {
+  if (typeof window === 'undefined') return
   try {
     const current = readCompletedKnowledgeLogs()
-    const alreadyExists = current.some(
-      (item) =>
-        item.id === log.id ||
-        (typeof item.sourceIssueId === 'string' && item.sourceIssueId === log.sourceIssueId),
-    )
-    if (alreadyExists) {
-      markIssueIdCompleted(log.sourceIssueId)
-      notifyKnowledgeUpdated()
-      return 'exists'
-    }
-    const next = [log, ...current]
+    const next = [log, ...current.filter((row) => row.id !== log.id)]
     window.localStorage.setItem(COMPLETED_KNOWLEDGE_STORAGE_KEY, JSON.stringify(next))
-    markIssueIdCompleted(log.sourceIssueId)
+    if (log.sourceIssueId) {
+      markIssueIdCompleted(log.sourceIssueId)
+    }
     notifyKnowledgeUpdated()
-    return 'added'
   } catch {
-    return 'failed'
+    // ignore quota / private mode
   }
 }
