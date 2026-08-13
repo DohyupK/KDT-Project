@@ -97,6 +97,7 @@ const empty: SyncSpcLotsResult = {
       failed: 0,
       issuesCreated: 0,
       reasonsUpdated: 0,
+      actionsUpdated: 0,
       errors: [],
     }
   }
@@ -216,39 +217,44 @@ let actionsUpdated = 0
         JSON.stringify(scoreResult),
         `elapsed_ms=${Date.now() - started}`,
       )
-      scored = scoreResult.scored;
-failed = scoreResult.failed;
-errors.push(...scoreResult.errors);
+      scored = scoreResult.scored
+      failed = scoreResult.failed
+      errors.push(...scoreResult.errors)
 
-try {
-  const reasonResult = await fillRiskReasonsForLots(scoreIds, {
-    concurrency: 2,
-    quiet,
-  });
-  reasonsUpdated = reasonResult.updated;
-  log(quiet, '[spc-sync] risk_reasons', reasonResult);
-} catch (err) {
-  const detail = err instanceof Error ? err.message : String(err);
-  console.error('[spc-sync] risk_reason_failed', detail);
-  errors.push(`risk_reason: ${detail}`);
-}
+      if (!skipRiskReason) {
+        try {
+          const reasonResult = await fillRiskReasonsForLots(scoreIds, {
+            concurrency: 2,
+            quiet,
+          })
+          reasonsUpdated = reasonResult.updated
+          log(quiet, '[spc-sync] risk_reasons', reasonResult)
+        } catch (err: unknown) {
+          const detail = err instanceof Error ? err.message : String(err)
+          console.error('[spc-sync] risk_reason_failed', detail)
+          errors.push(`risk_reason: ${detail}`)
+        }
+      }
 
-try {
-  const actionResult = await fillRecommendedActionsForLots(scoreIds, {
-    concurrency: 2,
-    quiet,
-  });
-  actionsUpdated = actionResult.updated;
-  log(quiet, '[spc-sync] recommended_actions', actionResult);
-} catch (err) {
-  const detail = err instanceof Error ? err.message : String(err);
-  console.error('[spc-sync] recommended_actions_failed', detail);
-  errors.push(`recommended_actions: ${detail}`);
-}      }
+      try {
+        const actionResult = await fillRecommendedActionsForLots(scoreIds, {
+          concurrency: 2,
+          quiet,
+        })
+        actionsUpdated = actionResult.updated
+        log(quiet, '[spc-sync] recommended_actions', actionResult)
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err)
+        console.error('[spc-sync] recommended_actions_failed', detail)
+        errors.push(`recommended_actions: ${detail}`)
+      }
+    }
 
-    // Always seed: already-scored 심각 lots must still get open issues.
-    issuesCreated = await lotService.ensureIssuesForRiskLots()
-    if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+    // Seed open issues for 심각 lots unless explicitly skipped.
+    if (!skipIssues) {
+      issuesCreated = await lotService.ensureIssuesForRiskLots()
+      if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+    }
     return {
       skipped: false,
       table,
@@ -259,47 +265,9 @@ try {
       reasonsUpdated,
       actionsUpdated,
       errors,
-    };
+    }
   } finally {
     running = false
-  }
-
-  if (!skipRiskReason && scoreIds.length > 0) {
-    try {
-      const reasonResult = await fillRiskReasonsForLots(scoreIds, {
-        concurrency: 2,
-        quiet,
-      })
-      reasonsUpdated = reasonResult.updated
-      log(quiet, '[spc-sync] risk_reasons', reasonResult)
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      console.error('[spc-sync] risk_reason_failed', detail)
-      errors.push(`risk_reason: ${detail}`)
-    }
-  }
-
-  // After risk_reason so issue_content can summarize the filled reason.
-  if (!skipIssues) {
-    try {
-      issuesCreated = await lotService.ensureIssuesForRiskLots()
-      if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      console.error('[spc-sync] issues_failed', detail)
-      errors.push(`issues: ${detail}`)
-    }
-  }
-
-  return {
-    skipped: false,
-    table,
-    inserted: insertedCount,
-    scored,
-    failed,
-    issuesCreated,
-    reasonsUpdated,
-    errors,
   }
 }
 

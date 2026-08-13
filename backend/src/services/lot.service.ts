@@ -812,6 +812,8 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   scored: number
   failed: number
   errors: string[]
+  /** Successfully scored lot ids (for risk-reason / recommended-action follow-up). */
+  lotIds: string[]
 }> {
   const offset = Math.max(0, options.offset ?? 0)
   const limit = options.limit != null ? Math.max(1, options.limit) : undefined
@@ -832,6 +834,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   let scored = 0
   let failed = 0
   const errors: string[] = []
+  const scoredLotIds: string[] = []
 
   type Job = {
     row: LotScoreSourceRow
@@ -901,6 +904,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
     for (const r of results) {
       if (r.status === 'fulfilled') {
         scored++
+        scoredLotIds.push(r.value)
         options.onProgress?.(scored + failed, jobs.length, r.value)
       } else {
         failed++
@@ -911,7 +915,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
     }
   }
 
-  return { scored, failed, errors: errors.slice(0, 20) }
+  return { scored, failed, errors: errors.slice(0, 20), lotIds: scoredLotIds }
 }
 
 export type RefreshSpcRiskOptions = {
@@ -1289,101 +1293,6 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     lotId,
     spcStatus: evaled.status,
     metrics,
-  }
-}
-
-export type QCostSummary = {
-  from: string
-  to: string
-  stableCount: number
-  warningCount: number
-  criticalCount: number
-  internalDefectCount: number
-  externalLeakCount: number
-  appraisalCost: number
-  appraisalBreakdown: {
-    stable: number
-    warning: number
-    critical: number
-  }
-  internalCost: number
-  externalCost: number
-  preventionCost: number
-  totalQCost: number
-}
-
-export async function getQCostSummary(params: { from?: string; to?: string }): Promise<QCostSummary> {
-  const from = params.from ?? ''
-  const to = params.to ?? ''
-
-  const whereClause: string[] = []
-  const queryParams: unknown[] = []
-
-  if (from) {
-    whereClause.push('l.`timestamp` >= ?')
-    queryParams.push(`${from} 00:00:00`)
-  }
-  if (to) {
-    whereClause.push('l.`timestamp` <= ?')
-    queryParams.push(`${to} 23:59:59`)
-  }
-
-  const whereSql = whereClause.length > 0 ? `WHERE ${whereClause.join(' AND ')}` : ''
-
-  const rows = await query<{
-    risk_level: string | null
-    probability: number | null
-  }[]>(
-    `SELECT a.risk_level, COALESCE(j.probability, a.probability) AS probability
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
-     ${whereSql}`,
-    queryParams
-  )
-
-  let stableCount = 0
-  let warningCount = 0
-  let criticalCount = 0
-  let internalDefectCount = 0
-  const externalLeakCount = 0
-
-  for (const r of rows) {
-    const risk = normalizeRiskLevel(r.risk_level)
-    if (risk === '심각') criticalCount++
-    else if (risk === '주의') warningCount++
-    else stableCount++
-
-    if ((r.probability != null && Number(r.probability) >= DEFECT_JUDGE_THRESHOLD) || risk === '심각') {
-      internalDefectCount++
-    }
-  }
-
-  const appraisalBreakdown = {
-    stable: stableCount * 50_000,
-    warning: warningCount * 100_000,
-    critical: criticalCount * 150_000,
-  }
-
-  const appraisalCost = appraisalBreakdown.stable + appraisalBreakdown.warning + appraisalBreakdown.critical
-  const internalCost = internalDefectCount * 500_000
-  const externalCost = externalLeakCount * 3_000_000
-  const preventionCost = 20_000_000
-
-  return {
-    from,
-    to,
-    stableCount,
-    warningCount,
-    criticalCount,
-    internalDefectCount,
-    externalLeakCount,
-    appraisalCost,
-    appraisalBreakdown,
-    internalCost,
-    externalCost,
-    preventionCost,
-    totalQCost: appraisalCost + internalCost + externalCost + preventionCost,
   }
 }
 
