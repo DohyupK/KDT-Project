@@ -9,12 +9,13 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
 } from 'react';
+import { Download, Paperclip } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
 import axios from 'axios';
 import { authApi } from '@/api/authApi';
-import { inquiryApi, type InquiryApiItem } from '@/api/inquiryApi';
+import { inquiryApi, type InquiryApiItem, type InquiryAttachment } from '@/api/inquiryApi';
 import {
   AUTH_CHANGED_EVENT,
   getAuthToken,
@@ -66,6 +67,9 @@ type InquiryItem = {
   answer: string;
   visibility: Visibility;
   answeredAt?: string;
+  masked?: boolean;
+  attachmentCount: number;
+  attachments: InquiryAttachment[];
 };
 
 function mapApiItem(item: InquiryApiItem): InquiryItem {
@@ -80,6 +84,9 @@ function mapApiItem(item: InquiryApiItem): InquiryItem {
     answer: item.answer ?? '',
     visibility: item.visibility === '비공개' ? '비공개' : '공개',
     ...(item.answeredAt ? { answeredAt: item.answeredAt } : {}),
+    masked: Boolean(item.masked),
+    attachmentCount: item.masked ? 0 : item.attachmentCount ?? item.attachments?.length ?? 0,
+    attachments: item.masked ? [] : item.attachments ?? [],
   };
 }
 
@@ -106,6 +113,22 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 ];
 
 const PAGE_SIZE = 5;
+const MAX_INQUIRY_FILES = 5;
+const MAX_INQUIRY_FILE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_INQUIRY_EXTS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.pdf',
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.docx',
+  '.txt',
+] as const;
+const INQUIRY_FILE_ACCEPT = ALLOWED_INQUIRY_EXTS.join(',');
 
 const colors = {
   bg: '#f8fafc',
@@ -133,11 +156,52 @@ function matchesCategoryFilter(category: string, filter: CategoryFilterKey) {
 }
 
 /**
- * 기존 코드는 비공개 문의의 제목·본문·답변을 일괄 마스킹합니다.
- * 작성자 ID / 권한 판별 함수가 없어 이름만으로 열람을 허용하지 않습니다.
+ * 목록·검색용. 백엔드가 비공개 타인 문의를 masked=true 로 내려 주면 본문을 숨깁니다.
+ * 작성자·관리자의 비공개 문의는 masked=false 이므로 제목·첨부가 그대로 보입니다.
  */
 function canViewInquiry(item: InquiryItem) {
-  return item.visibility !== '비공개';
+  return !item.masked;
+}
+
+function fileExt(name: string) {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return '';
+  return name.slice(dot).toLowerCase();
+}
+
+function isAllowedInquiryFile(file: File) {
+  return (ALLOWED_INQUIRY_EXTS as readonly string[]).includes(fileExt(file.name));
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function mergeInquiryFiles(prev: File[], incoming: File[]): { files: File[]; error: string } {
+  const next = [...prev];
+  const rejected: string[] = [];
+  for (const file of incoming) {
+    if (!isAllowedInquiryFile(file)) {
+      rejected.push(`${file.name} (형식)`);
+      continue;
+    }
+    if (file.size > MAX_INQUIRY_FILE_BYTES) {
+      rejected.push(`${file.name} (10MB 초과)`);
+      continue;
+    }
+    if (next.length >= MAX_INQUIRY_FILES) {
+      rejected.push(`${file.name} (최대 ${MAX_INQUIRY_FILES}개)`);
+      continue;
+    }
+    next.push(file);
+  }
+  if (rejected.length === 0) return { files: next, error: '' };
+  return {
+    files: next,
+    error: `일부 파일을 넣지 못했습니다: ${rejected.join(', ')}`,
+  };
 }
 
 function getDisplayFields(item: InquiryItem) {
@@ -231,6 +295,7 @@ export default function InquiryPage() {
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{
     category: string;
@@ -486,6 +551,7 @@ export default function InquiryPage() {
     setSubject('');
     setContent('');
     setFiles([]);
+    setFileError('');
     setErrorMessage('');
     setFieldErrors({ category: '', subject: '', content: '' });
     setIsDragActive(false);
@@ -554,15 +620,22 @@ export default function InquiryPage() {
     setCurrentPage(1);
   };
 
+  const addInquiryFiles = (incoming: File[]) => {
+    const { files: next, error } = mergeInquiryFiles(files, incoming);
+    setFiles(next);
+    setFileError(error);
+  };
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files;
     if (!selected || selected.length === 0) return;
-    setFiles((prev) => [...prev, ...Array.from(selected)]);
+    addInquiryFiles(Array.from(selected));
     e.target.value = '';
   };
 
   const handleFileRemove = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+    setFileError('');
   };
 
   const openFilePicker = () => {
@@ -602,7 +675,7 @@ export default function InquiryPage() {
     setIsDragActive(false);
     const dropped = event.dataTransfer.files;
     if (!dropped || dropped.length === 0) return;
-    setFiles((prev) => [...prev, ...Array.from(dropped)]);
+    addInquiryFiles(Array.from(dropped));
   };
 
   const handleOverlayClick = () => {
@@ -615,6 +688,33 @@ export default function InquiryPage() {
 
   const handleRowClick = (item: InquiryItem) => {
     setSelectedInquiryId(item.id);
+  };
+
+  const handleDownloadAttachment = async (attachment: InquiryAttachment) => {
+    if (!selectedInquiry) return;
+    try {
+      const { data } = await inquiryApi.download(selectedInquiry.id, attachment.id);
+      if (data.type.includes('application/json')) {
+        const text = await data.text();
+        try {
+          const parsed = JSON.parse(text) as { message?: string };
+          showToast(parsed.message || '첨부파일을 내려받지 못했습니다.', 'warning');
+        } catch {
+          showToast('첨부파일을 내려받지 못했습니다.', 'warning');
+        }
+        return;
+      }
+      const url = URL.createObjectURL(data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast(getApiErrorMessage(err, '첨부파일을 내려받지 못했습니다.'), 'warning');
+    }
   };
 
   const scrollToAnswerSection = () => {
@@ -732,6 +832,7 @@ export default function InquiryPage() {
         visibility,
         title: subject.trim(),
         content: content.trim(),
+        files,
       });
       const created = mapApiItem(data.item);
       setInquiries((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
@@ -1073,6 +1174,17 @@ export default function InquiryPage() {
                           <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                             {item.id}
                           </span>
+                          {item.attachmentCount > 0 ? (
+                            <span
+                              className={`inline-flex items-center gap-1 text-xs font-semibold ${
+                                isDark ? 'text-slate-300' : 'text-slate-500'
+                              }`}
+                              title={`첨부 ${item.attachmentCount}개`}
+                            >
+                              <Paperclip className="h-3.5 w-3.5" aria-hidden />
+                              {item.attachmentCount}
+                            </span>
+                          ) : null}
                         </div>
                         <div
                           className={`line-clamp-2 text-[15px] font-extrabold leading-snug ${
@@ -1252,6 +1364,53 @@ export default function InquiryPage() {
                     {selectedInquiry.content}
                   </p>
                 </div>
+
+                {selectedInquiry.attachments.length > 0 ? (
+                  <div
+                    className={`mt-4 rounded-xl border p-4 ${
+                      isDark ? 'border-slate-700 bg-slate-900/60' : 'border-slate-200 bg-slate-50/80'
+                    }`}
+                  >
+                    <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      첨부 파일
+                    </div>
+                    <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                      {selectedInquiry.attachments.map((file) => (
+                        <li
+                          key={file.id}
+                          className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                            isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div
+                              className={`truncate text-sm font-medium ${
+                                isDark ? 'text-slate-100' : 'text-slate-800'
+                              }`}
+                            >
+                              {file.name}
+                            </div>
+                            <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                              {formatFileSize(file.size)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadAttachment(file)}
+                            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2.5 text-xs font-semibold ${
+                              isDark
+                                ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                                : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Download className="h-3.5 w-3.5" aria-hidden />
+                            다운로드
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
                 {selectedInquiry.answer && !isEditingAnswer ? (
                   <div
@@ -1686,57 +1845,73 @@ export default function InquiryPage() {
                   <div
                     className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                   >
-                    스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드
+                    {files.length > 0
+                      ? '파일을 추가하려면 클릭하거나 여기에 드래그하세요'
+                      : '스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드'}
                   </div>
                   <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    여러 파일 선택 가능
+                    {files.length > 0
+                      ? `${files.length}개 선택됨 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`
+                      : `여러 파일 선택 가능 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`}
                   </div>
+                  {files.length > 0 ? (
+                    <ul
+                      className="mt-3 flex list-none flex-col gap-2 p-0 text-left"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {files.map((file, index) => (
+                        <li
+                          key={`${file.name}-${file.size}-${index}`}
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                            isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div
+                              className={`truncate text-xs font-medium ${
+                                isDark ? 'text-slate-200' : 'text-slate-700'
+                              }`}
+                            >
+                              {file.name}
+                            </div>
+                            <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                              {formatFileSize(file.size)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleFileRemove(index);
+                            }}
+                            aria-label={`${file.name} 삭제`}
+                            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                              isDark
+                                ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
                 <input
                   id="inquiry-files"
                   ref={fileInputRef}
                   type="file"
                   multiple
+                  accept={INQUIRY_FILE_ACCEPT}
                   onChange={handleFileChange}
                   className="sr-only"
                   tabIndex={-1}
                 />
-                {files.length > 0 ? (
-                  <ul className="mt-3 flex list-none flex-wrap gap-2 p-0">
-                    {files.map((file, index) => (
-                      <li
-                        key={`${file.name}-${index}`}
-                        className={`inline-flex max-w-full items-center gap-2 rounded-full border py-1 pl-3 pr-1 ${
-                          isDark
-                            ? 'border-slate-600 bg-slate-900'
-                            : 'border-slate-200 bg-white'
-                        }`}
-                      >
-                        <span
-                          className={`max-w-[180px] truncate text-xs font-medium sm:max-w-[240px] ${
-                            isDark ? 'text-slate-200' : 'text-slate-700'
-                          }`}
-                        >
-                          {file.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleFileRemove(index);
-                          }}
-                          aria-label={`${file.name} 삭제`}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                            isDark
-                              ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                          }`}
-                        >
-                          ×
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                {fileError ? (
+                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
+                    {fileError}
+                  </div>
                 ) : null}
               </div>
 

@@ -1,4 +1,4 @@
--- Inquiry board table (no attachments in this phase)
+-- Inquiry board table (see also DB/inquiry_attachments.sql)
 CREATE TABLE IF NOT EXISTS inquiries (
   id                   INT AUTO_INCREMENT PRIMARY KEY,
   inquiry_code         VARCHAR(32)  NOT NULL,

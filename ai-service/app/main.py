@@ -67,6 +67,12 @@ from app.schemas import (
     HealthResponse,
     KnowledgeAnalyzeRequest,
     KnowledgeAnalyzeResponse,
+    LotRiskReasonRequest,
+    LotRiskReasonResponse,
+    ExplainLotRequest,
+    ExplainLotResponse,
+    LotRecommendedActionRequest,
+    LotRecommendedActionResponse,
     PredictRequest,
     PredictResponse,
     ResidualResponse,
@@ -617,6 +623,73 @@ def knowledge_analyze_endpoint(body: KnowledgeAnalyzeRequest) -> KnowledgeAnalyz
         provider=provider or "llm",
         error=err,
     )
+
+
+@app.post("/lot-risk-reason", response_model=LotRiskReasonResponse)
+def lot_risk_reason_endpoint(body: LotRiskReasonRequest) -> LotRiskReasonResponse:
+    """analysis_lots.risk_reason via local vLLM only — no RAG / SYSTEM_COMPOSE."""
+    from agent.api_llm.lot_risk_reason import compose_lot_risk_reason
+
+    facts = {
+        "lot_id": body.lot_id,
+        "probability": body.probability,
+        "spc_status": body.spc_status,
+        "risk_level": body.risk_level,
+        "residual_li": body.residual_li,
+        "capacity": body.capacity,
+        "quality_defect": body.quality_defect,
+    }
+    text, err = compose_lot_risk_reason(facts)
+    if not text:
+        logging.getLogger(__name__).warning(
+            "[lot-risk-reason] empty_or_error lot=%s err=%s", body.lot_id, err
+        )
+        return LotRiskReasonResponse(risk_reason="", provider="vllm", error=err or "empty")
+    return LotRiskReasonResponse(risk_reason=text, provider="vllm", error=None)
+
+
+@app.post("/explain-lot", response_model=ExplainLotResponse)
+def explain_lot_endpoint(body: ExplainLotRequest) -> ExplainLotResponse:
+    """Per-LOT SHAP drivers for defect probability and residual Li models."""
+    from agent.lot_explain import explain_lot_from_request
+
+    try:
+        drivers = explain_lot_from_request(body.model_dump())
+        return ExplainLotResponse(drivers_json=drivers, error=None)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("[explain-lot] fail: %s", exc)
+        return ExplainLotResponse(drivers_json={}, error=str(exc)[:300])
+
+
+@app.post("/lot-recommended-action", response_model=LotRecommendedActionResponse)
+def lot_recommended_action_endpoint(
+    body: LotRecommendedActionRequest,
+) -> LotRecommendedActionResponse:
+    """QMS-grounded recommended action from drivers + optional RAG/vLLM."""
+    from agent.api_llm.lot_recommended_action import compose_lot_recommended_action
+
+    try:
+        result = compose_lot_recommended_action(body.model_dump())
+        return LotRecommendedActionResponse(
+            summary=result.get("summary") or "",
+            steps=result.get("steps") or [],
+            sources=result.get("sources") or [],
+            drivers_json=result.get("drivers_json") or body.drivers_json,
+            status=result.get("status") or "ready",
+            error=result.get("error"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "[lot-recommended-action] fail lot=%s err=%s", body.lot_id, exc
+        )
+        return LotRecommendedActionResponse(
+            summary="",
+            steps=[],
+            sources=[],
+            drivers_json=body.drivers_json,
+            status="error",
+            error=str(exc)[:300],
+        )
 
 
 @app.post("/security-chat", response_model=SecurityChatResponse)

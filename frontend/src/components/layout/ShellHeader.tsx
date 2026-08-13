@@ -1,16 +1,28 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bell, RefreshCw } from 'lucide-react'
+import { Bell, ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react'
 import {
   SHELL_REFRESH_EVENT,
   useRefreshSettings,
   useUiSettings,
 } from '@/components/layout/AppShell'
 import UserAuthMenu from '@/components/layout/UserAuthMenu'
-import { MOCK_HEADER_NOTIFICATIONS } from '@/config/headerNotificationMocks'
 import type { HeaderNotification } from '@/config/headerNotificationSpec'
+import {
+  HEADER_NOTIF_PAGE_SIZE,
+  dismissNotifications,
+  loadHeaderNotifications,
+  markNotificationsRead,
+} from '@/lib/headerNotifications'
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')
@@ -36,14 +48,46 @@ export default function ShellHeader() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshToast, setRefreshToast] = useState(false)
   const [isNotifyOpen, setIsNotifyOpen] = useState(false)
-  const [notifications, setNotifications] = useState<HeaderNotification[]>(MOCK_HEADER_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState<HeaderNotification[]>([])
+  const [notifyLoading, setNotifyLoading] = useState(false)
+  const [notifyError, setNotifyError] = useState(false)
+  const [notifyPage, setNotifyPage] = useState(1)
 
   const notifyRef = useRef<HTMLDivElement | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
   const toastTimerRef = useRef<number | null>(null)
 
   const unreadCount = notifications.filter((item) => item.unread).length
+  const readCount = notifications.filter((item) => !item.unread).length
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
+
+  const totalPages = Math.max(1, Math.ceil(notifications.length / HEADER_NOTIF_PAGE_SIZE))
+  const safePage = Math.min(notifyPage, totalPages)
+  const pageItems = useMemo(() => {
+    const start = (safePage - 1) * HEADER_NOTIF_PAGE_SIZE
+    return notifications.slice(start, start + HEADER_NOTIF_PAGE_SIZE)
+  }, [notifications, safePage])
+
+  useEffect(() => {
+    if (notifyPage > totalPages) setNotifyPage(totalPages)
+  }, [notifyPage, totalPages])
+
+  const fetchNotifications = useCallback(async () => {
+    setNotifyLoading(true)
+    setNotifyError(false)
+    try {
+      const items = await loadHeaderNotifications()
+      setNotifications(items)
+      setNotifyPage((prev) => {
+        const pages = Math.max(1, Math.ceil(items.length / HEADER_NOTIF_PAGE_SIZE))
+        return Math.min(prev, pages)
+      })
+    } catch {
+      setNotifyError(true)
+    } finally {
+      setNotifyLoading(false)
+    }
+  }, [])
 
   const triggerShellDataRefresh = useCallback(
     (options?: { toast?: boolean; source?: 'auto' | 'manual' }) => {
@@ -65,8 +109,9 @@ export default function ShellHeader() {
           detail: { source },
         }),
       )
+      void fetchNotifications()
     },
-    [router],
+    [router, fetchNotifications],
   )
 
   useEffect(() => {
@@ -76,6 +121,10 @@ export default function ShellHeader() {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    void fetchNotifications()
+  }, [fetchNotifications])
 
   /** Settings → auto refresh (skipped on management — Grafana embeds handle their own refresh). */
   useEffect(() => {
@@ -95,6 +144,7 @@ export default function ShellHeader() {
 
   useEffect(() => {
     if (!isNotifyOpen) return
+    void fetchNotifications()
 
     const onPointerDown = (event: MouseEvent) => {
       if (notifyRef.current && !notifyRef.current.contains(event.target as Node)) {
@@ -111,7 +161,7 @@ export default function ShellHeader() {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [isNotifyOpen])
+  }, [isNotifyOpen, fetchNotifications])
 
   useEffect(() => {
     return () => {
@@ -139,6 +189,7 @@ export default function ShellHeader() {
   }
 
   const openNotification = (item: HeaderNotification) => {
+    markNotificationsRead([item.id])
     setNotifications((prev) =>
       prev.map((row) => (row.id === item.id ? { ...row, unread: false } : row)),
     )
@@ -146,9 +197,41 @@ export default function ShellHeader() {
     if (item.href) router.push(item.href)
   }
 
+  const dismissOne = (item: HeaderNotification, event: MouseEvent) => {
+    event.stopPropagation()
+    dismissNotifications([item.id])
+    setNotifications((prev) => {
+      const next = prev.filter((row) => row.id !== item.id)
+      const pages = Math.max(1, Math.ceil(next.length / HEADER_NOTIF_PAGE_SIZE))
+      setNotifyPage((p) => Math.min(p, pages))
+      return next
+    })
+  }
+
+  const markAllRead = () => {
+    markNotificationsRead(notifications.map((item) => item.id))
+    setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })))
+  }
+
+  const removeReadNotifications = () => {
+    const readIds = notifications.filter((item) => !item.unread).map((item) => item.id)
+    if (readIds.length === 0) return
+    dismissNotifications(readIds)
+    setNotifications((prev) => {
+      const next = prev.filter((item) => item.unread)
+      const pages = Math.max(1, Math.ceil(next.length / HEADER_NOTIF_PAGE_SIZE))
+      setNotifyPage((p) => Math.min(p, pages))
+      return next
+    })
+  }
+
   const iconBtnClass = isDark
     ? 'inline-flex items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800 text-slate-100 shadow-sm transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
     : 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
+
+  const actionLinkClass = isDark
+    ? 'text-xs font-medium text-slate-400 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40'
+    : 'text-xs font-medium text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40'
 
   return (
     <>
@@ -218,36 +301,53 @@ export default function ShellHeader() {
           {isNotifyOpen ? (
             <div
               role="menu"
-              className={`absolute right-0 top-12 z-50 w-[min(92vw,320px)] overflow-hidden rounded-xl border shadow-lg ${
+              className={`absolute right-0 top-12 z-50 w-[min(92vw,340px)] overflow-hidden rounded-xl border shadow-lg ${
                 isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
               }`}
             >
               <div
-                className={`flex items-center justify-between border-b px-4 py-3 ${
+                className={`flex items-center justify-between gap-2 border-b px-4 py-3 ${
                   isDark ? 'border-slate-700' : 'border-gray-100'
                 }`}
               >
                 <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>
                   알림
                 </strong>
-                {unreadCount > 0 ? (
-                  <button
-                    type="button"
-                    className={`text-xs font-medium ${
-                      isDark
-                        ? 'text-slate-400 hover:text-slate-200'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                    onClick={() =>
-                      setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })))
-                    }
-                  >
-                    모두 읽음
-                  </button>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {unreadCount > 0 ? (
+                    <button type="button" className={actionLinkClass} onClick={markAllRead}>
+                      모두 읽음
+                    </button>
+                  ) : null}
+                  {readCount > 0 ? (
+                    <button
+                      type="button"
+                      className={actionLinkClass}
+                      onClick={removeReadNotifications}
+                    >
+                      읽은 알림 제거
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
-              {notifications.length === 0 ? (
+              {notifyLoading && notifications.length === 0 ? (
+                <p
+                  className={`px-4 py-8 text-center text-sm ${
+                    isDark ? 'text-slate-400' : 'text-gray-500'
+                  }`}
+                >
+                  알림을 불러오는 중…
+                </p>
+              ) : notifyError && notifications.length === 0 ? (
+                <p
+                  className={`px-4 py-8 text-center text-sm ${
+                    isDark ? 'text-slate-400' : 'text-gray-500'
+                  }`}
+                >
+                  알림을 불러오지 못했습니다.
+                </p>
+              ) : notifications.length === 0 ? (
                 <p
                   className={`px-4 py-8 text-center text-sm ${
                     isDark ? 'text-slate-400' : 'text-gray-500'
@@ -256,37 +356,92 @@ export default function ShellHeader() {
                   새로운 알림이 없습니다.
                 </p>
               ) : (
-                notifications.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="menuitem"
-                    className={`block w-full border-b px-4 py-3 text-left last:border-b-0 ${
-                      isDark
-                        ? `border-slate-800 hover:bg-slate-800 ${item.unread ? 'bg-blue-950/40' : ''}`
-                        : `border-gray-50 hover:bg-gray-50 ${item.unread ? 'bg-blue-50/50' : ''}`
-                    }`}
-                    onClick={() => openNotification(item)}
-                  >
+                <>
+                  {pageItems.map((item) => (
                     <div
-                      className={`flex justify-between gap-2 text-sm font-semibold ${
-                        isDark ? 'text-slate-100' : 'text-gray-800'
+                      key={item.id}
+                      role="menuitem"
+                      className={`flex w-full border-b last:border-b-0 ${
+                        isDark
+                          ? `border-slate-800 ${item.unread ? 'bg-blue-950/40' : ''}`
+                          : `border-gray-50 ${item.unread ? 'bg-blue-50/50' : ''}`
                       }`}
                     >
-                      <span className="min-w-0 truncate">{item.title}</span>
+                      <button
+                        type="button"
+                        className={`min-w-0 flex-1 px-4 py-3 text-left ${
+                          isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-50'
+                        }`}
+                        onClick={() => openNotification(item)}
+                      >
+                        <div
+                          className={`flex justify-between gap-2 text-sm font-semibold ${
+                            isDark ? 'text-slate-100' : 'text-gray-800'
+                          }`}
+                        >
+                          <span className="min-w-0 truncate">{item.title}</span>
+                          <span
+                            className={`shrink-0 text-xs font-normal ${
+                              isDark ? 'text-slate-500' : 'text-slate-400'
+                            }`}
+                          >
+                            {item.time}
+                          </span>
+                        </div>
+                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                          {item.message}
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="알림 제거"
+                        title="알림 제거"
+                        className={`shrink-0 px-3 ${
+                          isDark
+                            ? 'text-slate-500 hover:bg-slate-800 hover:text-slate-200'
+                            : 'text-gray-400 hover:bg-gray-50 hover:text-gray-700'
+                        }`}
+                        onClick={(event) => dismissOne(item, event)}
+                      >
+                        <X size={14} aria-hidden />
+                      </button>
+                    </div>
+                  ))}
+
+                  {notifications.length > HEADER_NOTIF_PAGE_SIZE ? (
+                    <div
+                      className={`flex items-center justify-between gap-2 border-t px-3 py-2 ${
+                        isDark ? 'border-slate-700' : 'border-gray-100'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        aria-label="이전 알림 페이지"
+                        disabled={safePage <= 1}
+                        className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
+                        onClick={() => setNotifyPage((p) => Math.max(1, p - 1))}
+                      >
+                        <ChevronLeft size={16} aria-hidden />
+                      </button>
                       <span
-                        className={`shrink-0 text-xs font-normal ${
-                          isDark ? 'text-slate-500' : 'text-slate-400'
+                        className={`text-xs tabular-nums ${
+                          isDark ? 'text-slate-400' : 'text-gray-500'
                         }`}
                       >
-                        {item.time}
+                        {safePage} / {totalPages}
                       </span>
+                      <button
+                        type="button"
+                        aria-label="다음 알림 페이지"
+                        disabled={safePage >= totalPages}
+                        className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
+                        onClick={() => setNotifyPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        <ChevronRight size={16} aria-hidden />
+                      </button>
                     </div>
-                    <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                      {item.message}
-                    </p>
-                  </button>
-                ))
+                  ) : null}
+                </>
               )}
             </div>
           ) : null}

@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS lot_recommended_actions (
+  lot_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  summary VARCHAR(1024) NOT NULL DEFAULT '',
+  steps_json JSON NOT NULL,
+  sources_json JSON NOT NULL,
+  drivers_json JSON NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'ready',
+  error_message VARCHAR(255) NULL,
+  content_hash CHAR(40) NULL,
+  generated_at DATETIME NOT NULL,
+  CONSTRAINT fk_lot_recommended_actions_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Feeder + AI NULL-fill buffer (quality_defect / residual_li). Not dropped as orphan.
 CREATE TABLE IF NOT EXISTS lot_results (
   seq             INT          NOT NULL PRIMARY KEY,
@@ -140,7 +155,7 @@ CREATE TABLE IF NOT EXISTS user_chat_messages (
     ON DELETE CASCADE,
   INDEX idx_user_chat_messages_thread_created (thread_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
--- Inquiry board (attachments deferred)
+-- Inquiry board
 CREATE TABLE IF NOT EXISTS inquiries (
   id                   INT AUTO_INCREMENT PRIMARY KEY,
   inquiry_code         VARCHAR(32)  NOT NULL,
@@ -168,6 +183,20 @@ CREATE TABLE IF NOT EXISTS inquiries (
   INDEX idx_inquiries_created (created_at),
   INDEX idx_inquiries_visibility (visibility)
 );
+
+CREATE TABLE IF NOT EXISTS inquiry_attachments (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  inquiry_id     INT          NOT NULL,
+  original_name  VARCHAR(255) NOT NULL,
+  stored_name    VARCHAR(255) NOT NULL,
+  mime_type      VARCHAR(127) NOT NULL,
+  size_bytes     INT          NOT NULL,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_inquiry_attachments_inquiry
+    FOREIGN KEY (inquiry_id) REFERENCES inquiries(id)
+    ON DELETE CASCADE,
+  INDEX idx_inquiry_attachments_inquiry (inquiry_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Knowledge AI custom analysis answers only (prompt/docs are not persisted).
 CREATE TABLE IF NOT EXISTS AI_Library_analysis (

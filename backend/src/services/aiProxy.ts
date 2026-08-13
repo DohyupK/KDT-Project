@@ -259,3 +259,76 @@ export async function proxyKnowledgeAnalyze(
 
   return (await res.json()) as AiKnowledgeAnalyzeResponse
 }
+
+export type AiLotRiskReasonRequest = {
+  lot_id: string
+  probability?: number | null
+  spc_status?: string | null
+  risk_level?: string | null
+  residual_li?: number | null
+  capacity?: number | null
+  quality_defect?: number | null
+}
+
+export type AiLotRiskReasonResponse = {
+  risk_reason: string
+  provider?: string | null
+  error: string | null
+}
+
+export async function proxyLotRiskReason(
+  body: AiLotRiskReasonRequest,
+): Promise<AiLotRiskReasonResponse> {
+  const res = await fetch(`${aiServiceBase()}/lot-risk-reason`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`ai-service /lot-risk-reason ${res.status}: ${text.slice(0, 200)}`)
+  }
+
+  return (await res.json()) as AiLotRiskReasonResponse
+}
+
+export type AiExplainLotRequest = {
+  features: Record<string, string | number | null>
+  spc_refs?: Record<string, number> | null
+}
+
+export type AiExplainLotResponse = {
+  drivers_json: Record<string, unknown>
+  error: string | null
+}
+
+export async function proxyExplainLot(
+  body: AiExplainLotRequest,
+): Promise<AiExplainLotResponse> {
+  return postAiJson<AiExplainLotResponse>('/explain-lot', body)
+}
+
+export type AiLotRecommendedActionRequest = {
+  lot_id: string
+  risk_level?: string | null
+  probability?: number | null
+  residual_li?: number | null
+  spc_status?: string | null
+  drivers_json?: Record<string, unknown>
+}
+
+export type AiLotRecommendedActionResponse = {
+  summary: string
+  steps: Array<{ order: number; text: string; doc_id?: string | null }>
+  sources: Array<{ doc_id: string; title?: string | null; path?: string | null }>
+  drivers_json: Record<string, unknown>
+  status: string
+  error: string | null
+}
+
+export async function proxyLotRecommendedAction(
+  body: AiLotRecommendedActionRequest,
+): Promise<AiLotRecommendedActionResponse> {
+  return postAiJson<AiLotRecommendedActionResponse>('/lot-recommended-action', body)
+}

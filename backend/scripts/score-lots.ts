@@ -1,5 +1,7 @@
 import '../src/loadRootEnv.js'
 import * as lotService from '../src/services/lot.service.js'
+import { fillRiskReasonsForLots } from '../src/services/lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from '../src/services/lotRecommendedAction.service.js'
 
 async function main() {
   const limitArg = process.argv.find((a) => a.startsWith('--limit='))
@@ -33,6 +35,16 @@ async function main() {
     },
   })
   console.log('SCORE_DONE', JSON.stringify(result), `elapsed_ms=${Date.now() - started}`)
+
+  if (result.lotIds.length > 0) {
+    const reasonResult = await fillRiskReasonsForLots(result.lotIds, { concurrency: 2 })
+    console.log('RISK_REASON_DONE', JSON.stringify(reasonResult))
+
+    const actionResult = await fillRecommendedActionsForLots(result.lotIds, {
+      concurrency: 2,
+    })
+    console.log('RECOMMENDED_ACTION_DONE', JSON.stringify(actionResult))
+  }
 
   const issuesCreated = await lotService.ensureIssuesForRiskLots()
   console.log('ISSUES_CREATED', issuesCreated)

@@ -7,6 +7,9 @@
 # Backend local chat DB
 backend/data/
 
+# Inquiry attachment binaries
+backend/uploads/
+
 # OS / IDE
 .DS_Store
 Thumbs.db

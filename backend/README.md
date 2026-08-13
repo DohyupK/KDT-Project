@@ -74,12 +74,13 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/inquiries` | 목록·필터·페이지 (JWT) |
-| POST | `/api/inquiries` | 문의 접수 (JWT) |
+| GET | `/api/inquiries` | 목록·필터·페이지 (JWT). 권한 있는 항목만 `attachmentCount` / `attachments` |
+| POST | `/api/inquiries` | 문의 접수 (JWT). JSON 또는 `multipart/form-data` (`files`) |
 | GET | `/api/inquiries/:id` | 상세 (`inquiry_code`, JWT) |
+| GET | `/api/inquiries/:id/attachments/:attachmentId` | 첨부 다운로드 (JWT · 비공개는 작성자/관리자만) |
 | POST/PATCH/PUT | `/api/inquiries/:id/answer` | 관리자 답변 · `ADMIN_USER_IDS` |
 
-시드: `npm run seed:inquiries` · 첨부 업로드는 후속.
+시드: `npm run seed:inquiries` · 첨부 테이블: `npm run migrate:inquiry-attachments`
 
 ### Issue / LOT / Dashboard API
 

@@ -1,5 +1,18 @@
-import { query } from '../db/connection.js'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import type { ReadStream } from 'node:fs'
+import { query, withTransaction } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
+import {
+  inquiryFileExt,
+  inquiryUploadsRoot,
+  isAllowedInquiryFile,
+  MAX_INQUIRY_FILE_BYTES,
+  MAX_INQUIRY_FILES,
+  sanitizeOriginalName,
+} from './inquiryFiles.js'
 
 const CATEGORIES = [
   '시스템 오류 제보',
@@ -34,6 +47,30 @@ interface InquiryRow {
   created_at: Date | string
 }
 
+interface AttachmentRow {
+  id: number
+  inquiry_id: number
+  original_name: string
+  stored_name: string
+  mime_type: string
+  size_bytes: number
+  created_at: Date | string
+}
+
+export type InquiryAttachmentDto = {
+  id: number
+  name: string
+  size: number
+  mimeType: string
+}
+
+export type IncomingInquiryFile = {
+  originalName: string
+  mimeType: string
+  size: number
+  buffer: Buffer
+}
+
 export type InquiryDto = {
   id: string
   category: string
@@ -46,6 +83,8 @@ export type InquiryDto = {
   visibility: string
   answeredAt: string | null
   masked?: boolean
+  attachmentCount: number
+  attachments: InquiryAttachmentDto[]
 }
 
 function isAdmin(userId: string | undefined): boolean {
@@ -87,7 +126,20 @@ function formatDateTime(value: Date | string | null): string | null {
   return `${date} ${hh}:${mm}`
 }
 
-function toDto(row: InquiryRow, viewerUserId: string | undefined): InquiryDto {
+function toPublicAttachment(row: AttachmentRow): InquiryAttachmentDto {
+  return {
+    id: row.id,
+    name: row.original_name,
+    size: Number(row.size_bytes) || 0,
+    mimeType: row.mime_type,
+  }
+}
+
+function toDto(
+  row: InquiryRow,
+  viewerUserId: string | undefined,
+  attachments: AttachmentRow[] = [],
+): InquiryDto {
   const full = canViewFull(row, viewerUserId)
   if (!full) {
     return {
@@ -102,8 +154,11 @@ function toDto(row: InquiryRow, viewerUserId: string | undefined): InquiryDto {
       visibility: row.visibility,
       answeredAt: null,
       masked: true,
+      attachmentCount: 0,
+      attachments: [],
     }
   }
+  const publicFiles = attachments.map(toPublicAttachment)
   return {
     id: row.inquiry_code,
     category: row.category,
@@ -116,7 +171,45 @@ function toDto(row: InquiryRow, viewerUserId: string | undefined): InquiryDto {
     visibility: row.visibility,
     answeredAt: formatDateTime(row.answered_at),
     masked: false,
+    attachmentCount: publicFiles.length,
+    attachments: publicFiles,
   }
+}
+
+async function loadAttachmentsByInquiryIds(inquiryIds: number[]): Promise<Map<number, AttachmentRow[]>> {
+  const map = new Map<number, AttachmentRow[]>()
+  if (inquiryIds.length === 0) return map
+  const placeholders = inquiryIds.map(() => '?').join(', ')
+  const rows = await query<AttachmentRow[]>(
+    `SELECT * FROM inquiry_attachments
+     WHERE inquiry_id IN (${placeholders})
+     ORDER BY id ASC`,
+    inquiryIds,
+  )
+  for (const row of rows) {
+    const list = map.get(row.inquiry_id) ?? []
+    list.push(row)
+    map.set(row.inquiry_id, list)
+  }
+  return map
+}
+
+function validateIncomingFiles(files: IncomingInquiryFile[]) {
+  if (files.length > MAX_INQUIRY_FILES) {
+    throw new AppError(400, `파일은 최대 ${MAX_INQUIRY_FILES}개까지 첨부할 수 있습니다.`)
+  }
+  for (const file of files) {
+    if (!isAllowedInquiryFile(file.originalName)) {
+      throw new AppError(400, '허용되지 않는 파일 형식입니다.')
+    }
+    if (file.size > MAX_INQUIRY_FILE_BYTES) {
+      throw new AppError(400, '파일은 10MB 이하여야 합니다.')
+    }
+  }
+}
+
+async function removeDirIfExists(dir: string) {
+  await fs.rm(dir, { recursive: true, force: true })
 }
 
 async function nextInquiryCode(): Promise<string> {
@@ -199,8 +292,10 @@ export async function listInquiries(
     [...params, pageSize, offset],
   )
 
+  const attachmentMap = await loadAttachmentsByInquiryIds(rows.map((row) => row.id))
+
   return {
-    items: rows.map((row) => toDto(row, viewerUserId)),
+    items: rows.map((row) => toDto(row, viewerUserId, attachmentMap.get(row.id) ?? [])),
     total,
     page,
     pageSize,
@@ -219,7 +314,8 @@ export async function getInquiryByCode(inquiryCode: string, viewerUserId: string
     throw new AppError(403, '비공개 문의는 작성자 또는 관리자만 열람할 수 있습니다.')
   }
 
-  return { item: toDto(row, viewerUserId) }
+  const attachmentMap = await loadAttachmentsByInquiryIds([row.id])
+  return { item: toDto(row, viewerUserId, attachmentMap.get(row.id) ?? []) }
 }
 
 export async function createInquiry(
@@ -230,6 +326,7 @@ export async function createInquiry(
     content?: string
   },
   author: { userId: string; name: string; email: string },
+  files: IncomingInquiryFile[] = [],
 ) {
   const category = (input.category ?? '').trim()
   const visibility = (input.visibility ?? '공개').trim()
@@ -246,25 +343,112 @@ export async function createInquiry(
   if (!content) throw new AppError(400, '내용을 입력해주세요.')
   if (!author.email?.trim()) throw new AppError(400, '작성자 이메일을 확인할 수 없습니다.')
 
+  validateIncomingFiles(files)
+
   const inquiryCode = await nextInquiryCode()
-  await query(
-    `INSERT INTO inquiries
-      (inquiry_code, category, visibility, status, title, content,
-       author_user_id, author_name, author_email)
-     VALUES (?, ?, ?, '접수', ?, ?, ?, ?, ?)`,
-    [
-      inquiryCode,
-      category,
-      visibility,
-      title,
-      content,
-      author.userId,
-      author.name.trim() || author.userId,
-      author.email.trim(),
-    ],
-  )
+  const uploadDir = path.join(inquiryUploadsRoot(), inquiryCode)
+  let wroteFiles = false
+
+  try {
+    await withTransaction(async (conn) => {
+      const insertResult = (await conn.query(
+        `INSERT INTO inquiries
+          (inquiry_code, category, visibility, status, title, content,
+           author_user_id, author_name, author_email)
+         VALUES (?, ?, ?, '접수', ?, ?, ?, ?, ?)`,
+        [
+          inquiryCode,
+          category,
+          visibility,
+          title,
+          content,
+          author.userId,
+          author.name.trim() || author.userId,
+          author.email.trim(),
+        ],
+      )) as { insertId?: number | bigint }
+
+      const inquiryId = Number(insertResult?.insertId ?? 0)
+      if (!inquiryId) throw new AppError(500, '문의 저장에 실패했습니다.')
+
+      if (files.length === 0) return
+
+      await fs.mkdir(uploadDir, { recursive: true })
+      wroteFiles = true
+
+      for (const file of files) {
+        const ext = inquiryFileExt(file.originalName)
+        const storedName = `${randomUUID()}${ext}`
+        const absPath = path.join(uploadDir, storedName)
+        await fs.writeFile(absPath, file.buffer)
+        await conn.query(
+          `INSERT INTO inquiry_attachments
+            (inquiry_id, original_name, stored_name, mime_type, size_bytes)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            inquiryId,
+            sanitizeOriginalName(file.originalName),
+            storedName,
+            (file.mimeType || 'application/octet-stream').slice(0, 127),
+            file.size,
+          ],
+        )
+      }
+    })
+  } catch (err) {
+    if (wroteFiles) await removeDirIfExists(uploadDir)
+    throw err
+  }
 
   return getInquiryByCode(inquiryCode, author.userId)
+}
+
+export async function openInquiryAttachment(
+  inquiryCode: string,
+  attachmentId: number,
+  viewerUserId: string,
+): Promise<{ stream: ReadStream; originalName: string; mimeType: string; size: number }> {
+  if (!Number.isFinite(attachmentId) || attachmentId <= 0) {
+    throw new AppError(400, '첨부파일을 찾을 수 없습니다.')
+  }
+
+  const rows = await query<InquiryRow[]>(
+    'SELECT * FROM inquiries WHERE inquiry_code = ? LIMIT 1',
+    [inquiryCode],
+  )
+  const row = rows[0]
+  if (!row) throw new AppError(404, '문의를 찾을 수 없습니다.')
+
+  if (!canViewFull(row, viewerUserId)) {
+    throw new AppError(403, '비공개 문의는 작성자 또는 관리자만 열람할 수 있습니다.')
+  }
+
+  const files = await query<AttachmentRow[]>(
+    'SELECT * FROM inquiry_attachments WHERE id = ? AND inquiry_id = ? LIMIT 1',
+    [attachmentId, row.id],
+  )
+  const file = files[0]
+  if (!file) throw new AppError(404, '첨부파일을 찾을 수 없습니다.')
+
+  const root = path.resolve(inquiryUploadsRoot())
+  const absPath = path.resolve(root, row.inquiry_code, file.stored_name)
+  const rel = path.relative(root, absPath)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new AppError(404, '첨부파일을 찾을 수 없습니다.')
+  }
+
+  try {
+    await fs.access(absPath)
+  } catch {
+    throw new AppError(404, '첨부파일을 찾을 수 없습니다.')
+  }
+
+  return {
+    stream: createReadStream(absPath),
+    originalName: file.original_name,
+    mimeType: file.mime_type || 'application/octet-stream',
+    size: Number(file.size_bytes) || 0,
+  }
 }
 
 export async function upsertAnswer(

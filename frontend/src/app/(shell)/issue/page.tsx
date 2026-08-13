@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { CSSProperties, FormEvent } from 'react';
 import {
   issueApi,
@@ -16,6 +17,10 @@ import DateInput from '@/components/DateInput';
 import { usePageChat } from '@/context/PageChatContext';
 import { getAuthUser } from '@/lib/authStorage';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
+import {
+  clearIssueActionDraft,
+  readIssueActionDraft,
+} from '@/lib/issueActionDraft';
 
 type SpcStatus = '이상' | '주의' | '안정';
 
@@ -1628,6 +1633,7 @@ const ManagementSection = ({
 
   return (
   <section
+    id="issue-management"
     style={{
       ...getPanelStyle(c),
       height: '100%',
@@ -1774,6 +1780,8 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
 export default function IssuePage() {
   const { isDark } = useUiSettings();
   const { setPagePayload, trackPageChatEvent } = usePageChat();
+  const searchParams = useSearchParams();
+  const deepLinkAppliedRef = useRef(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1813,6 +1821,33 @@ export default function IssuePage() {
   useShellRefresh(() => {
     void loadIssues();
   });
+
+  useEffect(() => {
+    if (deepLinkAppliedRef.current || issues.length === 0) return;
+    const lotId = searchParams.get('lotId')?.trim();
+    if (!lotId) return;
+
+    const match = issues.find(
+      (issue) => issue.lot === lotId && !isIssueCompleted(issue),
+    );
+    deepLinkAppliedRef.current = true;
+
+    if (!match) {
+      setToastMessage(`${lotId}의 미완료 이슈가 없습니다.`);
+      setShowToast(true);
+      return;
+    }
+
+    setDraftFilters((current) => ({ ...current, lot: lotId }));
+    setAppliedFilters((current) => ({ ...current, lot: lotId }));
+    setCurrentPage(1);
+
+    const actionDraft = readIssueActionDraft(lotId);
+    void handleSelectIssue(match.id, {
+      actionOverride: actionDraft,
+      scrollTo: 'action',
+    });
+  }, [issues, searchParams]);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,
@@ -1945,11 +1980,20 @@ export default function IssuePage() {
       return;
     }
 
-    setManagementForm({
+    const lotId = searchParams.get('lotId')?.trim();
+    const copied = (lotId && issue.lot === lotId ? readIssueActionDraft(lotId) : null)?.trim() || '';
+    const preserveAction =
+      Boolean(copied) ||
+      (deepLinkAppliedRef.current &&
+        Boolean(managementForm.action) &&
+        managementForm.action !== issue.action);
+    const newForm = {
       assignee: issue.assignee,
-      action: issue.action,
       completed: issue.completed,
-    });
+      action: copied || (preserveAction ? managementForm.action : issue.action),
+    };
+
+    setManagementForm(newForm);
     setSaveMessage('');
   }, [selectedId, issues]);
 
@@ -1971,7 +2015,10 @@ export default function IssuePage() {
     return () => window.clearTimeout(timer);
   }, [showToast]);
 
-  const handleSelectIssue = async (id: string) => {
+  const handleSelectIssue = async (
+    id: string,
+    options?: { actionOverride?: string | null; scrollTo?: 'analysis' | 'action' },
+  ) => {
     const requestId = ++detailRequestRef.current;
     setSelectedId(id);
     trackPageChatEvent({
@@ -1981,9 +2028,11 @@ export default function IssuePage() {
       entityId: id,
       payload: { issueId: id },
     });
+    const scrollTarget =
+      options?.scrollTo === 'action' ? 'manager-action' : 'issue-detail-analysis';
     window.setTimeout(() => {
       document
-        .getElementById('issue-detail-analysis')
+        .getElementById(scrollTarget)
         ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
 
@@ -2019,12 +2068,18 @@ export default function IssuePage() {
             : null,
         },
       });
+      const copied = options?.actionOverride?.trim() || '';
       setManagementForm({
         assignee: data.issue.assigneeName?.trim() || '미배정',
-        action: data.issue.actionContent ?? '',
+        action: copied || data.issue.actionContent || '',
         completed: data.issue.completed,
       });
       setSaveMessage('');
+      if (copied) {
+        clearIssueActionDraft();
+        setToastMessage('조치 내용을 이슈에 복사했습니다.');
+        setShowToast(true);
+      }
     } catch (error) {
       if (requestId !== detailRequestRef.current) return;
       setToastMessage(getApiErrorMessage(error, '이슈 상세를 불러오지 못했습니다.'));

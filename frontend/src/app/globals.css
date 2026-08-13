@@ -6,3 +6,104 @@
     font-family: 'Noto Sans KR', sans-serif;
   }
 }
+
+@layer components {
+  .doc-preview {
+    font-family: 'Noto Sans KR', sans-serif;
+    color: inherit;
+  }
+  .doc-preview .doc-title {
+    margin: 0 0 4px;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: -0.02em;
+  }
+  .doc-preview .doc-subtitle {
+    margin: 0 0 16px;
+    font-size: 0.8rem;
+    color: #64748b;
+  }
+  .doc-preview .doc-section {
+    scroll-margin-top: 12px;
+    margin: 28px 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 1.02rem;
+    font-weight: 700;
+    line-height: 1.45;
+    color: #1e3a8a;
+  }
+  .doc-preview .doc-section .sec-num {
+    margin-right: 0.4rem;
+    color: #2563eb;
+  }
+  .doc-preview .doc-subhead {
+    margin: 16px 0 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .doc-preview .doc-p {
+    margin: 8px 0;
+    font-size: 0.875rem;
+    line-height: 1.75;
+  }
+  .doc-preview .doc-table {
+    width: 100%;
+    margin: 12px 0 18px;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  .doc-preview .doc-table th,
+  .doc-preview .doc-table td {
+    border: 1px solid #cbd5e1;
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .doc-preview .doc-table th {
+    background: #f8fafc;
+    font-weight: 600;
+    color: #334155;
+  }
+  .doc-preview .doc-table td {
+    color: #1e293b;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-title {
+    color: #f1f5f9;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-subtitle {
+    color: #94a3b8;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-section {
+    color: #93c5fd;
+    border-bottom-color: #334155;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-section .sec-num {
+    color: #60a5fa;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-subhead,
+  .doc-preview-theme-dark .doc-preview .doc-p,
+  .doc-preview-theme-dark .doc-preview .doc-table td {
+    color: #e2e8f0;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-table th,
+  .doc-preview-theme-dark .doc-preview .doc-table td {
+    border-color: #475569;
+  }
+  .doc-preview-theme-dark .doc-preview .doc-table th {
+    background: #1e293b;
+    color: #e2e8f0;
+  }
+}
+
+@media print {
+  .doc-preview .doc-section {
+    color: #1e3a8a;
+    break-after: avoid;
+  }
+  .doc-preview .doc-table {
+    break-inside: avoid;
+  }
+}
