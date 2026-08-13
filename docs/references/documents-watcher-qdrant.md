@@ -12,13 +12,15 @@
 | 관심사 | 누가 기동하나 | 기본 on/off |
 |--------|---------------|-------------|
 | Documents 감시 · OCR · `text_match` · ingest 트리거 | **Express backend** 자식 Python | `DOCUMENT_WATCHER_AUTOSTART=1` |
-| Qdrant 벡터 DB (:6333) | **ai-service** lifespan (Docker) | `QDRANT_AUTOSTART=1` |
+| Qdrant 벡터 DB (:6333) | **ai-service** lifespan (Docker `kdt-qdrant`) | `QDRANT_AUTOSTART=1` |
 | FastAPI chat/predict/RAG | **ai-service** (:8800) | `npm run dev:ai` 또는 backend `AI_SERVICE_AUTOSTART` |
+| n8n 이슈 보고서 메일 (:5678) | **수동** Docker `kdt-n8n` — backend는 웹훅만 호출 | 컨테이너가 켜져 있어야 메일 발송 |
 | OCR/변환 구현 코드 | `ai-service/agent/document_*.py` (로직은 AI 쪽, **프로세스 소유는 backend**) | — |
 
 **Docker가 없으면?**  
-→ **Qdrant 자동 기동은 불가**하다. Docker Desktop(또는 `docker` CLI)이 있어야 `kdt-qdrant` 컨테이너를 올린다.  
-→ 워처(OCR·md·`text_match`)는 Docker 없이 backend만으로 동작 가능하다. 다만 **ingest(벡터 인덱싱)는 Qdrant가 살아 있어야** 성공한다.
+→ **Qdrant·n8n 자동 기동은 불가**하다. Docker Desktop(또는 `docker` CLI)이 있어야 한다.  
+→ 워처(OCR·md·`text_match`)는 Docker 없이 backend만으로 동작 가능하다. 다만 **ingest(벡터 인덱싱)는 Qdrant가 살아 있어야** 성공한다.  
+→ 이슈 보고서 메일은 n8n 웹훅 URL이 있으면 **n8n 컨테이너가 살아 있어야** 한다.
 
 ---
 
@@ -47,6 +49,9 @@ flowchart LR
     TM[text_match]
     Chat[user_chat_*]
   end
+  subgraph n8nbox [n8n :5678]
+    N8n[kdt-n8n Docker]
+  end
 
   Next -->|"/api rewrite"| Express
   Next -->|"/ai rewrite"| FastAPI
@@ -56,20 +61,24 @@ flowchart LR
   FastAPI --> QdrSup --> Qdr
   FastAPI --> Chat
   FastAPI --> Qdr
+  Express -->|"issue-report webhook"| N8n
+  N8n -->|"send-email-result"| Express
 ```
 
-| 포트 | 서비스 | 기동 주체 (권장 `npm run dev`) |
-|------|--------|--------------------------------|
-| **3000** | Next.js UI | `dev:frontend` |
-| **3001** | Express (auth · chat 게이트 · 프록시 · 폴러) | `dev:backend` (`AI_SERVICE_AUTOSTART=0`) |
-| **8800** | FastAPI ai-service | `dev:ai` (uvicorn) |
-| **6333** | Qdrant HTTP | ai-service `QDRANT_AUTOSTART` → Docker |
-| **6334** | Qdrant gRPC | 동일 컨테이너 |
-| **8001** | 로컬 vLLM / LM Studio (보안 챗) | **수동** |
-| **3306** | MariaDB | 원격/로컬 `.env` `DB_*` |
+| 포트 | 서비스 | `npm run dev`가 켜나 | 기동 주체 |
+|------|--------|----------------------|-----------|
+| **3000** | Next.js UI | **예** | `dev:frontend` |
+| **3001** | Express (auth · 게이트 · 프록시 · 폴러 · 메일 웹훅 호출) | **예** | `dev:backend` (`AI_SERVICE_AUTOSTART=0`) |
+| **8800** | FastAPI ai-service | **예** | `dev:ai` (uvicorn) |
+| **6333** | Qdrant HTTP | **간접** (ai lifespan) | Docker `kdt-qdrant` · `QDRANT_AUTOSTART=1` |
+| **6334** | Qdrant gRPC | **간접** | 동일 컨테이너 |
+| **5678** | n8n UI · 웹훅 | **아니오** | 수동 `docker start kdt-n8n` |
+| **8001** | 로컬 vLLM / LM Studio (보안 챗) | **아니오** | **수동** |
+| **3306** | MariaDB | **아니오** | 원격/로컬 `.env` `DB_*` |
 
-루트 `npm run dev` = concurrently `ai` + `backend` + `frontend`.  
-backend가 ai를 또 띄우지 않도록 [`scripts/dev-backend.cjs`](../../scripts/dev-backend.cjs)가 `AI_SERVICE_AUTOSTART=0`을 넣는다.
+루트 `npm run dev` = concurrently `ai` + `backend` + `frontend`만. Express·n8n·Qdrant를 **한 프로세스에 합치지 않는다.**  
+backend가 ai를 또 띄우지 않도록 [`scripts/dev-backend.cjs`](../../scripts/dev-backend.cjs)가 `AI_SERVICE_AUTOSTART=0`을 넣는다.  
+n8n Task Broker(`5679`)는 **컨테이너 내부** 포트이며 호스트에 열려 있지 않다.
 
 ---
 
@@ -180,9 +189,26 @@ python ingest_secure.py
 
 ---
 
-## 5. 권장 기동 순서
+## 5. n8n (메일 · 수동 Docker)
 
-1. **Docker Desktop 실행** (Qdrant 자동기동용)  
+이슈 보고서 메일: backend가 `N8N_ISSUE_REPORT_WEBHOOK_URL`(기본 `http://127.0.0.1:5678/webhook/issue-report`)로 POST → n8n이 Gmail API → `POST :3001/api/internal/n8n/send-email-result`.  
+계획: [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md).
+
+| 항목 | 내용 |
+|------|------|
+| 컨테이너 | `kdt-n8n` (호스트 볼륨 없음 · 지우면 로그인·워크플로 소실) |
+| 호스트 포트 | **5678** (UI + production webhook) |
+| `npm run dev` | **켜지 않음** |
+| Express에 내장 | 불가. 기동만 backend에 붙이는 것은 미구현 |
+
+메일 쓸 때: Docker Desktop + `docker start kdt-n8n` (워크플로 Published).  
+웹훅 URL을 비우면 backend가 Gmail로 직접 보내 n8n 없이 동작 가능하다.
+
+---
+
+## 6. 권장 기동 순서
+
+1. **Docker Desktop 실행** (Qdrant 자동기동 · n8n 메일이면 `docker start kdt-n8n`)  
 2. 루트 `npm run dev`  
    - ai → Qdrant ensure → uvicorn :8800  
    - backend → document watcher 자식 → Express :3001  
@@ -198,7 +224,7 @@ MariaDB `text_match`: [`DB/text_match.sql`](../../DB/text_match.sql) · `python 
 
 ---
 
-## 6. 장애 체크리스트
+## 7. 장애 체크리스트
 
 | 증상 | 확인 |
 |------|------|
@@ -208,12 +234,14 @@ MariaDB `text_match`: [`DB/text_match.sql`](../../DB/text_match.sql) · `python 
 | OCR fail / no kor | Tesseract · tessdata · `TESSERACT_CMD` |
 | `[text_match] DB unavailable` | 루트 `.env` `DB_*` / `DATABASE_URL` |
 | `:8800` EADDRINUSE | `dev:ai`와 backend `AI_SERVICE_AUTOSTART=1` 이중 기동 여부 |
+| 이슈 메일 `webhook_404` | n8n 꺼짐 · 워크플로 unpublished · 경로 `issue-report` |
 
 ---
 
-## 7. 관련 링크
+## 8. 관련 링크
 
 - [`Documents/README.md`](../../Documents/README.md) — 변환 정책  
 - [`secure-rag.md`](./secure-rag.md) — RAG · ingest · 환경  
 - [`general-chatbot-page-context.md`](./general-chatbot-page-context.md) — 일반 챗 페이지 컨텍스트  
+- [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md) — 이슈 보고서 메일  
 - DDL: [`DB/text_match.sql`](../../DB/text_match.sql) · [`DB/schema.sql`](../../DB/schema.sql)
