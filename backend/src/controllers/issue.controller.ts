@@ -2,6 +2,8 @@ import type { Request, Response, NextFunction } from 'express'
 import * as lotService from '../services/lot.service.js'
 import * as issueService from '../services/issue.service.js'
 import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.js'
+import { fillRiskReasonsForLots } from '../services/lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.service.js'
 import { AppError } from '../middleware/errorHandler.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
@@ -38,6 +40,8 @@ export const importLots = asyncHandler(async (req, res) => {
   const result = await lotService.importLotsFromCsv()
   const doScore = String(req.query.score ?? '0') === '1'
   let scoring: Awaited<ReturnType<typeof lotService.scoreAllLots>> | null = null
+  let reasonsUpdated = 0
+  let actionsUpdated = 0
   let issuesCreated = 0
   if (doScore) {
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined
@@ -45,6 +49,22 @@ export const importLots = asyncHandler(async (req, res) => {
       limit: Number.isFinite(limit) ? limit : undefined,
       concurrency: 4,
     })
+    if (scoring.lotIds.length > 0) {
+      try {
+        reasonsUpdated = (
+          await fillRiskReasonsForLots(scoring.lotIds, { concurrency: 2 })
+        ).updated
+      } catch {
+        /* keep import success */
+      }
+      try {
+        actionsUpdated = (
+          await fillRecommendedActionsForLots(scoring.lotIds, { concurrency: 2 })
+        ).updated
+      } catch {
+        /* keep import success */
+      }
+    }
     issuesCreated = await lotService.ensureIssuesForRiskLots()
   }
   res.status(200).json({
@@ -54,6 +74,8 @@ export const importLots = asyncHandler(async (req, res) => {
     imported: result.imported,
     csvPath: result.path,
     scoring,
+    reasonsUpdated,
+    actionsUpdated,
     issuesCreated,
   })
 })
@@ -67,10 +89,30 @@ export const scoreLots = asyncHandler(async (req, res) => {
     offset: Number.isFinite(offset) ? offset : 0,
     concurrency: Number.isFinite(concurrency) ? concurrency : 4,
   })
+  let reasonsUpdated = 0
+  let actionsUpdated = 0
+  if (scoring.lotIds.length > 0) {
+    try {
+      reasonsUpdated = (
+        await fillRiskReasonsForLots(scoring.lotIds, { concurrency: 2 })
+      ).updated
+    } catch {
+      /* scoring still succeeded */
+    }
+    try {
+      actionsUpdated = (
+        await fillRecommendedActionsForLots(scoring.lotIds, { concurrency: 2 })
+      ).updated
+    } catch {
+      /* scoring still succeeded */
+    }
+  }
   const issuesCreated = await lotService.ensureIssuesForRiskLots()
   res.status(200).json({
     message: 'AI/SPC 채점 완료',
     scoring,
+    reasonsUpdated,
+    actionsUpdated,
     issuesCreated,
   })
 })

@@ -4,7 +4,10 @@
  */
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
+
+const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
 
 let timer: ReturnType<typeof setInterval> | null = null
 let running = false
@@ -42,7 +45,7 @@ async function tick() {
         analysis_only: analysisOnlyIds.length,
         full: fullScoreIds.length,
       })
-      if (analysisOnlyIds.length > 0) {
+if (analysisOnlyIds.length > 0) {
         let rebuilt = 0
         for (const id of analysisOnlyIds) {
           if (await lotService.scoreAnalysisFromJudgment(id)) rebuilt++

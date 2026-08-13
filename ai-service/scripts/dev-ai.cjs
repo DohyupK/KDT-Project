@@ -2,7 +2,7 @@ const { spawn } = require('child_process')
 const path = require('path')
 
 const cwd = path.join(__dirname, '..')
-const args = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8800']
+const args = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8800', '--reload']
 
 const candidates =
   process.platform === 'win32'

@@ -16,7 +16,7 @@ import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import DateInput from '@/components/DateInput'
 import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
-import { Ruler, UserRound } from 'lucide-react'
+import { LotRecommendedActionPanel, type RecommendedActionData } from '@/components/dashboard/LotRecommendedActionPanel'
 
 /**
  * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
@@ -99,6 +99,7 @@ type LotRiskApiDetail = {
   riskLevel: '심각' | '주의' | '안정' | null;
   riskReason: string | null;
   actionContent: string | null;
+  recommendedAction?: RecommendedActionData | null;
   spc?: { metrics?: SpcMetric[] } | null;
 };
 
@@ -318,6 +319,43 @@ function lotRiskProbPercent(prob: number): number {
   return Math.min(100, Math.max(0, pct));
 }
 
+function isSpcUnjudged(spc: string | null | undefined): boolean {
+  const value = (spc ?? '').trim();
+  return value === '' || value === '-' || value === '—';
+}
+
+function formatSpcStatusLabel(spc: string | null | undefined): string {
+  if (isSpcUnjudged(spc)) return '미판정';
+  return (spc ?? '').trim();
+}
+
+function SpcStatusNoteBlock({
+  isDark,
+  paragraphs,
+}: {
+  isDark: boolean;
+  paragraphs: ReactNode[];
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-2.5 ${
+        isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white shadow-2xs'
+      }`}
+    >
+      {paragraphs.map((para, idx) => (
+        <p
+          key={idx}
+          className={`m-0 text-xs font-normal leading-relaxed ${
+            idx < paragraphs.length - 1 ? 'mb-2' : ''
+          } ${isDark ? 'text-slate-300' : 'text-slate-700'}`}
+        >
+          {para}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function renderLotRiskAction(action: string): ReactNode {
   const escaped = LOT_RISK_ACTION_KEYWORDS.map((k) =>
     k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
@@ -401,7 +439,7 @@ function downloadLotRiskCsv(rows: LotRiskRow[]) {
         r.prob != null && Number.isFinite(r.prob) ? Math.round(lotRiskProbPercent(r.prob)) : '',
         typeof r.predLi === 'number' ? Math.round(r.predLi) : r.predLi || '',
         formatSpecDistance(r.margin),
-        r.spc || '',
+        formatSpcStatusLabel(r.spc),
         r.grade || '',
         r.reason || '',
       ]
@@ -437,7 +475,7 @@ function downloadLotRiskPdf(rows: LotRiskRow[]) {
               <td>${prob}</td>
               <td>${residual}</td>
               <td>${formatSpecDistance(r.margin)}</td>
-              <td>${r.spc || '—'}</td>
+              <td>${formatSpcStatusLabel(r.spc)}</td>
               <td>${r.grade || '—'}</td>
               <td>${(r.reason || '—').replace(/</g, '&lt;')}</td>
             </tr>`;
@@ -1411,7 +1449,7 @@ function ProductionTrendDateFilter({
   return (
     <div className="min-w-0">
       <div
-        className={`inline-flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
+        className={`inline-flex w-fit max-w-full flex-nowrap items-center gap-1 rounded-lg border px-2 py-1 ${
           isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-white/80'
         }`}
         aria-label="생산 추이 조회 기간"
@@ -1423,7 +1461,7 @@ function ProductionTrendDateFilter({
           onChange={(startDate) => onDraftChange({ ...draft, startDate })}
           isDark={isDark}
           compact
-          className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
         />
         <span className={`shrink-0 text-xs ${muted}`}>~</span>
         <DateInput
@@ -1432,7 +1470,7 @@ function ProductionTrendDateFilter({
           onChange={(endDate) => onDraftChange({ ...draft, endDate })}
           isDark={isDark}
           compact
-          className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
         />
         <button
           type="button"
@@ -1596,6 +1634,17 @@ export default function DashBoardPage() {
         : '';
     return `${probPart}잔류리튬 ${residualText}, ${marginText}`;
   }, [selectedLotRisk, selectedLotRiskDetail]);
+
+  const selectedSpcStatus =
+    selectedLotRiskDetail?.spcStatus ?? selectedLotRisk?.spc ?? null;
+  const selectedSpcUnjudged = isSpcUnjudged(selectedSpcStatus);
+  const selectedSpcMetrics =
+    selectedLotRiskDetail?.lotId === selectedLotRisk?.lot
+      ? selectedLotRiskDetail?.spc?.metrics ?? []
+      : [];
+  const selectedSpcDetailLoading =
+    !!selectedLotRisk &&
+    (selectedLotRiskDetail == null || selectedLotRiskDetail.lotId !== selectedLotRisk.lot);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -2870,7 +2919,7 @@ export default function DashBoardPage() {
                                 }`}
                               />
                             ) : null}
-                            {row.spc || '—'}
+                            {formatSpcStatusLabel(row.spc)}
                           </span>
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -3118,10 +3167,12 @@ export default function DashBoardPage() {
                       },
                       {
                         label: 'SPC',
-                        value:
-                          selectedLotRiskDetail?.spcStatus ??
-                          selectedLotRisk.spc ??
-                          '—',
+                        value: formatSpcStatusLabel(selectedSpcStatus),
+                        valueClass: selectedSpcUnjudged
+                          ? isDark
+                            ? 'text-slate-400'
+                            : 'text-slate-500'
+                          : undefined,
                       },
                     ].map((m) => (
                       <div
@@ -3150,7 +3201,6 @@ export default function DashBoardPage() {
                     ))}
                   </div>
 
-                  {(selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) !== '-' ? (
                   <div className="mb-3 space-y-2">
                     <p
                       className={`mb-1.5 text-xs font-semibold ${
@@ -3159,10 +3209,9 @@ export default function DashBoardPage() {
                     >
                       SPC 관리도
                     </p>
-                    {selectedLotRiskDetail?.spc?.metrics &&
-                    selectedLotRiskDetail.spc.metrics.length > 0 ? (
+                    {selectedSpcMetrics.length > 0 ? (
                       <div className="space-y-3">
-                        {selectedLotRiskDetail.spc.metrics.map((metric) => (
+                        {selectedSpcMetrics.map((metric) => (
                           <div key={metric.key}>
                             <SpcChartCard metric={metric} isDark={isDark} />
                             {metric.violatedRules && metric.violatedRules.length > 0 ? (
@@ -3189,36 +3238,30 @@ export default function DashBoardPage() {
                         ))}
                       </div>
                     ) : (
-                      <p
-                        className={`rounded-md px-2.5 py-2 text-xs ${
-                          isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
-                        }`}
-                      >
-                        {selectedLotRiskDetail == null ||
-                        selectedLotRiskDetail.lotId !== selectedLotRisk.lot
-                          ? 'SPC 관리도를 불러오는 중…'
-                          : '표시할 SPC 관리도 데이터가 없습니다.'}
-                      </p>
+                      <SpcStatusNoteBlock
+                        isDark={isDark}
+                        paragraphs={
+                          selectedSpcDetailLoading
+                            ? ['SPC 관리도를 불러오는 중…']
+                            : selectedSpcUnjudged
+                              ? [
+                                  '필수 공정값 일부가 비어 SPC를 판정하지 않습니다.',
+                                  '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
+                                ]
+                              : [
+                                  '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
+                                ]
+                        }
+                      />
                     )}
                   </div>
-                  ) : null}
 
-                  <div className="mt-auto pt-1">
-                    <p
-                      className={`mb-1.5 text-xs font-semibold ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      조치
-                    </p>
-                    <p
-                      className={`text-sm font-medium leading-snug ${
-                        isDark ? 'text-slate-100' : 'text-slate-900'
-                      }`}
-                    >
-                      {selectedLotRiskDetail?.actionContent?.trim() || '\u00A0'}
-                    </p>
-                  </div>
+                  <LotRecommendedActionPanel
+                    lotId={selectedLotRisk.lot}
+                    riskLevel={selectedLotRiskDetail?.riskLevel ?? selectedLotRisk.risk}
+                    action={selectedLotRiskDetail?.recommendedAction ?? null}
+                    isDark={isDark}
+                  />
                 </div>
               )}
             </aside>
@@ -3508,7 +3551,7 @@ export default function DashBoardPage() {
           >
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h2
-                className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                className={`whitespace-nowrap shrink-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
               >
                 생산 추이 그래프
               </h2>
@@ -3804,7 +3847,7 @@ export default function DashBoardPage() {
                         >
                           {formatSpecDistance(row.margin)}
                         </td>
-                        <td className="px-3 py-2.5 text-center">{row.spc || '—'}</td>
+                        <td className="px-3 py-2.5 text-center">{formatSpcStatusLabel(row.spc)}</td>
                         <td className="px-3 py-2.5 text-center font-semibold">{row.grade || '—'}</td>
                         <td
                           className={`max-w-[280px] truncate px-3 py-2.5 ${
