@@ -6,6 +6,7 @@
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
@@ -23,6 +24,7 @@ export type SyncSpcLotsResult = {
   failed: number
   issuesCreated: number
   reasonsUpdated: number
+  actionsUpdated: number
   errors: string[]
 }
 
@@ -75,6 +77,7 @@ export async function syncSpcLotsToApp(
     failed: 0,
     issuesCreated: 0,
     reasonsUpdated: 0,
+    actionsUpdated: 0,
     errors: [],
   }
   if (running) {
@@ -142,6 +145,7 @@ export async function syncSpcLotsToApp(
         failed: 0,
         issuesCreated: 0,
         reasonsUpdated: 0,
+        actionsUpdated: 0,
         errors: [],
       }
     }
@@ -167,6 +171,7 @@ export async function syncSpcLotsToApp(
     let scored = 0
     let failed = 0
     let reasonsUpdated = 0
+    let actionsUpdated = 0
     const errors: string[] = []
 
     if (scoreIds.length > 0) {
@@ -211,6 +216,19 @@ export async function syncSpcLotsToApp(
         console.error('[spc-sync] risk_reason_failed', detail)
         errors.push(`risk_reason: ${detail}`)
       }
+
+      try {
+        const actionResult = await fillRecommendedActionsForLots(scoreIds, {
+          concurrency: 2,
+          quiet,
+        })
+        actionsUpdated = actionResult.updated
+        log(quiet, '[spc-sync] recommended_actions', actionResult)
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        console.error('[spc-sync] recommended_actions_failed', detail)
+        errors.push(`recommended_actions: ${detail}`)
+      }
     }
 
     // Always seed: already-scored 심각 lots must still get open issues.
@@ -225,6 +243,7 @@ export async function syncSpcLotsToApp(
       failed,
       issuesCreated,
       reasonsUpdated,
+      actionsUpdated,
       errors,
     }
   } finally {

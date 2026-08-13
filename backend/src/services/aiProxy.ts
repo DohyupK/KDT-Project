@@ -231,7 +231,6 @@ export type AiLotRiskReasonResponse = {
   error: string | null
 }
 
-/** Local vLLM risk_reason for analysis_lots (no chat compose). */
 export async function proxyLotRiskReason(
   body: AiLotRiskReasonRequest,
 ): Promise<AiLotRiskReasonResponse> {
@@ -247,4 +246,44 @@ export async function proxyLotRiskReason(
   }
 
   return (await res.json()) as AiLotRiskReasonResponse
+}
+
+export type AiExplainLotRequest = {
+  features: Record<string, string | number | null>
+  spc_refs?: Record<string, number> | null
+}
+
+export type AiExplainLotResponse = {
+  drivers_json: Record<string, unknown>
+  error: string | null
+}
+
+export async function proxyExplainLot(
+  body: AiExplainLotRequest,
+): Promise<AiExplainLotResponse> {
+  return postAiJson<AiExplainLotResponse>('/explain-lot', body)
+}
+
+export type AiLotRecommendedActionRequest = {
+  lot_id: string
+  risk_level?: string | null
+  probability?: number | null
+  residual_li?: number | null
+  spc_status?: string | null
+  drivers_json?: Record<string, unknown>
+}
+
+export type AiLotRecommendedActionResponse = {
+  summary: string
+  steps: Array<{ order: number; text: string; doc_id?: string | null }>
+  sources: Array<{ doc_id: string; title?: string | null; path?: string | null }>
+  drivers_json: Record<string, unknown>
+  status: string
+  error: string | null
+}
+
+export async function proxyLotRecommendedAction(
+  body: AiLotRecommendedActionRequest,
+): Promise<AiLotRecommendedActionResponse> {
+  return postAiJson<AiLotRecommendedActionResponse>('/lot-recommended-action', body)
 }

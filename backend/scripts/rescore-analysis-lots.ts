@@ -7,6 +7,7 @@ import '../src/loadRootEnv.js'
 import { query } from '../src/db/connection.js'
 import * as lotService from '../src/services/lot.service.js'
 import { fillRiskReasonsForLots } from '../src/services/lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from '../src/services/lotRecommendedAction.service.js'
 
 async function main() {
   const before = await query<{ c: number }[]>(
@@ -49,6 +50,17 @@ async function main() {
     'RISK_REASON_DONE',
     JSON.stringify(reasonResult),
     `elapsed_ms=${Date.now() - reasonStarted}`,
+  )
+
+  console.log('RECOMMENDED_ACTION_START')
+  const actionStarted = Date.now()
+  const actionResult = await fillRecommendedActionsForLots(scoreResult.lotIds, {
+    concurrency: 2,
+  })
+  console.log(
+    'RECOMMENDED_ACTION_DONE',
+    JSON.stringify(actionResult),
+    `elapsed_ms=${Date.now() - actionStarted}`,
   )
 
   const issuesCreated = await lotService.ensureIssuesForRiskLots()

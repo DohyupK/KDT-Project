@@ -8,13 +8,22 @@ import {
   type RiskLevel,
 } from './lotScore.js'
 import { getLotSpcDetail, parseSpcChartSnapshot } from './lot.service.js'
+import { getRecommendedActionForLot } from './lotRecommendedAction.service.js'
 import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
 
-function isLotProcessComplete(row: Record<string, number | null | undefined>): boolean {
+function isLotProcessComplete(row: Record<string, unknown>): boolean {
   const bag: Partial<Record<(typeof SPC_PARAM_KEYS)[number], number | null>> = {}
-  for (const k of SPC_PARAM_KEYS) bag[k] = row[k] != null ? Number(row[k]) : null
+  for (const k of SPC_PARAM_KEYS) {
+    const v = row[k]
+    bag[k] =
+      v == null || v === ''
+        ? null
+        : typeof v === 'number'
+          ? v
+          : Number(v)
+  }
   return isProcessComplete(bag)
 }
 
@@ -375,6 +384,13 @@ export async function getLotRiskDetail(lotId: string) {
         ? storedSpcStatus
         : '-'
 
+  let recommendedAction = null
+  try {
+    recommendedAction = await getRecommendedActionForLot(lotId)
+  } catch {
+    recommendedAction = null
+  }
+
   return {
     lotId: r.lot_id,
     recordedAt: formatDateTime(r.recorded_at),
@@ -386,6 +402,7 @@ export async function getLotRiskDetail(lotId: string) {
     riskLevel: r.risk_level != null ? normalizeRiskLevel(r.risk_level) : null,
     riskReason: r.risk_reason,
     actionContent: r.action_content,
+    recommendedAction,
     spc:
       resolvedSpc !== '-' && spc && spc.metrics.length > 0
         ? {

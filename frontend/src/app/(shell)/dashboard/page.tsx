@@ -16,7 +16,7 @@ import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import DateInput from '@/components/DateInput'
 import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
-import { Ruler, UserRound } from 'lucide-react'
+import { LotRecommendedActionPanel, type RecommendedActionData } from '@/components/dashboard/LotRecommendedActionPanel'
 
 /**
  * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
@@ -99,6 +99,7 @@ type LotRiskApiDetail = {
   riskLevel: '심각' | '주의' | '안정' | null;
   riskReason: string | null;
   actionContent: string | null;
+  recommendedAction?: RecommendedActionData | null;
   spc?: { metrics?: SpcMetric[] } | null;
 };
 
@@ -3127,22 +3128,12 @@ export default function DashBoardPage() {
                   </div>
                   ) : null}
 
-                  <div className="mt-auto pt-1">
-                    <p
-                      className={`mb-1.5 text-xs font-semibold ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      조치
-                    </p>
-                    <p
-                      className={`text-sm font-medium leading-snug ${
-                        isDark ? 'text-slate-100' : 'text-slate-900'
-                      }`}
-                    >
-                      {selectedLotRiskDetail?.actionContent?.trim() || '\u00A0'}
-                    </p>
-                  </div>
+                  <LotRecommendedActionPanel
+                    lotId={selectedLotRisk.lot}
+                    riskLevel={selectedLotRiskDetail?.riskLevel ?? selectedLotRisk.risk}
+                    action={selectedLotRiskDetail?.recommendedAction ?? null}
+                    isDark={isDark}
+                  />
                 </div>
               )}
             </aside>

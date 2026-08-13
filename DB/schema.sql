@@ -66,6 +66,21 @@ CREATE TABLE IF NOT EXISTS judgment_lots (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS lot_recommended_actions (
+  lot_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  summary VARCHAR(1024) NOT NULL DEFAULT '',
+  steps_json JSON NOT NULL,
+  sources_json JSON NOT NULL,
+  drivers_json JSON NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'ready',
+  error_message VARCHAR(255) NULL,
+  content_hash CHAR(40) NULL,
+  generated_at DATETIME NOT NULL,
+  CONSTRAINT fk_lot_recommended_actions_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS issues (
   issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY,
   lot_id            VARCHAR(64)  NOT NULL,

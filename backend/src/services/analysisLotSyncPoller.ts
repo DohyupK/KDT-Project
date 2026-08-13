@@ -6,6 +6,7 @@
 import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 
 const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
 
@@ -52,6 +53,8 @@ async function tick() {
       console.log('[analysis-sync] score_done', scored)
       const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
       console.log('[analysis-sync] risk_reasons', reasons)
+      const actions = await fillRecommendedActionsForLots(lotIds, { concurrency: 2 })
+      console.log('[analysis-sync] recommended_actions', actions)
     }
     // Backfill issues for already-scored 심각 lots (seed is not scoring-dependent).
     const issuesCreated = await lotService.ensureIssuesForRiskLots()

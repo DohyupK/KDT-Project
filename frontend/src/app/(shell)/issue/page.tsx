@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { CSSProperties, FormEvent } from 'react';
 import {
   issueApi,
@@ -1770,6 +1771,8 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
 
 export default function IssuePage() {
   const { isDark } = useUiSettings();
+  const searchParams = useSearchParams();
+  const deepLinkAppliedRef = useRef(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1809,6 +1812,34 @@ export default function IssuePage() {
   useShellRefresh(() => {
     void loadIssues();
   });
+
+  useEffect(() => {
+    if (deepLinkAppliedRef.current || issues.length === 0) return;
+    const lotId = searchParams.get('lotId')?.trim();
+    if (!lotId) return;
+    const match = issues.find(
+      (issue) => issue.lot === lotId && !isIssueCompleted(issue),
+    );
+    if (!match) return;
+    setSelectedId(match.id);
+    let actionDraft: string | null = null;
+    try {
+      if (sessionStorage.getItem('issue_lot_id') === lotId) {
+        actionDraft = sessionStorage.getItem('issue_action_draft');
+        sessionStorage.removeItem('issue_action_draft');
+        sessionStorage.removeItem('issue_lot_id');
+      }
+    } catch {
+      actionDraft = searchParams.get('action');
+    }
+    if (actionDraft) {
+      setManagementForm((prev) => ({
+        ...prev,
+        action: actionDraft,
+      }));
+    }
+    deepLinkAppliedRef.current = true;
+  }, [issues, searchParams]);
 
   const selectedIssue = useMemo(
     () => issues.find((issue) => issue.id === selectedId) ?? null,

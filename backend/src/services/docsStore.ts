@@ -174,6 +174,8 @@ export function mimeForFile(filePath: string): string {
     '.gif': 'image/gif',
     '.webp': 'image/webp',
     '.svg': 'image/svg+xml',
+    '.docx':
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     '.xlsx':
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.xls': 'application/vnd.ms-excel',
