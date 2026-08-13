@@ -15,6 +15,10 @@ import {
 
 export type SyncSpcLotsOptions = {
   skipScore?: boolean
+  /** Skip vLLM risk_reason fill (boot kick / tests). */
+  skipRiskReason?: boolean
+  /** Skip ensureIssuesForRiskLots (boot kick can leave issues to poller). */
+  skipIssues?: boolean
   concurrency?: number
   /** Max unscored lots to pick up per tick. */
   unscoredLimit?: number
@@ -89,7 +93,8 @@ export async function syncSpcLotsToApp(
   running = true
 
   let scoreIds: string[] = []
-  let skipRiskReason = false
+  let skipRiskReason = Boolean(opts.skipRiskReason)
+  let skipIssues = Boolean(opts.skipIssues)
   let scored = 0
   let failed = 0
   let issuesCreated = 0
@@ -201,10 +206,6 @@ export async function syncSpcLotsToApp(
       failed = scoreResult.failed
       errors.push(...scoreResult.errors)
     }
-
-    // Always seed: already-scored 심각 lots must still get open issues.
-    issuesCreated = await lotService.ensureIssuesForRiskLots()
-    if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
   } finally {
     running = false
   }
@@ -221,6 +222,18 @@ export async function syncSpcLotsToApp(
       const detail = err instanceof Error ? err.message : String(err)
       console.error('[spc-sync] risk_reason_failed', detail)
       errors.push(`risk_reason: ${detail}`)
+    }
+  }
+
+  // After risk_reason so issue_content can summarize the filled reason.
+  if (!skipIssues) {
+    try {
+      issuesCreated = await lotService.ensureIssuesForRiskLots()
+      if (issuesCreated) log(quiet, '[spc-sync] issues_created', issuesCreated)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.error('[spc-sync] issues_failed', detail)
+      errors.push(`issues: ${detail}`)
     }
   }
 

@@ -11,7 +11,7 @@
 - 인수인계(`handover_history`): `issues`와 **독립** (no `issue_id`) · `handover_content` · `handover_from`/`handover_to` · `created_at`/`archived_at` · Knowledge는 `archivedAt||createdAt` 일시 표시
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번은 **issues** 전용. 인수인계 등록은 이슈를 만들지 않음.
 - **이슈 자동 생성:** `analysis_lots.risk_level = '심각'` 인 완전 공정 LOT만 (`ensureIssuesForRiskLots`; SPC 이탈 등은 이미 risk_level에 반영). SPC/분석 폴러는 **채점 대상이 없어도** 매 틱 시드 실행.
-- **`issue_content`:** 컬럼만 준비. `risk_reason` → 2차 API_LLM 요약은 **후속** (지금은 `buildIssueTitle`/`risk_reason` 임시)
+- **`issue_content`:** `risk_reason` → 로컬 vLLM 한 문장 요약 (`composeIssueContentViaVllm`). 실패 시 `buildIssueTitle` fallback. 폴러는 **score → risk_reason → 이슈 시드** 순.
 - 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
 - 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `risk_level` 심각 (`analysis_lots` JOIN)
 - 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
@@ -21,8 +21,8 @@
   3. **`analysis_lots`** — **judgment 기준 2차 추론** (`combineLotScore` + SPC → risk/`scored_at`); judgment만 찬·analysis만 빈 경우 `scoreAnalysisFromJudgment`  
 - **`lot_results`:** 피더 `produce` 시 **`lot_id` stub 즉시** (qd/residual NULL) · +60분 qd · +24h residual · 그 전·미연동은 AI NULL-fill. `lot_id` UNIQUE.  
 - **`lot_results` / residual NULL FAQ:** 추론 실패가 아님. 피더 지연(+60분/+24h) · 과거 미연동 · **폴러가 옛 LR만 ASC로 집어 신규를 굶기면** AI fill도 안 돌아 NULL 고착(버그→큐 우선순위 수정).  
-- **폴러:** A큐(judgment/analysis/`scored_at`/LR행 결손·**최신 DESC**) ~70% → B큐(LR qd/residual NULL·ASC). **score 락 해제 후** `risk_reason`(vLLM).  
-  - 미채점: analysis/`probability`/`scored_at`/judgment residual·capacity **또는** `lot_results` 행/`residual_li`/`quality_defect` NULL  
+- **폴러:** 백엔드 기동 시 **즉시** SPC sync + analysis sync 틱 + `SCORE_ON_BOOT`(기본 on) 1회 **채점만**(risk_reason/이슈는 폴러). 이후 SPC ~60s · analysis ~10m. A큐(judgment/analysis/`scored_at`/LR행 결손·**최신 DESC**) ~70% → B큐(LR qd/residual NULL·ASC). **score 락 해제 후** `risk_reason`(vLLM) → 이슈 시드.
+  - 미채점: analysis/`probability`/`scored_at`/judgment residual·capacity **또는** `lot_results` 행/`residual_li`/`quality_defect` NULL
   - 피더 실측이 `lot_results`에 있으면 AI가 **덮지 않음**(COALESCE) · 대시보드 잔류는 계속 `judgment_lots`
 - 목록의 `date`, `riskLevel`은 잘못된 값을 보내면 `400`을 반환 (**`status` 필터 없음**)
 
@@ -66,7 +66,7 @@
 | `issueContent` | `issues.issue_content` |
 | `actionContent` | `issues.action_content` |
 | `completed` / `completedAt` | `completed_at IS NOT NULL` / `completed_at` |
-| `analysis` (상세) | `analysis_lots` 스냅샷: `lotId`, `probability`, `spcStatus`, `riskLevel`, `riskReason`, `createdAt` (`scored_at`은 DB·채점 upsert에 기록, API DTO 노출은 후속) |
+| `analysis` (상세) | `analysis_lots` 스냅샷: `lotId`, `probability`, `spcStatus`, `riskLevel`, `riskReason`, `createdAt`, **`scoredAt`** |
 
 ## 이슈 상세 분석 UI (시각화 초안)
 

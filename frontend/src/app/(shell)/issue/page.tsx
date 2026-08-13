@@ -36,6 +36,7 @@ interface Issue {
     riskLevel: '심각' | '주의' | '안정';
     riskReason: string | null;
     createdAt: string | null;
+    scoredAt: string | null;
   } | null;
   /** 목록 SPC 필터용 (analysis_lots.spc_status) */
   listSpcStatus: string | null;
@@ -337,6 +338,7 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
         riskLevel: normalizeIssueRiskLevel(detail.analysis.riskLevel),
         riskReason: detail.analysis.riskReason,
         createdAt: detail.analysis.createdAt,
+        scoredAt: detail.analysis.scoredAt,
       }
     : null;
 
@@ -530,7 +532,7 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
     payload.type === 'lot'
       ? `<h2>4. LOT 상세 분석</h2>
 <table>
-  <tr><th>이슈 ID</th><th>LOT</th><th>위험도</th><th>SPC</th><th>불량 확률</th><th>위험 원인</th><th>분석 시각</th></tr>
+  <tr><th>이슈 ID</th><th>LOT</th><th>위험도</th><th>SPC</th><th>불량 확률</th><th>위험 원인</th><th>채점 시각</th></tr>
   ${
     payload.issues.length === 0
       ? '<tr><td colspan="7" style="text-align:center;">대상 이슈가 없습니다.</td></tr>'
@@ -544,7 +546,7 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
               <td>${escapeHtml(a?.spcStatus ?? issue.listSpcStatus ?? '—')}</td>
               <td>${escapeHtml(formatAnalysisProbability(a?.probability).label)}</td>
               <td>${escapeHtml(a?.riskReason?.trim() || '—')}</td>
-              <td>${escapeHtml(a?.createdAt ?? '—')}</td>
+              <td>${escapeHtml(a?.scoredAt ?? a?.createdAt ?? '—')}</td>
             </tr>`;
           })
           .join('')
@@ -673,7 +675,7 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
   if (payload.type === 'lot') {
     lines.push(toRow([]));
     lines.push(toRow(['4. LOT 상세 분석']));
-    lines.push(toRow(['이슈 ID', 'LOT', '위험도', 'SPC', '불량 확률', '위험 원인', '분석 시각']));
+    lines.push(toRow(['이슈 ID', 'LOT', '위험도', 'SPC', '불량 확률', '위험 원인', '채점 시각']));
     if (payload.issues.length === 0) {
       lines.push(toRow(['대상 이슈가 없습니다.']));
     } else {
@@ -687,7 +689,7 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
             a?.spcStatus ?? issue.listSpcStatus ?? '',
             formatAnalysisProbability(a?.probability).label,
             a?.riskReason?.trim() || '',
-            a?.createdAt ?? '',
+            a?.scoredAt ?? a?.createdAt ?? '',
           ]),
         );
       }

@@ -251,6 +251,11 @@ export function IssueDetailAnalysis({
       label: 'created_at',
       value: analysis?.createdAt || '—',
     },
+    {
+      key: 'scored_at',
+      label: 'scored_at',
+      value: analysis?.scoredAt || '—',
+    },
   ]
 
   const cardClass = isDark

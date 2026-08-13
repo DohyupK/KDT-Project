@@ -26,13 +26,15 @@ async function snapshot() {
       scored_at: Date | string | null
       risk: string | null
       spc: string | null
+      chart: string | null
     }>
   >(
     `SELECT l.id AS lot,
             j.lot_id AS j, j.residual_li AS j_residual, j.probability AS j_prob,
             j.capacity AS j_cap, j.quality_defect AS j_qd,
             lr.lot_id AS lr, lr.residual_li AS lr_residual, lr.quality_defect AS lr_qd,
-            a.lot_id AS a, a.scored_at, a.risk_level AS risk, a.spc_status AS spc
+            a.lot_id AS a, a.scored_at, a.risk_level AS risk, a.spc_status AS spc,
+            CASE WHEN a.spc_chart_json IS NULL THEN NULL ELSE 'yes' END AS chart
      FROM lots l
      LEFT JOIN judgment_lots j ON j.lot_id = l.id
      LEFT JOIN lot_results lr ON lr.lot_id = l.id
@@ -123,6 +125,11 @@ async function main() {
       name: 'analysis_scored_at_not_null',
       ok: after?.scored_at != null,
       detail: String(after?.scored_at),
+    },
+    {
+      name: 'analysis_spc_chart_json',
+      ok: after?.chart === 'yes',
+      detail: String(after?.chart),
     },
     { name: 'score_failed_zero', ok: score.failed === 0 && score.scored === 1 },
   ]
