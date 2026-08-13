@@ -53,7 +53,7 @@ STABLE_SOURCES = [
     {
         "doc_id": "QMS-RULE-003",
         "title": "검사 방안",
-        "path": "Confidential/qms-source/QMS-RULE-003_검사방안.docx",
+        "path": "Confidential/qms-source/QMS-RULE-003_검사수준운영규정.docx",
     },
 ]
 
@@ -79,9 +79,9 @@ def _resolve_doc_path(doc_id: str, title: str) -> str:
         "QMS-ACT-003": "QMS-ACT-003_드라이룸점검절차.docx",
         "QMS-ACT-005": "QMS-ACT-005_전수검사운영절차.docx",
         "QMS-MAN-001": "QMS-MAN-001_SPC운영매뉴얼.docx",
-        "QMS-RULE-003": "QMS-RULE-003_검사방안.docx",
+        "QMS-RULE-003": "QMS-RULE-003_검사수준운영규정.docx",
         "QMS-STD-001": "QMS-STD-001_공정흐름및검사시점기준.docx",
-        "QMS-SOP-002": "QMS-SOP-002_공정시간SOP.docx",
+        "QMS-SOP-002": "QMS-SOP-002_공정시간관리SOP.docx",
     }
     fname = slug_map.get(doc_id, f"{doc_id}_{title}.docx")
     return f"Confidential/qms-source/{fname}"

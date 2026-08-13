@@ -194,3 +194,35 @@ export async function assertReadableFile(absolute: string): Promise<void> {
     throw new AppError(400, '파일이 아닙니다.')
   }
 }
+
+const QMS_DOC_ID_RE = /^QMS-[A-Z]+-\d{3}$/i
+
+/**
+ * Resolve a QMS source .docx by document id (ASCII), ignoring Korean filename variants.
+ * Looks under Documents/Confidential/qms-source/{docId}*.docx
+ */
+export async function resolveQmsDocById(docId: string): Promise<{
+  absolute: string
+  clearance: DocClearance
+  relativePosix: string
+} | null> {
+  const id = (docId || '').trim()
+  if (!QMS_DOC_ID_RE.test(id)) return null
+  const dir = path.join(docsRoot(), 'Confidential', 'qms-source')
+  let names: string[]
+  try {
+    names = await fs.readdir(dir)
+  } catch {
+    return null
+  }
+  const prefix = id.toUpperCase()
+  const match = names.find(
+    (n) => n.toUpperCase().startsWith(prefix) && n.toLowerCase().endsWith('.docx'),
+  )
+  if (!match) return null
+  return {
+    absolute: path.join(dir, match),
+    clearance: 'Confidential',
+    relativePosix: `Confidential/qms-source/${match}`,
+  }
+}

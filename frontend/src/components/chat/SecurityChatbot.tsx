@@ -38,13 +38,13 @@ function formatWallElapsed(ms: number): string {
 const WELCOME_SECURITY: ChatMessage = {
   id: 1,
   role: 'ai',
-  text:
-    '보안·기밀 전용 챗봇입니다. 이 탭의 메시지는 외부 API(Groq/Gemini 등)로 전송되지 않으며, 로컬 vLLM(CHAT_VLLM_BASE_URL, 기본 :8001)과 보안 문서 RAG만 사용합니다. vLLM이 꺼져 있으면 오프라인 안내만 표시됩니다.',
+  text: '안녕하세요, YAHO입니다.\n\n보안·기밀 관련 질문을 도와드릴게요.',
   mode: 'template',
   provider: 'offline',
 }
 
 const LOCAL_THREADS_KEY = 'kdt_security_chat_recent_threads'
+const DELETED_THREADS_KEY = 'kdt_security_chat_deleted_threads'
 const LOCAL_THREADS_MAX = 20
 
 type LocalStoredMsg = {
@@ -97,6 +97,32 @@ function upsertLocalThread(thread: LocalThreadStore) {
 
 function getLocalThread(id: string): LocalThreadStore | null {
   return readLocalThreads().find((t) => t.id === id) ?? null
+}
+
+function readDeletedThreadIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = window.localStorage.getItem(DELETED_THREADS_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function markThreadDeleted(id: string) {
+  if (typeof window === 'undefined') return
+  const next = readDeletedThreadIds()
+  next.add(id)
+  window.localStorage.setItem(
+    DELETED_THREADS_KEY,
+    JSON.stringify(Array.from(next).slice(-100)),
+  )
+}
+
+function deleteLocalThread(id: string) {
+  writeLocalThreads(readLocalThreads().filter((t) => t.id !== id))
 }
 
 function formatThreadTime(iso?: string | null): string {
@@ -270,10 +296,23 @@ export default function SecurityChatbot({
         byId.set(t.id, { ...existing, title: t.title })
       }
     }
-    const merged = Array.from(byId.values()).sort((a, b) =>
-      (b.updated_at || '').localeCompare(a.updated_at || ''),
-    )
+    const deleted = readDeletedThreadIds()
+    const merged = Array.from(byId.values())
+      .filter((t) => !deleted.has(t.id))
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
     setThreads(merged.slice(0, LOCAL_THREADS_MAX))
+  }
+
+  const deleteThread = (threadId: string) => {
+    if (pending) return
+    deleteLocalThread(threadId)
+    markThreadDeleted(threadId)
+    setThreads((prev) => prev.filter((t) => t.id !== threadId))
+    if (activeThreadId === threadId || getSecurityChatThreadId() === threadId) {
+      startNewThread()
+      return
+    }
+    void refreshThreads()
   }
 
   const applyStoredMessages = (rows: LocalStoredMsg[]) => {
@@ -675,7 +714,6 @@ export default function SecurityChatbot({
                 보안 상담
               </span>
             </div>
-            <p className="truncate text-xs text-slate-500">보안 문서 · 로컬 vLLM</p>
           </div>
           <button
             type="button"
@@ -704,29 +742,46 @@ export default function SecurityChatbot({
               ) : null}
             </div>
             {threads.length > 0 ? (
-              <div className="flex max-h-24 gap-1 overflow-x-auto px-2 py-1.5">
+              <div className="flex max-h-24 gap-1.5 overflow-x-auto px-2 py-1.5">
                 {threads.map((t) => {
                   const label = (t.title && t.title.trim()) || t.id.slice(0, 8)
                   const active = t.id === activeThreadId
                   return (
-                    <button
+                    <div
                       key={t.id}
-                      type="button"
-                      disabled={pending}
-                      onClick={() => void selectThread(t.id)}
-                      className={`max-w-[140px] shrink-0 truncate rounded-full px-2.5 py-1 text-[10px] ${
-                        active
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      className={`inline-flex max-w-[168px] shrink-0 items-center gap-0.5 rounded-full pl-2.5 ${
+                        active ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
                       }`}
-                      title={
-                        t.updated_at
-                          ? `${label} · ${formatThreadTime(t.updated_at)}`
-                          : label
-                      }
                     >
-                      {label}
-                    </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void selectThread(t.id)}
+                        className={`min-w-0 truncate py-1 text-[10px] ${
+                          active ? 'text-white' : 'hover:text-slate-900'
+                        }`}
+                        title={
+                          t.updated_at
+                            ? `${label} · ${formatThreadTime(t.updated_at)}`
+                            : label
+                        }
+                      >
+                        {label}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        aria-label={`${label} 대화 삭제`}
+                        onClick={() => deleteThread(t.id)}
+                        className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                          active
+                            ? 'text-amber-100 hover:bg-amber-600 hover:text-white'
+                            : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                        }`}
+                      >
+                        <X size={10} aria-hidden />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
@@ -762,25 +817,38 @@ export default function SecurityChatbot({
                     (t.title && t.title.trim()) || `${t.id.slice(0, 8)}…`
                   const active = t.id === activeThreadId
                   return (
-                    <button
+                    <div
                       key={t.id}
-                      type="button"
-                      disabled={pending}
-                      onClick={() => void selectThread(t.id)}
-                      className={`mb-0.5 w-full rounded-md px-2 py-1.5 text-left text-[11px] leading-snug ${
-                        active
-                          ? 'bg-amber-50 font-medium text-amber-950'
-                          : 'text-slate-600 hover:bg-slate-50'
+                      className={`mb-0.5 flex items-start gap-1 rounded-md ${
+                        active ? 'bg-amber-50' : 'hover:bg-slate-50'
                       }`}
-                      title={t.id}
                     >
-                      <span className="block truncate">{label}</span>
-                      {t.updated_at ? (
-                        <span className="block truncate text-[9px] text-slate-400">
-                          {formatThreadTime(t.updated_at)}
-                        </span>
-                      ) : null}
-                    </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void selectThread(t.id)}
+                        className={`min-w-0 flex-1 px-2 py-1.5 text-left text-[11px] leading-snug ${
+                          active ? 'font-medium text-amber-950' : 'text-slate-600'
+                        }`}
+                        title={t.id}
+                      >
+                        <span className="block truncate">{label}</span>
+                        {t.updated_at ? (
+                          <span className="block truncate text-[9px] text-slate-400">
+                            {formatThreadTime(t.updated_at)}
+                          </span>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        aria-label={`${label} 대화 삭제`}
+                        onClick={() => deleteThread(t.id)}
+                        className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                      >
+                        <X size={12} aria-hidden />
+                      </button>
+                    </div>
                   )
                 })
               )}

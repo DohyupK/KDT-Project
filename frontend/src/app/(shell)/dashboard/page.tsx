@@ -22,7 +22,7 @@ import { LotRecommendedActionPanel, type RecommendedActionData } from '@/compone
  * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
  * Share → Embed의 src만 넣으세요.
  */
-const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1785471624684&to=1786076424684&timezone=browser&refresh=5m&panelId=panel-10'
+const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10'
 
 /**
  * 실시간 생산 게이지 Embed URL.
@@ -319,6 +319,43 @@ function lotRiskProbPercent(prob: number): number {
   return Math.min(100, Math.max(0, pct));
 }
 
+function isSpcUnjudged(spc: string | null | undefined): boolean {
+  const value = (spc ?? '').trim();
+  return value === '' || value === '-' || value === '—';
+}
+
+function formatSpcStatusLabel(spc: string | null | undefined): string {
+  if (isSpcUnjudged(spc)) return '미판정';
+  return (spc ?? '').trim();
+}
+
+function SpcStatusNoteBlock({
+  isDark,
+  paragraphs,
+}: {
+  isDark: boolean;
+  paragraphs: ReactNode[];
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-2.5 ${
+        isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white shadow-2xs'
+      }`}
+    >
+      {paragraphs.map((para, idx) => (
+        <p
+          key={idx}
+          className={`m-0 text-xs font-normal leading-relaxed ${
+            idx < paragraphs.length - 1 ? 'mb-2' : ''
+          } ${isDark ? 'text-slate-300' : 'text-slate-700'}`}
+        >
+          {para}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function renderLotRiskAction(action: string): ReactNode {
   const escaped = LOT_RISK_ACTION_KEYWORDS.map((k) =>
     k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
@@ -402,7 +439,7 @@ function downloadLotRiskCsv(rows: LotRiskRow[]) {
         r.prob != null && Number.isFinite(r.prob) ? Math.round(lotRiskProbPercent(r.prob)) : '',
         typeof r.predLi === 'number' ? Math.round(r.predLi) : r.predLi || '',
         formatSpecDistance(r.margin),
-        r.spc || '',
+        formatSpcStatusLabel(r.spc),
         r.grade || '',
         r.reason || '',
       ]
@@ -438,7 +475,7 @@ function downloadLotRiskPdf(rows: LotRiskRow[]) {
               <td>${prob}</td>
               <td>${residual}</td>
               <td>${formatSpecDistance(r.margin)}</td>
-              <td>${r.spc || '—'}</td>
+              <td>${formatSpcStatusLabel(r.spc)}</td>
               <td>${r.grade || '—'}</td>
               <td>${(r.reason || '—').replace(/</g, '&lt;')}</td>
             </tr>`;
@@ -948,7 +985,10 @@ function ProductionTrendChart({
   const axisTitleLeft = isDark ? '#94a3b8' : '#64748b';
   const axisTitleRight = isDark ? '#f87171' : '#dc2626';
   const pointStroke = isDark ? '#1e293b' : '#ffffff';
-  const legendText = isDark ? 'text-slate-300' : 'text-slate-600';
+
+  const axisTitleY = pad.top - 14;
+  const axisTitleLeftX = pad.left / 2;
+  const axisTitleRightX = width - pad.right / 2;
 
   const showTooltip = (
     e: React.MouseEvent<SVGElement, MouseEvent>,
@@ -965,22 +1005,6 @@ function ProductionTrendChart({
 
   return (
     <div className="relative min-h-0 flex-1 overflow-x-auto pb-1">
-      <div
-        className={`mb-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 px-0.5 sm:px-1 ${legendText}`}
-        aria-hidden
-      >
-        <div className="inline-flex items-center gap-2 text-sm font-medium">
-          <span className="inline-block h-3 w-3 rounded-sm bg-blue-600" />
-          생산량
-        </div>
-        <div className="inline-flex items-center gap-2 text-sm font-medium">
-          <span className="relative inline-flex h-3 w-5 items-center" aria-hidden>
-            <span className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-red-600" />
-            <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-600 ring-2 ring-white dark:ring-slate-900" />
-          </span>
-          불량률
-        </div>
-      </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="h-[300px] w-full lg:h-[320px]"
@@ -989,17 +1013,18 @@ function ProductionTrendChart({
         aria-label="생산량 막대와 불량률 선 차트"
       >
         <text
-          x={pad.left}
-          y={20}
+          x={axisTitleLeftX}
+          y={axisTitleY}
+          textAnchor="middle"
           className="text-xs font-semibold"
           fill={axisTitleLeft}
         >
           생산량
         </text>
         <text
-          x={width - pad.right}
-          y={20}
-          textAnchor="end"
+          x={axisTitleRightX}
+          y={axisTitleY}
+          textAnchor="middle"
           className="text-xs font-semibold"
           fill={axisTitleRight}
         >
@@ -1388,6 +1413,96 @@ function SpcChartCard({ metric, isDark }: { metric: SpcMetric; isDark: boolean }
   );
 }
 
+type TrendDateRange = { startDate: string; endDate: string };
+
+function isValidTrendRange(range: TrendDateRange): boolean {
+  if (!range.startDate || !range.endDate) return false;
+  return range.startDate <= range.endDate;
+}
+
+function ProductionTrendDateFilter({
+  draft,
+  applied,
+  onDraftChange,
+  onApply,
+  onReset,
+  isDark,
+}: {
+  draft: TrendDateRange;
+  applied: TrendDateRange;
+  onDraftChange: (next: TrendDateRange) => void;
+  onApply: () => void;
+  onReset: () => void;
+  isDark: boolean;
+}) {
+  const canApply = isValidTrendRange(draft);
+  const rangeInvalid =
+    Boolean(draft.startDate && draft.endDate) && draft.startDate > draft.endDate;
+  const hasPendingChanges =
+    draft.startDate !== applied.startDate || draft.endDate !== applied.endDate;
+  const showStatus = (hasPendingChanges && canApply) || rangeInvalid;
+  const muted = isDark ? 'text-slate-500' : 'text-slate-400';
+  const secondaryBtnClass = isDark
+    ? 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-600 px-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+
+  return (
+    <div className="min-w-0">
+      <div
+        className={`inline-flex w-fit max-w-full flex-nowrap items-center gap-1 rounded-lg border px-2 py-1 ${
+          isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-white/80'
+        }`}
+        aria-label="생산 추이 조회 기간"
+      >
+        <span className={`shrink-0 text-[11px] font-medium ${muted}`}>기간</span>
+        <DateInput
+          aria-label="생산 추이 시작일"
+          value={draft.startDate}
+          onChange={(startDate) => onDraftChange({ ...draft, startDate })}
+          isDark={isDark}
+          compact
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
+        />
+        <span className={`shrink-0 text-xs ${muted}`}>~</span>
+        <DateInput
+          aria-label="생산 추이 종료일"
+          value={draft.endDate}
+          onChange={(endDate) => onDraftChange({ ...draft, endDate })}
+          isDark={isDark}
+          compact
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
+        />
+        <button
+          type="button"
+          disabled={!canApply}
+          onClick={onApply}
+          className={`inline-flex h-8 min-w-[3rem] shrink-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed ${
+            canApply
+              ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+              : isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-400'
+                : 'border-slate-200 bg-slate-100 text-slate-500'
+          }`}
+        >
+          적용
+        </button>
+        <button type="button" onClick={onReset} className={secondaryBtnClass}>
+          초기화
+        </button>
+      </div>
+      {showStatus ? (
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+          {hasPendingChanges && canApply ? (
+            <span className={isDark ? 'text-amber-400/90' : 'text-amber-600'}>변경 사항 미적용</span>
+          ) : null}
+          {rangeInvalid ? (
+            <span className={isDark ? 'text-rose-400' : 'text-rose-600'}>시작일이 종료일보다 늦을 수 없습니다.</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function DashBoardPage() {
   const { isDark } = useUiSettings();
@@ -1411,7 +1526,6 @@ export default function DashBoardPage() {
   const [trendPoints, setTrendPoints] = useState<DailyAggregate[]>([]);
   /** Selected production-trend bar → Feature Importance period. */
   const [selectedTrendBucket, setSelectedTrendBucket] = useState<DailyAggregate | null>(null);
-  const [trendGrain, setTrendGrain] = useState<'day' | 'week' | 'month'>('day');
   const [featureImportanceLabel, setFeatureImportanceLabel] = useState('당일');
   const [trendFilterDraft, setTrendFilterDraft] = useState({ startDate: '', endDate: '' });
   const [trendFilterApplied, setTrendFilterApplied] = useState({ startDate: '', endDate: '' });
@@ -1520,6 +1634,17 @@ export default function DashBoardPage() {
         : '';
     return `${probPart}잔류리튬 ${residualText}, ${marginText}`;
   }, [selectedLotRisk, selectedLotRiskDetail]);
+
+  const selectedSpcStatus =
+    selectedLotRiskDetail?.spcStatus ?? selectedLotRisk?.spc ?? null;
+  const selectedSpcUnjudged = isSpcUnjudged(selectedSpcStatus);
+  const selectedSpcMetrics =
+    selectedLotRiskDetail?.lotId === selectedLotRisk?.lot
+      ? selectedLotRiskDetail?.spc?.metrics ?? []
+      : [];
+  const selectedSpcDetailLoading =
+    !!selectedLotRisk &&
+    (selectedLotRiskDetail == null || selectedLotRiskDetail.lotId !== selectedLotRisk.lot);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -1799,17 +1924,17 @@ export default function DashBoardPage() {
           ? {
               from: trendFilterApplied.startDate,
               to: trendFilterApplied.endDate,
-              grain: trendGrain,
+              grain: 'day' as const,
             }
-          : { grain: trendGrain };
+          : { grain: 'day' as const };
       const fiParams =
         selectedTrendBucket != null
           ? {
-              grain: trendGrain,
+              grain: 'day' as const,
               bucket: selectedTrendBucket.date,
               mode: 'selected' as const,
             }
-          : { grain: trendGrain, mode: 'default' as const };
+          : { grain: 'day' as const, mode: 'default' as const };
       const [trendResponse, fiResponse] = await Promise.all([
         dashboardApi.getProductionTrend(trendParams),
         dashboardApi.getFeatureImportance(fiParams),
@@ -1857,7 +1982,6 @@ export default function DashBoardPage() {
     markFetchStart,
     selectedTrendBucket,
     trendFilterApplied,
-    trendGrain,
   ]);
 
   const fetchProductionDaily = useCallback(async (options?: { force?: boolean }) => {
@@ -2795,7 +2919,7 @@ export default function DashBoardPage() {
                                 }`}
                               />
                             ) : null}
-                            {row.spc || '—'}
+                            {formatSpcStatusLabel(row.spc)}
                           </span>
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -3043,10 +3167,12 @@ export default function DashBoardPage() {
                       },
                       {
                         label: 'SPC',
-                        value:
-                          selectedLotRiskDetail?.spcStatus ??
-                          selectedLotRisk.spc ??
-                          '—',
+                        value: formatSpcStatusLabel(selectedSpcStatus),
+                        valueClass: selectedSpcUnjudged
+                          ? isDark
+                            ? 'text-slate-400'
+                            : 'text-slate-500'
+                          : undefined,
                       },
                     ].map((m) => (
                       <div
@@ -3075,7 +3201,6 @@ export default function DashBoardPage() {
                     ))}
                   </div>
 
-                  {(selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) !== '-' ? (
                   <div className="mb-3 space-y-2">
                     <p
                       className={`mb-1.5 text-xs font-semibold ${
@@ -3084,10 +3209,9 @@ export default function DashBoardPage() {
                     >
                       SPC 관리도
                     </p>
-                    {selectedLotRiskDetail?.spc?.metrics &&
-                    selectedLotRiskDetail.spc.metrics.length > 0 ? (
+                    {selectedSpcMetrics.length > 0 ? (
                       <div className="space-y-3">
-                        {selectedLotRiskDetail.spc.metrics.map((metric) => (
+                        {selectedSpcMetrics.map((metric) => (
                           <div key={metric.key}>
                             <SpcChartCard metric={metric} isDark={isDark} />
                             {metric.violatedRules && metric.violatedRules.length > 0 ? (
@@ -3114,19 +3238,23 @@ export default function DashBoardPage() {
                         ))}
                       </div>
                     ) : (
-                      <p
-                        className={`rounded-md px-2.5 py-2 text-xs ${
-                          isDark ? 'bg-slate-800/70 text-slate-400' : 'bg-white text-slate-500'
-                        }`}
-                      >
-                        {selectedLotRiskDetail == null ||
-                        selectedLotRiskDetail.lotId !== selectedLotRisk.lot
-                          ? 'SPC 관리도를 불러오는 중…'
-                          : '표시할 SPC 관리도 데이터가 없습니다.'}
-                      </p>
+                      <SpcStatusNoteBlock
+                        isDark={isDark}
+                        paragraphs={
+                          selectedSpcDetailLoading
+                            ? ['SPC 관리도를 불러오는 중…']
+                            : selectedSpcUnjudged
+                              ? [
+                                  '필수 공정값 일부가 비어 SPC를 판정하지 않습니다.',
+                                  '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
+                                ]
+                              : [
+                                  '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
+                                ]
+                        }
+                      />
                     )}
                   </div>
-                  ) : null}
 
                   <LotRecommendedActionPanel
                     lotId={selectedLotRisk.lot}
@@ -3421,103 +3549,28 @@ export default function DashBoardPage() {
           <div
             className={`flex min-h-[380px] min-w-0 flex-col p-5 xl:col-span-5 ${cardClass}`}
           >
-            <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex min-w-0 flex-col gap-3">
-                <h2
-                  className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-                >
-                  생산 추이 그래프
-                </h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <DateInput
-                    aria-label="생산 추이 시작일"
-                    value={trendFilterDraft.startDate}
-                    onChange={(startDate) => {
-                      setTrendFilterDraft((prev) => {
-                        const next = { ...prev, startDate };
-                        if (next.startDate && next.endDate) {
-                          setTrendFilterApplied(next);
-                        }
-                        return next;
-                      });
-                    }}
-                    isDark={isDark}
-                    compact
-                    className="!h-9 !w-[112px] !max-w-[112px] shrink-0"
-                  />
-                  <span
-                    className={`shrink-0 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
-                  >
-                    –
-                  </span>
-                  <DateInput
-                    aria-label="생산 추이 종료일"
-                    value={trendFilterDraft.endDate}
-                    onChange={(endDate) => {
-                      setTrendFilterDraft((prev) => {
-                        const next = { ...prev, endDate };
-                        if (next.startDate && next.endDate) {
-                          setTrendFilterApplied(next);
-                        }
-                        return next;
-                      });
-                    }}
-                    isDark={isDark}
-                    compact
-                    className="!h-9 !w-[112px] !max-w-[112px] shrink-0"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrendFilterDraft({ startDate: '', endDate: '' });
-                      setTrendFilterApplied({ startDate: '', endDate: '' });
-                      setTrendGrain('day');
-                    }}
-                    className={`inline-flex h-9 shrink-0 items-center rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-                      isDark
-                        ? 'border-slate-600 text-slate-300 hover:bg-slate-800'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    초기화
-                  </button>
-                </div>
-              </div>
-              <div
-                className={`inline-flex shrink-0 rounded-xl border p-1 ${
-                  isDark ? 'border-slate-600 bg-slate-900/60' : 'border-slate-200 bg-white'
-                }`}
-                role="group"
-                aria-label="생산 추이 조회 단위"
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2
+                className={`whitespace-nowrap shrink-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
               >
-                {(
-                  [
-                    { id: 'day', label: '일 별' },
-                    { id: 'week', label: '주간 별' },
-                    { id: 'month', label: '월 별' },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedTrendBucket(null);
-                      setTrendGrain(opt.id);
-                    }}
-                    className={`inline-flex h-9 items-center rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-                      trendGrain === opt.id
-                        ? isDark
-                          ? 'bg-slate-700 text-white shadow-sm'
-                          : 'bg-slate-900 text-white shadow-sm'
-                        : isDark
-                          ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+                생산 추이 그래프
+              </h2>
+              <ProductionTrendDateFilter
+                draft={trendFilterDraft}
+                applied={trendFilterApplied}
+                onDraftChange={setTrendFilterDraft}
+                onApply={() => {
+                  if (!isValidTrendRange(trendFilterDraft)) return;
+                  setSelectedTrendBucket(null);
+                  setTrendFilterApplied(trendFilterDraft);
+                }}
+                onReset={() => {
+                  setSelectedTrendBucket(null);
+                  setTrendFilterDraft({ startDate: '', endDate: '' });
+                  setTrendFilterApplied({ startDate: '', endDate: '' });
+                }}
+                isDark={isDark}
+              />
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
@@ -3525,7 +3578,6 @@ export default function DashBoardPage() {
                 <ProductionTrendChart
                   points={dailyAggregates}
                   isDark={isDark}
-                  trendGrain={trendGrain}
                   onBarClick={setSelectedTrendBucket}
                 />
               ) : (
@@ -3795,7 +3847,7 @@ export default function DashBoardPage() {
                         >
                           {formatSpecDistance(row.margin)}
                         </td>
-                        <td className="px-3 py-2.5 text-center">{row.spc || '—'}</td>
+                        <td className="px-3 py-2.5 text-center">{formatSpcStatusLabel(row.spc)}</td>
                         <td className="px-3 py-2.5 text-center font-semibold">{row.grade || '—'}</td>
                         <td
                           className={`max-w-[280px] truncate px-3 py-2.5 ${

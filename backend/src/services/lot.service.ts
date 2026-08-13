@@ -180,10 +180,9 @@ export type RiskTopResult = {
 }
 
 const RISK_TOP_WHERE = `a.risk_level = '심각'
-  AND a.spc_status LIKE '%이탈%'
   AND l.\`timestamp\` >= DATE_SUB(NOW(), INTERVAL 3 DAY)`
 
-/** Recent 3 days · SPC OOC · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
+/** Recent 3 days · risk_level 심각 — paginated for Main 「위험 LOT Top」. */
 export async function getRiskTop(opts: {
   page?: number
   pageSize?: number
@@ -322,16 +321,43 @@ export async function importLotsFromCsv(csvPath?: string): Promise<{ imported: n
   return { imported, path: filePath }
 }
 
-async function upsertAnalysisScore(lotId: string, scored: LotScoreResult) {
+async function upsertAnalysisScore(
+  lotId: string,
+  scored: LotScoreResult,
+  spcChart?: any,
+) {
+  const chartJson = spcChart === undefined ? undefined : JSON.stringify(spcChart ?? { metrics: [] })
+  if (chartJson === undefined) {
+    await query(
+      `INSERT INTO analysis_lots (
+        lot_id, probability, spc_status, risk_level, risk_reason, scored_at
+      ) VALUES (?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        probability = VALUES(probability),
+        spc_status = VALUES(spc_status),
+        risk_level = VALUES(risk_level),
+        risk_reason = VALUES(risk_reason),
+        scored_at = NOW()`,
+      [
+        lotId,
+        scored.probability,
+        scored.spc_status,
+        scored.risk_level,
+        scored.risk_reason,
+      ],
+    )
+    return
+  }
   await query(
     `INSERT INTO analysis_lots (
-      lot_id, probability, spc_status, risk_level, risk_reason, scored_at
-    ) VALUES (?, ?, ?, ?, ?, NOW())
+      lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NOW())
     ON DUPLICATE KEY UPDATE
       probability = VALUES(probability),
       spc_status = VALUES(spc_status),
       risk_level = VALUES(risk_level),
       risk_reason = VALUES(risk_reason),
+      spc_chart_json = VALUES(spc_chart_json),
       scored_at = NOW()`,
     [
       lotId,
@@ -339,6 +365,7 @@ async function upsertAnalysisScore(lotId: string, scored: LotScoreResult) {
       scored.spc_status,
       scored.risk_level,
       scored.risk_reason,
+      chartJson,
     ],
   )
 }
@@ -746,12 +773,8 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   return { scored, failed, errors: errors.slice(0, 20) }
 }
 
-const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.metal_impurity IS NOT NULL
-  AND l.lithium_input IS NOT NULL AND l.additive_ratio IS NOT NULL AND l.process_time IS NOT NULL
-  AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
-
 /**
- * Create open issues when analysis_lots is 심각 AND spc_status is 주의|이탈.
+ * Create open issues when analysis_lots is 심각.
  * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
  */
 export async function ensureIssuesForRiskLots(): Promise<number> {
@@ -761,9 +784,9 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.risk_reason
      FROM lots l
      INNER JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN issues i ON i.lot_id = l.id AND i.completed_at IS NULL
      WHERE a.risk_level = '심각'
-       AND a.spc_status IN ('주의', '이탈')
-       AND (${COMPLETE_PROCESS_SQL_L})`,
+       AND i.issue_id IS NULL`,
   )
 
   let created = 0
@@ -804,6 +827,7 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
 /** Trailing LOT count shown on detail I-charts (must cover longest Nelson window: 15). */
 export const SPC_DETAIL_CHART_WINDOW = 30
 
+
 export type SpcChartMetric = {
   key: SpcParamKey
   label: string
@@ -833,6 +857,8 @@ export function parseSpcChartSnapshot(raw: unknown): SpcChartSnapshot | null {
   if (!Array.isArray(metrics)) return null
   return { metrics: metrics as SpcChartMetric[] }
 }
+
+
 
 /** SPC series + per-param status for LOT detail (recomputed from Phase I limits). */
 export async function getLotSpcDetail(lotId: string): Promise<{
@@ -911,3 +937,99 @@ export async function getLotSpcDetail(lotId: string): Promise<{
     metrics,
   }
 }
+
+export type QCostSummary = {
+  from: string
+  to: string
+  stableCount: number
+  warningCount: number
+  criticalCount: number
+  internalDefectCount: number
+  externalLeakCount: number
+  appraisalCost: number
+  appraisalBreakdown: {
+    stable: number
+    warning: number
+    critical: number
+  }
+  internalCost: number
+  externalCost: number
+  preventionCost: number
+  totalQCost: number
+}
+
+export async function getQCostSummary(params: { from?: string; to?: string }): Promise<QCostSummary> {
+  const from = params.from ?? ''
+  const to = params.to ?? ''
+
+  const whereClause: string[] = []
+  const queryParams: unknown[] = []
+
+  if (from) {
+    whereClause.push('l.`timestamp` >= ?')
+    queryParams.push(`${from} 00:00:00`)
+  }
+  if (to) {
+    whereClause.push('l.`timestamp` <= ?')
+    queryParams.push(`${to} 23:59:59`)
+  }
+
+  const whereSql = whereClause.length > 0 ? `WHERE ${whereClause.join(' AND ')}` : ''
+
+  const rows = await query<{
+    risk_level: string | null
+    probability: number | null
+  }[]>(
+    `SELECT a.risk_level, COALESCE(j.probability, a.probability) AS probability
+     FROM lots l
+     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     ${whereSql}`,
+    queryParams
+  )
+
+  let stableCount = 0
+  let warningCount = 0
+  let criticalCount = 0
+  let internalDefectCount = 0
+  const externalLeakCount = 0
+
+  for (const r of rows) {
+    const risk = normalizeRiskLevel(r.risk_level)
+    if (risk === '심각') criticalCount++
+    else if (risk === '주의') warningCount++
+    else stableCount++
+
+    if ((r.probability != null && Number(r.probability) >= DEFECT_JUDGE_THRESHOLD) || risk === '심각') {
+      internalDefectCount++
+    }
+  }
+
+  const appraisalBreakdown = {
+    stable: stableCount * 50_000,
+    warning: warningCount * 100_000,
+    critical: criticalCount * 150_000,
+  }
+
+  const appraisalCost = appraisalBreakdown.stable + appraisalBreakdown.warning + appraisalBreakdown.critical
+  const internalCost = internalDefectCount * 500_000
+  const externalCost = externalLeakCount * 3_000_000
+  const preventionCost = 20_000_000
+
+  return {
+    from,
+    to,
+    stableCount,
+    warningCount,
+    criticalCount,
+    internalDefectCount,
+    externalLeakCount,
+    appraisalCost,
+    appraisalBreakdown,
+    internalCost,
+    externalCost,
+    preventionCost,
+    totalQCost: appraisalCost + internalCost + externalCost + preventionCost,
+  }
+}
+

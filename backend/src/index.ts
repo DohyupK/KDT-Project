@@ -1,5 +1,6 @@
 import './loadRootEnv.js'
 import { createApp } from './app.js'
+import { startAiServiceSupervisor } from './services/aiServiceSupervisor.js'
 import { startSpcLotSyncPoller } from './services/spcLotSyncPoller.js'
 import { startAnalysisLotSyncPoller } from './services/analysisLotSyncPoller.js'
 
@@ -10,8 +11,12 @@ const server = app.listen(port, () => {
   console.log(`[backend] listening on http://127.0.0.1:${port}`)
   console.log(`[backend] AI_SERVICE_URL=${process.env.AI_SERVICE_URL || 'http://127.0.0.1:8800'}`)
   console.log(`[backend] CHAT_STORE=${process.env.CHAT_STORE || 'mariadb'}`)
-  startSpcLotSyncPoller()
-  startAnalysisLotSyncPoller()
+  void (async () => {
+    await startAiServiceSupervisor()
+    // Pollers after ai-service health (or timeout) so scoring can run.
+    startSpcLotSyncPoller()
+    startAnalysisLotSyncPoller()
+  })()
 })
 
 // Security-chat proxy may wait up to 180s for local RAG+LLM; avoid Node closing early.

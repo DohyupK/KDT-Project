@@ -39,7 +39,7 @@ export function createApp() {
       health: '/api/health',
       auth: '/api/auth',
       auth_settings: 'GET|PUT /api/auth/settings · POST /api/auth/settings/reset',
-      lots: 'GET /api/lots/risk-top · GET /api/lots/daily-kpi · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
+      lots: 'GET /api/lots/risk-top · GET /api/lots/daily-kpi · GET /api/lots/q-cost · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
       dashboard:
         'GET /api/dashboard/lot-risks · /lot-risks/:lotId · /production-trend · /production-daily · /lots.csv · /feature-importance',
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
@@ -48,7 +48,7 @@ export function createApp() {
       handover_history:
         'GET /api/knowledge/handover-history?status=pending|completed · POST /api/knowledge/handover (auth)',
       docs: 'GET /api/docs/tree · GET /api/docs/file?path= (READ-ONLY, auth)',
-      inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · POST|PATCH|PUT /api/inquiries/:id/answer',
+      inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · GET /api/inquiries/:id/attachments/:attachmentId · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',
       chat_threads: 'GET /api/chat/threads · GET /api/chat/threads/:id/messages',
       security_chat: 'POST /api/security-chat',

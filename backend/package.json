@@ -18,6 +18,7 @@
     "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
+    "migrate:inquiry-attachments": "tsx scripts/migrate-inquiry-attachments.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
     "seed:judgment-lots": "tsx scripts/seed-judgment-lots.ts",
@@ -38,7 +39,7 @@
     "inspect:schema": "tsx scripts/inspect-schema.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",
     "sync:spc-lots": "tsx scripts/sync-spc-lots.ts",
-    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts"
+    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -50,13 +51,15 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "mariadb": "^3.5.3"
+    "mariadb": "^3.5.3",
+    "multer": "^2.2.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.2.0",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"

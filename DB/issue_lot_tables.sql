@@ -26,10 +26,12 @@ CREATE TABLE IF NOT EXISTS analysis_lots (
     COMMENT '심각|주의|안정',
   risk_reason              VARCHAR(255) NULL,
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  scored_at                DATETIME     NULL COMMENT '마지막 채점 시각',
   CONSTRAINT fk_analysis_lots_lot
     FOREIGN KEY (lot_id) REFERENCES lots(id)
     ON DELETE CASCADE,
-  INDEX idx_analysis_risk (risk_level)
+  INDEX idx_analysis_risk (risk_level),
+  INDEX idx_analysis_scored (scored_at)
 );
 
 CREATE TABLE IF NOT EXISTS judgment_lots (

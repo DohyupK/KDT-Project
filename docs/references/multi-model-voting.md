@@ -1,59 +1,53 @@
 # 다중 모델 투표 앙상블 — 결정 기록
 
-최종 갱신: 2026-08-10  
-관련: [`model-training-methods.md`](./model-training-methods.md) · [`ai-service/models/voting_config.json`](../../ai-service/models/voting_config.json)
+최종 갱신: 2026-08-12  
+관련: [`model-training-methods.md`](./model-training-methods.md) · [`ai-service/models/voting_config.json`](../../ai-service/models/voting_config.json) · [`ai-service/models/recipe.json`](../../ai-service/models/recipe.json)
 
-활성 경로: cascade voting만. 레거시 clf/reg/residual 가중치는 `ai-service/temp/models_backup_2026-08-10/`에만 보관하며 **로드하지 않음**.
+활성 경로: cascade voting (`POST /predict-voting`).  
+레거시 단일 헤드도 **`ai-service/models/legacy/`** 에서 로드해 capacity/residual/불량 blend에 포함한다 (구 `temp/models_backup_*` 경로 폐기).
 
 ## 1. 목적
 
-`lots` 공정 파라미터로 추론하여 `judgment_lots`의  
-`quality_defect`, `capacity`, `residual_li`, `probability` 를 채운다.
+`lots` 공정 파라미터로 `/predict-voting` 추론 후 **3단 쓰기 SSOT**:  
+`lot_results`(qd/residual NULL-fill) → `judgment_lots`(LR + voting capacity/prob) → `analysis_lots`(judgment 기준 risk/`scored_at` 2차 추론).
 
-## 2. 데이터
+## 2. 데이터·아티팩트
 
-- 원본: `c:\Users\OWNER\Downloads\data` CSV 11개 (1행 헤더, 2행~ 데이터)
-- 복사본: `ai-service/data/voting/`
-- 기존 운영 아티팩트 백업: `ai-service/temp/models_backup_2026-08-10/`
+- 피처 CSV: `ai-service/data/cathode_{clf,reg,qc_reg}_data.csv`
+- 운영 모델: `ai-service/models/` (`voting/` · `legacy/` · `symbolic_model/` · `voting_config.json`)
 
-## 3. 학습 합의
+## 3. 학습 합의 (멤버 학습 시)
 
-- 기존 파이프라인과 동일 + **`N_FOLDS = 6`**
-- **Test holdout 미사용** (100% Train; Optuna는 Train 내 TimeSeriesSplit만)
-- 멤버별 완료 시 `Downloads/data/<member_id>_완료.md` 기록
-- 임계값 **`default_threshold = 0.4`** (`quality_defect` 마지막 단계만; 학습 비포함)
+- 기존 파이프라인 + **`N_FOLDS = 6`** · Test holdout 미사용
+- 멤버 산출물: `ai-service/models/voting/<member>/`
 
-## 4. 투표 가중
+## 4. 운영 투표 가중 (현 config)
 
-| 용도 | 멤버 | 가중 | 분모 |
-|------|------|------|------|
-| capacity | reg_d50, reg_d90, reg_feature, cathode_feature_cap, special_cap | 1,1,2,3,4 | **11** |
-| residual_li | residual_d50/d90/feature, cathode_feature_res, special_res | 1,1,2,3,4 | **11** |
-| probability | clf×3 + residual_score×3 + cascade clf×2 | 1,1,2 + 1,1,2 + 3,4 | **15** |
+| 용도 | 분모 | 요지 |
+|------|-----:|------|
+| capacity | **15** | legacy_reg:4 · d50/d90:3 · feature/feat_cap:2 · special_cap:1 |
+| residual_li | **13** | legacy_res:4 · d50/d90:3 · feature:2 · feat_res:1 |
+| 불량 | OR | `p_blend=(7·clf_d90+3·legacy)/10` ≥ **0.55** **또는** symbolic ≥ ≈**0.0809** |
 
-- **reg(capacity) 가중 1+1+2=4 는 probability 투표에서 제외** (초기 “19”에서 제외 → 15)
-- 전체 가중 계수 표기 합(11+11+…과 별개로) 대화 초기안 19에서 capacity 슬롯 제외
+상세 상수: `models/recipe.json` · `voting_config.json` (`probability.mode` = `blend_or_symbolic`).
 
-## 5. probability (B안)
+## 5. 추론 스테이지
 
-1. capacitŷ · residual̂ 먼저 산정  
-2. cascade clf (`cathode_feature` / `special`)는 입력에 capacitŷ·residual̂ 사용  
-3. qc_reg 출력 → `standard` 기반 점수  
-   `s(r) = clip((r - 3000) / (4000 - 3000), 0, 1)`  
-   - caution 3000 · severe 3500(위험등급) · USL spare **4000**(규격 대비)
-4. `probability = Σ w_i · score_i / 15`  
-5. `quality_defect` = `probability ≥ 0.4` (**마지막** 단계; `voting_config.threshold.default_threshold`)
-
-스테이지 내 스케줄: `*_d50 || *_d90` 병렬 → `*_feature` → 나머지. 스테이지는 capacity → residual → probability → quality_defect 순.
+capacity → residual_li → (blend + symbolic) → quality_defect.  
+스테이지 내: `*_d50 || *_d90` 병렬 → 나머지.
 
 ## 6. 코드 진입점
 
 | 항목 | 경로 |
 |------|------|
-| 멤버 학습 | `ai-service/train_voting_member.py` |
-| 일괄 학습 | `ai-service/scripts/train_all_voting_models.py` |
 | 추론 | `ai-service/voting_predict.py` → `POST /predict-voting` |
-| backend | `aiProxy.predictVoting` · `lotScore.scoreLotWithAi` (voting만) |
-| 임계 | **0.4** → `quality_defect` |
-| `judgment_lots` | 운영 UPSERT는 **NULL-fill만** (`COALESCE`). 스키마·기존 행 수정 없음. 채점 검증은 `` `temp` `` |
-| temp 채점 | [`DB/temp_judgment_like.sql`](../../DB/temp_judgment_like.sql) · `npm run score:lots-to-temp` (`lots ORDER BY id LIMIT 10000`) |
+| backend | `aiProxy.predictVoting` · `lotScore.scoreLotWithAi` |
+| `lot_results` | **1단** qd/`residual_li` NULL-fill (피더 실측 COALESCE 유지) |
+| `judgment_lots` | **2단** qd/residual←LR · capacity/prob←voting · UPSERT **NULL-fill** (`COALESCE`) |
+| `analysis_lots` | **3단** judgment 기준 `combineLotScore` + SPC → risk/`scored_at` |
+| 폴러 | `spcLotSync` (60s) · `analysisLotSyncPoller` (10m) — 3단 전체 또는 analysis-only(`scoreAnalysisFromJudgment`) |
+| ai-service | backend 기동 시 자식 자동 기동 (`AI_SERVICE_AUTOSTART=1`, `AI_SERVICE_AUTOSTART=0`이면 수동) |
+
+채점 순서 SSOT: `/predict-voting` → **`lot_results` NULL-fill** → **`judgment_lots` 기록** → **judgment 기준 `analysis_lots` 2차 추론**.  
+폴러: judgment/analysis/`scored_at`/LR행 결손 **최신 우선** · LR 필드 백필은 잔여 · risk_reason은 score 락 밖.  
+`lot_results` NULL / residual NULL = 피더 stub 후 +60분 qd / +24h residual · 또는 AI fill 미도달(큐 굶주림이면 버그).

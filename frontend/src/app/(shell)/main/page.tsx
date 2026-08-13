@@ -4,19 +4,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
-import { mainApi, RISK_TOP_PAGE_SIZE, type RiskTopLot } from '@/api/mainApi';
+import {
+  mainApi,
+  RISK_TOP_PAGE_SIZE,
+  type QCostSummaryResponse,
+  type RiskTopLot,
+} from '@/api/mainApi';
 import { issueApi } from '@/api/issueApi';
 import {
   IssueDetailAnalysis,
   issueDetailToAnalysisModel,
   type IssueDetailAnalysisModel,
 } from '@/components/IssueDetailAnalysis';
-import {
-  useRefreshSettings,
-  useUiSettings,
-} from '@/components/layout/AppShell';
+import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
+import {
+  APPRAISAL_UNIT,
+  formatKRW,
+  type QCostResult,
+} from '@/lib/qCost';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -158,6 +165,421 @@ function formatDailyKpis(kpi: {
   ]
 }
 
+function currentYearMonth(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function parseYearMonth(yearMonth: string): { year: number; month: number } {
+  const [yRaw, mRaw] = yearMonth.split('-')
+  const year = Number(yRaw)
+  const month = Number(mRaw)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() + 1 }
+  }
+  return { year, month }
+}
+
+function formatYearMonthLabel(yearMonth: string): string {
+  const { year, month } = parseYearMonth(yearMonth)
+  return `${year}년 ${month}월`
+}
+
+function toYearMonth(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+/** Exclusive end date (`to`) for calendar month `YYYY-MM`. */
+function monthRange(yearMonth: string): { from: string; to: string } {
+  const { year: y, month: m } = parseYearMonth(yearMonth)
+  const from = `${y}-${String(m).padStart(2, '0')}-01`
+  const nextY = m === 12 ? y + 1 : y
+  const nextM = m === 12 ? 1 : m + 1
+  const to = `${nextY}-${String(nextM).padStart(2, '0')}-01`
+  return { from, to }
+}
+
+function resultFromQCostSummary(data: QCostSummaryResponse): QCostResult {
+  return {
+    appraisalCost: data.appraisalCost,
+    appraisalBreakdown: data.appraisalBreakdown,
+    internalCost: data.internalCost,
+    externalCost: data.externalCost,
+    preventionCost: data.preventionCost,
+    totalQCost: data.totalQCost,
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+}
+
+function csvEscape(value: string | number): string {
+  const text = String(value)
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
+}
+
+function buildQCostCsv(summary: QCostSummaryResponse, yearMonth: string): string {
+  const lines = [
+    ['항목', '값'],
+    ['조회월', formatYearMonthLabel(yearMonth)],
+    ['기간_from', summary.from],
+    ['기간_to(미포함)', summary.to],
+    ['안정_LOT수', summary.stableCount],
+    ['주의_LOT수', summary.warningCount],
+    ['심각_LOT수', summary.criticalCount],
+    ['내부불량_건수', summary.internalDefectCount],
+    ['외부유출_건수', summary.externalLeakCount],
+    ['평가비용_안정', summary.appraisalBreakdown.stable],
+    ['평가비용_주의', summary.appraisalBreakdown.warning],
+    ['평가비용_심각', summary.appraisalBreakdown.critical],
+    ['평가비용_합계', summary.appraisalCost],
+    ['내부실패비용', summary.internalCost],
+    ['외부실패비용', summary.externalCost],
+    ['예방비용', summary.preventionCost],
+    ['총_Q-Cost', summary.totalQCost],
+  ]
+  return lines.map((row) => row.map(csvEscape).join(',')).join('\r\n')
+}
+
+function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          reject(new Error('PDF 이미지 생성 실패'))
+          return
+        }
+        const buffer = await blob.arrayBuffer()
+        resolve(new Uint8Array(buffer))
+      },
+      'image/jpeg',
+      quality,
+    )
+  })
+}
+
+/** Minimal single-page PDF wrapping a JPEG (Korean text via canvas fonts). */
+function buildJpegPdf(jpeg: Uint8Array, width: number, height: number): Blob {
+  const encoder = new TextEncoder()
+  const parts: Uint8Array[] = []
+  let offset = 0
+  const offsets: number[] = [0]
+
+  const push = (chunk: string | Uint8Array) => {
+    const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk
+    parts.push(bytes)
+    offset += bytes.length
+  }
+
+  const startObj = (id: number) => {
+    offsets[id] = offset
+  }
+
+  push('%PDF-1.4\n')
+
+  startObj(1)
+  push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n')
+
+  startObj(2)
+  push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n')
+
+  startObj(3)
+  push(
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Contents 4 0 R /Resources << /XObject << /Im0 5 0 R >> >> >>\nendobj\n`,
+  )
+
+  const content = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ\n`
+  startObj(4)
+  push(`4 0 obj\n<< /Length ${encoder.encode(content).length} >>\nstream\n${content}endstream\nendobj\n`)
+
+  startObj(5)
+  push(
+    `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+  )
+  push(jpeg)
+  push('\nendstream\nendobj\n')
+
+  const xrefStart = offset
+  push(`xref\n0 6\n0000000000 65535 f \n`)
+  for (let id = 1; id <= 5; id += 1) {
+    push(`${String(offsets[id]).padStart(10, '0')} 00000 n \n`)
+  }
+  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`)
+
+  const total = parts.reduce((sum, part) => sum + part.length, 0)
+  const merged = new Uint8Array(total)
+  let cursor = 0
+  for (const part of parts) {
+    merged.set(part, cursor)
+    cursor += part.length
+  }
+  return new Blob([merged], { type: 'application/pdf' })
+}
+
+async function buildQCostPdfBlob(
+  summary: QCostSummaryResponse,
+  yearMonth: string,
+): Promise<Blob> {
+  const width = 794
+  const height = 1123
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('PDF 캔버스를 만들 수 없습니다.')
+
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, width, height)
+
+  const drawText = (
+    text: string,
+    x: number,
+    y: number,
+    options?: { size?: number; weight?: string; color?: string },
+  ) => {
+    const size = options?.size ?? 14
+    const weight = options?.weight ?? 'normal'
+    ctx.fillStyle = options?.color ?? '#0f172a'
+    ctx.font = `${weight} ${size}px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`
+    ctx.fillText(text, x, y)
+  }
+
+  drawText('Q-Cost 리포트', 48, 64, { size: 28, weight: '700' })
+  drawText(`조회 월: ${formatYearMonthLabel(yearMonth)}`, 48, 100, { size: 14, color: '#475569' })
+  drawText(`집계 기간: ${summary.from} ~ ${summary.to} (to 미포함)`, 48, 124, {
+    size: 13,
+    color: '#64748b',
+  })
+
+  ctx.strokeStyle = '#e2e8f0'
+  ctx.beginPath()
+  ctx.moveTo(48, 148)
+  ctx.lineTo(width - 48, 148)
+  ctx.stroke()
+
+  drawText('총 Q-Cost', 48, 190, { size: 14, color: '#64748b' })
+  drawText(formatKRW(summary.totalQCost), 48, 230, { size: 32, weight: '700' })
+
+  const rows: Array<[string, string]> = [
+    ['평가 비용 합계', formatKRW(summary.appraisalCost)],
+    [
+      `  · 안정 ${summary.stableCount.toLocaleString('ko-KR')} LOT`,
+      formatKRW(summary.appraisalBreakdown.stable),
+    ],
+    [
+      `  · 주의 ${summary.warningCount.toLocaleString('ko-KR')} LOT`,
+      formatKRW(summary.appraisalBreakdown.warning),
+    ],
+    [
+      `  · 심각 ${summary.criticalCount.toLocaleString('ko-KR')} LOT`,
+      formatKRW(summary.appraisalBreakdown.critical),
+    ],
+    [
+      `내부 실패 (${summary.internalDefectCount.toLocaleString('ko-KR')}건)`,
+      formatKRW(summary.internalCost),
+    ],
+    [
+      `외부 실패 (${summary.externalLeakCount.toLocaleString('ko-KR')}건)`,
+      formatKRW(summary.externalCost),
+    ],
+    ['예방 비용 (월 고정)', formatKRW(summary.preventionCost)],
+  ]
+
+  let y = 290
+  drawText('상세 내역', 48, y, { size: 16, weight: '700' })
+  y += 28
+  for (const [label, amount] of rows) {
+    drawText(label, 48, y, { size: 14, color: '#334155' })
+    ctx.textAlign = 'right'
+    drawText(amount, width - 48, y, { size: 14, weight: '600' })
+    ctx.textAlign = 'left'
+    y += 28
+  }
+
+  y += 16
+  ctx.strokeStyle = '#e2e8f0'
+  ctx.beginPath()
+  ctx.moveTo(48, y)
+  ctx.lineTo(width - 48, y)
+  ctx.stroke()
+  y += 36
+  drawText(
+    `생성 시각: ${new Date().toLocaleString('ko-KR', { hour12: false })}`,
+    48,
+    y,
+    { size: 12, color: '#94a3b8' },
+  )
+  drawText('단가: 안정 5만 · 주의 10만 · 심각 15만 / LOT · 내부 50만 · 외부 300만 · 예방 2,000만', 48, y + 24, {
+    size: 11,
+    color: '#94a3b8',
+  })
+
+  const jpeg = await canvasToJpegBytes(canvas)
+  return buildJpegPdf(jpeg, width, height)
+}
+
+const MONTH_LABELS = [
+  '1월',
+  '2월',
+  '3월',
+  '4월',
+  '5월',
+  '6월',
+  '7월',
+  '8월',
+  '9월',
+  '10월',
+  '11월',
+  '12월',
+] as const
+
+/** Year/month popover — any past year (e.g. last year) selectable. */
+function QCostMonthPicker({
+  value,
+  onChange,
+  isDark,
+}: {
+  value: string
+  onChange: (yearMonth: string) => void
+  isDark: boolean
+}) {
+  const selected = parseYearMonth(value)
+  const now = new Date()
+  const maxYear = now.getFullYear()
+  const minYear = 2020
+
+  const [open, setOpen] = useState(false)
+  const [viewYear, setViewYear] = useState(selected.year)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setViewYear(Math.min(maxYear, Math.max(minYear, selected.year)))
+  }, [open, selected.year, maxYear, minYear])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  const panelClass = isDark
+    ? 'border-slate-600 bg-slate-900 text-slate-100'
+    : 'border-slate-200 bg-white text-slate-900'
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500'
+  const btnClass = isDark
+    ? 'h-9 rounded-lg border border-slate-600 bg-slate-900 px-3 text-sm font-medium text-slate-100 outline-none transition-colors hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500/40'
+  const navBtnClass = isDark
+    ? 'inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-800 disabled:opacity-30'
+    : 'inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 disabled:opacity-30'
+
+  return (
+    <div className="relative shrink-0" ref={rootRef}>
+      <span className={`mb-1 block text-[11px] font-medium ${muted}`}>조회 월</span>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`${btnClass} inline-flex min-w-[9.5rem] items-center justify-between gap-2`}
+      >
+        <span className="tabular-nums">{formatYearMonthLabel(value)}</span>
+        <span aria-hidden className={muted}>
+          ▾
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="조회 월 선택"
+          className={`absolute right-0 z-40 mt-2 w-[17.5rem] rounded-xl border p-3 shadow-xl ${panelClass}`}
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className={navBtnClass}
+              aria-label="이전 해"
+              disabled={viewYear <= minYear}
+              onClick={() => setViewYear((y) => Math.max(minYear, y - 1))}
+            >
+              ‹
+            </button>
+            <p className="text-sm font-semibold tabular-nums">{viewYear}년</p>
+            <button
+              type="button"
+              className={navBtnClass}
+              aria-label="다음 해"
+              disabled={viewYear >= maxYear}
+              onClick={() => setViewYear((y) => Math.min(maxYear, y + 1))}
+            >
+              ›
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            {MONTH_LABELS.map((label, index) => {
+              const month = index + 1
+              const isSelected = selected.year === viewYear && selected.month === month
+              const isFuture =
+                viewYear > maxYear ||
+                (viewYear === maxYear && month > now.getMonth() + 1)
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  disabled={isFuture}
+                  onClick={() => {
+                    onChange(toYearMonth(viewYear, month))
+                    setOpen(false)
+                  }}
+                  className={`rounded-lg px-2 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white'
+                      : isDark
+                        ? 'text-slate-200 hover:bg-slate-800'
+                        : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
+          <p className={`mt-3 text-[11px] leading-relaxed ${muted}`}>
+            ‹ › 로 연도를 바꿔 작년 등 과거 월을 선택할 수 있습니다.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /* -------------------------------------------------------------------------- */
 /* Small UI pieces                                                            */
 /* -------------------------------------------------------------------------- */
@@ -265,7 +687,6 @@ function Modal({
 
 export default function MainPage() {
   const { isDark, language } = useUiSettings();
-  const { autoRefreshEnabled, refreshInterval } = useRefreshSettings();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedLot, setSelectedLot] = useState<RiskLotView | null>(null);
   const [issueAnalysis, setIssueAnalysis] = useState<IssueDetailAnalysisModel | null>(null);
@@ -278,10 +699,16 @@ export default function MainPage() {
   const [riskTopTotal, setRiskTopTotal] = useState(0);
   const [riskTopTotalPages, setRiskTopTotalPages] = useState(1);
   const [summaryKpis, setSummaryKpis] = useState<SummaryKpi[]>(() => formatDailyKpis(null));
+  const [qCostMonth, setQCostMonth] = useState(currentYearMonth);
+  const [qCostSummary, setQCostSummary] = useState<QCostSummaryResponse | null>(null);
+  const [qCostLoading, setQCostLoading] = useState(true);
+  const [qCostError, setQCostError] = useState<string | null>(null);
+  const [qCostExporting, setQCostExporting] = useState<'csv' | 'pdf' | null>(null);
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const loadSeqRef = useRef(0);
+  const qCostSeqRef = useRef(0);
 
   const pushToast = useCallback((message: string, variant: ToastItem['variant'] = 'info') => {
     toastIdRef.current += 1;
@@ -334,22 +761,87 @@ export default function MainPage() {
       );
     }
 
-    if (seq === loadSeqRef.current) setRiskLotsLoading(false);
+    if (seq === loadSeqRef.current) {
+      setRiskLotsLoading(false);
+    }
   }, [pushToast, riskTopPage]);
 
   useEffect(() => {
     void loadMainData();
   }, [loadMainData]);
 
-  useShellRefresh(loadMainData);
+  const loadQCost = useCallback(async () => {
+    const seq = ++qCostSeqRef.current;
+    setQCostLoading(true);
+    setQCostError(null);
+    const { from, to } = monthRange(qCostMonth);
+    try {
+      const { data } = await mainApi.getQCost({ from, to });
+      if (seq !== qCostSeqRef.current) return;
+      setQCostSummary(data);
+    } catch (error) {
+      if (seq !== qCostSeqRef.current) return;
+      setQCostSummary(null);
+      setQCostError(getApiErrorMessage(error, 'Q-Cost 데이터를 불러오지 못했습니다.'));
+    } finally {
+      if (seq === qCostSeqRef.current) setQCostLoading(false);
+    }
+  }, [qCostMonth]);
 
   useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const timer = window.setInterval(() => {
-      void loadMainData();
-    }, refreshInterval * 60_000);
-    return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, refreshInterval, loadMainData]);
+    void loadQCost();
+  }, [loadQCost]);
+
+  useShellRefresh(() => {
+    void loadMainData();
+    void loadQCost();
+  });
+
+  const handleDownloadQCostCsv = useCallback(() => {
+    if (!qCostSummary) {
+      pushToast('다운로드할 Q-Cost 데이터가 없습니다.', 'error');
+      return;
+    }
+    try {
+      setQCostExporting('csv');
+      const csv = `\uFEFF${buildQCostCsv(qCostSummary, qCostMonth)}`;
+      downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `qcost_${qCostMonth}.csv`);
+      pushToast('Q-Cost CSV를 다운로드했습니다.', 'success');
+    } catch (error) {
+      pushToast(getApiErrorMessage(error, 'CSV 다운로드에 실패했습니다.'), 'error');
+    } finally {
+      setQCostExporting(null);
+    }
+  }, [qCostMonth, qCostSummary, pushToast]);
+
+  const handleDownloadQCostPdf = useCallback(async () => {
+    if (!qCostSummary) {
+      pushToast('다운로드할 Q-Cost 데이터가 없습니다.', 'error');
+      return;
+    }
+    try {
+      setQCostExporting('pdf');
+      const blob = await buildQCostPdfBlob(qCostSummary, qCostMonth);
+      downloadBlob(blob, `qcost_${qCostMonth}.pdf`);
+      pushToast('Q-Cost PDF를 다운로드했습니다.', 'success');
+    } catch (error) {
+      pushToast(getApiErrorMessage(error, 'PDF 다운로드에 실패했습니다.'), 'error');
+    } finally {
+      setQCostExporting(null);
+    }
+  }, [qCostMonth, qCostSummary, pushToast]);
+
+  const qCostResult = useMemo(
+    () => (qCostSummary ? resultFromQCostSummary(qCostSummary) : null),
+    [qCostSummary],
+  );
+
+  const qCostAppraisalMax = Math.max(
+    qCostResult?.appraisalBreakdown.stable ?? 0,
+    qCostResult?.appraisalBreakdown.warning ?? 0,
+    qCostResult?.appraisalBreakdown.critical ?? 0,
+    1,
+  );
 
   const riskTopPageItems = useMemo(
     () => buildPaginationItems(riskTopPage, riskTopTotalPages),
@@ -499,32 +991,232 @@ export default function MainPage() {
         </section>
 
         <section className="grid grid-cols-1 items-stretch gap-5 pb-8 xl:grid-cols-5">
-          <section className={`${cardClass} flex h-full flex-col p-5 md:p-6 xl:col-span-3`} aria-labelledby="trend-heading">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          <section className={`${cardClass} flex h-full flex-col p-5 md:p-6 xl:col-span-3`} aria-labelledby="qcost-heading">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2
-                  id="trend-heading"
+                  id="qcost-heading"
                   className={`text-base font-semibold tracking-tight ${
                     isDark ? 'text-slate-100' : 'text-slate-900'
                   }`}
                 >
-                  생산 추이
+                  Q-Cost
                 </h2>
+                <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Tier-based Quality Cost · 월 단위 집계
+                </p>
               </div>
-              <Link href="/dashboard" className={detailLinkClass}>
-                상세보기
-                <span aria-hidden="true">→</span>
-              </Link>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadQCostCsv}
+                    disabled={!qCostSummary || qCostLoading || qCostExporting !== null}
+                    className={
+                      isDark
+                        ? 'inline-flex h-9 items-center rounded-lg border border-slate-600 bg-slate-900 px-3 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40'
+                        : 'inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                    }
+                  >
+                    {qCostExporting === 'csv' ? 'CSV…' : 'CSV'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadQCostPdf()}
+                    disabled={!qCostSummary || qCostLoading || qCostExporting !== null}
+                    className={
+                      isDark
+                        ? 'inline-flex h-9 items-center rounded-lg border border-slate-600 bg-slate-900 px-3 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40'
+                        : 'inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                    }
+                  >
+                    {qCostExporting === 'pdf' ? 'PDF…' : 'PDF'}
+                  </button>
+                </div>
+                <QCostMonthPicker
+                  value={qCostMonth}
+                  onChange={setQCostMonth}
+                  isDark={isDark}
+                />
+              </div>
             </div>
 
-            <div
-              className={`mt-5 flex min-h-[280px] flex-1 items-center justify-center rounded-lg ${
-                isDark ? 'bg-slate-900/40' : 'bg-slate-50/80'
-              }`}
-            >
-              <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                표시할 내용이 없습니다.
-              </p>
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+              <div
+                className={`rounded-xl border p-5 shadow-sm ${
+                  isDark
+                    ? 'border-slate-600 bg-gradient-to-br from-slate-800 to-slate-900'
+                    : 'border-slate-200 bg-gradient-to-br from-white to-slate-50'
+                }`}
+              >
+                <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  총 Q-Cost 발생 금액
+                </p>
+                <p
+                  className={`mt-2 text-3xl font-bold tracking-tight tabular-nums sm:text-4xl ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                  {qCostLoading ? '…' : formatKRW(qCostResult?.totalQCost ?? 0)}
+                </p>
+                <p className={`mt-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  평가 + 내부실패 + 외부실패 + 예방(월 고정)
+                  {qCostSummary ? ` · ${qCostSummary.from} ~ ${qCostSummary.to}` : ''}
+                </p>
+                {qCostError ? (
+                  <p className={`mt-2 text-xs font-medium ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                    {qCostError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {(
+                  [
+                    {
+                      id: 'appraisal',
+                      label: '평가 비용',
+                      amount: qCostResult?.appraisalCost ?? 0,
+                      description: '등급별 LOT 검사·평가',
+                      tone: isDark ? 'border-amber-700/50 bg-amber-950/30' : 'border-amber-200 bg-amber-50/60',
+                      valueTone: isDark ? 'text-amber-300' : 'text-amber-800',
+                    },
+                    {
+                      id: 'internal',
+                      label: '내부 실패 비용',
+                      amount: qCostResult?.internalCost ?? 0,
+                      description: '불량 1건당 500,000원',
+                      tone: isDark ? 'border-red-800/50 bg-red-950/30' : 'border-red-200 bg-red-50/60',
+                      valueTone: isDark ? 'text-red-300' : 'text-red-700',
+                    },
+                    {
+                      id: 'external',
+                      label: '외부 실패 비용',
+                      amount: qCostResult?.externalCost ?? 0,
+                      description: '유출 1건당 3,000,000원',
+                      tone: isDark ? 'border-red-700/60 bg-red-950/40' : 'border-red-300 bg-red-50',
+                      valueTone: isDark ? 'text-red-200' : 'text-red-800',
+                    },
+                    {
+                      id: 'prevention',
+                      label: '예방 비용',
+                      amount: qCostResult?.preventionCost ?? 0,
+                      description: '월 고정 20,000,000원',
+                      tone: isDark ? 'border-blue-800/50 bg-blue-950/30' : 'border-blue-200 bg-blue-50/60',
+                      valueTone: isDark ? 'text-blue-300' : 'text-blue-700',
+                    },
+                  ] as const
+                ).map((card) => (
+                  <div key={card.id} className={`rounded-xl border p-4 shadow-sm ${card.tone}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {card.label}
+                    </p>
+                    <p className={`mt-2 text-xl font-bold tabular-nums ${card.valueTone}`}>
+                      {qCostLoading ? '…' : formatKRW(card.amount)}
+                    </p>
+                    <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {card.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className={`${subpanelClass} p-4`}>
+                <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  평가 비용(Appraisal) 상세
+                </h3>
+                <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  안정 5만 · 주의 10만 · 심각 15만 / LOT
+                </p>
+                <ul className="mt-4 space-y-3">
+                  {(
+                    [
+                      {
+                        id: 'stable',
+                        label: '안정',
+                        count: qCostSummary?.stableCount ?? 0,
+                        unit: APPRAISAL_UNIT.stable,
+                        amount: qCostResult?.appraisalBreakdown.stable ?? 0,
+                        badge: isDark
+                          ? 'bg-emerald-950/50 text-emerald-300 ring-1 ring-emerald-700/50'
+                          : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200',
+                        bar: 'bg-emerald-500',
+                      },
+                      {
+                        id: 'warning',
+                        label: '주의',
+                        count: qCostSummary?.warningCount ?? 0,
+                        unit: APPRAISAL_UNIT.warning,
+                        amount: qCostResult?.appraisalBreakdown.warning ?? 0,
+                        badge: isDark
+                          ? 'bg-amber-950/50 text-amber-300 ring-1 ring-amber-700/50'
+                          : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200',
+                        bar: 'bg-amber-500',
+                      },
+                      {
+                        id: 'critical',
+                        label: '심각',
+                        count: qCostSummary?.criticalCount ?? 0,
+                        unit: APPRAISAL_UNIT.critical,
+                        amount: qCostResult?.appraisalBreakdown.critical ?? 0,
+                        badge: isDark
+                          ? 'bg-red-950/50 text-red-300 ring-1 ring-red-700/50'
+                          : 'bg-red-50 text-red-800 ring-1 ring-red-200',
+                        bar: 'bg-red-500',
+                      },
+                    ] as const
+                  ).map((row) => {
+                    const pct = Math.round((row.amount / qCostAppraisalMax) * 100)
+                    return (
+                      <li key={row.id}>
+                        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.badge}`}
+                            >
+                              {row.label}
+                            </span>
+                            <span className={`text-xs tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              {row.count.toLocaleString('ko-KR')} LOT · {formatKRW(row.unit)}/LOT
+                            </span>
+                          </div>
+                          <span
+                            className={`text-sm font-semibold tabular-nums ${
+                              isDark ? 'text-slate-100' : 'text-slate-900'
+                            }`}
+                          >
+                            {formatKRW(row.amount)}
+                          </span>
+                        </div>
+                        <div
+                          className={`h-2 overflow-hidden rounded-full ${
+                            isDark ? 'bg-slate-800' : 'bg-slate-100'
+                          }`}
+                        >
+                          <div
+                            className={`h-full rounded-full transition-[width] ${row.bar}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+                <div
+                  className={`mt-4 flex items-center justify-between border-t pt-3 text-sm ${
+                    isDark ? 'border-slate-700' : 'border-slate-100'
+                  }`}
+                >
+                  <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    평가 비용 합계
+                  </span>
+                  <span
+                    className={`font-bold tabular-nums ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                  >
+                    {formatKRW(qCostResult?.appraisalCost ?? 0)}
+                  </span>
+                </div>
+              </div>
             </div>
           </section>
 

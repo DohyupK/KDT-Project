@@ -1,12 +1,11 @@
 /**
- * Every 10 minutes: score lots missing analysis_lots (or null probability),
- * then fill risk_reason via local vLLM. Always re-seed open issues for 심각 lots
- * (even when there is nothing left to score). Complements per-insert syncSpcLots.
+ * Periodic score for lots missing analysis / judgment / lot_results / scored_at.
+ * Complements per-insert syncSpcLots. Started after ai-service health (index.ts).
  */
-import { query } from '../db/connection.js'
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
+import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
 
 const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
 
@@ -30,39 +29,51 @@ async function tick() {
     return
   }
   running = true
+
+  let lotIds: string[] = []
   try {
-    const rows = await query<{ id: string }[]>(
-      `SELECT l.id
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       WHERE (a.lot_id IS NULL OR a.probability IS NULL)
-         AND l.id <> ?
-       ORDER BY l.\`timestamp\` ASC, l.id ASC
-       LIMIT 200`,
-      [SYS_HANDOVER],
-    )
-    const lotIds = rows.map((r) => r.id)
+    const picked = await pickUnscoredLotIds(200)
+    lotIds = picked.lotIds
+    const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
     if (lotIds.length === 0) {
       console.log('[analysis-sync] nothing to score')
     } else {
-      console.log('[analysis-sync] score_start', { count: lotIds.length })
-      const scored = await lotService.scoreAllLots({
-        lotIds,
-        concurrency: 4,
+      console.log('[analysis-sync] score_start', {
+        count: lotIds.length,
+        queue_a: picked.reason.queue_a,
+        queue_b: picked.reason.queue_b,
+        analysis_only: analysisOnlyIds.length,
+        full: fullScoreIds.length,
       })
-      console.log('[analysis-sync] score_done', scored)
-      const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
-      console.log('[analysis-sync] risk_reasons', reasons)
-      const actions = await fillRecommendedActionsForLots(lotIds, { concurrency: 2 })
-      console.log('[analysis-sync] recommended_actions', actions)
+if (analysisOnlyIds.length > 0) {
+        let rebuilt = 0
+        for (const id of analysisOnlyIds) {
+          if (await lotService.scoreAnalysisFromJudgment(id)) rebuilt++
+        }
+        console.log('[analysis-sync] analysis_only_done', { rebuilt })
+      }
+      if (fullScoreIds.length > 0) {
+        const scored = await lotService.scoreAllLots({
+          lotIds: fullScoreIds,
+          concurrency: 4,
+        })
+        console.log('[analysis-sync] score_done', scored)
+      }
     }
-    // Backfill issues for already-scored 심각 lots (seed is not scoring-dependent).
     const issuesCreated = await lotService.ensureIssuesForRiskLots()
     if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {
     console.error('[analysis-sync] error', err)
   } finally {
     running = false
+  }
+
+  if (lotIds.length === 0) return
+  try {
+    const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
+    console.log('[analysis-sync] risk_reasons', reasons)
+  } catch (err) {
+    console.error('[analysis-sync] risk_reason_failed', err)
   }
 }
 
@@ -74,7 +85,6 @@ export function startAnalysisLotSyncPoller(): void {
   if (timer) return
   const ms = intervalMs()
   console.log(`[analysis-sync] started interval_ms=${ms}`)
-  // First tick delayed slightly so SPC sync can run first on boot.
   setTimeout(() => {
     void tick()
   }, 15_000)
