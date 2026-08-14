@@ -244,7 +244,7 @@ function productionDailyApiFilters(f: ProductionDailyFilterState) {
   };
 }
 
-type LiveConnectionStatus = 'connected' | 'updating' | 'error';
+type LiveConnectionStatus = 'idle' | 'connected' | 'updating' | 'error';
 
 const LIVE_POLL_INTERVAL_MS = 30_000;
 
@@ -1522,7 +1522,7 @@ export default function DashBoardPage() {
 
   /** 생산 원천 — KPI / 차트 / 상세 테이블 공유 */
   const [liveLots] = useState<CathodeLot[]>([]);
-  const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('connected');
+  const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('idle');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -2339,7 +2339,9 @@ export default function DashBoardPage() {
       ? '업데이트 중'
       : liveStatus === 'error'
         ? '업데이트 지연'
-        : 'API 연결됨';
+        : liveStatus === 'idle'
+          ? 'API 대기'
+          : 'API 연결됨';
 
   return (
     <div
@@ -2386,7 +2388,9 @@ export default function DashBoardPage() {
                       ? 'bg-amber-500'
                       : liveStatus === 'updating'
                         ? 'bg-blue-500'
-                        : 'bg-emerald-500'
+                        : liveStatus === 'idle'
+                          ? 'bg-slate-400'
+                          : 'bg-emerald-500'
                   }`}
                   aria-hidden="true"
                 />
