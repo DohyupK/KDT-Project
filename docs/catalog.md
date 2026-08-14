@@ -41,7 +41,7 @@
 | [`2026-08-08.md`](./work-log/2026-08-08.md) | 위험 LOT · KPI · issues 리팩터 |
 | [`2026-08-10.md`](./work-log/2026-08-10.md) | N_FOLDS 6 · 학습 SSOT |
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
-| [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 |
+| [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 
@@ -73,6 +73,7 @@
 | [`optimization-event-schema.md`](./references/optimization-event-schema.md) | Approve/Undo · outcome 로그 |
 | [`control-bounds-wiring.md`](./references/control-bounds-wiring.md) | 공정 한계치 Setting↔whatif |
 | [`login-auth-tech-stack.md`](./references/login-auth-tech-stack.md) | 로그인 Auth 패키지 기록 |
+| [`aws-dashboard-empty-next-dev.md`](./references/aws-dashboard-empty-next-dev.md) | Lightsail 대시보드 공란 (`next dev` origin) |
 | [`important-paths.md`](./references/important-paths.md) | 자주 쓰는 코드 경로 |
 | [`chat-history-qdrant.md`](./references/chat-history-qdrant.md) | 챗 장기기억 Qdrant 컬렉션 |
 | [`scenario-smoke-checklist.md`](./references/scenario-smoke-checklist.md) | 시나리오 스모크 체크리스트 |
