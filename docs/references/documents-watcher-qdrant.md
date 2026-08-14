@@ -246,4 +246,5 @@ MariaDB `text_match`: [`DB/text_match.sql`](../../DB/text_match.sql) · `python 
 - [`secure-rag.md`](./secure-rag.md) — RAG · ingest · 환경  
 - [`general-chatbot-page-context.md`](./general-chatbot-page-context.md) — 일반 챗 페이지 컨텍스트  
 - [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md) — 이슈 보고서 메일  
+- [`docs/guides/aws-lightsail-docker.md`](../guides/aws-lightsail-docker.md) — Lightsail에 n8n·Qdrant  
 - DDL: [`DB/text_match.sql`](../../DB/text_match.sql) · [`DB/schema.sql`](../../DB/schema.sql)
