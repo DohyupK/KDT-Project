@@ -130,7 +130,11 @@ let actionsUpdated = 0
        ORDER BY s.produced_at ASC, s.lot_id ASC`,
     )
 
-    log(quiet, '[spc-sync] missing', { table, count: missing.length })
+    if (missing.length === 0) {
+      log(quiet, '[spc-sync] no new feeder rows (already in LOTS)', { table })
+    } else {
+      log(quiet, '[spc-sync] missing', { table, count: missing.length })
+    }
 
     const inserted: string[] = []
     const CHUNK = 200

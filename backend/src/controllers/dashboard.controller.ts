@@ -8,6 +8,7 @@ function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => P
 }
 
 export const listLotRisks = asyncHandler(async (req, res) => {
+  console.log(`[api] GET ${req.originalUrl}`)
   const result = await dashboardService.listLotRisks({
     page: req.query.page != null ? Number(req.query.page) : 1,
     pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : 5,
