@@ -1531,6 +1531,7 @@ export default function DashBoardPage() {
   const chartsFetchingRef = useRef(false);
   const dailyFetchingRef = useRef(false);
   const [lotRiskRows, setLotRiskRows] = useState<LotRiskRow[]>([]);
+  const [lotRiskFetchError, setLotRiskFetchError] = useState<string | null>(null);
   const [lotRiskTotal, setLotRiskTotal] = useState(0);
   const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
   const [selectedLotRiskDetail, setSelectedLotRiskDetail] = useState<LotRiskApiDetail | null>(null);
@@ -2046,11 +2047,14 @@ export default function DashBoardPage() {
       const lotResponse = await dashboardApi.listLotRisks(
         lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
       );
+      setLotRiskFetchError(null);
       setLotRiskRows(lotResponse.data.items.map(mapDashboardLotRiskItem));
       setLotRiskTotal(lotResponse.data.total);
       setLotRiskTotalPages(lotResponse.data.totalPages);
       markFetchEnd(true);
-    } catch {
+    } catch (err) {
+      console.error('[dashboard] GET /api/dashboard/lot-risks failed', err);
+      setLotRiskFetchError('LOT 위험 데이터를 불러오지 못했습니다.');
       markFetchEnd(false);
     } finally {
       lotFetchingRef.current = false;
@@ -2159,7 +2163,10 @@ export default function DashBoardPage() {
   }, [dataPanelTab, fetchLotRisks, fetchProductionDaily, fetchTrendAndFi]);
 
   useEffect(() => {
-    void fetchLotRisks();
+    void fetchLotRisks({ force: true });
+    return () => {
+      lotFetchingRef.current = false;
+    };
   }, [fetchLotRisks]);
 
   useEffect(() => {
@@ -2925,7 +2932,9 @@ export default function DashBoardPage() {
                             isDark ? 'text-slate-400' : 'text-slate-500'
                           }`}
                         >
-                          {lotRiskFilterActive
+                          {lotRiskFetchError
+                            ? lotRiskFetchError
+                            : lotRiskFilterActive
                             ? '검색 조건에 해당하는 LOT가 없습니다. 조건을 바꾼 뒤 검색을 눌러 주세요.'
                             : '표시할 LOT 위험등급 데이터가 없습니다.'}
                         </td>
