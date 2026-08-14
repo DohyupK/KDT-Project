@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { Maximize2, MessageCircle, Minimize2, Shield, X } from 'lucide-react'
+import { useUiSettings } from '@/components/layout/AppShell'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import {
   postApproveControl,
@@ -159,6 +160,7 @@ function formatThreadTime(iso?: string | null): string {
 }
 
 export default function GlobalChatbot() {
+  const { isDark } = useUiSettings()
   const pageChat = usePageChatOptional()
   const [chatOpen, setChatOpen] = useState(false)
 
@@ -746,21 +748,35 @@ export default function GlobalChatbot() {
           <div
             className={
               isExpanded
-                ? 'mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl'
-                : 'flex h-[min(680px,calc(100vh-24px))] max-h-[calc(100vh-24px)] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:w-[420px]'
+                ? `mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border shadow-2xl ${
+                    isDark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+                  }`
+                : `flex h-[min(680px,calc(100vh-24px))] max-h-[calc(100vh-24px)] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border shadow-2xl sm:w-[420px] ${
+                    isDark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+                  }`
             }
           >
             <div
               className={`flex-none border-b ${
-                chatMode === 'secure' ? 'border-amber-200' : 'border-blue-200'
+                chatMode === 'secure'
+                  ? isDark
+                    ? 'border-amber-800'
+                    : 'border-amber-200'
+                  : isDark
+                    ? 'border-slate-700'
+                    : 'border-blue-200'
               }`}
             >
               <div className="flex items-center justify-between gap-3 px-4 py-3">
                 <div
                   className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                     chatMode === 'secure'
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-blue-100 text-blue-700'
+                      ? isDark
+                        ? 'bg-amber-900/60 text-amber-200'
+                        : 'bg-amber-100 text-amber-800'
+                      : isDark
+                        ? 'bg-blue-900/60 text-blue-200'
+                        : 'bg-blue-100 text-blue-700'
                   }`}
                 >
                   {chatMode === 'secure' ? (
@@ -771,14 +787,22 @@ export default function GlobalChatbot() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <strong className="truncate text-base font-bold text-slate-900">
+                    <strong
+                      className={`truncate text-base font-bold ${
+                        isDark ? 'text-slate-100' : 'text-slate-900'
+                      }`}
+                    >
                       YAHO! AI 챗봇
                     </strong>
                     <span
                       className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         chatMode === 'secure'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-blue-100 text-blue-700'
+                          ? isDark
+                            ? 'bg-amber-900/60 text-amber-200'
+                            : 'bg-amber-100 text-amber-800'
+                          : isDark
+                            ? 'bg-blue-900/60 text-blue-200'
+                            : 'bg-blue-100 text-blue-700'
                       }`}
                     >
                       {chatMode === 'secure' ? '보안 상담' : '일반 상담'}
@@ -790,7 +814,11 @@ export default function GlobalChatbot() {
                   aria-label={isExpanded ? '팝업으로 축소' : '전체화면으로 확대'}
                   title={isExpanded ? '팝업으로 축소' : '전체화면으로 확대'}
                   onClick={() => setIsExpanded((prev) => !prev)}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg focus:outline-none focus:ring-2 ${
+                    isDark
+                      ? 'text-slate-400 hover:bg-slate-800 focus:ring-slate-600'
+                      : 'text-slate-500 hover:bg-slate-100 focus:ring-slate-300'
+                  }`}
                 >
                   {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </button>
@@ -801,7 +829,11 @@ export default function GlobalChatbot() {
                     else setSecureNewThreadNonce((n) => n + 1)
                   }}
                   disabled={chatMode === 'general' ? pending : false}
-                  className="hidden h-9 shrink-0 items-center rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:inline-flex"
+                  className={`hidden h-9 shrink-0 items-center rounded-lg border px-2.5 text-[11px] font-medium disabled:opacity-50 sm:inline-flex ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
                   새 대화
                 </button>
@@ -812,7 +844,11 @@ export default function GlobalChatbot() {
                     setChatOpen(false)
                     setIsExpanded(false)
                   }}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg focus:outline-none focus:ring-2 ${
+                    isDark
+                      ? 'text-slate-400 hover:bg-slate-800 focus:ring-slate-600'
+                      : 'text-slate-500 hover:bg-slate-100 focus:ring-slate-300'
+                  }`}
                 >
                   <X size={16} />
                 </button>
@@ -820,7 +856,9 @@ export default function GlobalChatbot() {
               <div
                 role="group"
                 aria-label="챗봇 모드 선택"
-                className="grid grid-cols-2 gap-2 border-t border-slate-100 px-4 py-3"
+                className={`grid grid-cols-2 gap-2 border-t px-4 py-3 ${
+                  isDark ? 'border-slate-700' : 'border-slate-100'
+                }`}
               >
                 <button
                   type="button"
@@ -829,7 +867,9 @@ export default function GlobalChatbot() {
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'general'
                       ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
-                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
+                      : isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700 focus:ring-slate-500'
+                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
                   }`}
                 >
                   <MessageCircle size={14} aria-hidden />
@@ -842,7 +882,9 @@ export default function GlobalChatbot() {
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'secure'
                       ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500'
-                      : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
+                      : isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700 focus:ring-slate-500'
+                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 focus:ring-slate-300'
                   }`}
                 >
                   <Shield size={14} aria-hidden />
@@ -852,8 +894,18 @@ export default function GlobalChatbot() {
             </div>
 
             {chatMode === 'secure' ? (
-              <div className="mx-4 mt-3 flex flex-none items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
-                <Shield size={14} className="mt-0.5 shrink-0 text-amber-700" aria-hidden />
+              <div
+                className={`mx-4 mt-3 flex flex-none items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${
+                  isDark
+                    ? 'border-amber-800 bg-amber-950/50 text-amber-100'
+                    : 'border-amber-200 bg-amber-50 text-amber-900'
+                }`}
+              >
+                <Shield
+                  size={14}
+                  className={`mt-0.5 shrink-0 ${isDark ? 'text-amber-300' : 'text-amber-700'}`}
+                  aria-hidden
+                />
                 <div>
                   <p className="font-semibold">보안 상담 모드</p>
                   <p className="mt-0.5 leading-relaxed">
@@ -871,7 +923,11 @@ export default function GlobalChatbot() {
               }
             >
               {threads.length > 0 ? (
-                <div className="flex flex-none flex-col border-b border-slate-100 bg-white">
+                <div
+                  className={`flex flex-none flex-col border-b ${
+                    isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-white'
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-2 px-3 pt-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                       최근 대화
@@ -886,7 +942,11 @@ export default function GlobalChatbot() {
                         <div
                           key={t.id}
                           className={`inline-flex max-w-[168px] shrink-0 items-center gap-0.5 rounded-full pl-2.5 ${
-                            active ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                            active
+                              ? 'bg-blue-600 text-white'
+                              : isDark
+                                ? 'bg-slate-800 text-slate-200'
+                                : 'bg-slate-100 text-slate-600'
                           }`}
                         >
                           <button
@@ -894,7 +954,11 @@ export default function GlobalChatbot() {
                             disabled={pending}
                             onClick={() => void selectThread(t.id)}
                             className={`min-w-0 truncate py-1 text-[10px] ${
-                              active ? 'text-white' : 'hover:text-slate-900'
+                              active
+                                ? 'text-white'
+                                : isDark
+                                  ? 'hover:text-white'
+                                  : 'hover:text-slate-900'
                             }`}
                             title={
                               t.updated_at
@@ -912,7 +976,9 @@ export default function GlobalChatbot() {
                             className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
                               active
                                 ? 'text-blue-100 hover:bg-blue-500 hover:text-white'
-                                : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                                : isDark
+                                  ? 'text-slate-400 hover:bg-slate-700 hover:text-slate-100'
+                                  : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
                             }`}
                           >
                             <X size={10} aria-hidden />
@@ -923,14 +989,22 @@ export default function GlobalChatbot() {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-none items-center border-b border-slate-100 bg-white px-3 py-2">
+                <div
+                  className={`flex flex-none items-center border-b px-3 py-2 ${
+                    isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-100 bg-white'
+                  }`}
+                >
                   <span className="text-[10px] text-slate-400">
                     최근 대화 없음 · 메시지를 보내면 여기에 저장됩니다
                   </span>
                 </div>
               )}
 
-              <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto bg-slate-50/60 px-4 py-4">
+              <div
+                className={`flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto px-4 py-4 ${
+                  isDark ? 'bg-slate-950/60' : 'bg-slate-50/60'
+                }`}
+              >
                 {messages.map((m) => (
                   <div
                     key={m.id}
@@ -938,8 +1012,12 @@ export default function GlobalChatbot() {
                       m.role === 'user'
                         ? 'ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-blue-600 text-white'
                         : m.mode === 'security_redirect'
-                          ? 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50/70 text-amber-950'
-                          : 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-blue-200 bg-blue-50/70 text-slate-800'
+                          ? isDark
+                            ? 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-amber-800 bg-amber-950/50 text-amber-100'
+                            : 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50/70 text-amber-950'
+                          : isDark
+                            ? 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-slate-600 bg-slate-800 text-slate-100'
+                            : 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-blue-200 bg-blue-50/70 text-slate-800'
                     }`}
                   >
                     {m.text}
@@ -947,7 +1025,9 @@ export default function GlobalChatbot() {
                       <div className="mt-2">
                         <Link
                           href="/security"
-                          className="text-xs font-semibold text-amber-800 underline"
+                          className={`text-xs font-semibold underline ${
+                            isDark ? 'text-amber-300' : 'text-amber-700'
+                          }`}
                           onClick={() => setChatOpen(false)}
                         >
                           보안 탭(/security)으로 이동
@@ -957,7 +1037,11 @@ export default function GlobalChatbot() {
                     {m.recommendation?.suggestion && m.role === 'ai' ? (
                       <div className="mt-2 space-y-2">
                         {m.approved ? (
-                          <span className="text-[11px] font-medium text-emerald-700">
+                          <span
+                            className={`text-[11px] font-medium ${
+                              isDark ? 'text-emerald-400' : 'text-emerald-700'
+                            }`}
+                          >
                             {m.reverted ? '취소됨' : '승인됨'}
                           </span>
                         ) : (
@@ -975,8 +1059,16 @@ export default function GlobalChatbot() {
                         m.outcomeEligible &&
                         !m.reverted &&
                         !m.outcomeSaved ? (
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
-                            <div className="font-medium text-slate-800">실측 기록</div>
+                          <div
+                            className={`rounded-lg border p-2 text-[11px] ${
+                              isDark
+                                ? 'border-slate-600 bg-slate-900 text-slate-200'
+                                : 'border-slate-200 bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                              실측 기록
+                            </div>
                             <p className="mt-0.5 text-[10px] text-slate-500">
                               작업자 실측만 저장합니다. 값을 만들지 않습니다.
                             </p>
@@ -989,7 +1081,11 @@ export default function GlobalChatbot() {
                                     setOutcomeDefect(e.target.value as '0' | '1' | '')
                                   }
                                   disabled={m.outcomeSaving}
-                                  className="h-7 rounded border border-slate-200 bg-white px-1"
+                                  className={`h-7 rounded border px-1 ${
+                                    isDark
+                                      ? 'border-slate-600 bg-slate-800 text-slate-100'
+                                      : 'border-slate-200 bg-white text-slate-800'
+                                  }`}
                                 >
                                   <option value="">선택</option>
                                   <option value="0">정상(0)</option>
@@ -1007,7 +1103,11 @@ export default function GlobalChatbot() {
                                   value={outcomeCapacity}
                                   onChange={(e) => setOutcomeCapacity(e.target.value)}
                                   disabled={m.outcomeSaving}
-                                  className="h-7 w-20 rounded border border-slate-200 bg-white px-1"
+                                  className={`h-7 w-20 rounded border px-1 ${
+                                    isDark
+                                      ? 'border-slate-600 bg-slate-800 text-slate-100'
+                                      : 'border-slate-200 bg-white text-slate-800'
+                                  }`}
                                 />
                               </label>
                               <label className="flex items-center gap-1">
@@ -1021,7 +1121,11 @@ export default function GlobalChatbot() {
                                   value={outcomeResidual}
                                   onChange={(e) => setOutcomeResidual(e.target.value)}
                                   disabled={m.outcomeSaving}
-                                  className="h-7 w-24 rounded border border-slate-200 bg-white px-1"
+                                  className={`h-7 w-24 rounded border px-1 ${
+                                    isDark
+                                      ? 'border-slate-600 bg-slate-800 text-slate-100'
+                                      : 'border-slate-200 bg-white text-slate-800'
+                                  }`}
                                 />
                               </label>
                               <button
@@ -1049,21 +1153,41 @@ export default function GlobalChatbot() {
                   </div>
                 ))}
                 {pending ? (
-                  <div className="mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-blue-200 bg-white px-3.5 py-3 text-sm text-slate-400">
+                  <div
+                    className={`mr-auto max-w-[88%] rounded-2xl rounded-tl-md border px-3.5 py-3 text-sm ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-400'
+                        : 'border-blue-200 bg-white text-slate-400'
+                    }`}
+                  >
                     응답 생성 중…
                   </div>
                 ) : null}
                 <div ref={endRef} />
               </div>
 
-              <div className="flex-none border-t border-slate-200 bg-white p-3">
+              <div
+                className={`flex-none border-t p-3 ${
+                  isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
+                }`}
+              >
                 <div className="mb-2 flex items-center gap-2">
-                  <label className="shrink-0 text-xs font-medium text-slate-500">API</label>
+                  <label
+                    className={`shrink-0 text-xs font-medium ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    API
+                  </label>
                   <select
                     value={llmMode}
                     onChange={(e) => setLlmMode(e.target.value)}
                     disabled={pending}
-                    className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                    className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-100'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
                   >
                     <option value="auto">Auto (단가·길이)</option>
                     {llmOptions.map((k) => (
@@ -1085,32 +1209,46 @@ export default function GlobalChatbot() {
                       type="button"
                       disabled={pending}
                       onClick={() => onChip(q)}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-600 disabled:opacity-50"
+                      className={`rounded-full border px-2.5 py-1 text-xs disabled:opacity-50 ${
+                        isDark
+                          ? 'border-slate-600 bg-slate-800 text-slate-200'
+                          : 'border-slate-200 bg-slate-50 text-slate-600'
+                      }`}
                     >
                       {q.label}
                     </button>
                   ))}
                 </div>
-                <form onSubmit={onSubmit} className="flex items-end gap-2">
+                <form onSubmit={onSubmit} className="flex min-w-0 items-center gap-2">
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKeyDown}
                     disabled={pending}
                     placeholder="질문을 입력하세요."
-                    className="h-11 min-h-[44px] flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50"
+                    className={`h-11 min-h-[44px] min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-sm leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-100 placeholder:text-slate-500 disabled:bg-slate-800'
+                        : 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 disabled:bg-slate-50'
+                    }`}
                   />
                   <button
                     type="submit"
                     aria-label="메시지 전송"
                     disabled={pending || !input.trim()}
-                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-blue-600 px-3.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     전송
                   </button>
                 </form>
                 {undoSnack ? (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+                  <div
+                    className={`mt-2 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[11px] ${
+                      isDark
+                        ? 'border-amber-800 bg-amber-950/50 text-amber-100'
+                        : 'border-amber-200 bg-amber-50 text-amber-950'
+                    }`}
+                  >
                     <span>승인 기록됨 · {undoSnack.secondsLeft}초 내 취소 가능</span>
                     <button
                       type="button"

@@ -1290,7 +1290,7 @@ export default function MainPage() {
                   평가 비용(Appraisal) 상세
                 </h3>
                 <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  안정 5만 · 주의 10만 · 심각 15만 / LOT
+                  안정 5만 · 주의 10만 · 심각 25만 / LOT
                 </p>
                 <ul className="mt-4 space-y-3">
                   {(
