@@ -1,5 +1,6 @@
 'use client'
 
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import {
   useCallback,
@@ -10,8 +11,31 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { Ruler, UserRound } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import DateInput from '@/components/DateInput'
+import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
+import { usePageChat } from '@/context/PageChatContext'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
+import { LotRecommendedActionPanel, type RecommendedActionData } from '@/components/dashboard/LotRecommendedActionPanel'
+import { grafanaEmbed } from '@/lib/grafanaEmbed'
+
+/**
+ * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
+ * Host: `NEXT_PUBLIC_GRAFANA_HOST` / `NEXT_PUBLIC_GRAFANA_PORT` (루트 `.env`).
+ */
+const GRAFANA_BOTTOM_PANEL_URL = grafanaEmbed(
+  '/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10',
+)
+
+/**
+ * 실시간 생산 게이지 Embed URL.
+ * theme=light 권장(패널 검정 배경 완화).
+ */
+const GRAFANA_GAUGE_PANEL_URL = grafanaEmbed(
+  '/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1',
+)
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -38,8 +62,51 @@ type ToastState = {
 type DailyAggregate = {
   date: string;
   production: number;
+  goodCount: number;
   defectCount: number;
-  targetProduction: number;
+  defectRate: number | null;
+};
+
+type ProductionDailyRow = {
+  date: string;
+  production: number;
+  goodCount: number;
+  defectCount: number;
+  defectRate: number | null;
+  metalImpurity: number | null;
+  sinteringTemp: number | null;
+  humidity: number | null;
+  lithiumInput: number | null;
+  additiveRatio: number | null;
+  tankPressure: number | null;
+  processTime: number | null;
+};
+
+type SpcMetric = {
+  key: string;
+  label: string;
+  status: string;
+  currentValue: number;
+  centerLine: number;
+  upperControlLimit: number;
+  lowerControlLimit: number;
+  violatedRules?: Array<{ rule: number; description: string }>;
+  data: Array<{ timestamp: string; value: number }>;
+};
+
+type LotRiskApiDetail = {
+  lotId: string;
+  recordedAt: string;
+  defectProb: number | null;
+  residualLithium: number | null;
+  residualMargin: number | null;
+  residualUsl: number;
+  spcStatus: string | null;
+  riskLevel: '심각' | '주의' | '안정' | null;
+  riskReason: string | null;
+  actionContent: string | null;
+  recommendedAction?: RecommendedActionData | null;
+  spc?: { metrics?: SpcMetric[] } | null;
 };
 
 type KpiSummary = {
@@ -95,74 +162,8 @@ type FeatureImportanceItem = {
   label: string;
   sub?: string;
   importance: number;
+  primary?: boolean;
 };
-
-/** 데모용 Feature Importance — 기간 LOT가 없을 때 fallback */
-const FEATURE_IMPORTANCE_MOCK: FeatureImportanceItem[] = [
-  { label: '소성 온도 이탈', importance: 0.32 },
-  { label: '리튬 투입비 편차', sub: 'Lithium Input', importance: 0.24 },
-  { label: '전구체 입도 이상', sub: 'd50, d90', importance: 0.18 },
-  { label: '금속 불순물 증가', importance: 0.14 },
-];
-
-/**
- * 전체 LOT로 Feature Importance를 추정 (화면 데모용).
- * - 소성 온도·금속 불순물: 실측 필드 편차
- * - 리튬 투입비·입도: CathodeLot에 필드가 없어 capacity 편차·날짜 시드로 대리 추정
- */
-function computeFeatureImportanceFromLots(lots: CathodeLot[]): FeatureImportanceItem[] | null {
-  if (lots.length === 0) return null;
-
-  let tempScore = 0;
-  let metalScore = 0;
-  let lithiumScore = 0;
-  let particleScore = 0;
-
-  for (const lot of lots) {
-    const w = lot.qualityDefect === 1 ? 2.4 : 1;
-    const tempDev = Math.abs(lot.sinteringTemp - 800);
-    const metalDev = Math.max(0, lot.metalImpurity - 0.024);
-    const capacityDev = Math.abs(lot.capacity - 200);
-    const daySeed =
-      lot.date.split('-').reduce((acc, part) => acc + (Number(part) || 0), 0) % 11;
-
-    tempScore += (tempDev / 12) * w;
-    metalScore += (metalDev / 0.008) * w;
-    // 조성(리튬) 대리: 용량 편차 + 불량 LOT 가중
-    lithiumScore += (capacityDev / 8) * w * (lot.qualityDefect === 1 ? 1.15 : 0.7);
-    // 입도 대리: 불순물·용량·일자 시드 조합
-    particleScore += ((metalDev / 0.01 + capacityDev / 14 + daySeed * 0.08) / 2.2) * w;
-  }
-
-  const raw = [
-    { label: '소성 온도 이탈', importance: tempScore },
-    { label: '리튬 투입비 편차', sub: 'Lithium Input', importance: lithiumScore },
-    { label: '전구체 입도 이상', sub: 'd50, d90', importance: particleScore },
-    { label: '금속 불순물 증가', importance: metalScore },
-  ];
-  const sum = raw.reduce((acc, item) => acc + item.importance, 0);
-  if (sum <= 0) return null;
-
-  // 합계를 Mock과 비슷한 0.88 스케일로 정규화
-  const targetSum = 0.88;
-  return raw.map((item) => ({
-    ...item,
-    importance: Math.round((item.importance / sum) * targetSum * 1000) / 1000,
-  }));
-}
-
-/**
- * Feature Importance 해석기.
- * - remote가 있으면 API/기간 추정 결과 사용
- * - 없으면 Mock 유지 (화면 데모용)
- */
-function resolveFeatureImportance(
-  remote?: FeatureImportanceItem[] | null,
-): FeatureImportanceItem[] {
-  const src =
-    remote && remote.length > 0 ? remote : FEATURE_IMPORTANCE_MOCK;
-  return [...src].sort((a, b) => b.importance - a.importance);
-}
 
 type PageSizeOption = 10 | 20 | 30 | 50;
 
@@ -179,11 +180,69 @@ type DailyDetailRow = {
   goodCount: number;
   defectCount: number;
   defectRate: number;
-  avgCapacity: number;
-  avgMetalImpurity: number;
-  avgSinteringTemp: number;
-  status: '수집 중' | '집계 완료';
+  metalImpurity?: number | null;
+  sinteringTemp?: number | null;
+  humidity?: number | null;
+  lithiumInput?: number | null;
+  additiveRatio?: number | null;
+  tankPressure?: number | null;
+  processTime?: number | null;
 };
+
+type ProductionDailyFilterState = {
+  operatorId: string;
+  d50Enabled: boolean;
+  d50Min: string;
+  d50Max: string;
+  d90Enabled: boolean;
+  d90Min: string;
+  d90Max: string;
+};
+
+const EMPTY_PRODUCTION_DAILY_FILTER: ProductionDailyFilterState = {
+  operatorId: '',
+  d50Enabled: false,
+  d50Min: '',
+  d50Max: '',
+  d90Enabled: false,
+  d90Min: '',
+  d90Max: '',
+};
+
+const PRODUCTION_DAILY_PAGE_SIZE = 7;
+
+function parseOptionalNumber(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function productionDailyApiFilters(f: ProductionDailyFilterState) {
+  return {
+    ...(f.operatorId.trim() ? { operatorId: f.operatorId.trim() } : {}),
+    ...(f.d50Enabled
+      ? {
+          ...(parseOptionalNumber(f.d50Min) != null
+            ? { d50Min: parseOptionalNumber(f.d50Min) }
+            : {}),
+          ...(parseOptionalNumber(f.d50Max) != null
+            ? { d50Max: parseOptionalNumber(f.d50Max) }
+            : {}),
+        }
+      : {}),
+    ...(f.d90Enabled
+      ? {
+          ...(parseOptionalNumber(f.d90Min) != null
+            ? { d90Min: parseOptionalNumber(f.d90Min) }
+            : {}),
+          ...(parseOptionalNumber(f.d90Max) != null
+            ? { d90Max: parseOptionalNumber(f.d90Max) }
+            : {}),
+        }
+      : {}),
+  };
+}
 
 type LiveConnectionStatus = 'connected' | 'updating' | 'error';
 
@@ -191,431 +250,120 @@ const LIVE_POLL_INTERVAL_MS = 30_000;
 
 
 /* -------------------------------------------------------------------------- */
-/* LOT 위험등급 — 독립 Mock UI (기존 생산 데이터와 분리)                        */
+/* LOT 위험등급 — judgment_lots (LOT·잔류·규격대비·probability); SPC/위험 후속 */
 /* -------------------------------------------------------------------------- */
 
 type LotRiskRow = {
   lot: string;
-  prob: number;
-  predLi: string;
-  margin: number;
-  spc: string;
-  grade: string;
+  /** Deferred (SPC/risk) — null until wired; probability from judgment_lots */
+  prob: number | null;
+  predLi: number | string | null;
+  margin: number | null;
+  spc: string | null;
+  grade: string | null;
   action: string;
+  reason?: string | null;
   isCritical: boolean;
 };
 
 
 type LotRiskFilterState = {
   lotQuery: string;
-  grade: 'all' | '높음' | '중간' | '낮음';
-  spc: 'all' | '정상' | '이탈';
-  critical: 'all' | 'critical' | 'normal';
-  /** high ≥50%, mid 15~50%, low <15% */
+  grade: 'all' | '심각' | '주의' | '안정';
+  spc: 'all' | '안정' | '주의' | '이탈';
   probLevel: 'all' | 'high' | 'mid' | 'low';
+  residualLevel: 'all' | 'low' | 'mid' | 'high';
+  marginLevel: 'all' | 'low' | 'caution' | 'sufficient';
 };
 
 const EMPTY_LOT_RISK_FILTER: LotRiskFilterState = {
   lotQuery: '',
   grade: 'all',
   spc: 'all',
-  critical: 'all',
   probLevel: 'all',
+  residualLevel: 'all',
+  marginLevel: 'all',
 };
 
 /** LOT 위험등급 목록 페이지당 행 수 */
-const LOT_RISK_PAGE_SIZE = 5;
+const LOT_RISK_PAGE_SIZE = 8;
+/** 헤더 44 + 행 52×8 + 푸터 ~52 */
+const LOT_RISK_TABLE_HEIGHT_CLASS = 'h-[512px]';
+
+type DataPanelTab = 'lot-risk' | 'production-daily';
 
 function isLotRiskFilterActive(filter: LotRiskFilterState): boolean {
   return (
     filter.lotQuery.trim() !== '' ||
+    filter.marginLevel !== 'all' ||
+    filter.residualLevel !== 'all' ||
+    filter.probLevel !== 'all' ||
     filter.grade !== 'all' ||
-    filter.spc !== 'all' ||
-    filter.critical !== 'all' ||
-    filter.probLevel !== 'all'
+    filter.spc !== 'all'
   );
 }
 
-function filterLotRiskRows(rows: LotRiskRow[], filter: LotRiskFilterState): LotRiskRow[] {
-  const q = filter.lotQuery.trim().toLowerCase();
-  return rows.filter((row) => {
-    if (q && !row.lot.toLowerCase().includes(q)) return false;
-    if (filter.grade !== 'all' && row.grade !== filter.grade) return false;
-    if (filter.spc !== 'all' && row.spc !== filter.spc) return false;
-    if (filter.critical === 'critical' && !row.isCritical) return false;
-    if (filter.critical === 'normal' && row.isCritical) return false;
-    if (filter.probLevel === 'high' && row.prob < 0.5) return false;
-    if (filter.probLevel === 'mid' && (row.prob < 0.15 || row.prob >= 0.5)) return false;
-    if (filter.probLevel === 'low' && row.prob >= 0.15) return false;
-    return true;
-  });
-}
-
-
-/** Mock 분석 데이터 — 기존 생산 LOT/KPI와 합치지 않음 */
-const LOT_RISK_MOCK: LotRiskRow[] = [
-  {
-    lot: '...0823-00317',
-    prob: 0.87,
-    predLi: '3,915',
-    margin: 85,
-    spc: '이탈',
-    grade: '높음',
-    action: '전수검사 + 소성로 점검',
-    isCritical: true,
-  },
-  {
-    lot: '...0823-00312',
-    prob: 0.46,
-    predLi: '3,610',
-    margin: 390,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 2배 강화',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00309',
-    prob: 0.18,
-    predLi: '3,780',
-    margin: 220,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 2배 강화 — 합격인데 위험',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00305',
-    prob: 0.12,
-    predLi: '3,540',
-    margin: 460,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00302',
-    prob: 0.08,
-    predLi: '3,480',
-    margin: 520,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00298',
-    prob: 0.05,
-    predLi: '3,420',
-    margin: 580,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00291',
-    prob: 0.72,
-    predLi: '3,880',
-    margin: 120,
-    spc: '이탈',
-    grade: '높음',
-    action: '전수검사 + 혼합기 점검',
-    isCritical: true,
-  },
-  {
-    lot: '...0823-00285',
-    prob: 0.55,
-    predLi: '3,820',
-    margin: 180,
-    spc: '이탈',
-    grade: '높음',
-    action: '전수검사',
-    isCritical: true,
-  },
-  {
-    lot: '...0823-00280',
-    prob: 0.38,
-    predLi: '3,700',
-    margin: 300,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 2배 강화',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00274',
-    prob: 0.29,
-    predLi: '3,650',
-    margin: 350,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 2배 강화',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00268',
-    prob: 0.22,
-    predLi: '3,600',
-    margin: 400,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 강화',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00261',
-    prob: 0.16,
-    predLi: '3,560',
-    margin: 440,
-    spc: '정상',
-    grade: '중간',
-    action: '샘플링 강화',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00255',
-    prob: 0.11,
-    predLi: '3,500',
-    margin: 500,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00249',
-    prob: 0.09,
-    predLi: '3,470',
-    margin: 530,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00242',
-    prob: 0.07,
-    predLi: '3,450',
-    margin: 550,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00236',
-    prob: 0.06,
-    predLi: '3,430',
-    margin: 570,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00230',
-    prob: 0.04,
-    predLi: '3,400',
-    margin: 600,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00224',
-    prob: 0.03,
-    predLi: '3,380',
-    margin: 620,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-  {
-    lot: '...0823-00218',
-    prob: 0.02,
-    predLi: '3,360',
-    margin: 640,
-    spc: '정상',
-    grade: '낮음',
-    action: '표준 샘플링',
-    isCritical: false,
-  },
-];
-
 const LOT_RISK_ACTION_KEYWORDS = ['전수검사', '소성로 점검', '샘플링 2배 강화', '2배 강화', '합격인데 위험', '표준 샘플링'] as const;
-
-type LotRiskFactor = { label: string; impact: number; note?: string };
-type LotRiskProcessSignal = {
-  name: string;
-  value: string;
-  status: 'ok' | 'warn' | 'danger';
-};
-type LotRiskDetail = {
-  lot: string;
-  summary: string;
-  processSignals: LotRiskProcessSignal[];
-  riskFactors: LotRiskFactor[];
-  analysisSteps: string[];
-  recommendedActions: string[];
-};
-
-/** LOT별 상세 분석 Mock — 없으면 buildLotRiskDetail 로 생성 */
-const LOT_RISK_DETAIL_MOCK: Record<string, Partial<LotRiskDetail>> = {
-  '...0823-00317': {
-    summary: '불량확률 87% · SPC 이탈 · 여유 85ppm → 등급 높음. 전수검사·소성로 점검.',
-    processSignals: [
-      { name: '소성 온도(3구역)', value: '812 ℃', status: 'danger' },
-      { name: '금속 불순물', value: '0.041', status: 'danger' },
-      { name: '리튬 투입비', value: '1.08', status: 'warn' },
-      { name: '습도', value: '42 %', status: 'ok' },
-    ],
-    riskFactors: [
-      { label: '소성 온도 이탈', impact: 0.42, note: '3구역 UCL 초과' },
-      { label: '금속 불순물 증가', impact: 0.31, note: '기준선 대비 +38%' },
-      { label: '리튬 투입비 편차', impact: 0.18 },
-      { label: '전구체 입도', impact: 0.09 },
-    ],
-    analysisSteps: [
-      '3단계: 불량확률 0.87 (≥0.50) → 위험도 높음',
-      '4단계: SPC 이탈 + 잔류Li 여유 85ppm (<100) → 등급 높음',
-      '5단계: 전수검사 + 소성로 점검 권고',
-    ],
-    recommendedActions: [
-      '전수검사 즉시 실시',
-      '소성로 온도 점검',
-    ],
-  },
-  '...0823-00312': {
-    summary: '불량확률 46% · SPC 정상 · 잔류Li 근접 → 등급 중간. 샘플링 2배 강화.',
-    processSignals: [
-      { name: '소성 온도(3구역)', value: '798 ℃', status: 'warn' },
-      { name: '금속 불순물', value: '0.028', status: 'warn' },
-      { name: '리튬 투입비', value: '1.04', status: 'ok' },
-      { name: '습도', value: '39 %', status: 'ok' },
-    ],
-    riskFactors: [
-      { label: '소성 온도 편차', impact: 0.34 },
-      { label: '금속 불순물', impact: 0.28 },
-      { label: '리튬 투입비', impact: 0.22 },
-      { label: '공정시간', impact: 0.16 },
-    ],
-  },
-  '...0823-00309': {
-    summary: '불량확률 18% · 합격 가능하나 등급 중간. 샘플링 강화 권고.',
-    riskFactors: [
-      { label: '잔류Li 여유 축소', impact: 0.36, note: '여유 220ppm' },
-      { label: '리튬 투입비 편차', impact: 0.27 },
-      { label: '전구체 입도', impact: 0.21 },
-      { label: '습도 변동', impact: 0.16 },
-    ],
-  },
-};
-
-function buildLotRiskDetail(row: LotRiskRow): LotRiskDetail {
-  const override = LOT_RISK_DETAIL_MOCK[row.lot] ?? {};
-  const defaultSummary =
-    row.grade === '높음'
-      ? `불량 ${(row.prob * 100).toFixed(0)}% · SPC ${row.spc} · 여유 ${row.margin}ppm → 등급 높음. 즉시 조치.`
-      : row.grade === '중간'
-        ? `불량 ${(row.prob * 100).toFixed(0)}% · 여유 ${row.margin}ppm → 등급 중간. 검사 강화.`
-        : `불량 ${(row.prob * 100).toFixed(0)}% · 여유 ${row.margin}ppm → 등급 낮음. 표준 모니터링.`;
-  const defaultSignals: LotRiskProcessSignal[] =
-    row.grade === '높음'
-      ? [
-          { name: '소성 온도(3구역)', value: '810 ℃', status: 'danger' },
-          { name: '금속 불순물', value: '0.038', status: 'danger' },
-          { name: '리튬 투입비', value: '1.06', status: 'warn' },
-          { name: '습도', value: '41 %', status: 'ok' },
-        ]
-      : row.grade === '중간'
-        ? [
-            { name: '소성 온도(3구역)', value: '795 ℃', status: 'warn' },
-            { name: '금속 불순물', value: '0.026', status: 'warn' },
-            { name: '리튬 투입비', value: '1.03', status: 'ok' },
-            { name: '습도', value: '38 %', status: 'ok' },
-          ]
-        : [
-            { name: '소성 온도(3구역)', value: '788 ℃', status: 'ok' },
-            { name: '금속 불순물', value: '0.021', status: 'ok' },
-            { name: '리튬 투입비', value: '1.01', status: 'ok' },
-            { name: '습도', value: '37 %', status: 'ok' },
-          ];
-  const defaultFactors: LotRiskFactor[] =
-    row.grade === '높음'
-      ? [
-          { label: '소성 온도 이탈', impact: 0.4 },
-          { label: '금속 불순물', impact: 0.3 },
-          { label: '리튬 투입비', impact: 0.18 },
-          { label: '전구체 입도', impact: 0.12 },
-        ]
-      : row.grade === '중간'
-        ? [
-            { label: '잔류Li 여유 축소', impact: 0.34 },
-            { label: '소성 온도 편차', impact: 0.28 },
-            { label: '리튬 투입비', impact: 0.22 },
-            { label: '공정시간', impact: 0.16 },
-          ]
-        : [
-            { label: '공정 변동(경미)', impact: 0.28 },
-            { label: '리튬 투입비', impact: 0.26 },
-            { label: '습도', impact: 0.24 },
-            { label: '전구체 입도', impact: 0.22 },
-          ];
-  const defaultSteps =
-    row.grade === '높음'
-      ? [
-          `3단계: 불량확률 ${row.prob.toFixed(2)} (≥0.50) → 위험도 높음`,
-          `4단계: SPC ${row.spc} + 잔류Li 여유 ${row.margin}ppm → 등급 높음`,
-          '5단계: 전수검사 및 공정 점검 권고',
-        ]
-      : row.grade === '중간'
-        ? [
-            `3단계: 불량확률 ${row.prob.toFixed(2)} (0.15~0.50) → 주의`,
-            `4단계: SPC ${row.spc} + 잔류Li 여유 ${row.margin}ppm → 등급 중간`,
-            '5단계: 샘플링 강화 권고',
-          ]
-        : [
-            `3단계: 불량확률 ${row.prob.toFixed(2)} (<0.15) → 낮음`,
-            `4단계: SPC ${row.spc} + 잔류Li 여유 ${row.margin}ppm → 등급 낮음`,
-            '5단계: 표준 모니터링 유지',
-          ];
-
-  return {
-    lot: row.lot,
-    summary: override.summary?.trim() || defaultSummary,
-    processSignals: override.processSignals?.length ? override.processSignals : defaultSignals,
-    riskFactors: override.riskFactors?.length ? override.riskFactors : defaultFactors,
-    analysisSteps: override.analysisSteps?.length ? override.analysisSteps : defaultSteps,
-    recommendedActions: override.recommendedActions?.length
-      ? override.recommendedActions
-      : row.action
-          .split(/[+,—–-]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-  };
-}
-
-function lotRiskSignalTone(status: LotRiskProcessSignal['status'], isDark: boolean): string {
-  if (status === 'danger') return isDark ? 'text-red-400' : 'text-red-600';
-  if (status === 'warn') return isDark ? 'text-amber-400' : 'text-amber-600';
-  return isDark ? 'text-emerald-400' : 'text-emerald-700';
-}
-
-
-function lotRiskMarginClass(margin: number, isDark: boolean): string {
+function lotRiskMarginClass(margin: number | null, isDark: boolean): string {
+  if (margin == null) return isDark ? 'text-slate-400' : 'text-slate-500';
   if (margin < 100) return 'text-red-600';
   if (margin < 300) return 'text-orange-500';
   return isDark ? 'text-slate-100' : 'text-gray-900';
+}
+
+function formatSpecDistance(margin: number | null, includeUnit = false): string {
+  if (margin == null) return '-';
+  const amount = formatNumber(Math.round(Math.abs(margin)));
+  const unit = includeUnit ? ' ppm' : '';
+  if (margin < 0) return `${amount}${unit} 초과`;
+  return `${amount}${unit}`;
 }
 
 function lotRiskProbPercent(prob: number): number {
   const pct = prob * 100;
   if (!Number.isFinite(pct)) return 0;
   return Math.min(100, Math.max(0, pct));
+}
+
+function isSpcUnjudged(spc: string | null | undefined): boolean {
+  const value = (spc ?? '').trim();
+  return value === '' || value === '-' || value === '—';
+}
+
+function isAbnormalSpcMetric(metric: SpcMetric): boolean {
+  return metric.status.includes('이탈') || metric.status.includes('주의');
+}
+
+function formatSpcStatusLabel(spc: string | null | undefined): string {
+  if (isSpcUnjudged(spc)) return '미판정';
+  return (spc ?? '').trim();
+}
+
+function SpcStatusNoteBlock({
+  isDark,
+  paragraphs,
+}: {
+  isDark: boolean;
+  paragraphs: ReactNode[];
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-2.5 ${
+        isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white shadow-2xs'
+      }`}
+    >
+      {paragraphs.map((para, idx) => (
+        <p
+          key={idx}
+          className={`m-0 text-xs font-normal leading-relaxed ${
+            idx < paragraphs.length - 1 ? 'mb-2' : ''
+          } ${isDark ? 'text-slate-300' : 'text-slate-700'}`}
+        >
+          {para}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 function renderLotRiskAction(action: string): ReactNode {
@@ -638,6 +386,139 @@ function renderLotRiskAction(action: string): ReactNode {
     return <span key={'t-' + i}>{part}</span>;
   });
 }
+
+function mapDashboardLotRiskItem(row: DashboardLotRiskItem): LotRiskRow {
+  return {
+    lot: row.lotId,
+    prob: row.defectProb,
+    predLi: row.residualLithium,
+    margin: row.residualMargin,
+    spc: row.spcStatus,
+    grade: row.riskLevel,
+    action: '',
+    reason: row.riskReason,
+    isCritical: false,
+  };
+}
+
+function lotRiskListParams(filter: LotRiskFilterState, page: number, pageSize: number) {
+  const probParams =
+    filter.probLevel === 'high'
+      ? { minProb: 0.4 }
+      : filter.probLevel === 'mid'
+        ? { minProb: 0.2, maxProb: 0.4 }
+        : filter.probLevel === 'low'
+          ? { maxProb: 0.2 }
+          : {};
+  return {
+    page,
+    pageSize,
+    search: filter.lotQuery || undefined,
+    marginLevel: filter.marginLevel === 'all' ? undefined : filter.marginLevel,
+    residualLevel: filter.residualLevel === 'all' ? undefined : filter.residualLevel,
+    riskLevel: filter.grade === 'all' ? undefined : filter.grade,
+    spc: filter.spc === 'all' ? undefined : filter.spc,
+    ...probParams,
+  };
+}
+
+async function fetchAllLotRiskRows(filter: LotRiskFilterState): Promise<LotRiskRow[]> {
+  const pageSize = 50;
+  const first = await dashboardApi.listLotRisks(lotRiskListParams(filter, 1, pageSize));
+  const totalPages = Math.max(1, first.data.totalPages || 1);
+  const rows = first.data.items.map(mapDashboardLotRiskItem);
+  for (let page = 2; page <= totalPages; page++) {
+    const res = await dashboardApi.listLotRisks(lotRiskListParams(filter, page, pageSize));
+    rows.push(...res.data.items.map(mapDashboardLotRiskItem));
+  }
+  return rows;
+}
+
+function escapeCsvCell(value: string | number): string {
+  const text = String(value).replace(/"/g, '""').replace(/\r?\n/g, ' ');
+  return `"${text}"`;
+}
+
+function downloadLotRiskCsv(rows: LotRiskRow[]) {
+  const header = ['LOT ID', '불량확률(%)', '잔류리튬', '여유량', 'SPC', '위험등급', '위험 원인'];
+  const lines = [
+    header.map(escapeCsvCell).join(','),
+    ...rows.map((r) =>
+      [
+        r.lot,
+        r.prob != null && Number.isFinite(r.prob) ? Math.round(lotRiskProbPercent(r.prob)) : '',
+        typeof r.predLi === 'number' ? Math.round(r.predLi) : r.predLi || '',
+        formatSpecDistance(r.margin),
+        formatSpcStatusLabel(r.spc),
+        r.grade || '',
+        r.reason || '',
+      ]
+        .map(escapeCsvCell)
+        .join(','),
+    ),
+  ];
+  const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `lot_risk_${formatDate(new Date())}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function downloadLotRiskPdf(rows: LotRiskRow[]) {
+  const tableRows =
+    rows.length === 0
+      ? '<tr><td colspan="7" style="text-align:center;">데이터가 없습니다.</td></tr>'
+      : rows
+          .map((r) => {
+            const prob =
+              r.prob != null && Number.isFinite(r.prob)
+                ? `${Math.round(lotRiskProbPercent(r.prob))}%`
+                : '—';
+            const residual =
+              typeof r.predLi === 'number' ? String(Math.round(r.predLi)) : r.predLi || '—';
+            return `<tr>
+              <td>${r.lot}</td>
+              <td>${prob}</td>
+              <td>${residual}</td>
+              <td>${formatSpecDistance(r.margin)}</td>
+              <td>${formatSpcStatusLabel(r.spc)}</td>
+              <td>${r.grade || '—'}</td>
+              <td>${(r.reason || '—').replace(/</g, '&lt;')}</td>
+            </tr>`;
+          })
+          .join('');
+  const html = `<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8" />
+<title>LOT 위험등급</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Arial, sans-serif; color: #0f172a; padding: 28px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .meta { color: #64748b; font-size: 12px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 10px; font-size: 12px; text-align: left; }
+  th { background: #f8fafc; color: #475569; white-space: nowrap; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+<h1>LOT 위험등급</h1>
+<div class="meta">내보내기 시각: ${formatDate(new Date())} · ${rows.length}건</div>
+<table>
+<tr><th>LOT ID</th><th>불량확률</th><th>잔류리튬</th><th>여유량</th><th>SPC</th><th>위험등급</th><th>위험 원인</th></tr>
+${tableRows}
+</table>
+<script>window.onload = function () { window.print(); };</script>
+</body></html>`;
+  const printWindow = window.open('', '_blank', 'width=960,height=720');
+  if (!printWindow) {
+    throw new Error('팝업이 차단되어 PDF 창을 열 수 없습니다.');
+  }
+  printWindow.document.write(html);
+  printWindow.document.close();
+}
+
 
 
 
@@ -668,192 +549,18 @@ function daysBetweenInclusive(start: string, end: string): number {
   return Math.floor(ms / 86400000) + 1;
 }
 
-function seededRandom(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 16807 + 0) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
-
-/** 양극재 LOT 단위 Mock — KPI·차트·상세 테이블 공통 원천 (초기 집계: 10003 / 9152 / 91.5%) */
-function buildCathodeLots(): CathodeLot[] {
-  const rand = seededRandom(20260520);
-  const lots: CathodeLot[] = [];
-  const start = parseDate('2026-05-01');
-  const dayCount = 45;
-  const totalLots = 10003;
-  const goodTarget = 9152;
-  const defectTarget = totalLots - goodTarget; // 851
-  const peakDay = 19; // 2026-05-20
-
-  const weights: number[] = [];
-  for (let d = 0; d < dayCount; d += 1) {
-    const dist = Math.abs(d - peakDay);
-    weights.push(Math.exp(-(dist * dist) / (2 * 1.72 * 1.72)));
-  }
-  const weightSum = weights.reduce((s, w) => s + w, 0);
-  const dayCounts: number[] = weights.map((w) => Math.floor((totalLots * w) / weightSum));
-  let assigned = dayCounts.reduce((s, n) => s + n, 0);
-  dayCounts[peakDay] += totalLots - assigned;
-
-  // 불량 LOT 개수를 정확히 851개로 고정 (셔플)
-  const defectFlags: Array<0 | 1> = Array.from({ length: totalLots }, (_, i) =>
-    i < defectTarget ? 1 : 0,
-  );
-  for (let i = defectFlags.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rand() * (i + 1));
-    const tmp = defectFlags[i];
-    defectFlags[i] = defectFlags[j];
-    defectFlags[j] = tmp;
-  }
-
-  let lotIndex = 0;
-  let capacitySum = 0;
-  let metalSum = 0;
-  let sinterSum = 0;
-
-  for (let dayOffset = 0; dayOffset < dayCount; dayOffset += 1) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + dayOffset);
-    const date = formatDate(d);
-    const count = dayCounts[dayOffset];
-
-    for (let i = 0; i < count; i += 1) {
-      const qualityDefect = defectFlags[lotIndex] ?? 0;
-      // 목표 평균(200.0 / 0.024 / 799.9) 주변의 작은 노이즈
-      const capacity = 200 + (rand() - 0.5) * 2.4;
-      const metalImpurity = 0.024 + (rand() - 0.5) * 0.006 + (qualityDefect ? 0.001 : 0);
-      const sinteringTemp = 799.9 + (rand() - 0.5) * 6;
-
-      const roundedCapacity = Math.round(capacity * 10) / 10;
-      const roundedMetal = Math.round(metalImpurity * 1e6) / 1e6;
-      const roundedSinter = Math.round(sinteringTemp * 10) / 10;
-
-      capacitySum += roundedCapacity;
-      metalSum += roundedMetal;
-      sinterSum += roundedSinter;
-
-      lots.push({
-        date,
-        capacity: roundedCapacity,
-        qualityDefect,
-        metalImpurity: roundedMetal,
-        sinteringTemp: roundedSinter,
-      });
-      lotIndex += 1;
-    }
-  }
-
-  // 마지막 LOT로 평균을 목표값에 맞춤
-  if (lots.length > 0) {
-    const last = lots[lots.length - 1];
-    const n = lots.length;
-    last.capacity =
-      Math.round((200 * n - (capacitySum - last.capacity)) * 10) / 10;
-    last.metalImpurity =
-      Math.round((0.024 * n - (metalSum - last.metalImpurity)) * 1e6) / 1e6;
-    last.sinteringTemp =
-      Math.round((799.9 * n - (sinterSum - last.sinteringTemp)) * 10) / 10;
-  }
-
-  return lots;
-}
-
-/** Mock 실시간 데모 — 최신 일자(수집 중)에 LOT를 누적 추가 */
-function appendLiveDemoLots(prev: CathodeLot[], addCount: number): CathodeLot[] {
-  if (prev.length === 0 || addCount <= 0) return prev;
-  const liveToday = prev.reduce((m, l) => (l.date > m ? l.date : m), prev[0].date);
-  const extras: CathodeLot[] = [];
-  for (let i = 0; i < addCount; i += 1) {
-    const isDefect = i % 5 === 0;
-    extras.push({
-      date: liveToday,
-      capacity: Math.round((199.2 + (i % 4) * 0.4) * 10) / 10,
-      qualityDefect: isDefect ? 1 : 0,
-      metalImpurity: Math.round((0.022 + i * 0.0004) * 1e6) / 1e6,
-      sinteringTemp: Math.round((799.4 + (i % 3) * 0.3) * 10) / 10,
-    });
-  }
-  return [...prev, ...extras];
-}
-
-function aggregateDailyDetailRows(lots: CathodeLot[], liveToday: string): DailyDetailRow[] {
-  type Acc = {
-    totalProduction: number;
-    goodCount: number;
-    defectCount: number;
-    capacitySum: number;
-    capacityN: number;
-    metalSum: number;
-    metalN: number;
-    sinterSum: number;
-    sinterN: number;
-  };
-  const map = new Map<string, Acc>();
-
-  for (const lot of lots) {
-    const cur = map.get(lot.date) ?? {
-      totalProduction: 0,
-      goodCount: 0,
-      defectCount: 0,
-      capacitySum: 0,
-      capacityN: 0,
-      metalSum: 0,
-      metalN: 0,
-      sinterSum: 0,
-      sinterN: 0,
-    };
-    cur.totalProduction += 1;
-    if (lot.qualityDefect === 0) cur.goodCount += 1;
-    else cur.defectCount += 1;
-    if (Number.isFinite(lot.capacity)) {
-      cur.capacitySum += lot.capacity;
-      cur.capacityN += 1;
-    }
-    if (Number.isFinite(lot.metalImpurity)) {
-      cur.metalSum += lot.metalImpurity;
-      cur.metalN += 1;
-    }
-    if (Number.isFinite(lot.sinteringTemp)) {
-      cur.sinterSum += lot.sinteringTemp;
-      cur.sinterN += 1;
-    }
-    map.set(lot.date, cur);
-  }
-
-  return Array.from(map.entries())
-    .map(([date, v]) => {
-      const defectCount = v.totalProduction - v.goodCount;
-      return {
-        date,
-        totalProduction: v.totalProduction,
-        goodCount: v.goodCount,
-        defectCount,
-        defectRate: v.totalProduction === 0 ? 0 : defectCount / v.totalProduction,
-        avgCapacity: v.capacityN === 0 ? 0 : v.capacitySum / v.capacityN,
-        avgMetalImpurity: v.metalN === 0 ? 0 : v.metalSum / v.metalN,
-        avgSinteringTemp: v.sinterN === 0 ? 0 : v.sinterSum / v.sinterN,
-        status: date === liveToday ? ('수집 중' as const) : ('집계 완료' as const),
-      };
-    })
-    .sort((a, b) => (a.date === b.date ? 0 : a.date > b.date ? -1 : 1));
-}
-
+/* -------------------------------------------------------------------------- */
 function formatClock(d: Date): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
 function buildPaginationItems(current: number, total: number): Array<number | 'ellipsis'> {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const items: Array<number | 'ellipsis'> = [1];
-  const start = Math.max(2, current - 1);
-  const end = Math.min(total - 1, current + 1);
-  if (start > 2) items.push('ellipsis');
-  for (let p = start; p <= end; p += 1) items.push(p);
-  if (end < total - 1) items.push('ellipsis');
-  items.push(total);
-  return items;
+  if (current <= 4) return [1, 2, 3, 4, 5, 'ellipsis', total];
+  if (current >= total - 3) {
+    return [1, 'ellipsis', total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total];
 }
 
 function lotsToProductionRecords(lots: CathodeLot[]): ProductionRecord[] {
@@ -1004,10 +711,7 @@ function computeDetailedKpis(lots: CathodeLot[]): DetailedKpi[] {
   ];
 }
 
-const MOCK_LOTS: CathodeLot[] = buildCathodeLots();
-const MOCK_RECORDS: ProductionRecord[] = lotsToProductionRecords(MOCK_LOTS);
 
-/* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -1036,6 +740,34 @@ function niceChartMax(rawMax: number, tickCount = 5): number {
   return Math.ceil(rawMax / step) * step;
 }
 
+function addCalendarDaysIso(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatTrendXLabel(date: string, grain: 'day' | 'week' | 'month'): string {
+  if (grain === 'week') {
+    const start = date.length >= 10 ? date.slice(5) : date;
+    const end = addCalendarDaysIso(date, 6).slice(5);
+    return `${start}~${end}`;
+  }
+  if (grain === 'month') return date;
+  return date.length >= 10 ? date.slice(5) : date;
+}
+
+function formatTrendTooltipTitle(date: string, grain: 'day' | 'week' | 'month'): string {
+  if (grain === 'week') return `${date} ~ ${addCalendarDaysIso(date, 6)}`;
+  return date;
+}
+
+function productionVolumeLabel(grain: 'day' | 'week' | 'month'): string {
+  return grain === 'day' ? '생산량' : '누적 생산량';
+}
+
 function emptyDefectBreakdown(): DefectBreakdown {
   return {
     '기계 결함': 0,
@@ -1043,14 +775,6 @@ function emptyDefectBreakdown(): DefectBreakdown {
     '작업자 실수': 0,
     '온도 이상': 0,
   };
-}
-
-function escapeCsvCell(value: string | number): string {
-  const str = String(value);
-  if (/[",\n\r]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
 }
 
 function getPreviousPeriodRange(
@@ -1159,8 +883,26 @@ function KpiCard({
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({
+  message,
+  plain = false,
+}: {
+  message: string;
+  /** No dashed border / fill — use inside flat white cards. */
+  plain?: boolean;
+}) {
   const { isDark } = useUiSettings();
+  if (plain) {
+    return (
+      <div
+        className={`flex h-full min-h-[160px] flex-1 items-center justify-center px-2 text-sm ${
+          isDark ? 'text-slate-400' : 'text-slate-500'
+        }`}
+      >
+        {message}
+      </div>
+    );
+  }
   return (
     <div
       className={`flex h-full min-h-[140px] items-center justify-center rounded-lg border border-dashed px-4 py-8 text-sm ${
@@ -1175,70 +917,65 @@ function EmptyState({ message }: { message: string }) {
 }
 
 function ProductionTrendChart({
-  daily,
-  dailyRates = [],
-  forecastRates,
+  points,
   isDark = false,
+  trendGrain = 'day',
+  onBarClick,
 }: {
-  daily: DailyAggregate[];
-  dailyRates?: Array<{ date: string; rate: number | null }>;
-  /** 실측 이후 AI 예측 불량률 (없으면 데모 값 사용) — API 연동 시 주입 */
-  forecastRates?: Array<{ date: string; rate: number }> | null;
+  points: DailyAggregate[];
   isDark?: boolean;
+  trendGrain?: 'day' | 'week' | 'month';
+  /** Reserved for Feature Importance linkage (green panel) — unused for now. */
+  onBarClick?: (bucket: DailyAggregate) => void;
 }) {
+  const [hover, setHover] = useState<{
+    x: number;
+    y: number;
+    point: DailyAggregate;
+  } | null>(null);
+
   const width = 720;
-  const height = 280;
-  const pad = { top: 24, right: 52, bottom: 40, left: 52 };
+  const height = 332;
+  const pad = { top: 48, right: 58, bottom: 44, left: 58 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
 
-  if (daily.length === 0) {
-    return <EmptyState message="표시할 생산 데이터가 없습니다." />;
+  if (points.length === 0) {
+    return <EmptyState plain message="표시할 생산 데이터가 없습니다." />;
   }
 
-  const rateByDate = new Map(
-    dailyRates.filter((d) => d.rate !== null).map((d) => [d.date, d.rate as number]),
-  );
-  const lastMeasured = daily[daily.length - 1];
-  // 데모용 AI 예측 Mock — 불량률(%) 기준. 실측 배열은 변경하지 않음
-  const demoForecastPercents = [11.2, 9.5, 12.1] as const;
-  const forecastMock: Array<{ date: string; rate: number }> =
-    forecastRates && forecastRates.length > 0
-      ? forecastRates
-      : demoForecastPercents.map((ratePercent, i) => ({
-          date: addDays(lastMeasured.date, i + 1),
-          rate: ratePercent / 100,
-        }));
-
-  const rawMaxY = Math.max(...daily.map((d) => d.production), 1);
+  const rawMaxY = Math.max(...points.map((d) => d.production), 1);
   const tickCount = 5;
   const maxY = niceChartMax(rawMaxY, tickCount);
-  const lastMeasuredRate = rateByDate.get(lastMeasured.date) ?? null;
-  const maxRate = Math.max(
-    ...Array.from(rateByDate.values()),
-    ...forecastMock.map((d) => d.rate),
-    lastMeasuredRate ?? 0,
-    0.001,
+  const rawMaxRate = Math.max(
+    ...points.map((d) => (d.defectRate != null ? d.defectRate : 0)),
+    0,
   );
-  const measuredCount = daily.length;
-  const n = measuredCount + forecastMock.length;
-  const barW = Math.max(4, (innerW / n) * 0.65);
+  const maxRate = niceChartMax(Math.max(rawMaxRate * 2, 0.2), 4);
+  const n = points.length;
+  const barW = Math.min(34, Math.max(12, (innerW / n) * 0.52));
   const slotX = (i: number) => pad.left + (innerW / n) * i + (innerW / n) / 2;
+  const labelStep = n <= 6 ? 1 : n <= 12 ? 2 : Math.ceil(n / 6);
 
-  const points = daily.map((d, i) => {
+  const plotted = points.map((d, i) => {
     const x = slotX(i);
     const y = pad.top + innerH - (d.production / maxY) * innerH;
-    const rate = rateByDate.get(d.date) ?? null;
+    const rate = d.defectRate;
     const rateY =
-      rate === null ? null : pad.top + innerH - (rate / maxRate) * innerH;
+      rate == null ? null : pad.top + innerH - (rate / maxRate) * innerH;
     return { ...d, x, y, rate, rateY };
   });
 
-  const forecastPoints = forecastMock.map((d, i) => {
-    const x = slotX(measuredCount + i);
-    const rateY = pad.top + innerH - (d.rate / maxRate) * innerH;
-    return { date: d.date, x, rate: d.rate, rateY };
-  });
+  const peakProduction = Math.max(...plotted.map((p) => p.production));
+  const ratedPoints = plotted.filter((p) => p.rate != null);
+  const maxRateValue =
+    ratedPoints.length > 0
+      ? Math.max(...ratedPoints.map((p) => p.rate as number))
+      : null;
+  const minRateValue =
+    ratedPoints.length > 0
+      ? Math.min(...ratedPoints.map((p) => p.rate as number))
+      : null;
 
   const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => {
     const v = (maxY / tickCount) * i;
@@ -1251,276 +988,602 @@ function ProductionTrendChart({
     y: pad.top + innerH - r * innerH,
   }));
 
-  const defectPoints = points.filter((p) => p.rateY !== null);
-  const forecastLinePoints = [
-    ...(lastMeasuredRate !== null
-      ? [
-          {
-            x: points[points.length - 1].x,
-            rateY: points[points.length - 1].rateY as number,
-          },
-        ]
-      : []),
-    ...forecastPoints.map((p) => ({ x: p.x, rateY: p.rateY })),
-  ];
-  const labelStep = Math.max(1, Math.ceil(n / 8));
-  const gridStroke = isDark ? '#334155' : '#e2e8f0';
-  const tickFill = isDark ? '#cbd5e1' : undefined;
-  const labelFill = isDark ? '#cbd5e1' : undefined;
+  const defectPoints = plotted.filter((p) => p.rateY !== null);
+  const gridStroke = isDark ? '#475569' : '#e2e8f0';
+  const tickFillLeft = isDark ? '#94a3b8' : '#64748b';
+  const tickFillRight = isDark ? '#f87171' : '#dc2626';
+  const axisTitleLeft = isDark ? '#94a3b8' : '#64748b';
+  const axisTitleRight = isDark ? '#f87171' : '#dc2626';
   const pointStroke = isDark ? '#1e293b' : '#ffffff';
 
+  const axisTitleY = pad.top - 14;
+  const axisTitleLeftX = pad.left / 2;
+  const axisTitleRightX = width - pad.right / 2;
+
+  const showTooltip = (
+    e: React.MouseEvent<SVGElement, MouseEvent>,
+    point: DailyAggregate,
+  ) => {
+    const parent = (e.currentTarget.ownerSVGElement as SVGElement).parentElement as HTMLElement;
+    const prect = parent.getBoundingClientRect();
+    setHover({
+      x: e.clientX - prect.left,
+      y: e.clientY - prect.top,
+      point,
+    });
+  };
+
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-[280px] w-full"
-      role="img"
-      aria-label="날짜별 생산량, 불량률 및 AI 예측 이중 축 차트"
-    >
-      {yTicks.map((t) => (
-        <g key={`prod-${t.v}`}>
-          <line
-            x1={pad.left}
-            x2={width - pad.right}
-            y1={t.y}
-            y2={t.y}
-            stroke={gridStroke}
-            strokeWidth={1}
-          />
-          <text
-            x={pad.left - 8}
-            y={t.y + 4}
-            textAnchor="end"
-            className={isDark ? 'text-[10px]' : 'fill-slate-400 text-[10px]'}
-            fill={tickFill}
-          >
-            {formatNumber(Math.round(t.v))}
-          </text>
-        </g>
-      ))}
-      {rateTicks.map((t) => (
+    <div className="relative min-h-0 flex-1 overflow-x-auto pb-1">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-[300px] w-full lg:h-[320px]"
+        style={{ minWidth: `${Math.min(width, 360 + n * 48)}px` }}
+        role="img"
+        aria-label="생산량 막대와 불량률 선 차트"
+      >
         <text
-          key={`rate-${t.v}`}
-          x={width - pad.right + 8}
-          y={t.y + 4}
-          textAnchor="start"
-          className="fill-amber-500 text-[10px]"
+          x={axisTitleLeftX}
+          y={axisTitleY}
+          textAnchor="middle"
+          className="text-xs font-semibold"
+          fill={axisTitleLeft}
         >
-          {formatPercent(t.v)}
+          생산량
         </text>
-      ))}
-      {points.map((p) => (
-        <rect
-          key={p.date}
-          x={p.x - barW / 2}
-          y={p.y}
-          width={barW}
-          height={pad.top + innerH - p.y}
-          fill="#2563eb"
-          rx={2}
+        <text
+          x={axisTitleRightX}
+          y={axisTitleY}
+          textAnchor="middle"
+          className="text-xs font-semibold"
+          fill={axisTitleRight}
         >
-          <title>{`${p.date}: ${formatNumber(p.production)}`}</title>
-        </rect>
-      ))}
-      {defectPoints.length > 0 ? (
-        <>
-          <polyline
-            fill="none"
-            stroke="#ea580c"
-            strokeWidth={3}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            points={defectPoints.map((p) => `${p.x},${p.rateY}`).join(' ')}
-          />
-          {defectPoints.map((p) => (
-            <circle
-              key={`rate-${p.date}`}
-              cx={p.x}
-              cy={p.rateY as number}
-              r={4.5}
-              fill="#ea580c"
-              stroke={pointStroke}
-              strokeWidth={2}
+          불량률 (%)
+        </text>
+        {yTicks.map((t) => (
+          <g key={`prod-${t.v}`}>
+            <line
+              x1={pad.left}
+              x2={width - pad.right}
+              y1={t.y}
+              y2={t.y}
+              stroke={gridStroke}
+              strokeWidth={1}
+              strokeDasharray={t.v === 0 ? undefined : '4 4'}
+              opacity={t.v === 0 ? 1 : 0.85}
+            />
+            <text
+              x={pad.left - 10}
+              y={t.y + 4}
+              textAnchor="end"
+              className="text-[11px]"
+              fill={tickFillLeft}
             >
-              <title>{`${p.date}: 불량률 ${formatPercent(p.rate)}`}</title>
-            </circle>
-          ))}
-        </>
-      ) : null}
-      {forecastLinePoints.length > 1 ? (
-        <>
-          <polyline
-            fill="none"
-            stroke="#7c3aed"
-            strokeWidth={2.5}
-            strokeDasharray="6 5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            points={forecastLinePoints.map((p) => `${p.x},${p.rateY}`).join(' ')}
-          />
-          {forecastPoints.map((p) => (
-            <circle
-              key={`ai-${p.date}`}
-              cx={p.x}
-              cy={p.rateY}
-              r={3.5}
-              fill="#7c3aed"
-              stroke={pointStroke}
-              strokeWidth={1.5}
-            >
-              <title>{`${p.date}: AI 예측 불량률 ${formatPercent(p.rate)}`}</title>
-            </circle>
-          ))}
-        </>
-      ) : null}
-      {Array.from({ length: n }, (_, i) => {
-        const date =
-          i < measuredCount ? daily[i].date : forecastMock[i - measuredCount].date;
-        const x = slotX(i);
-        if (!(i % labelStep === 0 || i === n - 1)) return null;
-        return (
+              {formatNumber(Math.round(t.v))}
+            </text>
+          </g>
+        ))}
+        {rateTicks.map((t) => (
           <text
-            key={`label-${date}`}
-            x={x}
-            y={height - 12}
-            textAnchor="middle"
-            className={isDark ? 'text-xs' : 'fill-slate-500 text-xs'}
-            fill={labelFill}
+            key={`rate-${t.v}`}
+            x={width - pad.right + 10}
+            y={t.y + 4}
+            textAnchor="start"
+            className="text-[11px] font-medium"
+            fill={tickFillRight}
           >
-            {date.slice(5)}
+            {formatPercent(t.v)}
           </text>
-        );
-      })}
-    </svg>
+        ))}
+        {plotted.map((p) => {
+          const isPeak = p.production === peakProduction && peakProduction > 0;
+          const barHeight = Math.max(0, pad.top + innerH - p.y);
+          return (
+            <g key={p.date}>
+              <rect
+                x={p.x - barW / 2}
+                y={p.y}
+                width={barW}
+                height={barHeight}
+                fill={isPeak ? '#1d4ed8' : '#2563eb'}
+                rx={3}
+                ry={3}
+                className="cursor-pointer transition-opacity hover:opacity-90"
+                onMouseEnter={(e) => showTooltip(e, p)}
+                onMouseMove={(e) => showTooltip(e, p)}
+                onMouseLeave={() => setHover(null)}
+                onClick={() =>
+                  onBarClick?.({
+                    date: p.date,
+                    production: p.production,
+                    goodCount: p.goodCount,
+                    defectCount: p.defectCount,
+                    defectRate: p.defectRate,
+                  })
+                }
+              />
+              {isPeak ? (
+                <text
+                  x={p.x}
+                  y={Math.max(pad.top + 12, p.y - 8)}
+                  textAnchor="middle"
+                  className="text-[10px] font-semibold"
+                  fill={isDark ? '#93c5fd' : '#1d4ed8'}
+                  pointerEvents="none"
+                >
+                  {formatNumber(p.production)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        {defectPoints.length > 0 ? (
+          <>
+            <polyline
+              fill="none"
+              stroke="#dc2626"
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              points={defectPoints.map((p) => `${p.x},${p.rateY}`).join(' ')}
+              pointerEvents="none"
+            />
+            {defectPoints.map((p) => {
+              const rate = p.rate as number;
+              const isMaxRate = maxRateValue != null && rate === maxRateValue;
+              const isMinRate =
+                minRateValue != null &&
+                rate === minRateValue &&
+                minRateValue !== maxRateValue;
+              const isZero = rate === 0;
+              const r = isMaxRate || isMinRate ? 4.5 : isZero ? 3.5 : 3;
+              return (
+                <g key={`rate-${p.date}`}>
+                  <circle
+                    cx={p.x}
+                    cy={p.rateY as number}
+                    r={12}
+                    fill="transparent"
+                    className="cursor-pointer"
+                    onMouseEnter={(e) => showTooltip(e, p)}
+                    onMouseMove={(e) => showTooltip(e, p)}
+                    onMouseLeave={() => setHover(null)}
+                  />
+                  <circle
+                    cx={p.x}
+                    cy={p.rateY as number}
+                    r={r}
+                    fill="#dc2626"
+                    stroke={pointStroke}
+                    strokeWidth={isMaxRate || isMinRate ? 2.5 : 2}
+                    pointerEvents="none"
+                  />
+                  {isMaxRate || isMinRate ? (
+                    <text
+                      x={p.x}
+                      y={(p.rateY as number) - 10}
+                      textAnchor="middle"
+                      className="text-[9px] font-semibold"
+                      fill={tickFillRight}
+                      pointerEvents="none"
+                    >
+                      {formatPercent(rate)}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
+          </>
+        ) : null}
+        {plotted.map((p, i) =>
+          i % labelStep === 0 || i === n - 1 ? (
+            <text
+              key={`label-${p.date}`}
+              x={p.x}
+              y={height - 14}
+              textAnchor="middle"
+              className="text-[11px]"
+              fill={isDark ? '#94a3b8' : '#64748b'}
+            >
+              {formatTrendXLabel(p.date, trendGrain)}
+            </text>
+          ) : null,
+        )}
+      </svg>
+      {hover ? (
+        <div
+          className={`pointer-events-none absolute z-10 min-w-[148px] rounded-lg border px-3 py-2.5 text-xs shadow-md ${
+            isDark
+              ? 'border-slate-600 bg-slate-800 text-slate-100'
+              : 'border-slate-200 bg-white text-slate-700'
+          }`}
+          style={{
+            left: Math.min(hover.x + 12, 240),
+            top: Math.max(8, hover.y - 88),
+          }}
+        >
+          <div
+            className={`mb-1.5 border-b pb-1.5 text-sm font-semibold ${
+              isDark ? 'border-slate-600 text-slate-100' : 'border-slate-100 text-slate-900'
+            }`}
+          >
+            {formatTrendTooltipTitle(hover.point.date, trendGrain)}
+          </div>
+          <div className={`font-medium ${isDark ? 'text-sky-300' : 'text-blue-700'}`}>
+            생산량: {formatNumber(hover.point.production)}
+          </div>
+          <div className={`mt-1 font-medium ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+            불량률:{' '}
+            {hover.point.defectRate != null
+              ? formatPercent(hover.point.defectRate)
+              : '0.0%'}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 function FeatureImportancePanel({
   items,
   isDark,
+  periodLabel,
+  selected,
+  onClearSelection,
 }: {
   items: FeatureImportanceItem[];
   isDark: boolean;
+  periodLabel: string;
+  selected: boolean;
+  onClearSelection: () => void;
 }) {
+  const mainItems = items.some((i) => i.primary === true)
+    ? items.filter((i) => i.primary)
+    : items.slice(0, 4);
+  const subItems = items.some((i) => i.primary === true)
+    ? items.filter((i) => !i.primary)
+    : items.slice(4);
+
+  const renderItem = (item: FeatureImportanceItem, i: number, large: boolean) => {
+    const pct = Math.round(Math.min(1, Math.max(0, item.importance)) * 100);
+    return (
+      <li key={item.label}>
+        <div
+          className={`mb-1 flex items-center justify-between gap-2 ${
+            large ? 'text-sm' : 'text-xs'
+          }`}
+        >
+          <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>
+            {item.label}
+            {item.sub ? (
+              <span
+                className={`ml-1 text-xs font-normal ${
+                  isDark ? 'text-slate-500' : 'text-slate-400'
+                }`}
+              >
+                {item.sub}
+              </span>
+            ) : null}
+          </span>
+          <span
+            className={`tabular-nums font-semibold ${
+              large
+                ? isDark
+                  ? 'text-slate-300'
+                  : 'text-slate-600'
+                : isDark
+                  ? 'text-slate-400'
+                  : 'text-slate-500'
+            }`}
+          >
+            {pct}%
+          </span>
+        </div>
+        <div
+          className={`overflow-hidden rounded-full ${
+            large ? 'h-2.5' : 'h-1.5'
+          } ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}
+        >
+          <div
+            className="h-full rounded-full"
+            style={
+              {
+                width: `${pct}%`,
+                backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+              } as CSSProperties
+            }
+          />
+        </div>
+      </li>
+    );
+  };
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h2
           className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
         >
-          AI 도출 주요 불량 유발 변수
+          불량 유발 변수
         </h2>
         <span className="text-sm font-normal text-gray-400">Feature Importance</span>
       </div>
-      <p className={`mb-4 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-        전체 LOT 기준 추정 중요도 · 양극재 공정 변수
-      </p>
-      <ul className="space-y-4">
-        {items.map((item, i) => {
-          const pct = Math.round(Math.min(1, Math.max(0, item.importance)) * 100);
-          return (
-            <li key={item.label}>
-              <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>
-                  {item.label}
-                  {item.sub ? (
-                    <span
-                      className={`ml-1 text-xs font-normal ${
-                        isDark ? 'text-slate-500' : 'text-slate-400'
-                      }`}
-                    >
-                      {item.sub}
-                    </span>
-                  ) : null}
-                </span>
-                <span
-                  className={`tabular-nums font-semibold ${
-                    isDark ? 'text-slate-300' : 'text-slate-600'
-                  }`}
-                >
-                  {pct}%
-                </span>
-              </div>
-              <div
-                className={`h-2.5 overflow-hidden rounded-full ${
-                  isDark ? 'bg-slate-700' : 'bg-slate-100'
-                }`}
-              >
-                <div
-                  className="h-full rounded-full"
-                  style={
-                    {
-                      width: `${pct}%`,
-                      backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                    } as CSSProperties
-                  }
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          {periodLabel || '기간 선택'}
+        </p>
+        {selected ? (
+          <button
+            type="button"
+            aria-label="기간 선택 해제"
+            onClick={onClearSelection}
+            className={`inline-flex h-5 w-5 items-center justify-center rounded text-xs font-bold ${
+              isDark
+                ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+            }`}
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+      {items.length === 0 ? (
+        <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+          해당 기간 불량 LOT 데이터가 없습니다.
+        </p>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          <ul className="space-y-4">
+            {mainItems.map((item, i) => renderItem(item, i, true))}
+          </ul>
+          {subItems.length > 0 ? (
+            <ul className="space-y-2 border-t border-dashed pt-3 opacity-90 dark:border-slate-700">
+              {subItems.map((item, i) => renderItem(item, i + 4, false))}
+            </ul>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
 
+function SpcChartCard({ metric, isDark }: { metric: SpcMetric; isDark: boolean }) {
+  const width = 420;
+  const height = 132;
+  const pad = { top: 14, right: 12, bottom: 22, left: 38 };
+  const data = metric.data.slice(-24);
+  const values = [
+    ...data.map((point) => point.value),
+    metric.lowerControlLimit,
+    metric.centerLine,
+    metric.upperControlLimit,
+  ];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 0.000001);
+  const x = (index: number) =>
+    pad.left + (index / Math.max(data.length - 1, 1)) * (width - pad.left - pad.right);
+  const y = (value: number) =>
+    pad.top + ((max - value) / range) * (height - pad.top - pad.bottom);
+  const tone =
+    metric.status.includes('이탈') ? '#dc2626' : metric.status.includes('주의') ? '#d97706' : '#2563eb';
+
+  return (
+    <div
+      className={`rounded-lg border p-2.5 ${
+        isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'
+      }`}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className={isDark ? 'text-xs font-semibold text-slate-200' : 'text-xs font-semibold text-slate-700'}>
+          {metric.label}
+        </span>
+        <span className="text-[11px] font-semibold" style={{ color: tone }}>
+          {metric.status}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[132px] w-full" role="img" aria-label={`${metric.label} SPC 관리도`}>
+        {[
+          { label: 'UCL', value: metric.upperControlLimit, color: '#dc2626' },
+          { label: 'CL', value: metric.centerLine, color: '#64748b' },
+          { label: 'LCL', value: metric.lowerControlLimit, color: '#dc2626' },
+        ].map((line) => (
+          <g key={line.label}>
+            <line
+              x1={pad.left}
+              x2={width - pad.right}
+              y1={y(line.value)}
+              y2={y(line.value)}
+              stroke={line.color}
+              strokeWidth={1}
+              strokeDasharray={line.label === 'CL' ? '3 3' : '5 4'}
+              opacity={0.8}
+            />
+            <text x={pad.left - 4} y={y(line.value) + 3} textAnchor="end" fill={line.color} fontSize="9">
+              {line.label}
+            </text>
+          </g>
+        ))}
+        {data.length > 1 ? (
+          <polyline
+            fill="none"
+            stroke={tone}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            points={data.map((point, index) => `${x(index)},${y(point.value)}`).join(' ')}
+          />
+        ) : null}
+        {data.map((point, index) => (
+          <circle key={`${point.timestamp}-${index}`} cx={x(index)} cy={y(point.value)} r={index === data.length - 1 ? 3.5 : 2} fill={tone}>
+            <title>{`${point.timestamp}: ${point.value}`}</title>
+          </circle>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+type TrendDateRange = { startDate: string; endDate: string };
+
+function isValidTrendRange(range: TrendDateRange): boolean {
+  if (!range.startDate || !range.endDate) return false;
+  return range.startDate <= range.endDate;
+}
+
+function ProductionTrendDateFilter({
+  draft,
+  applied,
+  onDraftChange,
+  onApply,
+  onReset,
+  isDark,
+}: {
+  draft: TrendDateRange;
+  applied: TrendDateRange;
+  onDraftChange: (next: TrendDateRange) => void;
+  onApply: () => void;
+  onReset: () => void;
+  isDark: boolean;
+}) {
+  const canApply = isValidTrendRange(draft);
+  const rangeInvalid =
+    Boolean(draft.startDate && draft.endDate) && draft.startDate > draft.endDate;
+  const hasPendingChanges =
+    draft.startDate !== applied.startDate || draft.endDate !== applied.endDate;
+  const showStatus = (hasPendingChanges && canApply) || rangeInvalid;
+  const muted = isDark ? 'text-slate-500' : 'text-slate-400';
+  const secondaryBtnClass = isDark
+    ? 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-600 px-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+
+  return (
+    <div className="min-w-0">
+      <div
+        className={`inline-flex w-fit max-w-full flex-nowrap items-center gap-1 rounded-lg border px-2 py-1 ${
+          isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-200 bg-white/80'
+        }`}
+        aria-label="생산 추이 조회 기간"
+      >
+        <span className={`shrink-0 text-[11px] font-medium ${muted}`}>기간</span>
+        <DateInput
+          aria-label="생산 추이 시작일"
+          value={draft.startDate}
+          onChange={(startDate) => onDraftChange({ ...draft, startDate })}
+          isDark={isDark}
+          compact
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
+        />
+        <span className={`shrink-0 text-xs ${muted}`}>~</span>
+        <DateInput
+          aria-label="생산 추이 종료일"
+          value={draft.endDate}
+          onChange={(endDate) => onDraftChange({ ...draft, endDate })}
+          isDark={isDark}
+          compact
+          className="!h-8 !w-[7.25rem] !max-w-none shrink-0"
+        />
+        <button
+          type="button"
+          disabled={!canApply}
+          onClick={onApply}
+          className={`inline-flex h-8 min-w-[3rem] shrink-0 items-center justify-center whitespace-nowrap rounded-md border px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed ${
+            canApply
+              ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+              : isDark
+                ? 'border-slate-600 bg-slate-800 text-slate-400'
+                : 'border-slate-200 bg-slate-100 text-slate-500'
+          }`}
+        >
+          적용
+        </button>
+        <button type="button" onClick={onReset} className={secondaryBtnClass}>
+          초기화
+        </button>
+      </div>
+      {showStatus ? (
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+          {hasPendingChanges && canApply ? (
+            <span className={isDark ? 'text-amber-400/90' : 'text-amber-600'}>변경 사항 미적용</span>
+          ) : null}
+          {rangeInvalid ? (
+            <span className={isDark ? 'text-rose-400' : 'text-rose-600'}>시작일이 종료일보다 늦을 수 없습니다.</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function DashBoardPage() {
   const { isDark } = useUiSettings();
+  const { setPagePayload, trackPageChatEvent } = usePageChat();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastIdRef = useRef(0);
 
   /** 생산 원천 — KPI / 차트 / 상세 테이블 공유 */
-  const [liveLots, setLiveLots] = useState<CathodeLot[]>(() => MOCK_LOTS);
+  const [liveLots] = useState<CathodeLot[]>([]);
   const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('connected');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const fetchingRef = useRef(false);
-  const liveVersionRef = useRef(0);
+  const inflightRef = useRef(0);
+  const lotFetchingRef = useRef(false);
+  const chartsFetchingRef = useRef(false);
+  const dailyFetchingRef = useRef(false);
+  const [lotRiskRows, setLotRiskRows] = useState<LotRiskRow[]>([]);
+  const [lotRiskTotal, setLotRiskTotal] = useState(0);
+  const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
+  const [selectedLotRiskDetail, setSelectedLotRiskDetail] = useState<LotRiskApiDetail | null>(null);
+  const [trendPoints, setTrendPoints] = useState<DailyAggregate[]>([]);
+  /** Selected production-trend bar → Feature Importance period. */
+  const [selectedTrendBucket, setSelectedTrendBucket] = useState<DailyAggregate | null>(null);
+  const [featureImportanceLabel, setFeatureImportanceLabel] = useState('당일');
+  const [trendFilterDraft, setTrendFilterDraft] = useState({ startDate: '', endDate: '' });
+  const [trendFilterApplied, setTrendFilterApplied] = useState({ startDate: '', endDate: '' });
+  const [dailyApiRows, setDailyApiRows] = useState<ProductionDailyRow[]>([]);
+  const [dailyTotal, setDailyTotal] = useState(0);
+  const [dailyTotalPages, setDailyTotalPages] = useState(1);
+  const [dailyOperators, setDailyOperators] = useState<string[]>([]);
+  const [productionDailyFilter, setProductionDailyFilter] = useState<ProductionDailyFilterState>(
+    EMPTY_PRODUCTION_DAILY_FILTER,
+  );
+  const [featureImportanceItems, setFeatureImportanceItems] = useState<FeatureImportanceItem[]>([]);
 
   const [tablePage, setTablePage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSizeOption>(10);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
-  const [selectedLotRiskId, setSelectedLotRiskId] = useState<string | null>(
-    () => LOT_RISK_MOCK[0]?.lot ?? null,
-  );
+  const [selectedLotRiskId, setSelectedLotRiskId] = useState<string | null>(null);
   const [lotRiskFilterDraft, setLotRiskFilterDraft] =
     useState<LotRiskFilterState>(EMPTY_LOT_RISK_FILTER);
   const [lotRiskFilterApplied, setLotRiskFilterApplied] =
     useState<LotRiskFilterState>(EMPTY_LOT_RISK_FILTER);
   const [lotRiskPage, setLotRiskPage] = useState(1);
+  const [lotRiskPageInput, setLotRiskPageInput] = useState('1');
+  const [dataPanelTab, setDataPanelTab] = useState<DataPanelTab>('lot-risk');
+  const [lotRiskFullscreenOpen, setLotRiskFullscreenOpen] = useState(false);
+  const [lotRiskFullscreenRows, setLotRiskFullscreenRows] = useState<LotRiskRow[]>([]);
+  const [lotRiskFullscreenLoading, setLotRiskFullscreenLoading] = useState(false);
 
-  const filteredLotRiskRows = useMemo(
-    () => filterLotRiskRows(LOT_RISK_MOCK, lotRiskFilterApplied),
-    [lotRiskFilterApplied],
-  );
+  const filteredLotRiskRows = lotRiskRows;
   const lotRiskFilterActive = isLotRiskFilterActive(lotRiskFilterApplied);
-  const lotRiskTotalPages = Math.max(
-    1,
-    Math.ceil(filteredLotRiskRows.length / LOT_RISK_PAGE_SIZE),
-  );
   const lotRiskSafePage = Math.min(lotRiskPage, lotRiskTotalPages);
-  const pagedLotRiskRows = useMemo(() => {
-    const start = (lotRiskSafePage - 1) * LOT_RISK_PAGE_SIZE;
-    return filteredLotRiskRows.slice(start, start + LOT_RISK_PAGE_SIZE);
-  }, [filteredLotRiskRows, lotRiskSafePage]);
-  /** 페이지당 5행 고정 슬롯 (부족분은 null placeholder) */
+  const pagedLotRiskRows = filteredLotRiskRows;
+  /** 페이지당 8행 고정 슬롯 (부족분은 null placeholder) */
   const lotRiskTableSlots = useMemo(() => {
     const slots: Array<LotRiskRow | null> = [...pagedLotRiskRows];
     while (slots.length < LOT_RISK_PAGE_SIZE) slots.push(null);
     return slots;
   }, [pagedLotRiskRows]);
   const lotRiskPageNumbers = useMemo(
-    () => Array.from({ length: lotRiskTotalPages }, (_, i) => i + 1),
-    [lotRiskTotalPages],
+    () => buildPaginationItems(lotRiskSafePage, lotRiskTotalPages),
+    [lotRiskSafePage, lotRiskTotalPages],
   );
   const lotRiskRangeLabel = useMemo(() => {
-    if (filteredLotRiskRows.length === 0) return null;
+    if (lotRiskTotal === 0) return null;
     const start = (lotRiskSafePage - 1) * LOT_RISK_PAGE_SIZE + 1;
-    const end = Math.min(lotRiskSafePage * LOT_RISK_PAGE_SIZE, filteredLotRiskRows.length);
+    const end = Math.min(lotRiskSafePage * LOT_RISK_PAGE_SIZE, lotRiskTotal);
     return `${start}-${end}`;
-  }, [filteredLotRiskRows.length, lotRiskSafePage]);
+  }, [lotRiskSafePage, lotRiskTotal]);
 
   useEffect(() => {
     setSelectedLotRiskId((prev) => {
@@ -1530,17 +1593,201 @@ export default function DashBoardPage() {
   }, [filteredLotRiskRows]);
 
   useEffect(() => {
-    if (lotRiskPage > lotRiskTotalPages) setLotRiskPage(lotRiskTotalPages);
+    if (lotRiskPage > lotRiskTotalPages) {
+      setLotRiskPage(lotRiskTotalPages);
+      setLotRiskPageInput(String(lotRiskTotalPages));
+    }
   }, [lotRiskPage, lotRiskTotalPages]);
 
   const selectedLotRisk = useMemo(
     () => filteredLotRiskRows.find((r) => r.lot === selectedLotRiskId) ?? null,
     [filteredLotRiskRows, selectedLotRiskId],
   );
-  const selectedLotRiskDetail = useMemo(
-    () => (selectedLotRisk ? buildLotRiskDetail(selectedLotRisk) : null),
-    [selectedLotRisk],
-  );
+  useEffect(() => {
+    if (!selectedLotRiskId) {
+      setSelectedLotRiskDetail(null);
+      return;
+    }
+    setSelectedLotRiskDetail((prev) => (prev?.lotId === selectedLotRiskId ? prev : null));
+    let cancelled = false;
+    dashboardApi.getLotRiskDetail(selectedLotRiskId)
+      .then(({ data }) => {
+        if (!cancelled) setSelectedLotRiskDetail(data.item as unknown as LotRiskApiDetail);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedLotRiskDetail((prev) => (prev?.lotId === selectedLotRiskId ? prev : null));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLotRiskId]);
+
+  const selectedRiskSummary = useMemo(() => {
+    if (!selectedLotRisk) return '';
+    const margin = selectedLotRiskDetail?.residualMargin ?? selectedLotRisk.margin;
+    const marginText =
+      margin == null
+        ? '여유량 산출 불가'
+        : margin < 0
+          ? `USL 대비 ${formatNumber(Math.round(Math.abs(margin)))} ppm 초과`
+          : `규격까지 ${formatNumber(Math.round(margin))} ppm`;
+    const residual = selectedLotRiskDetail?.residualLithium ?? selectedLotRisk.predLi;
+    const residualText =
+      typeof residual === 'number'
+        ? `${formatNumber(Math.round(residual))} ppm`
+        : residual || '-';
+    const probability = selectedLotRiskDetail?.defectProb ?? selectedLotRisk.prob;
+    const probPart =
+      probability != null && Number.isFinite(probability)
+        ? `불량확률 ${(probability * 100).toFixed(1)}%, `
+        : '';
+    return `${probPart}잔류리튬 ${residualText}, ${marginText}`;
+  }, [selectedLotRisk, selectedLotRiskDetail]);
+
+  useEffect(() => {
+    const detailMetrics = selectedLotRiskDetail?.spc?.metrics?.slice(0, 9).map((m) => ({
+      key: m.key,
+      label: m.label,
+      status: m.status,
+      currentValue: m.currentValue,
+      violatedRules: m.violatedRules?.slice(0, 3),
+    }));
+    setPagePayload(
+      '/dashboard',
+      {
+        lotRisks: {
+          page: lotRiskPage,
+          total: lotRiskTotal,
+          filter: lotRiskFilterApplied,
+          items: lotRiskRows.slice(0, 10).map((r) => ({
+            lotId: r.lot,
+            grade: r.grade,
+            prob: r.prob,
+            predLi: r.predLi,
+            margin: r.margin,
+            spc: r.spc,
+          })),
+        },
+        selectedLot: selectedLotRisk
+          ? {
+              lotId: selectedLotRisk.lot,
+              summary: selectedRiskSummary,
+              detail: selectedLotRiskDetail
+                ? {
+                    lotId: selectedLotRiskDetail.lotId,
+                    defectProb: selectedLotRiskDetail.defectProb,
+                    residualLithium: selectedLotRiskDetail.residualLithium,
+                    residualMargin: selectedLotRiskDetail.residualMargin,
+                    spcStatus: selectedLotRiskDetail.spcStatus,
+                    riskLevel: selectedLotRiskDetail.riskLevel,
+                    riskReason: selectedLotRiskDetail.riskReason,
+                    metrics: detailMetrics,
+                  }
+                : null,
+            }
+          : null,
+        productionTrend: {
+          filter: trendFilterApplied,
+          points: trendPoints.slice(0, 14),
+          selectedBucket: selectedTrendBucket,
+        },
+        featureImportance: {
+          label: featureImportanceLabel,
+          items: featureImportanceItems.slice(0, 10),
+        },
+        productionDaily: {
+          page: tablePage,
+          total: dailyTotal,
+          rows: dailyApiRows.slice(0, 5).map((r) => ({
+            date: r.date,
+            production: r.production,
+            defectCount: r.defectCount,
+            defectRate: r.defectRate,
+          })),
+        },
+        dataPanelTab,
+      },
+      ['dashboard-lot-risks', 'dashboard-trend', 'dashboard-fi'],
+    );
+  }, [
+    setPagePayload,
+    lotRiskPage,
+    lotRiskTotal,
+    lotRiskFilterApplied,
+    lotRiskRows,
+    selectedLotRisk,
+    selectedLotRiskDetail,
+    selectedRiskSummary,
+    trendFilterApplied,
+    trendPoints,
+    selectedTrendBucket,
+    featureImportanceLabel,
+    featureImportanceItems,
+    tablePage,
+    dailyTotal,
+    dailyApiRows,
+    dataPanelTab,
+  ]);
+
+  useEffect(() => {
+    if (!selectedLotRiskId || !selectedLotRisk) {
+      trackPageChatEvent({ type: 'clear', route: '/dashboard', target: 'lot-risk-detail' })
+      return
+    }
+    const spcStatus =
+      selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc ?? null
+    const spcText = spcStatus != null ? String(spcStatus).trim() : ''
+    const metrics = selectedLotRiskDetail?.spc?.metrics?.slice(0, 9).map((m) => ({
+      key: m.key,
+      label: m.label,
+      status: m.status,
+      currentValue: m.currentValue,
+    }))
+    const spcBlank = !spcText || spcText === '-' || spcText === '—'
+    const metricsEmpty = !metrics || metrics.length === 0
+    trackPageChatEvent({
+      type: 'row_select',
+      route: '/dashboard',
+      target: 'lot-risk-detail',
+      entityId: selectedLotRisk.lot,
+      payload: {
+        lotId: selectedLotRisk.lot,
+        spcStatus: spcStatus ?? '-',
+        spcGraph: spcBlank || metricsEmpty ? 'none' : 'present',
+        row: {
+          grade: selectedLotRisk.grade,
+          prob: selectedLotRisk.prob,
+          predLi: selectedLotRisk.predLi,
+          margin: selectedLotRisk.margin,
+          spc: selectedLotRisk.spc ?? '-',
+        },
+        detail: selectedLotRiskDetail
+          ? {
+              defectProb: selectedLotRiskDetail.defectProb,
+              residualLithium: selectedLotRiskDetail.residualLithium,
+              residualMargin: selectedLotRiskDetail.residualMargin,
+              spcStatus: selectedLotRiskDetail.spcStatus ?? '-',
+              riskLevel: selectedLotRiskDetail.riskLevel,
+              riskReason: selectedLotRiskDetail.riskReason,
+              metrics: metrics ?? [],
+            }
+          : null,
+        summary: selectedRiskSummary,
+      },
+    })
+  }, [selectedLotRiskId, selectedLotRisk, selectedLotRiskDetail, selectedRiskSummary, trackPageChatEvent]);
+  const selectedSpcStatus =
+    selectedLotRiskDetail?.spcStatus ?? selectedLotRisk?.spc ?? null;
+  const selectedSpcUnjudged = isSpcUnjudged(selectedSpcStatus);
+  const selectedSpcMetrics =
+    selectedLotRiskDetail?.lotId === selectedLotRisk?.lot
+      ? (selectedLotRiskDetail?.spc?.metrics ?? []).filter(isAbnormalSpcMetric)
+      : [];
+  const selectedSpcDetailLoading =
+    !!selectedLotRisk &&
+    (selectedLotRiskDetail == null || selectedLotRiskDetail.lotId !== selectedLotRisk.lot);
 
   const pushToast = useCallback((message: string, variant: ToastState['variant']) => {
     toastIdRef.current += 1;
@@ -1555,6 +1802,7 @@ export default function DashBoardPage() {
   const applyLotRiskFilters = useCallback(() => {
     setLotRiskFilterApplied({ ...lotRiskFilterDraft });
     setLotRiskPage(1);
+    setLotRiskPageInput('1');
     pushToast('LOT 위험등급 검색 결과가 적용되었습니다.', 'success');
   }, [lotRiskFilterDraft, pushToast]);
 
@@ -1562,8 +1810,97 @@ export default function DashBoardPage() {
     setLotRiskFilterDraft(EMPTY_LOT_RISK_FILTER);
     setLotRiskFilterApplied(EMPTY_LOT_RISK_FILTER);
     setLotRiskPage(1);
+    setLotRiskPageInput('1');
     pushToast('LOT 위험등급 필터가 초기화되었습니다.', 'info');
   }, [pushToast]);
+
+  const handleLotRiskPageChange = (page: number) => {
+    const nextPage = Math.min(lotRiskTotalPages, Math.max(1, Math.trunc(page)));
+    setLotRiskPage(nextPage);
+    setLotRiskPageInput(String(nextPage));
+  };
+
+  const handleLotRiskPageInputSubmit = () => {
+    const requestedPage = Number(lotRiskPageInput);
+    if (!Number.isFinite(requestedPage)) {
+      setLotRiskPageInput(String(lotRiskSafePage));
+      return;
+    }
+    handleLotRiskPageChange(requestedPage);
+  };
+
+  const openLotRiskFullscreen = useCallback(async (filterOverride?: LotRiskFilterState) => {
+    const filter = filterOverride ?? lotRiskFilterApplied;
+    setLotRiskFullscreenOpen(true);
+    setLotRiskFullscreenLoading(true);
+    try {
+      const rows = await fetchAllLotRiskRows(filter);
+      setLotRiskFullscreenRows(rows);
+    } catch {
+      setLotRiskFullscreenRows([]);
+      pushToast('LOT 위험등급 전체 목록을 불러오지 못했습니다.', 'error');
+    } finally {
+      setLotRiskFullscreenLoading(false);
+    }
+  }, [lotRiskFilterApplied, pushToast]);
+
+  const closeLotRiskFullscreen = useCallback(() => {
+    setLotRiskFullscreenOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!lotRiskFullscreenOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeLotRiskFullscreen();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lotRiskFullscreenOpen, closeLotRiskFullscreen]);
+
+  const handleLotRiskExportCsv = useCallback(async () => {
+    try {
+      const rows = lotRiskFullscreenOpen
+        ? lotRiskFullscreenRows
+        : await fetchAllLotRiskRows(lotRiskFilterApplied);
+      if (rows.length === 0) {
+        pushToast('내보낼 LOT 위험등급 데이터가 없습니다.', 'info');
+        return;
+      }
+      downloadLotRiskCsv(rows);
+      pushToast(`LOT 위험등급 CSV ${rows.length}건 다운로드를 시작했습니다.`, 'success');
+    } catch {
+      pushToast('LOT 위험등급 CSV를 만들지 못했습니다.', 'error');
+    }
+  }, [
+    lotRiskFilterApplied,
+    lotRiskFullscreenOpen,
+    lotRiskFullscreenRows,
+    pushToast,
+  ]);
+
+  const handleLotRiskExportPdf = useCallback(async () => {
+    try {
+      const rows = lotRiskFullscreenOpen
+        ? lotRiskFullscreenRows
+        : await fetchAllLotRiskRows(lotRiskFilterApplied);
+      if (rows.length === 0) {
+        pushToast('내보낼 LOT 위험등급 데이터가 없습니다.', 'info');
+        return;
+      }
+      downloadLotRiskPdf(rows);
+      pushToast('LOT 위험등급 PDF 인쇄 창을 열었습니다.', 'success');
+    } catch (err) {
+      pushToast(
+        err instanceof Error ? err.message : 'PDF 창을 열 수 없습니다.',
+        'error',
+      );
+    }
+  }, [
+    lotRiskFilterApplied,
+    lotRiskFullscreenOpen,
+    lotRiskFullscreenRows,
+    pushToast,
+  ]);
 
   const liveToday = useMemo(() => {
     if (liveLots.length === 0) return formatDate(new Date());
@@ -1587,43 +1924,29 @@ export default function DashBoardPage() {
   const periodLots = liveLots;
 
   const filteredRecords = useMemo(() => lotsToProductionRecords(periodLots), [periodLots]);
-  const hasData = periodLots.length > 0;
+  const hasData = (trendPoints?.length ?? 0) > 0 || dailyApiRows.length > 0;
   const detailedKpis = useMemo(() => computeDetailedKpis(periodLots), [periodLots]);
 
-  const dailyDetailRows = useMemo(
-    () => aggregateDailyDetailRows(periodLots, liveToday),
-    [periodLots, liveToday],
+  const dailyDetailRows: DailyDetailRow[] = useMemo(
+    () => dailyApiRows.map((row) => ({
+      date: row.date,
+      totalProduction: row.production,
+      goodCount: row.goodCount,
+      defectCount: row.defectCount,
+      defectRate: row.defectRate ?? 0,
+      metalImpurity: row.metalImpurity,
+      sinteringTemp: row.sinteringTemp,
+      humidity: row.humidity,
+      lithiumInput: row.lithiumInput,
+      additiveRatio: row.additiveRatio,
+      tankPressure: row.tankPressure,
+      processTime: row.processTime,
+    })),
+    [dailyApiRows],
   );
 
-  const dailyAggregates: DailyAggregate[] = useMemo(
-    () =>
-      [...dailyDetailRows]
-        .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((r) => ({
-          date: r.date,
-          production: r.totalProduction,
-          defectCount: r.defectCount,
-          targetProduction: Math.max(1, Math.round(r.totalProduction * 1.05)),
-        })),
-    [dailyDetailRows],
-  );
-
+  const dailyAggregates: DailyAggregate[] = trendPoints;
   const trendHasData = dailyAggregates.length > 0;
-  const trendDailyAggregates = dailyAggregates;
-  const trendDailyRates = useMemo(
-    () =>
-      dailyAggregates.map((d) => ({
-        date: d.date,
-        rate: safeRate(d.defectCount, d.production),
-      })),
-    [dailyAggregates],
-  );
-
-  /** 전체 LOT 기준 Feature Importance (liveLots 갱신 시 변동) */
-  const featureImportanceItems = useMemo(
-    () => resolveFeatureImportance(computeFeatureImportanceFromLots(periodLots)),
-    [periodLots],
-  );
 
   const kpi: KpiSummary = useMemo(() => {
     if (!hasData) {
@@ -1662,12 +1985,9 @@ export default function DashBoardPage() {
 
   const searchedDetailRows = dailyDetailRows;
 
-  const tableTotalPages = Math.max(1, Math.ceil(searchedDetailRows.length / pageSize));
+  const tableTotalPages = dailyTotalPages;
   const tableSafePage = Math.min(tablePage, tableTotalPages);
-  const pagedDetailRows = useMemo(() => {
-    const start = (tableSafePage - 1) * pageSize;
-    return searchedDetailRows.slice(start, start + pageSize);
-  }, [searchedDetailRows, tableSafePage, pageSize]);
+  const pagedDetailRows = searchedDetailRows;
   const visibleDetailIds = useMemo(
     () => pagedDetailRows.map((r) => r.date),
     [pagedDetailRows],
@@ -1684,12 +2004,12 @@ export default function DashBoardPage() {
   );
 
   const tableRangeStart =
-    searchedDetailRows.length === 0 ? 0 : (tableSafePage - 1) * pageSize + 1;
-  const tableRangeEnd = Math.min(tableSafePage * pageSize, searchedDetailRows.length);
+    dailyTotal === 0 ? 0 : (tableSafePage - 1) * PRODUCTION_DAILY_PAGE_SIZE + 1;
+  const tableRangeEnd = Math.min(tableSafePage * PRODUCTION_DAILY_PAGE_SIZE, dailyTotal);
   const tableStatusText =
-    searchedDetailRows.length === 0
+    dailyTotal === 0
       ? '표시할 데이터가 없습니다.'
-      : `총 ${formatNumber(searchedDetailRows.length)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
+      : `총 ${formatNumber(dailyTotal)}건 중 ${formatNumber(tableRangeStart)}–${formatNumber(tableRangeEnd)}건 표시`;
 
   useEffect(() => {
     if (tablePage > tableTotalPages) setTablePage(tableTotalPages);
@@ -1705,39 +2025,155 @@ export default function DashBoardPage() {
     setIsMounted(true);
   }, []);
 
-  const refreshDashboardData = useCallback(async () => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
+  const markFetchStart = useCallback(() => {
+    inflightRef.current += 1;
     setLiveStatus('updating');
-    try {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 220);
-      });
-      liveVersionRef.current += 1;
-      // Mock 실시간 데모: 최초는 기준 Mock 유지, 이후 최신일 LOT 누적
-      if (liveVersionRef.current === 1) {
-        setLiveLots(MOCK_LOTS);
-      } else {
-        const addCount = 1 + (liveVersionRef.current % 2);
-        setLiveLots((prev) => appendLiveDemoLots(prev, addCount));
-      }
-      setLastUpdatedAt(new Date());
-      setLiveStatus('connected');
-    } catch {
-      setLiveStatus('error');
-    } finally {
-      fetchingRef.current = false;
-      setInitialLoading(false);
+  }, []);
+
+  const markFetchEnd = useCallback((ok: boolean) => {
+    inflightRef.current = Math.max(0, inflightRef.current - 1);
+    if (ok) setLastUpdatedAt(new Date());
+    if (inflightRef.current === 0) {
+      setLiveStatus(ok ? 'connected' : 'error');
     }
   }, []);
 
+  const fetchLotRisks = useCallback(async (options?: { force?: boolean }) => {
+    if (lotFetchingRef.current && !options?.force) return;
+    lotFetchingRef.current = true;
+    markFetchStart();
+    try {
+      const lotResponse = await dashboardApi.listLotRisks(
+        lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
+      );
+      setLotRiskRows(lotResponse.data.items.map(mapDashboardLotRiskItem));
+      setLotRiskTotal(lotResponse.data.total);
+      setLotRiskTotalPages(lotResponse.data.totalPages);
+      markFetchEnd(true);
+    } catch {
+      markFetchEnd(false);
+    } finally {
+      lotFetchingRef.current = false;
+    }
+  }, [lotRiskFilterApplied, lotRiskPage, markFetchEnd, markFetchStart]);
+
+  const fetchTrendAndFi = useCallback(async (options?: { force?: boolean }) => {
+    if (chartsFetchingRef.current && !options?.force) return;
+    chartsFetchingRef.current = true;
+    markFetchStart();
+    try {
+      const trendParams =
+        trendFilterApplied.startDate && trendFilterApplied.endDate
+          ? {
+              from: trendFilterApplied.startDate,
+              to: trendFilterApplied.endDate,
+              grain: 'day' as const,
+            }
+          : { grain: 'day' as const };
+      const fiParams =
+        selectedTrendBucket != null
+          ? {
+              grain: 'day' as const,
+              bucket: selectedTrendBucket.date,
+              mode: 'selected' as const,
+            }
+          : { grain: 'day' as const, mode: 'default' as const };
+      const [trendResponse, fiResponse] = await Promise.all([
+        dashboardApi.getProductionTrend(trendParams),
+        dashboardApi.getFeatureImportance(fiParams),
+      ]);
+      setTrendPoints(
+        (trendResponse.data.points || []).map((row) => ({
+          date: row.date,
+          production: row.production,
+          goodCount: row.goodCount,
+          defectCount: row.defectCount,
+          defectRate: row.defectRate,
+        })),
+      );
+      if (!trendFilterApplied.startDate || !trendFilterApplied.endDate) {
+        setTrendFilterDraft({
+          startDate: trendResponse.data.from,
+          endDate: trendResponse.data.to,
+        });
+        setTrendFilterApplied({
+          startDate: trendResponse.data.from,
+          endDate: trendResponse.data.to,
+        });
+      }
+      const importanceTotal = fiResponse.data.items.reduce(
+        (sum, item) => sum + Math.max(0, Number(item.importance) || 0),
+        0,
+      );
+      setFeatureImportanceItems(
+        fiResponse.data.items.map((item, idx) => ({
+          label: item.label,
+          importance:
+            importanceTotal > 0 ? Math.max(0, Number(item.importance) || 0) / importanceTotal : 0,
+          primary: item.primary ?? idx < 4,
+        })),
+      );
+      setFeatureImportanceLabel(fiResponse.data.label || '당일');
+      markFetchEnd(true);
+    } catch {
+      markFetchEnd(false);
+    } finally {
+      chartsFetchingRef.current = false;
+    }
+  }, [
+    markFetchEnd,
+    markFetchStart,
+    selectedTrendBucket,
+    trendFilterApplied,
+  ]);
+
+  const fetchProductionDaily = useCallback(async (options?: { force?: boolean }) => {
+    if (dailyFetchingRef.current && !options?.force) return;
+    dailyFetchingRef.current = true;
+    markFetchStart();
+    try {
+      const dailyResponse = await dashboardApi.getProductionDaily(
+        tablePage,
+        PRODUCTION_DAILY_PAGE_SIZE,
+        productionDailyApiFilters(productionDailyFilter),
+      );
+      setDailyApiRows(dailyResponse.data.items as unknown as ProductionDailyRow[]);
+      setDailyTotal(dailyResponse.data.total);
+      setDailyTotalPages(dailyResponse.data.totalPages);
+      setDailyOperators(dailyResponse.data.operators ?? []);
+      markFetchEnd(true);
+    } catch {
+      markFetchEnd(false);
+    } finally {
+      dailyFetchingRef.current = false;
+      setInitialLoading(false);
+    }
+  }, [markFetchEnd, markFetchStart, productionDailyFilter, tablePage]);
+
+  const refreshDashboardData = useCallback(async (options?: { force?: boolean }) => {
+    await Promise.all([
+      fetchLotRisks(options),
+      fetchTrendAndFi(options),
+      dataPanelTab === 'production-daily' ? fetchProductionDaily(options) : Promise.resolve(),
+    ]);
+  }, [dataPanelTab, fetchLotRisks, fetchProductionDaily, fetchTrendAndFi]);
+
   useEffect(() => {
-    void refreshDashboardData();
-    const id = window.setInterval(() => {
-      void refreshDashboardData();
-    }, LIVE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [refreshDashboardData]);
+    void fetchLotRisks();
+  }, [fetchLotRisks]);
+
+  useEffect(() => {
+    void fetchTrendAndFi();
+  }, [fetchTrendAndFi]);
+
+  useEffect(() => {
+    if (dataPanelTab !== 'production-daily') return;
+    void fetchProductionDaily();
+  }, [dataPanelTab, fetchProductionDaily]);
+
+  useShellRefresh(() => {
+    void refreshDashboardData({ force: true });
+  });
 
   const defectAnalysis: DefectAnalysis = useMemo(() => {
     const dailyRates = dailyAggregates.map((d) => ({
@@ -1876,53 +2312,15 @@ export default function DashBoardPage() {
       alert('다운로드할 항목을 체크박스로 선택해주세요.');
       return;
     }
-    const rowsToExport = searchedDetailRows.filter((r) =>
-      selectedItems.includes(r.date),
-    );
-    if (rowsToExport.length === 0) {
-      pushToast('내보낼 데이터가 없습니다.', 'error');
-      return;
-    }
-    const headers = [
-      '날짜',
-      '총생산량',
-      '양품 수',
-      '불량품 수',
-      '불량률',
-      '평균 방전 용량',
-      '금속 불순물 농도',
-      '평균 소성 온도',
-      '데이터 상태',
-    ];
-    const lines = [
-      headers.map(escapeCsvCell).join(','),
-      ...rowsToExport.map((r) =>
-        [
-          r.date,
-          r.totalProduction,
-          r.goodCount,
-          r.defectCount,
-          (r.defectRate * 100).toFixed(1) + '%',
-          r.avgCapacity.toFixed(1),
-          r.avgMetalImpurity.toFixed(3),
-          r.avgSinteringTemp.toFixed(1),
-          r.status,
-        ]
-          .map(escapeCsvCell)
-          .join(','),
-      ),
-    ];
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `production-detail_${liveToday}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    pushToast('CSV 파일이 다운로드되었습니다.', 'success');
+    selectedItems.forEach((date) => {
+      const link = document.createElement('a');
+      link.href = dashboardApi.lotsCsvPath(date);
+      link.download = `lots_${date}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+    pushToast(`${selectedItems.length}개 날짜의 LOT CSV 다운로드를 시작했습니다.`, 'success');
   };
 
   const cardClass = isDark
@@ -1934,7 +2332,7 @@ export default function DashBoardPage() {
       ? '업데이트 중'
       : liveStatus === 'error'
         ? '업데이트 지연'
-        : '실시간 데모';
+        : 'API 연결됨';
 
   return (
     <div
@@ -2010,49 +2408,291 @@ export default function DashBoardPage() {
           </div>
         </header>
 
-        {/* KPI — 6 detailed data-driven cards */}
-        <section className="mb-5 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
-          {detailedKpis.map((card) => (
-            <KpiCard
-              key={card.key}
-              label={card.label}
-              value={card.value}
-              unit={card.unit}
-              sub={card.sub}
-              badge={card.badge}
-            />
-          ))}
-        </section>
-
-
-
-        {/* LOT 위험등급 — 좌측 목록 / 우측 핵심 상세 (생산 추이 위) */}
+        {/* LOT 위험등급 / 생산 상세 — 탭 스위치 */}
         <section className={`col-span-full mb-6 w-full p-5 ${cardClass}`}>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2
-                className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-              >
-                LOT 위험등급
-              </h2>
-              <span className="text-sm font-normal text-gray-400">
-                분류확률 + 잔류Li 여유 + SPC 결합
-              </span>
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                  isDark
-                    ? 'bg-slate-800 text-slate-400 ring-1 ring-slate-600'
-                    : 'bg-slate-50 text-slate-500 ring-1 ring-slate-200'
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <div
+                className={`inline-flex rounded-lg border p-0.5 ${
+                  isDark ? 'border-slate-600' : 'border-slate-200'
                 }`}
+                role="tablist"
+                aria-label="데이터 패널 전환"
               >
-                Mock 분석 데이터
-              </span>
+                {(
+                  [
+                    { id: 'lot-risk' as const, label: 'LOT 위험등급' },
+                    { id: 'production-daily' as const, label: '생산 상세' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={dataPanelTab === tab.id}
+                    onClick={() => setDataPanelTab(tab.id)}
+                    className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors ${
+                      dataPanelTab === tab.id
+                        ? 'bg-blue-600 text-white'
+                        : isDark
+                          ? 'text-slate-300 hover:bg-slate-800'
+                          : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              {dataPanelTab === 'lot-risk' ? (
+                <span className="text-sm font-normal text-gray-400">
+                  분류확률 + 잔류Li 여유 + SPC 결합
+                </span>
+              ) : (
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  analysis_lots · lots 기반 최근 7일 일별 집계 (불량 판정 확률 ≥ 0.8)
+                </span>
+              )}
             </div>
+            {dataPanelTab === 'lot-risk' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void openLotRiskFullscreen()}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  전체보기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLotRiskExportCsv()}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLotRiskExportPdf()}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  PDF
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2 text-xs ${
+                    isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
+                  }`}
+                  title="작업자 필터"
+                >
+                  <UserRound
+                    className={`h-3.5 w-3.5 shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                    aria-hidden
+                  />
+                  <select
+                    aria-label="작업자 필터"
+                    value={productionDailyFilter.operatorId}
+                    onChange={(e) => {
+                      setTablePage(1);
+                      setProductionDailyFilter((prev) => ({
+                        ...prev,
+                        operatorId: e.target.value,
+                      }));
+                    }}
+                    className={`max-w-[140px] bg-transparent text-xs font-medium outline-none ${
+                      isDark ? 'text-slate-200' : 'text-slate-700'
+                    }`}
+                  >
+                    <option value="">전체 작업자</option>
+                    {dailyOperators.map((op) => (
+                      <option key={op} value={op}>
+                        {op}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div
+                  className={`inline-flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1 ${
+                    isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={productionDailyFilter.d50Enabled}
+                    title="d50 필터"
+                    onClick={() => {
+                      setTablePage(1);
+                      setProductionDailyFilter((prev) => ({
+                        ...prev,
+                        d50Enabled: !prev.d50Enabled,
+                      }));
+                    }}
+                    className={`inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold ${
+                      productionDailyFilter.d50Enabled
+                        ? 'bg-blue-600 text-white'
+                        : isDark
+                          ? 'text-slate-300 hover:bg-slate-700'
+                          : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Ruler className="h-3.5 w-3.5" aria-hidden />
+                    d50
+                  </button>
+                  {productionDailyFilter.d50Enabled ? (
+                    <>
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label="d50 최소"
+                        placeholder="min"
+                        value={productionDailyFilter.d50Min}
+                        onChange={(e) => {
+                          setTablePage(1);
+                          setProductionDailyFilter((prev) => ({
+                            ...prev,
+                            d50Min: e.target.value,
+                          }));
+                        }}
+                        className={`h-7 w-16 rounded border px-1.5 text-[11px] tabular-nums ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900 text-slate-200'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      />
+                      <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        ~
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label="d50 최대"
+                        placeholder="max"
+                        value={productionDailyFilter.d50Max}
+                        onChange={(e) => {
+                          setTablePage(1);
+                          setProductionDailyFilter((prev) => ({
+                            ...prev,
+                            d50Max: e.target.value,
+                          }));
+                        }}
+                        className={`h-7 w-16 rounded border px-1.5 text-[11px] tabular-nums ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900 text-slate-200'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      />
+                    </>
+                  ) : null}
+                </div>
+
+                <div
+                  className={`inline-flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1 ${
+                    isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={productionDailyFilter.d90Enabled}
+                    title="d90 필터"
+                    onClick={() => {
+                      setTablePage(1);
+                      setProductionDailyFilter((prev) => ({
+                        ...prev,
+                        d90Enabled: !prev.d90Enabled,
+                      }));
+                    }}
+                    className={`inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold ${
+                      productionDailyFilter.d90Enabled
+                        ? 'bg-blue-600 text-white'
+                        : isDark
+                          ? 'text-slate-300 hover:bg-slate-700'
+                          : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Ruler className="h-3.5 w-3.5" aria-hidden />
+                    d90
+                  </button>
+                  {productionDailyFilter.d90Enabled ? (
+                    <>
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label="d90 최소"
+                        placeholder="min"
+                        value={productionDailyFilter.d90Min}
+                        onChange={(e) => {
+                          setTablePage(1);
+                          setProductionDailyFilter((prev) => ({
+                            ...prev,
+                            d90Min: e.target.value,
+                          }));
+                        }}
+                        className={`h-7 w-16 rounded border px-1.5 text-[11px] tabular-nums ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900 text-slate-200'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      />
+                      <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        ~
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label="d90 최대"
+                        placeholder="max"
+                        value={productionDailyFilter.d90Max}
+                        onChange={(e) => {
+                          setTablePage(1);
+                          setProductionDailyFilter((prev) => ({
+                            ...prev,
+                            d90Max: e.target.value,
+                          }));
+                        }}
+                        className={`h-7 w-16 rounded border px-1.5 text-[11px] tabular-nums ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900 text-slate-200'
+                            : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      />
+                    </>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  disabled={searchedDetailRows.length === 0}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  CSV 다운로드
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-            <label className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-xs sm:max-w-[280px] sm:flex-none">
+          {dataPanelTab === 'lot-risk' ? (
+          <>
+          <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-2">
+            <label className="inline-flex w-[140px] shrink-0 items-center gap-1.5 text-xs">
               <span className={`shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 LOT
               </span>
@@ -2070,7 +2710,7 @@ export default function DashBoardPage() {
                     applyLotRiskFilters();
                   }
                 }}
-                className={`h-9 w-full min-w-0 rounded-lg border px-2.5 text-sm outline-none ${
+                className={`h-9 w-full min-w-0 rounded-lg border px-1.5 text-xs outline-none ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100 placeholder:text-slate-500'
                     : 'border-slate-200 bg-white text-slate-700 placeholder:text-slate-400'
@@ -2079,26 +2719,74 @@ export default function DashBoardPage() {
             </label>
 
             <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>불량확률</span>
               <select
-                aria-label="위험등급 필터"
-                value={lotRiskFilterDraft.grade}
+                aria-label="불량확률 필터"
+                value={lotRiskFilterDraft.probLevel}
                 onChange={(e) =>
                   setLotRiskFilterDraft((prev) => ({
                     ...prev,
-                    grade: e.target.value as LotRiskFilterState['grade'],
+                    probLevel: e.target.value as LotRiskFilterState['probLevel'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="높음">높음</option>
-                <option value="중간">중간</option>
-                <option value="낮음">낮음</option>
+                <option value="high">40% 이상</option>
+                <option value="mid">20~40%</option>
+                <option value="low">20% 미만</option>
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>잔류리튬</span>
+              <select
+                aria-label="잔류리튬 필터"
+                value={lotRiskFilterDraft.residualLevel}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    residualLevel: e.target.value as LotRiskFilterState['residualLevel'],
+                  }))
+                }
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <option value="all">전체</option>
+                <option value="low">3,000 미만</option>
+                <option value="mid">3,000~3,500</option>
+                <option value="high">3,500 이상</option>
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>여유량</span>
+              <select
+                aria-label="여유량 필터"
+                value={lotRiskFilterDraft.marginLevel}
+                onChange={(e) =>
+                  setLotRiskFilterDraft((prev) => ({
+                    ...prev,
+                    marginLevel: e.target.value as LotRiskFilterState['marginLevel'],
+                  }))
+                }
+                className={`h-9 max-w-[7.5rem] rounded-lg border px-1.5 text-xs ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <option value="all">전체</option>
+                <option value="low">≤500</option>
+                <option value="caution">500~1,000</option>
+                <option value="sufficient">{`>1,000`}</option>
               </select>
             </label>
 
@@ -2113,62 +2801,40 @@ export default function DashBoardPage() {
                     spc: e.target.value as LotRiskFilterState['spc'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="정상">정상</option>
                 <option value="이탈">이탈</option>
+                <option value="주의">주의</option>
+                <option value="안정">안정</option>
               </select>
             </label>
 
             <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>불량확률</span>
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
               <select
-                aria-label="불량확률 필터"
-                value={lotRiskFilterDraft.probLevel}
+                aria-label="위험등급 필터"
+                value={lotRiskFilterDraft.grade}
                 onChange={(e) =>
                   setLotRiskFilterDraft((prev) => ({
                     ...prev,
-                    probLevel: e.target.value as LotRiskFilterState['probLevel'],
+                    grade: e.target.value as LotRiskFilterState['grade'],
                   }))
                 }
-                className={`h-9 rounded-lg border px-2 text-sm ${
+                className={`h-9 rounded-lg border px-1.5 text-xs ${
                   isDark
                     ? 'border-slate-700 bg-slate-950/40 text-slate-100'
                     : 'border-slate-200 bg-white text-slate-700'
                 }`}
               >
                 <option value="all">전체</option>
-                <option value="high">50% 이상</option>
-                <option value="mid">15~50%</option>
-                <option value="low">15% 미만</option>
-              </select>
-            </label>
-
-            <label className="inline-flex items-center gap-1.5 text-xs">
-              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>긴급</span>
-              <select
-                aria-label="긴급 LOT 필터"
-                value={lotRiskFilterDraft.critical}
-                onChange={(e) =>
-                  setLotRiskFilterDraft((prev) => ({
-                    ...prev,
-                    critical: e.target.value as LotRiskFilterState['critical'],
-                  }))
-                }
-                className={`h-9 rounded-lg border px-2 text-sm ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-950/40 text-slate-100'
-                    : 'border-slate-200 bg-white text-slate-700'
-                }`}
-              >
-                <option value="all">전체</option>
-                <option value="critical">긴급만</option>
-                <option value="normal">일반만</option>
+                <option value="심각">심각</option>
+                <option value="주의">주의</option>
+                <option value="안정">안정</option>
               </select>
             </label>
 
@@ -2185,9 +2851,8 @@ export default function DashBoardPage() {
               disabled={
                 !lotRiskFilterActive &&
                 lotRiskFilterDraft.lotQuery === '' &&
-                lotRiskFilterDraft.grade === 'all' &&
-                lotRiskFilterDraft.spc === 'all' &&
-                lotRiskFilterDraft.critical === 'all' &&
+                lotRiskFilterDraft.marginLevel === 'all' &&
+                lotRiskFilterDraft.residualLevel === 'all' &&
                 lotRiskFilterDraft.probLevel === 'all'
               }
               className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -2206,8 +2871,8 @@ export default function DashBoardPage() {
               }`}
             >
               {lotRiskFilterActive
-                ? `검색 결과 ${filteredLotRiskRows.length}건 / 전체 ${LOT_RISK_MOCK.length}건`
-                : `총 ${filteredLotRiskRows.length}건`}
+                ? `검색 결과 ${lotRiskTotal}건`
+                : `총 ${lotRiskTotal}건`}
               {lotRiskRangeLabel
                 ? ` · ${lotRiskRangeLabel} 표시 · ${lotRiskSafePage}/${lotRiskTotalPages}페이지`
                 : ''}
@@ -2215,28 +2880,31 @@ export default function DashBoardPage() {
           </div>
 
           <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-12">
-            <div className="flex min-w-0 flex-col xl:col-span-7">
+            <div className="flex min-w-0 flex-col xl:col-span-8">
               <div
-                className={`flex h-[356px] min-h-0 flex-col overflow-hidden rounded-lg border ${
+                className={`flex ${LOT_RISK_TABLE_HEIGHT_CLASS} min-h-0 flex-col overflow-hidden rounded-lg border ${
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-              <div className="min-h-0 flex-1 overflow-hidden">
-              <table className="w-full table-fixed border-collapse text-sm">
+              <div className="min-h-0 flex-1 overflow-x-auto">
+              <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
                 <thead
                   className={`text-sm font-normal text-gray-500 ${
                     isDark ? 'bg-slate-900/80' : 'bg-slate-100/70'
                   }`}
                 >
                   <tr className="h-[44px]">
-                    <th scope="col" className="px-3 py-3 text-left font-normal">
-                      LOT
+                    <th scope="col" className="w-[190px] px-3 py-3 text-left font-normal">
+                      LOT ID
                     </th>
                     <th scope="col" className="px-3 py-3 text-left font-normal">
                       불량확률
                     </th>
                     <th scope="col" className="px-3 py-3 text-right font-normal">
-                      잔류Li 여유
+                      잔류리튬
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-right font-normal">
+                      여유량
                     </th>
                     <th scope="col" className="px-3 py-3 text-center font-normal">
                       SPC
@@ -2251,7 +2919,7 @@ export default function DashBoardPage() {
                     <>
                       <tr className={`h-[52px] border-b ${isDark ? 'border-slate-700/80' : 'border-slate-100'}`}>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           rowSpan={LOT_RISK_PAGE_SIZE}
                           className={`px-4 text-center text-sm align-middle ${
                             isDark ? 'text-slate-400' : 'text-slate-500'
@@ -2281,17 +2949,15 @@ export default function DashBoardPage() {
                           }`}
                           aria-hidden="true"
                         >
-                          <td className="px-3 py-3" colSpan={5} />
+                          <td className="px-3 py-3" colSpan={6} />
                         </tr>
                       );
                     }
-                    const pct = lotRiskProbPercent(row.prob);
-                    const spcOut = row.spc === '이탈';
                     const isSelected = row.lot === selectedLotRiskId;
                     return (
                       <tr
                         key={row.lot}
-                        role="button"
+                        role="row"
                         tabIndex={0}
                         aria-selected={isSelected}
                         onClick={() => setSelectedLotRiskId(row.lot)}
@@ -2306,45 +2972,60 @@ export default function DashBoardPage() {
                             ? isDark
                               ? 'border-blue-800/60 bg-blue-950/40 ring-1 ring-inset ring-blue-700/50'
                               : 'border-blue-100 bg-blue-50 ring-1 ring-inset ring-blue-200'
-                            : row.isCritical
-                              ? isDark
-                                ? 'border-slate-700/80 bg-red-950/20 hover:bg-red-950/35'
-                                : 'border-slate-100 bg-red-50/70 hover:bg-red-50'
-                              : isDark
-                                ? 'border-slate-700/80 hover:bg-slate-800/60'
-                                : 'border-slate-100 hover:bg-gray-50'
+                            : isDark
+                              ? 'border-slate-700/80 hover:bg-slate-800/60'
+                              : 'border-slate-100 hover:bg-gray-50'
                         }`}
                       >
                         <td
-                          className={`whitespace-nowrap px-3 py-3 font-medium ${
+                          className={`min-w-[190px] whitespace-nowrap px-3 py-3 font-medium ${
                             isDark ? 'text-slate-200' : 'text-slate-700'
                           }`}
                         >
                           {row.lot}
                         </td>
                         <td className="px-3 py-3">
-                          <div
-                            className="flex min-w-0 items-center gap-2"
-                            aria-label={`${row.lot} 불량확률 ${Math.round(pct)}%`}
-                          >
+                          {row.prob != null && Number.isFinite(row.prob) ? (
                             <div
-                              className={`h-2 min-w-0 flex-1 overflow-hidden rounded-full ${
-                                isDark ? 'bg-slate-700' : 'bg-slate-200'
-                              }`}
+                              className="flex min-w-0 items-center gap-2"
+                              aria-label={`${row.lot} 불량확률 ${Math.round(lotRiskProbPercent(row.prob))}%`}
                             >
                               <div
-                                className="h-full rounded-full bg-blue-500"
-                                style={{ width: `${pct}%` }}
-                              />
+                                className={`h-2 min-w-0 flex-1 overflow-hidden rounded-full ${
+                                  isDark ? 'bg-slate-700' : 'bg-slate-200'
+                                }`}
+                              >
+                                <div
+                                  className="h-full rounded-full bg-blue-500"
+                                  style={{ width: `${lotRiskProbPercent(row.prob)}%` }}
+                                />
+                              </div>
+                              <span
+                                className={`min-w-[2.25rem] shrink-0 tabular-nums ${
+                                  isDark ? 'text-slate-200' : 'text-slate-700'
+                                }`}
+                              >
+                                {Math.round(lotRiskProbPercent(row.prob))}%
+                              </span>
                             </div>
+                          ) : (
                             <span
-                              className={`min-w-[2.25rem] shrink-0 tabular-nums ${
-                                isDark ? 'text-slate-200' : 'text-slate-700'
+                              className={`tabular-nums ${
+                                isDark ? 'text-slate-500' : 'text-slate-400'
                               }`}
                             >
-                              {Math.round(pct)}%
+                              —
                             </span>
-                          </div>
+                          )}
+                        </td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-3 text-right tabular-nums ${
+                            isDark ? 'text-slate-200' : 'text-slate-700'
+                          }`}
+                        >
+                          {typeof row.predLi === 'number'
+                            ? formatNumber(Math.round(row.predLi))
+                            : row.predLi || '-'}
                         </td>
                         <td
                           className={`whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums ${lotRiskMarginClass(
@@ -2352,46 +3033,66 @@ export default function DashBoardPage() {
                             isDark,
                           )}`}
                         >
-                          {row.margin}
+                          {formatSpecDistance(row.margin)}
                         </td>
                         <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                              spcOut
-                                ? 'bg-red-100 text-red-600'
-                                : 'bg-green-100 text-green-700'
+                            className={`inline-flex items-center gap-1.5 text-sm font-medium ${
+                              row.spc === '이탈'
+                                ? 'text-red-600'
+                                : row.spc === '주의'
+                                  ? 'text-amber-600'
+                                  : row.spc === '안정'
+                                    ? isDark
+                                      ? 'text-slate-300'
+                                      : 'text-slate-700'
+                                    : isDark
+                                      ? 'text-slate-500'
+                                      : 'text-slate-400'
                             }`}
                           >
-                            <span
-                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                spcOut ? 'bg-red-500' : 'bg-green-600'
-                              }`}
-                              aria-hidden="true"
-                            />
-                            {row.spc}
+                            {row.spc === '이탈' || row.spc === '주의' || row.spc === '안정' ? (
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  row.spc === '이탈'
+                                    ? 'bg-red-500'
+                                    : row.spc === '주의'
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                }`}
+                              />
+                            ) : null}
+                            {formatSpcStatusLabel(row.spc)}
                           </span>
                         </td>
                         <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                              row.grade === '높음'
-                                ? 'bg-red-50 text-red-600'
-                                : row.grade === '중간'
-                                  ? 'bg-orange-50 text-orange-600'
-                                  : 'bg-green-50 text-green-600'
+                            className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                              row.grade === '심각'
+                                ? 'text-red-600'
+                                : row.grade === '주의'
+                                  ? 'text-amber-600'
+                                  : row.grade === '안정'
+                                    ? isDark
+                                      ? 'text-slate-300'
+                                      : 'text-slate-700'
+                                    : isDark
+                                      ? 'text-slate-500'
+                                      : 'text-slate-400'
                             }`}
                           >
-                            <span
-                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                row.grade === '높음'
-                                  ? 'bg-red-500'
-                                  : row.grade === '중간'
-                                    ? 'bg-orange-500'
-                                    : 'bg-green-600'
-                              }`}
-                              aria-hidden="true"
-                            />
-                            {row.grade}
+                            {row.grade === '심각' || row.grade === '주의' || row.grade === '안정' ? (
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  row.grade === '심각'
+                                    ? 'bg-red-500'
+                                    : row.grade === '주의'
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                }`}
+                              />
+                            ) : null}
+                            {row.grade || '—'}
                           </span>
                         </td>
                       </tr>
@@ -2403,7 +3104,7 @@ export default function DashBoardPage() {
               </div>
 
               <div
-                className={`flex h-[52px] shrink-0 items-center justify-between gap-2 border-t px-3 ${
+                className={`flex min-h-[52px] shrink-0 flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
@@ -2412,19 +3113,17 @@ export default function DashBoardPage() {
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  {filteredLotRiskRows.length > 0 && lotRiskRangeLabel
-                    ? `${lotRiskRangeLabel} / 총 ${filteredLotRiskRows.length}건`
-                    : `0 / 총 ${filteredLotRiskRows.length}건`}
+                  {lotRiskTotal > 0 && lotRiskRangeLabel
+                    ? `${lotRiskRangeLabel} / 총 ${lotRiskTotal}건`
+                    : `0 / 총 ${lotRiskTotal}건`}
                 </span>
-                <nav
-                  aria-label="LOT 위험등급 목록 페이지"
-                  className="flex flex-wrap items-center justify-center gap-1.5"
-                >
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                <nav aria-label="LOT 위험등급 목록 페이지" className="flex w-[440px] shrink-0 items-center justify-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setLotRiskPage((p) => Math.max(1, p - 1))}
+                    onClick={() => handleLotRiskPageChange(lotRiskSafePage - 1)}
                     disabled={lotRiskSafePage <= 1 || filteredLotRiskRows.length === 0}
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`min-w-12 shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       isDark
                         ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -2432,16 +3131,23 @@ export default function DashBoardPage() {
                   >
                     이전
                   </button>
-                  {lotRiskPageNumbers.map((page) => {
+                  {lotRiskPageNumbers.map((page, index) => {
+                    if (page === 'ellipsis') {
+                      return (
+                        <span key={`lot-ellipsis-${index}`} className={`inline-flex w-10 shrink-0 items-center justify-center text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                          …
+                        </span>
+                      );
+                    }
                     const active = page === lotRiskSafePage;
                     return (
                       <button
                         key={page}
                         type="button"
                         aria-current={active ? 'page' : undefined}
-                        onClick={() => setLotRiskPage(page)}
+                        onClick={() => handleLotRiskPageChange(page)}
                         disabled={filteredLotRiskRows.length === 0}
-                        className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        className={`w-10 shrink-0 rounded-lg px-1 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                           active
                             ? 'bg-blue-600 text-white'
                             : isDark
@@ -2455,14 +3161,12 @@ export default function DashBoardPage() {
                   })}
                   <button
                     type="button"
-                    onClick={() =>
-                      setLotRiskPage((p) => Math.min(lotRiskTotalPages, p + 1))
-                    }
+                    onClick={() => handleLotRiskPageChange(lotRiskSafePage + 1)}
                     disabled={
                       lotRiskSafePage >= lotRiskTotalPages ||
                       filteredLotRiskRows.length === 0
                     }
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`min-w-12 shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       isDark
                         ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -2471,16 +3175,58 @@ export default function DashBoardPage() {
                     다음
                   </button>
                 </nav>
+                <form
+                  className="flex items-center gap-1.5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    handleLotRiskPageInputSubmit();
+                  }}
+                >
+                  <label
+                    htmlFor="lot-risk-page-jump"
+                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+                  >
+                    페이지
+                  </label>
+                  <input
+                    id="lot-risk-page-jump"
+                    type="number"
+                    min={1}
+                    max={lotRiskTotalPages}
+                    value={lotRiskPageInput}
+                    onChange={(event) => setLotRiskPageInput(event.target.value)}
+                    aria-label="이동할 LOT 위험등급 페이지 번호"
+                    className={`h-8 w-16 rounded-lg border px-2 text-center text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-200'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  />
+                  <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    / {lotRiskTotalPages}
+                  </span>
+                  <button
+                    type="submit"
+                    className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                      isDark
+                        ? 'border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    이동
+                  </button>
+                </form>
+                </div>
               </div>
               </div>
             </div>
 
             <aside
-              className={`flex h-[356px] min-h-0 flex-col overflow-hidden rounded-lg border p-4 xl:col-span-5 ${
+              className={`flex ${LOT_RISK_TABLE_HEIGHT_CLASS} min-h-0 flex-col overflow-hidden rounded-lg border p-4 xl:col-span-4 ${
                 isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50/60'
               }`}
             >
-              {!selectedLotRisk || !selectedLotRiskDetail ? (
+              {!selectedLotRisk ? (
                 <div
                   className={`flex flex-1 flex-col items-center justify-center gap-2 text-center ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -2511,44 +3257,66 @@ export default function DashBoardPage() {
                     </div>
                     <span
                       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        selectedLotRisk.grade === '높음'
-                          ? 'bg-red-50 text-red-600'
-                          : selectedLotRisk.grade === '중간'
-                            ? 'bg-orange-50 text-orange-600'
-                            : 'bg-green-50 text-green-600'
+                        selectedLotRisk.grade === '심각'
+                          ? isDark
+                            ? 'bg-red-950/50 text-red-400'
+                            : 'bg-red-50 text-red-700'
+                          : selectedLotRisk.grade === '주의'
+                            ? isDark
+                              ? 'bg-amber-950/40 text-amber-400'
+                              : 'bg-amber-50 text-amber-700'
+                            : selectedLotRisk.grade === '안정'
+                              ? isDark
+                                ? 'bg-emerald-950/40 text-emerald-400'
+                                : 'bg-emerald-50 text-emerald-700'
+                              : isDark
+                                ? 'bg-slate-800 text-slate-500'
+                                : 'bg-slate-100 text-slate-400'
                       }`}
                     >
-                      등급 {selectedLotRisk.grade}
+                      {selectedLotRisk.grade || '—'}
                     </span>
                   </div>
 
                   <p
                     className={`mb-3 rounded-lg border-l-4 px-3 py-2 text-sm leading-snug ${
-                      selectedLotRisk.isCritical
-                        ? isDark
-                          ? 'border-red-500 bg-red-950/40 text-red-200'
-                          : 'border-red-500 bg-red-50 text-red-900'
-                        : isDark
-                          ? 'border-amber-500 bg-amber-950/30 text-amber-100'
-                          : 'border-amber-400 bg-amber-50 text-amber-950'
+                      isDark
+                        ? 'border-slate-600 bg-slate-800/60 text-slate-200'
+                        : 'border-slate-300 bg-white text-slate-800'
                     }`}
                   >
-                    {selectedLotRiskDetail.summary}
+                    {selectedRiskSummary}
                   </p>
 
                   <div className="mb-3 grid grid-cols-2 gap-2">
                     {[
                       {
                         label: '불량확률',
-                        value: `${Math.round(lotRiskProbPercent(selectedLotRisk.prob))}%`,
+                        value:
+                          selectedLotRisk.prob != null && Number.isFinite(selectedLotRisk.prob)
+                            ? `${Math.round(lotRiskProbPercent(selectedLotRisk.prob))}%`
+                            : '—',
                       },
-                      { label: '예측 잔류Li', value: selectedLotRisk.predLi },
                       {
-                        label: '잔류Li 여유',
-                        value: `${selectedLotRisk.margin}`,
+                        label: '예측 잔류리튬',
+                        value: typeof selectedLotRisk.predLi === 'number'
+                          ? `${formatNumber(Math.round(selectedLotRisk.predLi))} ppm`
+                          : selectedLotRisk.predLi || '-',
+                      },
+                      {
+                        label: '여유량',
+                        value: formatSpecDistance(selectedLotRisk.margin, true),
                         valueClass: lotRiskMarginClass(selectedLotRisk.margin, isDark),
                       },
-                      { label: 'SPC', value: selectedLotRisk.spc },
+                      {
+                        label: 'SPC',
+                        value: formatSpcStatusLabel(selectedSpcStatus),
+                        valueClass: selectedSpcUnjudged
+                          ? isDark
+                            ? 'text-slate-400'
+                            : 'text-slate-500'
+                          : undefined,
+                      },
                     ].map((m) => (
                       <div
                         key={m.label}
@@ -2576,195 +3344,79 @@ export default function DashBoardPage() {
                     ))}
                   </div>
 
-                  <div className="mb-3">
+                  <div className="mb-3 space-y-2">
                     <p
                       className={`mb-1.5 text-xs font-semibold ${
                         isDark ? 'text-slate-300' : 'text-slate-700'
                       }`}
                     >
-                      핵심 요인
+                      SPC 관리도
                     </p>
-                    <ul className="space-y-1.5">
-                      {selectedLotRiskDetail.riskFactors.slice(0, 2).map((f) => {
-                        const pct = Math.round(Math.min(1, Math.max(0, f.impact)) * 100);
-                        return (
-                          <li
-                            key={f.label}
-                            className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs ${
-                              isDark ? 'bg-slate-800/70' : 'bg-white'
-                            }`}
-                          >
-                            <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
-                              {f.label}
-                            </span>
-                            <span
-                              className={`shrink-0 font-semibold tabular-nums ${
-                                isDark ? 'text-slate-200' : 'text-slate-800'
-                              }`}
-                            >
-                              {pct}%
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    {selectedSpcMetrics.length > 0 ? (
+                      <div className="space-y-3">
+                        {selectedSpcMetrics.map((metric) => (
+                          <div key={metric.key}>
+                            <SpcChartCard metric={metric} isDark={isDark} />
+                            {metric.violatedRules && metric.violatedRules.length > 0 ? (
+                              <ul
+                                className={`mt-2 space-y-1.5 rounded-md px-2 py-1.5 text-sm leading-relaxed ${
+                                  isDark
+                                    ? 'bg-amber-950/40 text-amber-100'
+                                    : 'bg-amber-50 text-amber-950'
+                                }`}
+                              >
+                                {metric.violatedRules.map((rule) => (
+                                  <li
+                                    key={`${metric.key}-${rule.rule}`}
+                                    className={`font-medium ${
+                                      isDark ? 'text-amber-50' : 'text-amber-900'
+                                    }`}
+                                  >
+                                    RULE {rule.rule} : {rule.description}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <SpcStatusNoteBlock
+                        isDark={isDark}
+                        paragraphs={
+                          selectedSpcDetailLoading
+                            ? ['SPC 관리도를 불러오는 중…']
+                            : selectedSpcUnjudged
+                              ? [
+                                  '필수 공정값 일부가 비어 SPC를 판정하지 않습니다.',
+                                  '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
+                                ]
+                              : (selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) ===
+                                  '안정'
+                                ? [
+                                    '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
+                                  ]
+                                : ['표시할 SPC 관리도 데이터가 없습니다.']
+                        }
+                      />
+                    )}
                   </div>
 
-                  <div className="mb-3">
-                    <p
-                      className={`mb-1.5 text-xs font-semibold ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      판정
-                    </p>
-                    <ul className="space-y-1.5">
-                      {selectedLotRiskDetail.analysisSteps.map((step) => (
-                        <li
-                          key={step}
-                          className={`rounded-md px-2.5 py-1.5 text-xs leading-relaxed ${
-                            isDark
-                              ? 'bg-slate-800/70 text-slate-300'
-                              : 'bg-white text-slate-600'
-                          }`}
-                        >
-                          {step}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="mt-auto pt-1">
-                    <p
-                      className={`mb-1.5 text-xs font-semibold ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      조치
-                    </p>
-                    <p
-                      className={`text-sm font-medium leading-snug ${
-                        isDark ? 'text-slate-100' : 'text-slate-900'
-                      }`}
-                    >
-                      {renderLotRiskAction(selectedLotRisk.action)}
-                    </p>
-                  </div>
+                  <LotRecommendedActionPanel
+                    lotId={selectedLotRisk.lot}
+                    riskLevel={
+                      selectedLotRiskDetail?.riskLevel ?? selectedLotRisk.grade
+                    }
+                    action={selectedLotRiskDetail?.recommendedAction ?? null}
+                    isDark={isDark}
+                  />
                 </div>
               )}
             </aside>
           </div>
-        </section>
-
-        {/* Charts: 생산 추이 + Feature Importance */}
-        <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <div className={`flex min-w-0 flex-col p-5 xl:col-span-8 ${cardClass}`}>
-            <div className="mb-3">
-              <h2
-                className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-              >
-                생산 추이
-              </h2>
-              <div
-                className={`mt-2 flex flex-wrap items-center gap-3 text-[11px] font-medium ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-blue-600" />
-                  생산량 (좌측)
-                </span>
-                <span className={isDark ? 'text-slate-600' : 'text-slate-300'} aria-hidden>
-                  |
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-amber-600" />
-                  불량률 (우측)
-                </span>
-                <span className={isDark ? 'text-slate-600' : 'text-slate-300'} aria-hidden>
-                  |
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span
-                    className="inline-block h-0.5 w-4 border-t-2 border-dashed border-violet-600"
-                    aria-hidden
-                  />
-                  AI 예측
-                </span>
-              </div>
-            </div>
-
-            {trendHasData ? (
-              <ProductionTrendChart
-                daily={trendDailyAggregates}
-                dailyRates={trendDailyRates}
-                isDark={isDark}
-              />
-            ) : (
-              <EmptyState message="표시할 생산 데이터가 없습니다." />
-            )}
-          </div>
-
-          <div className={`flex min-w-0 flex-col p-5 xl:col-span-4 ${cardClass}`}>
-            <FeatureImportancePanel items={featureImportanceItems} isDark={isDark} />
-          </div>
-        </section>
-
-        {/* Table */}
-        <section className={`mb-6 p-5 ${cardClass}`}>
-          <div className="mb-3">
-            <h2
-              className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-            >
-              생산 상세 테이블
-            </h2>
-            <p className={`mt-0.5 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              일별 집계 · KPI·차트와 동일 원천 · Mock 실시간 데모
-            </p>
-          </div>
-
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
-              <label
-                className={`inline-flex items-center gap-1.5 text-[11px] ${
-                  isDark ? 'text-slate-500' : 'text-slate-400'
-                }`}
-              >
-                페이지당
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value) as PageSizeOption);
-                    setTablePage(1);
-                  }}
-                  className={`h-8 rounded-md border px-1.5 text-xs ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-950/40 text-slate-300'
-                      : 'border-slate-200 bg-white text-slate-600'
-                  }`}
-                >
-                  {PAGE_SIZE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={handleExportCsv}
-                disabled={searchedDetailRows.length === 0}
-                className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                CSV 다운로드
-              </button>
-            </div>
-          </div>
-
+          </>
+          ) : (
+            <>
           {initialLoading ? (
             <EmptyState message="생산 데이터를 불러오는 중입니다." />
           ) : !hasData ? (
@@ -2778,7 +3430,7 @@ export default function DashBoardPage() {
                   isDark ? 'border-slate-700' : 'border-slate-200'
                 }`}
               >
-                <table className="w-full min-w-[960px] border-collapse text-sm">
+                <table className="w-full min-w-[1400px] border-collapse text-sm">
                   <thead
                     className={`text-xs font-semibold uppercase tracking-wider ${
                       isDark
@@ -2803,10 +3455,13 @@ export default function DashBoardPage() {
                       <th className="px-3 py-3 text-right">양품 수</th>
                       <th className="px-3 py-3 text-right">불량품 수</th>
                       <th className="px-3 py-3 text-right">불량률</th>
-                      <th className="px-3 py-3 text-right">평균 방전 용량</th>
-                      <th className="px-3 py-3 text-right">금속 불순물 농도</th>
-                      <th className="px-3 py-3 text-right">평균 소성 온도</th>
-                      <th className="px-3 py-3 text-center">데이터 상태</th>
+                      <th className="px-3 py-3 text-right">금속 불순물</th>
+                      <th className="px-3 py-3 text-right">소성 온도</th>
+                      <th className="px-3 py-3 text-right">습도</th>
+                      <th className="px-3 py-3 text-right">리튬 투입량</th>
+                      <th className="px-3 py-3 text-right">첨가제 비율</th>
+                      <th className="px-3 py-3 text-right">압력</th>
+                      <th className="px-3 py-3 text-right">공정시간</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2880,34 +3535,49 @@ export default function DashBoardPage() {
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgCapacity.toFixed(1)}
+                            {r.metalImpurity == null ? '-' : r.metalImpurity.toFixed(3)}
                           </td>
                           <td
                             className={`px-3 py-3 text-right tabular-nums ${
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgMetalImpurity.toFixed(3)}
+                            {r.sinteringTemp == null ? '-' : r.sinteringTemp.toFixed(2)}
                           </td>
                           <td
                             className={`px-3 py-3 text-right tabular-nums ${
                               isDark ? 'text-slate-200' : 'text-slate-700'
                             }`}
                           >
-                            {r.avgSinteringTemp.toFixed(1)}
+                            {r.humidity == null ? '-' : r.humidity.toFixed(2)}
                           </td>
-                          <td className="px-3 py-3 text-center">
-                            <span
-                              className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                                r.status === '수집 중'
-                                  ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
-                                  : isDark
-                                    ? 'bg-slate-800 text-slate-300 ring-1 ring-slate-600'
-                                    : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
-                              }`}
-                            >
-                              {r.status}
-                            </span>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.lithiumInput == null ? '-' : r.lithiumInput.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.additiveRatio == null ? '-' : r.additiveRatio.toFixed(3)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.tankPressure == null ? '-' : r.tankPressure.toFixed(2)}
+                          </td>
+                          <td
+                            className={`px-3 py-3 text-right tabular-nums ${
+                              isDark ? 'text-slate-200' : 'text-slate-700'
+                            }`}
+                          >
+                            {r.processTime == null ? '-' : r.processTime.toFixed(2)}
                           </td>
                         </tr>
                       );
@@ -2986,9 +3656,373 @@ export default function DashBoardPage() {
               </div>
             </div>
           )}
+            </>
+          )}
+        </section>
+
+        {/* Charts: 게이지 | 생산 추이 | Feature Importance */}
+        <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <div
+            className={`flex min-h-[360px] min-w-0 flex-col p-5 xl:col-span-3 ${cardClass}`}
+          >
+            <h2
+              className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+            >
+              실시간 생산 게이지
+            </h2>
+            <div className="flex min-h-[280px] w-full flex-1 items-center justify-center">
+              {GRAFANA_GAUGE_PANEL_URL.trim() ? (
+                <div className="relative aspect-square w-full max-w-[300px] overflow-hidden rounded-full bg-transparent shadow-none ring-0">
+                  <iframe
+                    src={GRAFANA_GAUGE_PANEL_URL}
+                    title="실시간 생산 게이지"
+                    scrolling="no"
+                    className="pointer-events-auto absolute left-1/2 top-1/2 h-[118%] w-[118%] max-w-none -translate-x-1/2 -translate-y-1/2 border-0 bg-transparent"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[280px] w-full items-center justify-center px-3">
+                  <p
+                    className={`m-0 text-center text-xs leading-relaxed ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    GRAFANA_GAUGE_PANEL_URL에 Embed URL을 넣으세요.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`flex min-h-[380px] min-w-0 flex-col p-5 xl:col-span-5 ${cardClass}`}
+          >
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2
+                className={`whitespace-nowrap shrink-0 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+              >
+                생산 추이 그래프
+              </h2>
+              <ProductionTrendDateFilter
+                draft={trendFilterDraft}
+                applied={trendFilterApplied}
+                onDraftChange={setTrendFilterDraft}
+                onApply={() => {
+                  if (!isValidTrendRange(trendFilterDraft)) return;
+                  setSelectedTrendBucket(null);
+                  setTrendFilterApplied(trendFilterDraft);
+                }}
+                onReset={() => {
+                  setSelectedTrendBucket(null);
+                  setTrendFilterDraft({ startDate: '', endDate: '' });
+                  setTrendFilterApplied({ startDate: '', endDate: '' });
+                }}
+                isDark={isDark}
+              />
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              {trendHasData ? (
+                <ProductionTrendChart
+                  points={dailyAggregates}
+                  isDark={isDark}
+                  onBarClick={(bucket) => {
+                    setSelectedTrendBucket(bucket);
+                    trackPageChatEvent({
+                      type: 'filter_apply',
+                      route: '/dashboard',
+                      target: 'production-trend-bar',
+                      entityId: String(bucket?.date ?? ''),
+                      payload: bucket,
+                    });
+                  }}
+                />
+              ) : (
+                <EmptyState plain message="표시할 생산 데이터가 없습니다." />
+              )}
+            </div>
+          </div>
+
+          <div className={`flex min-w-0 flex-col p-5 xl:col-span-4 ${cardClass}`}>
+            <FeatureImportancePanel
+              items={featureImportanceItems}
+              isDark={isDark}
+              periodLabel={featureImportanceLabel}
+              selected={selectedTrendBucket != null}
+              onClearSelection={() => setSelectedTrendBucket(null)}
+            />
+          </div>
+        </section>
+
+
+        {/* Grafana 하단 패널 */}
+        <section className={`mb-6 p-5 ${cardClass}`}>
+          <h2
+            className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+          >
+            실시간 잔류 리튬 분석
+          </h2>
+          <div
+            className={`relative min-h-[520px] h-[520px] w-full overflow-hidden rounded-md ${
+              isDark ? 'bg-slate-900' : 'bg-white'
+            }`}
+          >
+            {GRAFANA_BOTTOM_PANEL_URL.trim() ? (
+              <iframe
+                src={GRAFANA_BOTTOM_PANEL_URL}
+                title="실시간 잔류 리튬 분석"
+                scrolling="no"
+                className="absolute inset-0 block h-full w-full border-0"
+              />
+            ) : (
+              <div className="flex h-full min-h-[520px] items-center justify-center px-4">
+                <p
+                  className={`m-0 text-center text-sm leading-relaxed ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  GRAFANA_BOTTOM_PANEL_URL에 Embed URL을 넣으세요.
+                </p>
+              </div>
+            )}
+          </div>
         </section>
 
       </div>
+
+      {lotRiskFullscreenOpen ? (
+        <div className="fixed inset-0 z-[90] flex flex-col bg-slate-950/70 p-3 sm:p-5">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="전체보기 닫기"
+            onClick={closeLotRiskFullscreen}
+          />
+          <div
+            className={`relative z-[1] flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${
+              isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'
+            }`}
+          >
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 ${
+                isDark ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <div>
+                <h2
+                  className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
+                >
+                  LOT 위험등급 전체보기
+                </h2>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  현재 필터 결과 · 마우스 휠로 스크롤
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleLotRiskExportCsv()}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLotRiskExportPdf()}
+                  className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={closeLotRiskFullscreen}
+                  className={`inline-flex h-9 items-center rounded-lg px-3 text-sm font-bold ${
+                    isDark
+                      ? 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+
+            <div
+              className={`flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3 ${
+                isDark ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <label className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-xs sm:max-w-[240px]">
+                <span className={`shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  LOT
+                </span>
+                <input
+                  type="search"
+                  value={lotRiskFilterDraft.lotQuery}
+                  onChange={(e) =>
+                    setLotRiskFilterDraft((prev) => ({ ...prev, lotQuery: e.target.value }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const next = { ...lotRiskFilterDraft };
+                      setLotRiskFilterApplied(next);
+                      setLotRiskPage(1);
+                      setLotRiskPageInput('1');
+                      void openLotRiskFullscreen(next);
+                    }
+                  }}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm outline-none ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                />
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>불량확률</span>
+                <select
+                  value={lotRiskFilterDraft.probLevel}
+                  onChange={(e) =>
+                    setLotRiskFilterDraft((prev) => ({
+                      ...prev,
+                      probLevel: e.target.value as LotRiskFilterState['probLevel'],
+                    }))
+                  }
+                  className={`h-9 rounded-lg border px-2 text-sm ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">전체</option>
+                  <option value="high">40% 이상</option>
+                  <option value="mid">20~40%</option>
+                  <option value="low">20% 미만</option>
+                </select>
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>위험등급</span>
+                <select
+                  value={lotRiskFilterDraft.grade}
+                  onChange={(e) =>
+                    setLotRiskFilterDraft((prev) => ({
+                      ...prev,
+                      grade: e.target.value as LotRiskFilterState['grade'],
+                    }))
+                  }
+                  className={`h-9 rounded-lg border px-2 text-sm ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-950/40 text-slate-100'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">전체</option>
+                  <option value="심각">심각</option>
+                  <option value="주의">주의</option>
+                  <option value="안정">안정</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = { ...lotRiskFilterDraft };
+                  setLotRiskFilterApplied(next);
+                  setLotRiskPage(1);
+                  setLotRiskPageInput('1');
+                  void openLotRiskFullscreen(next);
+                }}
+                className="inline-flex h-9 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                검색
+              </button>
+              <span className={`ml-auto text-xs tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {lotRiskFullscreenLoading
+                  ? '불러오는 중…'
+                  : `총 ${lotRiskFullscreenRows.length}건`}
+              </span>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+              {lotRiskFullscreenLoading ? (
+                <p className={`py-16 text-center text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  불러오는 중…
+                </p>
+              ) : lotRiskFullscreenRows.length === 0 ? (
+                <p className={`py-16 text-center text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  표시할 LOT가 없습니다.
+                </p>
+              ) : (
+                <table className="w-full min-w-[960px] border-collapse text-sm">
+                  <thead
+                    className={`sticky top-0 text-xs font-semibold ${
+                      isDark ? 'bg-slate-900 text-slate-400' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    <tr>
+                      <th className="px-3 py-2.5 text-left">LOT ID</th>
+                      <th className="px-3 py-2.5 text-left">불량확률</th>
+                      <th className="px-3 py-2.5 text-right">잔류리튬</th>
+                      <th className="px-3 py-2.5 text-right">여유량</th>
+                      <th className="px-3 py-2.5 text-center">SPC</th>
+                      <th className="px-3 py-2.5 text-center">위험등급</th>
+                      <th className="px-3 py-2.5 text-left">위험 원인</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotRiskFullscreenRows.map((row) => (
+                      <tr
+                        key={row.lot}
+                        className={`border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}
+                      >
+                        <td className={`px-3 py-2.5 font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                          {row.lot}
+                        </td>
+                        <td className={`px-3 py-2.5 tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                          {row.prob != null && Number.isFinite(row.prob)
+                            ? `${Math.round(lotRiskProbPercent(row.prob))}%`
+                            : '—'}
+                        </td>
+                        <td className={`px-3 py-2.5 text-right tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                          {typeof row.predLi === 'number'
+                            ? formatNumber(Math.round(row.predLi))
+                            : row.predLi || '—'}
+                        </td>
+                        <td
+                          className={`px-3 py-2.5 text-right font-semibold tabular-nums ${lotRiskMarginClass(
+                            row.margin,
+                            isDark,
+                          )}`}
+                        >
+                          {formatSpecDistance(row.margin)}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">{formatSpcStatusLabel(row.spc)}</td>
+                        <td className="px-3 py-2.5 text-center font-semibold">{row.grade || '—'}</td>
+                        <td
+                          className={`max-w-[280px] truncate px-3 py-2.5 ${
+                            isDark ? 'text-slate-400' : 'text-slate-500'
+                          }`}
+                          title={row.reason || undefined}
+                        >
+                          {row.reason || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Toasts */}
       <div className="pointer-events-none fixed bottom-6 right-6 z-[60] flex flex-col gap-2">

@@ -11,10 +11,11 @@ from pathlib import Path
 AI = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AI))
 
+from agent.doc_clearance import DEFAULT_PROFILE_CLEARANCE, MARKDOWN_DIR_NAME  # noqa: E402
 from agent.rag_engine import SECURE_DOCS_DIR  # noqa: E402
 from ingest_secure import run_ingest  # noqa: E402
 
-CONV = SECURE_DOCS_DIR / "ai-service"
+CONV = SECURE_DOCS_DIR / DEFAULT_PROFILE_CLEARANCE / MARKDOWN_DIR_NAME
 LEGACY_KEYS = (
     "cathode_clf",
     "cathode_reg",

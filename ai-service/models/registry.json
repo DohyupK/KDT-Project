@@ -1,29 +1,17 @@
 {
-  "version": 1,
-  "note": "Chat runs every head with ready=true. Add future datasets as new heads + register_builtin in agent/tools.py.",
+  "version": 3,
+  "note": "Active path: models/ cascade (legacy + voting + symbolic OR). Former experiment name was temp39.",
   "heads": {
-    "clf": {
-      "task": "ox_classification",
+    "voting": {
+      "task": "cascade_voting",
       "dir": "models",
       "ready": true,
-      "entrypoint": "train_pipeline.predict"
-    },
-    "reg": {
-      "task": "capacity_regression",
-      "dir": "models/reg",
-      "ready": true,
-      "entrypoint": "train_reg_pipeline.predict_capacity",
-      "data": "data/cathode_reg_data.csv",
-      "train": "python train_reg_pipeline.py"
-    },
-    "residual": {
-      "task": "residual_li_regression",
-      "dir": "models/residual",
-      "ready": true,
-      "entrypoint": "train_residual_pipeline.predict_residual_li",
-      "data": "data/cathode_qc_reg_data.csv",
-      "train": "python train_residual_pipeline.py",
-      "unit": "ppm"
+      "entrypoint": "voting_predict.predict_voting",
+      "config": "models/voting_config.json",
+      "recipe": "models/recipe.json",
+      "legacy": "models/legacy",
+      "symbolic": "models/symbolic_model",
+      "note": "cap/15 · res/13 · (blend≥0.55)∨(symbolic≥≈0.0809) → judgment_lots"
     }
   }
 }

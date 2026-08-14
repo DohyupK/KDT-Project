@@ -1,0 +1,42 @@
+{
+  "member_id": "cathode_special_res",
+  "model_version": "2.0.0-voting",
+  "train_date": "2026-08-09T20:01:50.806086+00:00",
+  "dataset_hash": "2102aaada4768d667a053969f2b6eb772f10d2ddc0e92262bd48824dc0dea5b4",
+  "data_path": "data/voting/cathode_special_feature.csv",
+  "target": "residual_li",
+  "task": "regression",
+  "seed": 42,
+  "n_folds": 6,
+  "optuna_trials": 100,
+  "holdout": "none",
+  "feature_columns": [
+    "metal_impurity",
+    "humidity"
+  ],
+  "feature_types": {
+    "metal_impurity": "Float64",
+    "humidity": "Float64"
+  },
+  "cat_features": [],
+  "numeric_cols": [
+    "metal_impurity",
+    "humidity"
+  ],
+  "device_mode": "cpu",
+  "metrics": {
+    "train_rmse": 580.7437262561738,
+    "train_mae": 445.4806193940618,
+    "train_r2": 0.3306100630503641,
+    "holdout": "none"
+  },
+  "cv_best": {
+    "xgb_cv_rmse": 605.3981322948677,
+    "cat_cv_rmse": 602.038652685285
+  },
+  "drop_extra": [
+    "capacity",
+    "quality_defect"
+  ],
+  "n_rows": 10000
+}

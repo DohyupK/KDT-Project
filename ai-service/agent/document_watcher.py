@@ -1,10 +1,11 @@
 """
 Dual-engine Documents watcher (FastAPI lifespan background thread).
 
-- PDF/TXT → MD under Documents/ai-service/ → full ingest (existing run_ingest)
-- CSV/XLSX → move to ai-service/data/csv_lake/ → short profile MD only → ingest
+- TXT / text PDF → native ingest (no matching .md)
+- Scan PDF / images → OCR Markdown + text_match → ingest
+- CSV/XLSX → ai-service/data/csv_lake/ → profile MD under Confidential/Markdown
+- Watches all four clearance roots + csv_lake
 - Debounce + ingest lock/coalesce so burst drops do not stack full rebuilds
-- Never blocks the FastAPI event loop (work runs on timer/worker threads)
 
 Does not modify SECURE_GENERATE / fillThreshold / LangGraph.
 """
@@ -19,9 +20,16 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from agent.doc_clearance import (
+    CLEARANCES,
+    ensure_clearance_tree,
+    is_under_any_markdown,
+)
+from agent.document_convert import CONVERT_SUFFIXES, ConvertResult
+
 logger = logging.getLogger(__name__)
 
-UNSTRUCTURED_SUFFIXES = {".pdf", ".txt"}
+UNSTRUCTURED_SUFFIXES = set(CONVERT_SUFFIXES)
 TABLE_SUFFIXES = {".csv", ".xlsx"}
 DEBOUNCE_S = float(os.environ.get("SECURE_DOCS_WATCH_DEBOUNCE", "4.0"))
 STABLE_CHECKS = 3
@@ -74,7 +82,7 @@ def _should_ignore(path: Path, docs_dir: Path, lake_dir: Path) -> bool:
     # Profile / converted MD must never re-enter the pipeline (loop guard)
     if path.suffix.lower() == ".md":
         return True
-    if _under(path, docs_dir / "ai-service"):
+    if is_under_any_markdown(path, docs_dir):
         return True
     if _under(path, docs_dir / "csv_profiles"):
         return True
@@ -157,9 +165,25 @@ def _handle_path(path: Path, docs_dir: Path, ai_root: Path, lake_dir: Path) -> b
         out = convert_file_to_md(
             path, secure_docs_dir=docs_dir, repo_root=ai_root.parent
         )
+        if isinstance(out, ConvertResult):
+            return bool(out.needs_ingest)
         return out is not None
 
     return False
+
+
+def _handle_deleted(path: Path, docs_dir: Path, ai_root: Path) -> bool:
+    """Drop OCR sidecar + text_match when source removed."""
+    suffix = path.suffix.lower()
+    if suffix not in UNSTRUCTURED_SUFFIXES:
+        return False
+    if is_under_any_markdown(path, docs_dir):
+        return False
+    from agent.document_convert import remove_pair_for_deleted_source
+
+    return remove_pair_for_deleted_source(
+        path, secure_docs_dir=docs_dir, repo_root=ai_root.parent
+    )
 
 
 def _schedule_flush(docs_dir: Path, ai_root: Path, lake_dir: Path) -> None:
@@ -239,8 +263,7 @@ def start_document_watcher(
     root_docs = docs_dir or SECURE_DOCS_DIR
     root_ai = ai_root or Path(__file__).resolve().parents[1]
     lake = csv_lake_dir(root_ai)
-    root_docs.mkdir(parents=True, exist_ok=True)
-    (root_docs / "ai-service").mkdir(parents=True, exist_ok=True)
+    ensure_clearance_tree(root_docs)
     lake.mkdir(parents=True, exist_ok=True)
 
     class Handler(FileSystemEventHandler):
@@ -256,14 +279,26 @@ def start_document_watcher(
             if not event.is_directory:
                 _enqueue(Path(event.dest_path), root_docs, root_ai, lake)
 
+        def on_deleted(self, event):  # noqa: ANN001
+            if event.is_directory:
+                return
+            path = Path(event.src_path)
+            try:
+                if _handle_deleted(path, root_docs, root_ai):
+                    _request_ingest()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[document_watcher] delete %s: %s", path, exc)
+
     observer = Observer()
+    # One recursive watch on Documents covers Public/Confidential/Secret/TopSecret
     observer.schedule(Handler(), str(root_docs), recursive=True)
     observer.schedule(Handler(), str(lake), recursive=True)
     observer.daemon = True
     observer.start()
     _observer = observer
     logger.info(
-        "[document_watcher] dual-engine docs=%s lake=%s debounce=%.1fs",
+        "[document_watcher] clearance_roots=%s docs=%s lake=%s debounce=%.1fs",
+        ",".join(CLEARANCES),
         root_docs,
         lake,
         DEBOUNCE_S,

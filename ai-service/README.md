@@ -27,16 +27,44 @@
 | 보안 챗 SSE | `POST /security-chat/stream` | `meta`/`delta`/`replace`/`done`/`error` |
 | Secure RAG | `secure_graph` · Qdrant `secure_docs` | Hybrid + BM25 + RRF + CPU rerank |
 | Analytics | `node_analytics` · `csv_lake` | Polars 집계 · Smart Fallback→RAG |
-| Ingest | `ingest_secure.py` · watchdog | Documents → MD/인덱스 · BM25 핫리로드 |
+| Ingest | `ingest_secure.py` · backend-spawned watcher · OCR | 텍스트 pdf/txt 네이티브 · 스캔/이미지→OCR md+`text_match` · BM25 핫리로드 |
+| Qdrant | `agent/qdrant_supervisor.py` | ai-service 기동 시 Docker `kdt-qdrant` (`QDRANT_AUTOSTART=1`) |
 
 상세 목록: [`ai-service-feature-catalog.md`](../docs/references/ai-service-feature-catalog.md)
+
+---
+
+## 성능 확인 (clf · reg · residual)
+
+학습 시 시간순 holdout(Test 20%) 지표가 `metadata.json`에 들어 있다. **재학습 없이** 같은 분할로 다시 채점하려면 아래 스크립트를 쓴다.
+
+### 1) 학습 당시 숫자 바로 보기
+
+| 헤드 | 파일 | 주요 지표 |
+|------|------|-----------|
+| clf | [`models/metadata.json`](./models/metadata.json) | `metrics.test_roc_auc`, accuracy, F1, PR-AUC, threshold |
+| reg | [`models/reg/metadata.json`](./models/reg/metadata.json) | `test_rmse`, `test_mae`, `test_r2` |
+| residual | [`models/residual/metadata.json`](./models/residual/metadata.json) | `test_rmse`, `test_mae`, `test_r2` |
+
+### 2) 오프라인 holdout 재채점 (재학습·Optuna 없음)
+
+```bash
+cd ai-service
+python scripts/evaluate_models.py
+# 일부만: python scripts/evaluate_models.py --heads clf,reg
+# 리포트: logs/eval_report.json (기본)
+# API alive만: python scripts/evaluate_models.py --api
+```
+
+CSV·산출물이 학습 때와 같으면 `match`가 true여야 한다. hash가 다르면 데이터가 바뀐 것.  
+`train_*.py` 재학습과는 별개이며, **장시간·재튜닝이 필요할 때만** 학습 스크립트를 **승인 후** 실행한다.
 
 ---
 
 ## 실행 방법
 
 **권장:** 저장소 루트에서 `npm run dev`  
-([로컬 실행 — 챗봇](../README.md#로컬-실행--챗봇)) — frontend(:3000) + backend(:3001) + 이 서비스(:8800).
+([로컬 실행](../README.md#로컬-실행-권장)) — frontend(:3000) + backend(:3001) + 이 서비스(:8800).
 
 ### 개별 기동
 
@@ -130,6 +158,25 @@ CHAT_VLLM_MODEL=local-model
 
 clf는 capacity/residual을 입력으로 쓰지 않는다. What-if: 불량 최소 → residual 최소 → capacity 최대.
 
+### 추론·불량확률 (운영 연동)
+
+학습 파이프라인 순서(clf → reg → residual)는 **아티팩트 생성 순서**일 뿐, HTTP 추론과는 무관하다. 세 엔드포인트는 서로 독립이며, backend 채점(`lotScore`)은 **`Promise.all`로 병렬** 호출한다.
+
+| 응답 | 출처 | backend DB |
+|------|------|------------|
+| `probability` (불량 확률 0~1) | `/predict`만 | `judgment_lots.probability`(우선·NULL-fill) · `analysis_lots.probability` |
+| `defect_status` / O·X | `/predict` · `probability ≥ fillThreshold`(또는 `ensemble_config.default_threshold`) | `judgment_lots.quality_defect` |
+| `capacity` | `/predict-capacity` | `judgment_lots.capacity` |
+| `residual_li` | `/predict-residual` | `judgment_lots.residual_li` |
+
+**clf 확률 원리**
+
+1. XGBoost · CatBoost 각각 P(불량) 산출  
+2. 앙상블 **평균 0.5 / 0.5** → `probability`  
+3. 임계값과 비교 → `defect_status`(불량/양품) · cost형 FP+FN 가중 임계값은 학습·`metadata`에 저장, 요청 시 `fillThreshold`로 덮어쓸 수 있음  
+
+`judgment_lots` 쪽 쓰기 주기·NULL-only 정책은 [`../backend/README.md`](../backend/README.md) SPC 싱크·채점 절을 본다 (기본 **60초** 폴링).
+
 ### Secure RAG · SSE · analytics (요약)
 
 - 하이브리드 검색 + rerank soft fallback · chunk 400/50 · `min_score` 기본 0.15
@@ -157,6 +204,13 @@ clf는 capacity/residual을 입력으로 쓰지 않는다. What-if: 불량 최�
 
 모노레포 스택 SSOT: [루트 README — 기술 스택](../README.md#기술-스택-모노레포)  
 직접 의존성 원본: [`requirements.txt`](./requirements.txt)
+
+**Documents OCR:** OS에 [Tesseract](https://github.com/tesseract-ocr/tesseract) 설치 (`kor`+`eng`).  
+Windows: `winget install UB-Mannheim.TesseractOCR` 후 `kor.traineddata`는  
+`%LOCALAPPDATA%\tesseract-tessdata\tessdata\`에 두면 됨 (Program Files 쓰기 권한 불필요).  
+선택 env: `TESSERACT_CMD`. Python: `pip install pymupdf Pillow pytesseract`.  
+정리: `python scripts/cleanup_converted_md.py` → Qdrant(:6333) 기동 후 `python ingest_secure.py`.  
+MariaDB `text_match` DDL: [`DB/text_match.sql`](../DB/text_match.sql) · `python DB/ai-service/apply_text_match.py`.
 
 ---
 

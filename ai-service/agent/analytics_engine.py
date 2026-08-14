@@ -35,7 +35,8 @@ def csv_lake_dir() -> Path:
 
 
 def xgb_model_path() -> Path:
-    return _ai_root() / "models" / "xgb_model.json"
+    """Legacy single-head path removed; voting readiness uses voting_config.json."""
+    return _ai_root() / "models" / "voting_config.json"
 
 
 def list_lake_csv_files() -> list[Path]:
@@ -79,7 +80,7 @@ def _summarize_csv(path: Path, message: str) -> str:
 
 def _try_xgb_predict_note(message: str, analytics_body: str) -> str:
     """Append predict notice on predict intent; never raises to caller."""
-    from agent.secure_prompts import is_predict_intent
+    from agent.secure_llm.prompts import is_predict_intent
 
     if not is_predict_intent(message):
         return analytics_body

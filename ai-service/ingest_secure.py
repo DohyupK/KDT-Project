@@ -4,10 +4,12 @@ Manual secure-doc ingest → Qdrant + BM25 node cache.
 Usage (from ai-service/):
   python ingest_secure.py
 
-Docs directory: monorepo root Documents/ (override with SECURE_DOCS_DIR).
-Supports: .md (YAML frontmatter), .txt, .pdf (pypdf).
+Docs directory: monorepo root Documents/<Clearance>/ (override SECURE_DOCS_DIR).
+Supports: .md under Markdown/ (YAML frontmatter); .txt / text PDF at clearance root
+(native extract, no matching .md); OCR sidecars under Markdown/ for scan PDF/images
+(linked via MariaDB text_match).
 CSV/XLSX: dual-engine — originals in data/csv_lake/; short profile MD under
-Documents/ai-service/*-profile.md (see agent.csv_profile / document_watcher).
+Documents/Confidential/Markdown/*-profile.md.
 
 Requires: Qdrant at QDRANT_URL (default http://127.0.0.1:6333).
 Embed: BAAI/bge-m3 on CPU only.
@@ -31,6 +33,14 @@ load_dotenv(REPO_ROOT / ".env", override=False)
 if str(AI_ROOT) not in sys.path:
     sys.path.insert(0, str(AI_ROOT))
 
+from agent.doc_clearance import (  # noqa: E402
+    CLEARANCES,
+    MARKDOWN_DIR_NAME,
+    clearance_from_path,
+    ensure_clearance_tree,
+    markdown_dir,
+)
+from agent.document_convert import _safe_stem  # noqa: E402
 from agent.rag_engine import (  # noqa: E402
     DEVICE,
     EMBED_MODEL,
@@ -44,8 +54,8 @@ from agent.rag_engine import (  # noqa: E402
 SUPPORTED_SUFFIXES = {".md", ".txt", ".pdf"}
 
 
-def _converted_md_for(root: Path, path: Path) -> Path:
-    return root / "ai-service" / f"{path.stem}.md"
+def _converted_md_for(clearance_root: Path, path: Path) -> Path:
+    return markdown_dir(clearance_root) / f"{_safe_stem(path)}.md"
 
 
 def _parse_frontmatter(raw: str) -> tuple[dict, str]:
@@ -150,47 +160,59 @@ def _load_document(path: Path) -> tuple[dict, str] | None:
 
 def _iter_doc_files(root: Path) -> list[Path]:
     """
-    Collect ingestible files.
-    - Always include .md (native SOPs + Documents/ai-service converted).
-    - Include root .txt/.pdf only when Documents/ai-service/<stem>.md is absent.
-    - Never ingest raw .csv/.xlsx (convert → md first).
+    Collect ingestible files under Documents/<Clearance>/...
+    - Prefer *.md under each Markdown/ folder (manual + OCR sidecars).
+    - Include clearance-root .txt/.pdf only when Markdown/<stem>.md is absent
+      (text PDFs are ingested natively; scan PDFs should have OCR md via watcher).
+    - Never ingest raw .csv/.xlsx or raw images (images → OCR md only).
     """
     if not root.is_dir():
         return []
     files: list[Path] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
+    for c in CLEARANCES:
+        c_root = root / c
+        if not c_root.is_dir():
             continue
-        if path.name.endswith(".meta.json"):
-            continue
-        if path.name.startswith("."):
-            continue
-        if path.name.upper() in ("README.MD", "README.TXT", "LICENSE", "LICENSE.MD"):
-            continue
-        suffix = path.suffix.lower()
-        under_converted = path.parent.name == "ai-service" and "ai-service" in path.parts
-        if suffix == ".md":
-            files.append(path)
-            continue
-        if under_converted:
-            print(f"  skip {path.relative_to(root)}: only .md under ai-service/")
-            continue
-        if suffix in (".txt", ".pdf"):
-            if _converted_md_for(root, path).is_file():
+        md_dir = markdown_dir(c_root)
+        for path in sorted(c_root.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.name.endswith(".meta.json"):
+                continue
+            if path.name.startswith("."):
+                continue
+            if path.name.upper() in ("README.MD", "README.TXT", "LICENSE", "LICENSE.MD"):
+                continue
+            suffix = path.suffix.lower()
+            under_md = MARKDOWN_DIR_NAME in path.parts
+            if suffix == ".md":
+                files.append(path)
+                continue
+            if under_md:
+                print(f"  skip {path.relative_to(root)}: only .md under Markdown/")
+                continue
+            if suffix in (".txt", ".pdf"):
+                if _converted_md_for(c_root, path).is_file():
+                    print(
+                        f"  skip {path.relative_to(root)}: "
+                        f"use {c}/Markdown/{path.stem}.md"
+                    )
+                    continue
+                files.append(path)
+                continue
+            if suffix in (".csv", ".xlsx"):
                 print(
                     f"  skip {path.relative_to(root)}: "
-                    f"use ai-service/{path.stem}.md"
+                    "move to data/csv_lake/ (profile MD only)"
                 )
                 continue
-            files.append(path)
-            continue
-        if suffix in (".csv", ".xlsx"):
-            print(
-                f"  skip {path.relative_to(root)}: "
-                "move to data/csv_lake/ (profile MD only)"
-            )
-            continue
-        print(f"  skip {path.relative_to(root)}: unsupported extension")
+            if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff"):
+                print(
+                    f"  skip {path.relative_to(root)}: "
+                    "image → OCR Markdown sidecar (document_convert / watcher)"
+                )
+                continue
+            print(f"  skip {path.relative_to(root)}: unsupported extension")
     return files
 
 
@@ -200,15 +222,15 @@ def run_ingest() -> int:
     from qdrant_client.http import models as qm
     from sentence_transformers import SentenceTransformer
 
-    SECURE_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_clearance_tree(SECURE_DOCS_DIR)
     SECURE_RAG_DIR.mkdir(parents=True, exist_ok=True)
-    (SECURE_DOCS_DIR / "ai-service").mkdir(parents=True, exist_ok=True)
 
     files = _iter_doc_files(SECURE_DOCS_DIR)
     if not files:
         print(
-            f"No ingestible docs in {SECURE_DOCS_DIR}. "
-            "Add .md or convert pdf/txt/csv/xlsx then re-run."
+            f"No ingestible docs in {SECURE_DOCS_DIR}/<Clearance>/. "
+            "Add .md under Markdown/, place text pdf/txt at clearance root, "
+            "or OCR images/scan PDFs via document_convert then re-run."
         )
         return 1
 
@@ -228,7 +250,14 @@ def run_ingest() -> int:
         collection_name=name,
         vectors_config=qm.VectorParams(size=dim, distance=qm.Distance.COSINE),
     )
-    for field in ("doc_id", "title", "category", "process", "security_level"):
+    for field in (
+        "doc_id",
+        "title",
+        "category",
+        "process",
+        "security_level",
+        "clearance",
+    ):
         try:
             client.create_payload_index(
                 collection_name=name,
@@ -251,6 +280,10 @@ def run_ingest() -> int:
         if not (body or "").strip():
             print(f"  skip {path.name}: empty text")
             continue
+        path_clearance = clearance_from_path(path, SECURE_DOCS_DIR) or "Confidential"
+        clearance = str(meta.get("clearance") or path_clearance)
+        if clearance not in CLEARANCES:
+            clearance = path_clearance
         doc_id = str(meta.get("doc_id") or path.stem)
         title = str(meta.get("title") or path.stem)
         category = str(meta.get("category") or "SOP")
@@ -264,7 +297,7 @@ def run_ingest() -> int:
             rel = str(path.relative_to(repo_root)).replace("\\", "/")
         except ValueError:
             rel = str(path).replace("\\", "/")
-        print(f"  {path.name}: {len(chunks)} chunks · {title}")
+        print(f"  [{clearance}] {path.name}: {len(chunks)} chunks · {title}")
         for i, chunk in enumerate(chunks):
             payload = {
                 "doc_id": doc_id,
@@ -272,6 +305,7 @@ def run_ingest() -> int:
                 "category": category,
                 "process": process,
                 "security_level": security_level,
+                "clearance": clearance,
                 "source_path": rel,
                 "chunk_index": i,
                 "text": chunk,

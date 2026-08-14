@@ -1,12 +1,14 @@
 # 시나리오 스모크 체크리스트
 
-최종 갱신: 2026-07-24  
+최종 갱신: 2026-08-13  
 실행은 [ask-before-run](../../.cursor/rules/ask-before-run.mdc) 승인 후. 자동 테스트 강제 아님.
 
 전제: frontend `:3000`, backend `:3001`, ai-service `:8800`, `models/` 학습 산출물 존재.
 
 **API 스모크 (2026-07-24 오전):** backend·ai-service 재기동 후 **14/14 PASS** (당시 `approved_logged`).  
 이후 상태값은 **`approved` / `reverted`** 로 변경됨 — 재스모크 시 아래 7·8항 확인.
+
+화면 컨텍스트 일반 챗 확정: [`docs/plans/2026-08-13-page-context-chatbot.md`](../plans/2026-08-13-page-context-chatbot.md)
 
 ## 1. 보안 게이트
 
@@ -16,16 +18,20 @@
 
 - [x] 같은 요지 질문 연속 3회 → `need_guideline` / reply에 `[사용 가이드]`
 
-## 3. LOT 피처 주입 (Step 1)
+## 3. 화면 컨텍스트 일반 챗
 
-- [ ] Main → 위험 LOT 상세 → **챗봇에 연결** → 패널에 `연결 LOT: …` *(브라우저 수동)*
-- [x] 「이거 지금 어때?」+ features → `predict` 비null (연결 센서 + 기본 d50/d90/OP01)
-- [x] features 없음 → predict 없이 피처 요청 안내
-- [x] 「샘플 LOT 진단」 features → predict 동작
+- [ ] 페이지 이동·버튼 클릭 시 콘솔 `[page-chat]` (route / focusId / payload sizes) *(브라우저)*
+- [ ] Main「이 화면 KPI 요약해줘」→ pagePayload(dailyKpi 등) 인용 답 *(브라우저)*
+- [ ] Main risk-top 행 클릭 후「이거 왜 심각이야?」→ focusPayload(LOT) 우선 *(브라우저)*
+- [ ] 칩「이 화면 요약」→ 현재 route pagePayload 기반 답 *(브라우저)*
+- [ ] 1턴: features 없이 predict null(또는 생략) · page_context+RAG 중심
+- [ ] 같은 스레드 추가질문(또는 features 첨부) → `enable_api_llm` / heads·whatif 가능
+- [x] features 첨부 시 predict 경로 동작 (회귀)
+- [x] 「샘플 LOT 진단」칩은 제거됨 → 「이 화면 요약」으로 대체
 
-## 4. What-if (Step 2)
+## 4. What-if (Step 2 · follow-up / features)
 
-- [x] 고습도/이상 LOT → `recommendation.suggestion` 존재 (reply에 제안 수치)
+- [x] 고습도/이상 LOT + features → `recommendation.suggestion` 존재 (reply에 제안 수치)
 - [x] 정상 샘플(`SAMPLE_CHAT_FEATURES`) → suggestion null + “유지” note
 - [ ] 한계치 타협: Setting에서 max 온도를 낮춘 뒤 이상 LOT 진단 → `boundary_hit` / `limit_reason` *(재스모크)*
 

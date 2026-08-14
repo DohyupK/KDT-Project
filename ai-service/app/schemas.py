@@ -47,6 +47,20 @@ class ResidualResponse(BaseModel):
     top_factors: list[str] = Field(default_factory=list)
 
 
+class VotingPredictResponse(BaseModel):
+    """Cascade voting: capacity, residual_li, probability (+ optional quality_defect)."""
+
+    capacity: float
+    residual_li: float
+    probability: float
+    quality_defect: int | None = None
+    applied_threshold: float | None = None
+    unit_capacity: str = "mAh/g"
+    unit_residual: str = "ppm"
+    probability_denominator: float | None = None
+    member_scores: dict[str, float] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None
@@ -83,6 +97,17 @@ class ChatFeatures(BaseModel):
     timestamp: str | None = None
 
 
+class PageContextModel(BaseModel):
+    """Screen context from FE (not shown in UI). Hybrid with optional BE supplement."""
+
+    route: str = "/"
+    focus_id: str | None = None
+    focus_payload: Any | None = None
+    page_payload: Any | None = None
+    supplement: dict[str, Any] | None = None
+    supplement_hints: list[str] | None = None
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User chat text")
     thread_id: str | None = Field(
@@ -96,9 +121,8 @@ class ChatRequest(BaseModel):
     features: ChatFeatures | None = Field(
         default=None,
         description=(
-            "If set, agent runs all ready registry heads "
-            "(clf O/X + reg capacity + residual + future) "
-            "then replies citing those JSON results only."
+            "If set on follow-up / explicit diagnosis, agent runs registry heads. "
+            "First-turn page Q&A prefers page_context + RAG."
         ),
     )
     fillThreshold: float | None = Field(
@@ -116,6 +140,17 @@ class ChatRequest(BaseModel):
     llm_credentials: list[dict[str, Any]] | None = Field(
         default=None,
         description="Decrypted credentials from Express (never stored in ai-service).",
+    )
+    page_context: PageContextModel | None = Field(
+        default=None,
+        description="Current screen focus/page payloads for context-aware Q&A.",
+    )
+    enable_api_llm: bool | None = Field(
+        default=None,
+        description=(
+            "Legacy flag. Learning heads run whenever features exist; "
+            "RAG is gated by document/analysis intent instead."
+        ),
     )
 
 
@@ -172,6 +207,85 @@ class ChatResponse(BaseModel):
         description="Extensible bag of registry head results (clf/reg/residual/future).",
     )
     recommendation: ChatRecommendation | None = None
+    error: str | None = None
+    timing: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional [chat-timing] breakdown (predict/rag/compose ms).",
+    )
+
+
+class KnowledgeAnalyzeRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Knowledge library materials + instruction")
+    llm_mode: str | None = Field(
+        default="auto",
+        description='"auto" or a registered credential id from /security vault.',
+    )
+    llm_credentials: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Decrypted credentials from Express (never stored in ai-service).",
+    )
+
+
+class KnowledgeAnalyzeResponse(BaseModel):
+    reply: str
+    mode: str = Field(description="'llm' | 'error'")
+    provider: str | None = None
+    error: str | None = None
+
+
+class LotRiskReasonRequest(BaseModel):
+    lot_id: str = Field(..., min_length=1)
+    probability: float | None = None
+    spc_status: str | None = None
+    risk_level: str | None = None
+    residual_li: float | None = None
+    capacity: float | None = None
+    quality_defect: int | None = None
+
+
+class LotRiskReasonResponse(BaseModel):
+    risk_reason: str
+    provider: str | None = None
+    error: str | None = None
+
+
+class ExplainLotRequest(BaseModel):
+    features: dict[str, Any] = Field(default_factory=dict)
+    spc_refs: dict[str, float] | None = None
+
+
+class ExplainLotResponse(BaseModel):
+    drivers_json: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class LotRecommendedActionRequest(BaseModel):
+    lot_id: str = Field(..., min_length=1)
+    risk_level: str | None = None
+    probability: float | None = None
+    residual_li: float | None = None
+    spc_status: str | None = None
+    drivers_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class LotRecommendedActionStep(BaseModel):
+    order: int
+    text: str
+    doc_id: str | None = None
+
+
+class LotRecommendedActionSource(BaseModel):
+    doc_id: str
+    title: str | None = None
+    path: str | None = None
+
+
+class LotRecommendedActionResponse(BaseModel):
+    summary: str = ""
+    steps: list[LotRecommendedActionStep] = Field(default_factory=list)
+    sources: list[LotRecommendedActionSource] = Field(default_factory=list)
+    drivers_json: dict[str, Any] = Field(default_factory=dict)
+    status: str = "ready"
     error: str | None = None
 
 

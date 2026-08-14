@@ -3,6 +3,10 @@
 조원 4명이 **같은** `kdt_project.users`로 회원가입·중복확인·로그인을 하기 위한 절차입니다.  
 프론트/백엔드 코드는 이미 레포에 있으므로, **Lightsail Ubuntu의 MariaDB**와 로컬 `.env`만 맞추면 됩니다.
 
+앱을 **16GB 인스턴스에서 전부** 돌리는 확정 설계는 [aws-lightsail-gpu-tunnel.md](./aws-lightsail-gpu-tunnel.md) 입니다.  
+그때 서버 `DB_HOST`는 `127.0.0.1`이고 **3306을 인터넷에 열지 않습니다.**  
+아래 절차는 **이 PC `npm run dev` → 원격 MariaDB** (구 2GB `my-server`와 같은 방식)용입니다.
+
 ## 구성
 
 ```text
@@ -32,7 +36,8 @@
    sudo mysql -e "USE kdt_project; SHOW TABLES;"
    ```
    → `kdt_project`, `users`
-4. Networking: **Public IPv4 / Static IP** 메모, 방화벽 **TCP 3306** 유지
+4. Networking: **Public IPv4 / Static IP** 메모.  
+   이 PC에서 직접 붙을 때만 방화벽 **TCP 3306**. 앱이 같은 서버면 3306 닫기.
 5. 로컬 모노레포 루트 `.env` (Git에 올리지 말 것):
    ```env
    DB_HOST=<Public_또는_Static_IP>
@@ -94,6 +99,7 @@
 
 - 기술스택·패키지: [login-auth-tech-stack.md](../references/login-auth-tech-stack.md)
 - Auth API 요약: [backend/README.md](../../backend/README.md)
+- Lightsail Docker (n8n·Qdrant): [aws-lightsail-docker.md](./aws-lightsail-docker.md)
 
 ## 트러블슈팅: `Cannot find package 'bcryptjs'`
 
@@ -112,3 +118,4 @@
 |------|------|
 | 2026-07-28 | 초안 작성. 기존 Running Ubuntu 재연결 + 신규 설치 절차. `.env`는 로컬만. |
 | 2026-07-28 | `bcryptjs` ERR_MODULE_NOT_FOUND → `npm install` 안내 추가. |
+| 2026-08-14 | 16GB `my-server-16gb` + 로컬 GPU 터널. 앱·DB 같은 기계면 `DB_HOST=127.0.0.1`, 3306 비공개. Grafana 호스트는 `.env` `NEXT_PUBLIC_GRAFANA_*`. |

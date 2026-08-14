@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Home,
   LayoutDashboard,
@@ -18,7 +18,7 @@ import {
 import type { ReactNode } from 'react'
 import GlobalChatbot from '@/components/chat/GlobalChatbot'
 import ShellHeader from '@/components/layout/ShellHeader'
-import { SelectedLotProvider } from '@/context/SelectedLotContext'
+import { PageChatProvider, usePageChat } from '@/context/PageChatContext'
 import { authApi } from '@/api/authApi'
 import { isLoggedIn } from '@/lib/authStorage'
 
@@ -27,12 +27,61 @@ export type UiLanguage = 'ko' | 'en'
 export type UiFontSize = 10 | 12 | 14 | 16 | 18 | 20 | 22 | 24
 
 export const UI_SETTINGS_EVENT = 'kdt-ui-settings-change'
+export const SHELL_REFRESH_EVENT = 'kdt-shell-refresh'
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
 const FONT_SCALE_STYLE_ID = 'kdt-font-scale-style'
 
 export const UI_FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
 export const DEFAULT_UI_FONT_SIZE: UiFontSize = 18
+
+export const REFRESH_INTERVAL_OPTIONS = [1, 5, 10, 30] as const
+export type RefreshIntervalMinutes = (typeof REFRESH_INTERVAL_OPTIONS)[number]
+export const DEFAULT_REFRESH_INTERVAL: RefreshIntervalMinutes = 1
+export const DEFAULT_AUTO_REFRESH_ENABLED = true
+
+function isRefreshInterval(value: unknown): value is RefreshIntervalMinutes {
+  return typeof value === 'number' && (REFRESH_INTERVAL_OPTIONS as readonly number[]).includes(value)
+}
+
+function readStoredRefreshSettings(): {
+  autoRefreshEnabled: boolean
+  refreshInterval: RefreshIntervalMinutes
+} {
+  if (typeof window === 'undefined') {
+    return {
+      autoRefreshEnabled: DEFAULT_AUTO_REFRESH_ENABLED,
+      refreshInterval: DEFAULT_REFRESH_INTERVAL,
+    }
+  }
+  try {
+    const raw = localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
+    if (!raw) {
+      return {
+        autoRefreshEnabled: DEFAULT_AUTO_REFRESH_ENABLED,
+        refreshInterval: DEFAULT_REFRESH_INTERVAL,
+      }
+    }
+    const parsed = JSON.parse(raw) as {
+      autoRefreshEnabled?: unknown
+      refreshInterval?: unknown
+    }
+    return {
+      autoRefreshEnabled:
+        typeof parsed.autoRefreshEnabled === 'boolean'
+          ? parsed.autoRefreshEnabled
+          : DEFAULT_AUTO_REFRESH_ENABLED,
+      refreshInterval: isRefreshInterval(parsed.refreshInterval)
+        ? parsed.refreshInterval
+        : DEFAULT_REFRESH_INTERVAL,
+    }
+  } catch {
+    return {
+      autoRefreshEnabled: DEFAULT_AUTO_REFRESH_ENABLED,
+      refreshInterval: DEFAULT_REFRESH_INTERVAL,
+    }
+  }
+}
 
 function isUiFontSize(value: unknown): value is UiFontSize {
   return typeof value === 'number' && (UI_FONT_SIZE_OPTIONS as readonly number[]).includes(value)
@@ -48,6 +97,9 @@ export const NAV_MENUS = [
   { name: 'Security', icon: Shield, path: '/security' },
   { name: 'Setting', icon: Settings, path: '/setting' },
 ] as const
+
+/** Sidebar-only hide; route and page stay available (e.g. direct URL). */
+const SIDEBAR_HIDDEN_PATHS = new Set<string>(['/security'])
 
 const UI_COPY = {
   ko: {
@@ -275,7 +327,7 @@ export function useUiSettings() {
                 fontSize: s.fontSize,
                 autoRefreshEnabled: s.autoRefreshEnabled ?? currentSystem.autoRefreshEnabled ?? true,
                 refreshInterval: s.refreshInterval,
-                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? true,
+                n8nAlert: s.n8nAlert ?? currentSystem.n8nAlert ?? false,
               }),
             )
           } catch {
@@ -334,13 +386,60 @@ export function useUiSettings() {
   }
 }
 
+/** Reads auto-refresh prefs from system_settings_config; re-syncs on settings events. */
+export function useRefreshSettings() {
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(DEFAULT_AUTO_REFRESH_ENABLED)
+  const [refreshInterval, setRefreshInterval] =
+    useState<RefreshIntervalMinutes>(DEFAULT_REFRESH_INTERVAL)
+
+  useEffect(() => {
+    const apply = () => {
+      const next = readStoredRefreshSettings()
+      setAutoRefreshEnabled(next.autoRefreshEnabled)
+      setRefreshInterval(next.refreshInterval)
+    }
+
+    apply()
+
+    const onSettings = () => apply()
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SYSTEM_SETTINGS_CONFIG_KEY && event.key !== null) return
+      apply()
+    }
+
+    window.addEventListener(UI_SETTINGS_EVENT, onSettings)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(UI_SETTINGS_EVENT, onSettings)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+
+  return { autoRefreshEnabled, refreshInterval }
+}
+
+/** Drop stale pagePayload/focus when navigating between shell pages. */
+function PageChatRouteReset() {
+  const pathname = usePathname()
+  const { resetForRoute } = usePageChat()
+  const prevPath = useRef(pathname)
+  useEffect(() => {
+    if (prevPath.current !== pathname) {
+      resetForRoute(pathname)
+      prevPath.current = pathname
+    }
+  }, [pathname, resetForRoute])
+  return null
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const { isDark, copy } = useUiSettings()
 
   return (
-    <SelectedLotProvider>
+    <PageChatProvider>
+      <PageChatRouteReset />
       <div className="w-screen h-screen flex overflow-hidden text-gray-800 font-sans">
         <aside
           data-sidebar
@@ -375,7 +474,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <ul className="flex flex-1 flex-col gap-2">
-            {NAV_MENUS.map((menu) => {
+            {NAV_MENUS.filter((menu) => !SIDEBAR_HIDDEN_PATHS.has(menu.path)).map((menu) => {
               const Icon = menu.icon
               const active = pathname === menu.path
               const label = copy.menus[menu.path] ?? menu.name
@@ -428,6 +527,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <GlobalChatbot />
-    </SelectedLotProvider>
+    </PageChatProvider>
   )
 }

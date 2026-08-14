@@ -1,0 +1,24 @@
+{
+    "enable_api_llm":  false,
+    "message":  "이거 왜 심각이야?",
+    "session_id":  "pagectx-114357-focus",
+    "page_context":  {
+                         "focusId":  "risk-top-row",
+                         "pagePayload":  {
+                                             "dailyKpi":  [
+                                                              {
+                                                                  "title":  "실시간 양품률",
+                                                                  "id":  "yield-rate",
+                                                                  "value":  "99%"
+                                                              }
+                                                          ]
+                                         },
+                         "focusPayload":  {
+                                              "status":  "심각",
+                                              "riskScore":  0.93,
+                                              "riskReason":  "습도 과다 및 소성온도 편차",
+                                              "lotId":  "LOT-FOCUS-999"
+                                          },
+                         "route":  "/main"
+                     }
+}

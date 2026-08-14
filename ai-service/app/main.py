@@ -53,7 +53,6 @@ def _configure_file_logging() -> None:
     root.addHandler(handler)
 
 
-import polars as pl
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -66,16 +65,25 @@ from app.schemas import (
     ChatThreadListResponse,
     ChatThreadMessagesResponse,
     HealthResponse,
+    KnowledgeAnalyzeRequest,
+    KnowledgeAnalyzeResponse,
+    LotRiskReasonRequest,
+    LotRiskReasonResponse,
+    ExplainLotRequest,
+    ExplainLotResponse,
+    LotRecommendedActionRequest,
+    LotRecommendedActionResponse,
     PredictRequest,
     PredictResponse,
     ResidualResponse,
     SecurityChatRequest,
     SecurityChatResponse,
+    VotingPredictResponse,
 )
-from agent.graph import run_chat
-from agent.model_registry import list_ready_heads
+from agent.api_llm.graph import run_chat
+from agent.api_llm.model_registry import list_ready_heads
 from agent.secure_llm import compose_secure, compose_secure_stream
-from train_pipeline import MODELS_DIR, predict
+from train_pipeline import MODELS_DIR
 
 # After train_pipeline (which may clear root handlers) attach rotating server log.
 _configure_file_logging()
@@ -84,19 +92,28 @@ _configure_file_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _configure_file_logging()
-    stop_watch = None
+    # Qdrant (:6333) — auto Docker start when AI server boots
     try:
-        from agent.document_watcher import start_document_watcher
+        from agent.qdrant_supervisor import ensure_qdrant
 
-        stop_watch = start_document_watcher()
+        ok = ensure_qdrant()
+        print(f"[qdrant] ensure_ok={ok}", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"[document_watcher] start skipped: {exc}")
+        print(f"[qdrant] ensure skipped: {exc}", flush=True)
+    # Documents OCR/watchdog is owned by Express backend (documentWatcherSupervisor).
+    # Warm RAG embed/rerank on CPU so first chat is not a cold load.
+    try:
+        from agent.rag_engine import get_engine
+
+        eng = get_engine()
+        eng.ensure()
+        print(
+            f"[rag] warm ready={eng.ready} err={eng.init_error!r}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[rag] warm skipped: {exc}", flush=True)
     yield
-    if stop_watch is not None:
-        try:
-            stop_watch()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[document_watcher] stop: {exc}")
 
 
 app = FastAPI(
@@ -133,20 +150,38 @@ RAW_FEATURE_KEYS = (
 
 
 def _default_threshold() -> float:
-    cfg_path = MODELS_DIR / "ensemble_config.json"
+    """Voting default_threshold from voting_config.json (fallback 0.4)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
     if cfg_path.exists():
         with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
-        return float(cfg.get("default_threshold", 0.5))
-    return 0.5
+        thr = (cfg.get("threshold") or {}).get("default_threshold")
+        if thr is not None:
+            return float(thr)
+    return 0.4
 
 
 def _model_version() -> str | None:
-    meta_path = MODELS_DIR / "metadata.json"
-    if not meta_path.exists():
-        return None
-    with open(meta_path, encoding="utf-8") as f:
-        return json.load(f).get("model_version")
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if cfg_path.exists():
+        return "2.0.0-voting"
+    return None
+
+
+def _features_row(body: PredictRequest) -> dict:
+    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
+    if body.id is not None:
+        row["id"] = body.id
+    if body.timestamp is not None:
+        row["timestamp"] = body.timestamp
+    return row
+
+
+def _run_voting(body: PredictRequest) -> dict:
+    from voting_predict import predict_voting
+
+    thr = body.fillThreshold if body.fillThreshold is not None else None
+    return predict_voting(_features_row(body), fill_threshold=thr)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -198,30 +233,34 @@ def get_chat_thread_messages(
     return ChatThreadMessagesResponse(thread_id=thread_id, messages=msgs)
 
 
+@app.post("/predict-voting", response_model=VotingPredictResponse)
+def predict_voting_endpoint(body: PredictRequest) -> VotingPredictResponse:
+    """Cascade multi-model voting (capacity → residual → probability /15)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=503, detail="voting_config.json missing")
+    try:
+        result = _run_voting(body)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"predict-voting failed: {exc}") from exc
+    return VotingPredictResponse(**result)
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict_endpoint(body: PredictRequest) -> PredictResponse:
-    """
-    Single-row O/X inference.
-    Accepts raw process features; domain engineering runs inside train_pipeline.predict.
-    """
-    required = MODELS_DIR / "xgb_model.json"
-    if not required.exists():
+    """O/X from cascade voting probability (legacy single-head models disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Model artifacts missing. Train first (ai-service/models/).",
+            detail="Voting models missing. Legacy clf artifacts removed; use voting under models/voting/.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    thr = body.fillThreshold if body.fillThreshold is not None else _default_threshold()
-    df = pl.DataFrame([row])
-
     try:
-        result = predict(df, fillThreshold=float(thr))
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -229,34 +268,35 @@ def predict_endpoint(body: PredictRequest) -> PredictResponse:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"predict failed: {exc}") from exc
 
-    return PredictResponse(**result)
+    thr = voted.get("applied_threshold")
+    if thr is None:
+        thr = (
+            float(body.fillThreshold)
+            if body.fillThreshold is not None
+            else _default_threshold()
+        )
+    qd = voted.get("quality_defect")
+    if qd is None:
+        qd = 1 if float(voted["probability"]) >= float(thr) else 0
+    return PredictResponse(
+        defect_status=int(qd),
+        probability=float(voted["probability"]),
+        applied_threshold=float(thr),
+        top_risk_factors=[],
+    )
 
 
 @app.post("/predict-capacity", response_model=CapacityResponse)
 def predict_capacity_endpoint(body: PredictRequest) -> CapacityResponse:
-    """
-    Single-row capacity (mAh/g) inference.
-    Same raw features as /predict; domain engineering inside train_reg_pipeline.
-    """
-    from train_reg_pipeline import MODELS_DIR as REG_DIR
-    from train_reg_pipeline import predict_capacity
-
-    required = REG_DIR / "xgb_model.json"
-    if not required.exists():
+    """Capacity from cascade voting (legacy models/reg disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Reg model artifacts missing. Train first (ai-service/models/reg/).",
+            detail="Voting models missing. Legacy reg artifacts removed.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    df = pl.DataFrame([row])
     try:
-        result = predict_capacity(df)
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -265,35 +305,20 @@ def predict_capacity_endpoint(body: PredictRequest) -> CapacityResponse:
         raise HTTPException(
             status_code=500, detail=f"predict-capacity failed: {exc}"
         ) from exc
-
-    return CapacityResponse(**result)
+    return CapacityResponse(capacity=float(voted["capacity"]), unit="mAh/g", top_factors=[])
 
 
 @app.post("/predict-residual", response_model=ResidualResponse)
 def predict_residual_endpoint(body: PredictRequest) -> ResidualResponse:
-    """
-    Single-row residual_li inference.
-    Same raw features as /predict; domain engineering inside train_residual_pipeline.
-    """
-    from train_residual_pipeline import MODELS_DIR as RES_DIR
-    from train_residual_pipeline import predict_residual_li
-
-    required = RES_DIR / "xgb_model.json"
-    if not required.exists():
+    """residual_li from cascade voting (legacy models/residual disconnected)."""
+    cfg_path = MODELS_DIR / "voting_config.json"
+    if not cfg_path.exists():
         raise HTTPException(
             status_code=503,
-            detail="Residual model artifacts missing. Train first (ai-service/models/residual/).",
+            detail="Voting models missing. Legacy residual artifacts removed.",
         )
-
-    row: dict = {k: getattr(body, k) for k in RAW_FEATURE_KEYS}
-    if body.id is not None:
-        row["id"] = body.id
-    if body.timestamp is not None:
-        row["timestamp"] = body.timestamp
-
-    df = pl.DataFrame([row])
     try:
-        result = predict_residual_li(df)
+        voted = _run_voting(body)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, TypeError) as exc:
@@ -302,8 +327,9 @@ def predict_residual_endpoint(body: PredictRequest) -> ResidualResponse:
         raise HTTPException(
             status_code=500, detail=f"predict-residual failed: {exc}"
         ) from exc
-
-    return ResidualResponse(**result)
+    return ResidualResponse(
+        residual_li=float(voted["residual_li"]), unit="ppm", top_factors=[]
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -325,6 +351,24 @@ def chat_endpoint(
     from agent import chat_history_vector as vec
 
     features = body.features.model_dump(exclude_none=True) if body.features else None
+    page_ctx = None
+    if body.page_context is not None:
+        raw = body.page_context.model_dump(exclude_none=True)
+        # normalize camelCase aliases from FE
+        page_ctx = {
+            "route": raw.get("route") or "/",
+            "focus_id": raw.get("focus_id") or raw.get("focusId"),
+            "focus_payload": raw.get("focus_payload")
+            if "focus_payload" in raw
+            else raw.get("focusPayload"),
+            "page_payload": raw.get("page_payload")
+            if "page_payload" in raw
+            else raw.get("pagePayload"),
+            "supplement": raw.get("supplement"),
+            "supplement_hints": raw.get("supplement_hints")
+            or raw.get("supplementHints"),
+        }
+
     tid = store.ensure_thread(
         thread_id=body.thread_id,
         user_id=body.user_id,
@@ -332,13 +376,20 @@ def chat_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
-    history_text = vec.merge_history_with_semantic(
-        window_text,
-        semantic,
-        heuristic_truncate_fn=store.heuristic_truncate,
-        format_compact_fn=store.format_history_text_compact,
-    )
+    from agent.api_llm.grounding import detect_topic_shift
+
+    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    if topic_shift:
+        # Facts come from page_context only; keep a tiny history window for pronouns.
+        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
+    else:
+        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
+        history_text = vec.merge_history_with_semantic(
+            window_text,
+            semantic,
+            heuristic_truncate_fn=store.heuristic_truncate,
+            format_compact_fn=store.format_history_text_compact,
+        )
     if tid and body.user_id:
         mid = store.insert_message(
             thread_id=tid,
@@ -366,6 +417,8 @@ def chat_endpoint(
             llm_mode=body.llm_mode,
             llm_credentials=body.llm_credentials,
             history_text=history_text,
+            page_context=page_ctx,
+            enable_api_llm=body.enable_api_llm,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"chat failed: {exc}") from exc
@@ -407,7 +460,233 @@ def chat_endpoint(
         heads=out.get("heads"),
         recommendation=recommendation,
         error=out.get("error"),
+        timing=out.get("timing"),
     )
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(
+    body: ChatRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> StreamingResponse:
+    """SSE: meta → delta* → done (general chat with optional light RAG)."""
+    global _chat_request_count
+    _chat_request_count += 1
+
+    from agent import chat_history_store as store
+    from agent import chat_history_vector as vec
+    from agent.api_llm.graph import iter_chat_events
+
+    features = body.features.model_dump(exclude_none=True) if body.features else None
+    page_ctx = None
+    if body.page_context is not None:
+        raw = body.page_context.model_dump(exclude_none=True)
+        page_ctx = {
+            "route": raw.get("route") or "/",
+            "focus_id": raw.get("focus_id") or raw.get("focusId"),
+            "focus_payload": raw.get("focus_payload")
+            if "focus_payload" in raw
+            else raw.get("focusPayload"),
+            "page_payload": raw.get("page_payload")
+            if "page_payload" in raw
+            else raw.get("pagePayload"),
+            "supplement": raw.get("supplement"),
+            "supplement_hints": raw.get("supplement_hints")
+            or raw.get("supplementHints"),
+        }
+
+    tid = store.ensure_thread(
+        thread_id=body.thread_id,
+        user_id=body.user_id,
+        channel="general",
+    )
+    history = store.load_messages(tid) if tid else []
+    window_text = store.format_history_text_compact(history)
+    from agent.api_llm.grounding import detect_topic_shift
+
+    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    if topic_shift:
+        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
+    else:
+        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
+        history_text = vec.merge_history_with_semantic(
+            window_text,
+            semantic,
+            heuristic_truncate_fn=store.heuristic_truncate,
+            format_compact_fn=store.format_history_text_compact,
+        )
+    if tid and body.user_id:
+        mid = store.insert_message(
+            thread_id=tid,
+            role="user",
+            content=body.message,
+            mode="general_user",
+            provider="general",
+        )
+        background_tasks.add_task(
+            vec.upsert_chat_message,
+            thread_id=tid,
+            user_id=body.user_id,
+            channel="general",
+            role="user",
+            text=body.message,
+            message_id=mid,
+        )
+
+    def event_gen():
+        final_reply = ""
+        final_mode = "template"
+        final_provider = "template"
+        try:
+            for item in iter_chat_events(
+                message=body.message,
+                features=features,
+                fillThreshold=body.fillThreshold,
+                need_guideline=body.need_guideline,
+                llm_mode=body.llm_mode,
+                llm_credentials=body.llm_credentials,
+                history_text=history_text,
+                page_context=page_ctx,
+                enable_api_llm=body.enable_api_llm,
+            ):
+                ev = str(item.get("event") or "message")
+                data = dict(item.get("data") or {})
+                if ev == "done":
+                    final_reply = str(data.get("reply") or "")
+                    final_mode = str(data.get("mode") or "template")
+                    final_provider = str(data.get("provider") or "template")
+                    data["thread_id"] = tid
+                yield _format_sse(ev, data)
+        except Exception as exc:  # noqa: BLE001
+            yield _format_sse("error", {"error": str(exc)[:400], "stage": "chat_stream"})
+            return
+
+        if tid and body.user_id and final_reply:
+            mid_a = store.insert_message(
+                thread_id=tid,
+                role="assistant",
+                content=final_reply,
+                mode=final_mode,
+                provider=final_provider,
+            )
+            background_tasks.add_task(
+                vec.upsert_chat_message,
+                thread_id=tid,
+                user_id=body.user_id,
+                channel="general",
+                role="assistant",
+                text=final_reply,
+                message_id=mid_a,
+            )
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/knowledge-analyze", response_model=KnowledgeAnalyzeResponse)
+def knowledge_analyze_endpoint(body: KnowledgeAnalyzeRequest) -> KnowledgeAnalyzeResponse:
+    """
+    Knowledge library summarize — no /chat graph, SYSTEM_COMPOSE, predict, RAG, or history.
+    Uses registered API LLM credentials from Express only.
+    """
+    from agent.api_llm.knowledge_compose import compose_knowledge
+
+    reply, provider, err = compose_knowledge(
+        body.message,
+        llm_mode=body.llm_mode,
+        llm_credentials=body.llm_credentials,
+    )
+    if not reply:
+        logging.getLogger(__name__).warning(
+            "[knowledge-analyze] empty_or_error: %s", err or "unknown"
+        )
+        return KnowledgeAnalyzeResponse(
+            reply="",
+            mode="error",
+            provider=provider,
+            error=err or "LLM 응답이 비어 있습니다.",
+        )
+    return KnowledgeAnalyzeResponse(
+        reply=reply,
+        mode="llm",
+        provider=provider or "llm",
+        error=err,
+    )
+
+
+@app.post("/lot-risk-reason", response_model=LotRiskReasonResponse)
+def lot_risk_reason_endpoint(body: LotRiskReasonRequest) -> LotRiskReasonResponse:
+    """analysis_lots.risk_reason via local vLLM only — no RAG / SYSTEM_COMPOSE."""
+    from agent.api_llm.lot_risk_reason import compose_lot_risk_reason
+
+    facts = {
+        "lot_id": body.lot_id,
+        "probability": body.probability,
+        "spc_status": body.spc_status,
+        "risk_level": body.risk_level,
+        "residual_li": body.residual_li,
+        "capacity": body.capacity,
+        "quality_defect": body.quality_defect,
+    }
+    text, err = compose_lot_risk_reason(facts)
+    if not text:
+        logging.getLogger(__name__).warning(
+            "[lot-risk-reason] empty_or_error lot=%s err=%s", body.lot_id, err
+        )
+        return LotRiskReasonResponse(risk_reason="", provider="vllm", error=err or "empty")
+    return LotRiskReasonResponse(risk_reason=text, provider="vllm", error=None)
+
+
+@app.post("/explain-lot", response_model=ExplainLotResponse)
+def explain_lot_endpoint(body: ExplainLotRequest) -> ExplainLotResponse:
+    """Per-LOT SHAP drivers for defect probability and residual Li models."""
+    from agent.lot_explain import explain_lot_from_request
+
+    try:
+        drivers = explain_lot_from_request(body.model_dump())
+        return ExplainLotResponse(drivers_json=drivers, error=None)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("[explain-lot] fail: %s", exc)
+        return ExplainLotResponse(drivers_json={}, error=str(exc)[:300])
+
+
+@app.post("/lot-recommended-action", response_model=LotRecommendedActionResponse)
+def lot_recommended_action_endpoint(
+    body: LotRecommendedActionRequest,
+) -> LotRecommendedActionResponse:
+    """QMS-grounded recommended action from drivers + optional RAG/vLLM."""
+    from agent.api_llm.lot_recommended_action import compose_lot_recommended_action
+
+    try:
+        result = compose_lot_recommended_action(body.model_dump())
+        return LotRecommendedActionResponse(
+            summary=result.get("summary") or "",
+            steps=result.get("steps") or [],
+            sources=result.get("sources") or [],
+            drivers_json=result.get("drivers_json") or body.drivers_json,
+            status=result.get("status") or "ready",
+            error=result.get("error"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "[lot-recommended-action] fail lot=%s err=%s", body.lot_id, exc
+        )
+        return LotRecommendedActionResponse(
+            summary="",
+            steps=[],
+            sources=[],
+            drivers_json=body.drivers_json,
+            status="error",
+            error=str(exc)[:300],
+        )
 
 
 @app.post("/security-chat", response_model=SecurityChatResponse)
@@ -541,6 +820,8 @@ def root() -> dict[str, str]:
         "predict_capacity": "POST /predict-capacity",
         "predict_residual": "POST /predict-residual",
         "chat": "POST /chat",
+        "chat_stream": "POST /chat/stream",
+        "knowledge_analyze": "POST /knowledge-analyze",
         "security_chat": "POST /security-chat",
         "security_chat_stream": "POST /security-chat/stream",
     }

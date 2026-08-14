@@ -15,16 +15,30 @@ CREATE TABLE IF NOT EXISTS user_settings (
   font_size             INT          NOT NULL DEFAULT 18,
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
+  email_check           CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=심각 LOT 보고서 메일 수신, X=거부',
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
     ON DELETE CASCADE
 );
 
--- LOT SSOT + scoring (Risk Top = query, no separate top table)
+-- Header bell read/dismiss overlay per user (list still aggregated on frontend).
+-- See also DB/user_header_notif_state.sql
+CREATE TABLE IF NOT EXISTS user_header_notif_state (
+  user_id         VARCHAR(50)  NOT NULL PRIMARY KEY,
+  read_ids        JSON         NOT NULL,
+  dismissed_ids   JSON         NOT NULL,
+  updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_user_header_notif_state_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE
+);
+
+-- LOT process SSOT (CSV column names). Scores live in analysis_lots.
+-- PK `id` is referenced by child tables as lot_id (FK name may differ).
 CREATE TABLE IF NOT EXISTS lots (
-  lot_id            VARCHAR(64)  NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME     NOT NULL,
+  id                VARCHAR(64)  NOT NULL PRIMARY KEY,
+  `timestamp`       DATETIME     NOT NULL,
   d50               DOUBLE       NULL,
   d90               DOUBLE       NULL,
   metal_impurity    DOUBLE       NULL,
@@ -35,131 +49,93 @@ CREATE TABLE IF NOT EXISTS lots (
   humidity          DOUBLE       NULL,
   tank_pressure     DOUBLE       NULL,
   operator_id       VARCHAR(32)  NULL,
-  quality_defect    TINYINT(1)   NOT NULL DEFAULT 0,
-  defect_prob       DOUBLE       NULL,
-  residual_lithium  DOUBLE       NULL,
-  spc_status        VARCHAR(32)  NULL,
-  risk_level        VARCHAR(10)  NOT NULL DEFAULT '낮음',
-  risk_reason       VARCHAR(255) NULL,
-  scored_at         DATETIME     NULL,
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_lots_recorded (recorded_at),
-  INDEX idx_lots_risk (risk_level)
+  INDEX idx_lots_recorded (`timestamp`)
 );
 
--- Raw CSV sources. Kept separate because each dataset has a different missing-value pattern.
--- No FK to operational lots: that table may contain only an SPC-cleaned subset.
-CREATE TABLE IF NOT EXISTS cathode_clf_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  quality_defect    TINYINT(1)  NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_clf_recorded (recorded_at),
-  INDEX idx_cathode_clf_operator (operator_id),
-  INDEX idx_cathode_clf_target (quality_defect)
+CREATE TABLE IF NOT EXISTS analysis_lots (
+  lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
+  probability              DOUBLE       NULL,
+  spc_status               VARCHAR(32)  NULL,
+  risk_level               VARCHAR(10)  NOT NULL DEFAULT '안정',
+  risk_reason              VARCHAR(255) NULL,
+  spc_chart_json           JSON         NULL,
+  created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  scored_at                DATETIME     NULL COMMENT '마지막 채점 시각',
+  CONSTRAINT fk_analysis_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE,
+  INDEX idx_analysis_risk (risk_level),
+  INDEX idx_analysis_scored (scored_at)
 );
 
-CREATE TABLE IF NOT EXISTS cathode_capacity_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  capacity          DOUBLE      NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_capacity_recorded (recorded_at),
-  INDEX idx_cathode_capacity_operator (operator_id),
-  INDEX idx_cathode_capacity_target (capacity)
+-- Judgment outcomes: clf quality_defect + reg capacity + residual_li + probability (0~1)
+CREATE TABLE IF NOT EXISTS judgment_lots (
+  lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,
+  quality_defect  TINYINT(1)   NOT NULL,
+  capacity        DOUBLE       NULL,
+  residual_li     DOUBLE       NULL,
+  probability     DOUBLE       NULL,
+  spc             VARCHAR(16)  NULL,
+  CONSTRAINT fk_judgment_lots_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS cathode_residual_samples (
-  lot_id            VARCHAR(64) NOT NULL PRIMARY KEY,
-  recorded_at       DATETIME    NOT NULL,
-  d50               DOUBLE      NULL,
-  d90               DOUBLE      NULL,
-  metal_impurity    DOUBLE      NULL,
-  lithium_input     DOUBLE      NULL,
-  additive_ratio    DOUBLE      NULL,
-  process_time      DOUBLE      NULL,
-  sintering_temp    DOUBLE      NULL,
-  humidity          DOUBLE      NULL,
-  tank_pressure     DOUBLE      NULL,
-  operator_id       VARCHAR(32) NULL,
-  residual_li       DOUBLE      NOT NULL,
-  imported_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_cathode_residual_recorded (recorded_at),
-  INDEX idx_cathode_residual_operator (operator_id),
-  INDEX idx_cathode_residual_target (residual_li)
+CREATE TABLE IF NOT EXISTS lot_recommended_actions (
+  lot_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  summary VARCHAR(1024) NOT NULL DEFAULT '',
+  steps_json JSON NOT NULL,
+  sources_json JSON NOT NULL,
+  drivers_json JSON NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'ready',
+  error_message VARCHAR(255) NULL,
+  content_hash CHAR(40) NULL,
+  generated_at DATETIME NOT NULL,
+  CONSTRAINT fk_lot_recommended_actions_lot
+    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Feeder + AI NULL-fill buffer (quality_defect / residual_li). Not dropped as orphan.
+CREATE TABLE IF NOT EXISTS lot_results (
+  seq             INT          NOT NULL PRIMARY KEY,
+  lot_id          VARCHAR(64)  NOT NULL,
+  quality_defect  TINYINT      NULL,
+  residual_li     DOUBLE       NULL,
+  measured_at     DATETIME     NULL,
+  UNIQUE KEY uq_lot_results_lot_id (lot_id)
 );
 
 CREATE TABLE IF NOT EXISTS issues (
   issue_id          VARCHAR(32)  NOT NULL PRIMARY KEY,
   lot_id            VARCHAR(64)  NOT NULL,
-  occurred_at       DATETIME     NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL,
-  status            VARCHAR(20)  NOT NULL DEFAULT '접수',
-  title             VARCHAR(255) NOT NULL,
+  issue_content     VARCHAR(255) NOT NULL,
   action_content    TEXT         NULL,
   assignee_user_id  VARCHAR(50)  NULL,
   completed_at      DATETIME     NULL,
-  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(lot_id),
+  created_at        DATETIME     NOT NULL,
+  CONSTRAINT fk_issues_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
   CONSTRAINT fk_issues_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
-  INDEX idx_issues_status (status),
   INDEX idx_issues_lot (lot_id),
-  INDEX idx_issues_occurred (occurred_at),
-  INDEX idx_issues_risk (risk_level)
+  INDEX idx_issues_created (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS handover_history (
   history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  issue_id          VARCHAR(32)  NOT NULL,
-  lot_id            VARCHAR(64)  NOT NULL,
-  risk_level        VARCHAR(10)  NOT NULL,
-  situation         VARCHAR(255) NOT NULL COMMENT '발생 상황 ← issues.title',
-  action            TEXT         NULL COMMENT '대응/조치 ← action_content',
-  cause             VARCHAR(255) NULL,
-  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← 담당자 성명',
+  handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
+  action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
+  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← users.name',
   handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
-  manager           VARCHAR(50)  NULL COMMENT '호환: handover_from과 동일',
   assignee_user_id  VARCHAR(50)  NULL,
-  event_date        DATE         NOT NULL COMMENT '날짜 ← issues.occurred_at 일자',
-  category          VARCHAR(32)  NULL COMMENT '분류 ← 처리상태 status',
-  snapshot_json     JSON         NULL,
-  archived_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_handover_issue (issue_id),
-  CONSTRAINT fk_handover_issue
-    FOREIGN KEY (issue_id) REFERENCES issues(issue_id)
-    ON DELETE RESTRICT,
-  CONSTRAINT fk_handover_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(lot_id)
-    ON DELETE RESTRICT,
+  category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
+  archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
   CONSTRAINT fk_handover_assignee
     FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
     ON DELETE SET NULL,
-  INDEX idx_handover_lot (lot_id),
-  INDEX idx_handover_date (event_date)
+  INDEX idx_handover_created (created_at),
+  INDEX idx_handover_action (action(32))
 );
 
 -- Unified per-user chat threads (general + security). users DDL unchanged — FK only.
@@ -192,7 +168,7 @@ CREATE TABLE IF NOT EXISTS user_chat_messages (
     ON DELETE CASCADE,
   INDEX idx_user_chat_messages_thread_created (thread_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
--- Inquiry board (attachments deferred)
+-- Inquiry board
 CREATE TABLE IF NOT EXISTS inquiries (
   id                   INT AUTO_INCREMENT PRIMARY KEY,
   inquiry_code         VARCHAR(32)  NOT NULL,
@@ -220,3 +196,70 @@ CREATE TABLE IF NOT EXISTS inquiries (
   INDEX idx_inquiries_created (created_at),
   INDEX idx_inquiries_visibility (visibility)
 );
+
+CREATE TABLE IF NOT EXISTS inquiry_attachments (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  inquiry_id     INT          NOT NULL,
+  original_name  VARCHAR(255) NOT NULL,
+  stored_name    VARCHAR(255) NOT NULL,
+  mime_type      VARCHAR(127) NOT NULL,
+  size_bytes     INT          NOT NULL,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_inquiry_attachments_inquiry
+    FOREIGN KEY (inquiry_id) REFERENCES inquiries(id)
+    ON DELETE CASCADE,
+  INDEX idx_inquiry_attachments_inquiry (inquiry_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Knowledge AI custom analysis answers only (prompt/docs are not persisted).
+CREATE TABLE IF NOT EXISTS AI_Library_analysis (
+  id                BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id           VARCHAR(50)  NOT NULL,
+  name              VARCHAR(50)  NOT NULL,
+  analysis_content  TEXT         NOT NULL,
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ai_library_analysis_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+  INDEX idx_ai_library_analysis_user_created (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- OCR / empty-text sidecar: source image|scan PDF ↔ Markdown/*.md (path meta only).
+CREATE TABLE IF NOT EXISTS text_match (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_path     VARCHAR(512) NOT NULL COMMENT 'repo-relative e.g. Documents/Public/a.pdf',
+  md_path         VARCHAR(512) NOT NULL COMMENT 'repo-relative Markdown sidecar',
+  clearance       VARCHAR(32)  NOT NULL,
+  source_ext      VARCHAR(16)  NOT NULL,
+  extract_method  VARCHAR(32)  NOT NULL DEFAULT 'ocr',
+  source_sha1     CHAR(40)     NULL,
+  status          VARCHAR(16)  NOT NULL DEFAULT 'ready' COMMENT 'ready|failed|stale',
+  error_message   VARCHAR(255) NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_text_match_source (source_path),
+  INDEX idx_text_match_md (md_path),
+  INDEX idx_text_match_clearance (clearance)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Issue report mail log (n8n / Gmail API). HTML in mail_contents.
+CREATE TABLE IF NOT EXISTS send_email (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lot_id        VARCHAR(64)  NOT NULL,
+  user_id       VARCHAR(50)  NOT NULL,
+  email         VARCHAR(100) NOT NULL COMMENT 'users.email snapshot at insert',
+  mail_contents LONGTEXT     NOT NULL COMMENT 'LOT report HTML (not JSON/PDF)',
+  send          CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=sent X=unsent/failed',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at       DATETIME     NULL,
+  error         VARCHAR(255) NULL,
+  CONSTRAINT fk_send_email_lot FOREIGN KEY (lot_id) REFERENCES lots(id),
+  CONSTRAINT fk_send_email_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+  UNIQUE KEY uq_send_email_lot_user (lot_id, user_id),
+  INDEX idx_send_email_send (send),
+  INDEX idx_send_email_lot (lot_id),
+  INDEX idx_send_email_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- See also DB/spc_limits_and_standard.sql (spc_limits, standard, judgment_lots.spc)
+-- See also DB/send_email.sql (ALTER user_settings.email_check + send_email)

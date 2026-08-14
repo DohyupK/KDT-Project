@@ -19,6 +19,19 @@ async function loadAuthorEmail(userId: string): Promise<string> {
   return email
 }
 
+function decodeUploadName(name: string): string {
+  try {
+    return Buffer.from(name, 'latin1').toString('utf8')
+  } catch {
+    return name
+  }
+}
+
+function contentDisposition(filename: string): string {
+  const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download'
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+}
+
 export const listInquiries = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
 
@@ -47,6 +60,14 @@ export const createInquiry = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
 
   const email = await loadAuthorEmail(req.auth.userId)
+  const uploaded = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[]
+  const files = uploaded.map((file: Express.Multer.File) => ({
+    originalName: decodeUploadName(file.originalname),
+    mimeType: file.mimetype,
+    size: file.size,
+    buffer: file.buffer,
+  }))
+
   const result = await inquiryService.createInquiry(
     {
       category: req.body?.category,
@@ -59,8 +80,32 @@ export const createInquiry = asyncHandler(async (req, res) => {
       name: req.auth.name || req.auth.userId,
       email,
     },
+    files,
   )
   res.status(201).json({ ...result, message: '문의가 접수되었습니다.' })
+})
+
+export const downloadAttachment = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+
+  const attachmentId = Number(req.params.attachmentId)
+  const file = await inquiryService.openInquiryAttachment(
+    String(req.params.id),
+    attachmentId,
+    req.auth.userId,
+  )
+
+  res.setHeader('Content-Type', file.mimeType)
+  res.setHeader('Content-Length', String(file.size))
+  res.setHeader('Content-Disposition', contentDisposition(file.originalName))
+  file.stream.on('error', (err) => {
+    if (!res.headersSent) {
+      res.status(500).json({ message: '첨부파일을 읽을 수 없습니다.' })
+      return
+    }
+    res.destroy(err)
+  })
+  file.stream.pipe(res)
 })
 
 export const upsertAnswer = asyncHandler(async (req, res) => {

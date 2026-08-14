@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { apiClient } from '@/api/axios'
-import { getAuthUser } from '@/lib/authStorage'
+import { getAuthToken, getAuthUser } from '@/lib/authStorage'
 
 /** Direct ai-service via next.config rewrite (`/ai` → :8800). Health / smoke only. */
 export const aiClient = axios.create({
@@ -108,6 +108,15 @@ export type ChatRecommendation = {
   note?: string | null
 }
 
+export type PageChatContextRequest = {
+  route: string
+  focusId?: string | null
+  focusPayload?: unknown
+  pagePayload?: unknown
+  supplementHints?: string[]
+  supplement?: Record<string, unknown> | null
+}
+
 export type ChatRequest = {
   message: string
   features?: ChatFeatures | null
@@ -118,6 +127,8 @@ export type ChatRequest = {
   session_id?: string | null
   /** "auto" | stored key id from /security vault */
   llm_mode?: string | null
+  page_context?: PageChatContextRequest | null
+  enable_api_llm?: boolean | null
 }
 
 export type ChatCapacityResult = {
@@ -195,10 +206,122 @@ export async function postChat(body: ChatRequest): Promise<ChatResponse> {
     thread_id: thread_id ?? undefined,
     user_id: user_id ?? undefined,
     llm_mode: body.llm_mode ?? 'auto',
+    page_context: body.page_context ?? undefined,
+    enable_api_llm: body.enable_api_llm ?? undefined,
   })
   const tid = data.thread_id || data.session_id
   if (tid) setChatThreadId(tid)
   return data
+}
+
+export type ChatStreamHandlers = {
+  onMeta?: (data: Record<string, unknown>) => void
+  onDelta?: (text: string) => void
+  onDone?: (data: {
+    reply: string
+    mode?: string
+    provider?: string
+    thread_id?: string
+    recommendation?: ChatRecommendation | null
+    predict?: unknown
+    error?: string | null
+    timing?: Record<string, unknown> | null
+  }) => void
+  onError?: (message: string) => void
+}
+
+/** General chat SSE — faster first token. Falls back callers may use postChat. */
+export async function postChatStream(
+  body: ChatRequest,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const thread_id = body.thread_id ?? body.session_id ?? getChatThreadId()
+  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
+  const token = getAuthToken()
+
+  const res = await fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message: body.message,
+      features: body.features ?? undefined,
+      fillThreshold: body.fillThreshold ?? undefined,
+      thread_id: thread_id ?? undefined,
+      user_id: user_id ?? undefined,
+      llm_mode: body.llm_mode ?? 'auto',
+      page_context: body.page_context ?? undefined,
+      enable_api_llm: body.enable_api_llm ?? undefined,
+    }),
+    signal,
+  })
+
+  if (!res.ok || !res.body) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const j = (await res.json()) as { error?: string }
+      if (j?.error) detail = j.error
+    } catch {
+      /* ignore */
+    }
+    handlers.onError?.(detail)
+    throw new Error(detail)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const flushBlock = (block: string) => {
+    const lines = block.split('\n')
+    let eventName = 'message'
+    const dataLines: string[] = []
+    for (const line of lines) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+    if (!dataLines.length) return
+    let data: Record<string, unknown> = {}
+    try {
+      data = JSON.parse(dataLines.join('\n')) as Record<string, unknown>
+    } catch {
+      return
+    }
+    if (eventName === 'meta') handlers.onMeta?.(data)
+    else if (eventName === 'delta' && typeof data.text === 'string') {
+      handlers.onDelta?.(data.text)
+    } else if (eventName === 'done') {
+      const reply = String(data.reply ?? '')
+      const tid = (data.thread_id as string | undefined) || thread_id || undefined
+      if (tid) setChatThreadId(tid)
+      handlers.onDone?.({
+        reply,
+        mode: data.mode as string | undefined,
+        provider: data.provider as string | undefined,
+        thread_id: tid,
+        recommendation: (data.recommendation as ChatRecommendation | null) ?? null,
+        predict: data.predict,
+        error: (data.error as string | null) ?? null,
+        timing: (data.timing as Record<string, unknown> | null) ?? null,
+      })
+    } else if (eventName === 'error') {
+      handlers.onError?.(String(data.error ?? 'stream error'))
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
+    for (const block of parts) flushBlock(block)
+  }
+  if (buffer.trim()) flushBlock(buffer)
 }
 
 export type ChatThreadItem = {

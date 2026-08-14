@@ -20,15 +20,14 @@ async function main() {
 
   try {
     await conn.query(sql)
-    const rows = await conn.query<{ issueCount: number }[]>(
-      `SELECT COUNT(*) AS issueCount
-       FROM issues
-       WHERE issue_id IN (
-         'ISS-260721-018', 'ISS-260721-017', 'ISS-260721-016', 'ISS-260720-015',
-         'ISS-260720-014', 'ISS-260719-013', 'ISS-260719-012', 'ISS-260718-011'
-       )`,
+    const rows = await conn.query<{ issueCount: number; lotCount: number }[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM issues) AS issueCount,
+         (SELECT COUNT(*) FROM lots WHERE id LIKE 'LOT-CA-2607%') AS lotCount`,
     )
-    console.log(`SEED_OK issues ${Number(rows[0]?.issueCount ?? 0)}/8`)
+    console.log(
+      `SEED_OK lots ${Number(rows[0]?.lotCount ?? 0)} (issues left empty: ${Number(rows[0]?.issueCount ?? 0)} rows)`,
+    )
   } finally {
     await conn.end()
   }

@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-03 (BM25 핫리로드 · 로그 회전 · SSE · analytics · 3단계)
+최종 갱신: 2026-08-14 (AWS 앱 + PC vLLM · Lightsail 16GB)
 
 모노레포 기준입니다. `frontend` / `backend` / `ai-service`를 모두 포함합니다.
 
@@ -10,12 +10,18 @@
 **residual 스키마:** [`docs/references/cathode-residual-schema.md`](./references/cathode-residual-schema.md)  
 **control/outcome:** [`docs/references/optimization-event-schema.md`](./references/optimization-event-schema.md)  
 **보안 골격:** [`docs/references/security-chat-skeleton.md`](./references/security-chat-skeleton.md)  
-**보안 RAG:** [`docs/references/secure-rag.md`](./references/secure-rag.md)  
+**보안 RAG:** [`docs/references/secure-rag.md`](./references/secure-rag.md) · Documents OCR/`text_match`: [`Documents/README.md`](../Documents/README.md) · [`DB/text_match.sql`](../DB/text_match.sql)  
 **LLM·RAG 튜닝 총정리:** [`docs/references/LLM 튜닝.md`](./references/LLM%20튜닝.md)  
 **챗봇 가이드(스택·이용):** [`docs/references/security-chatbot-guide.md`](./references/security-chatbot-guide.md)  
+**일반 챗 · 페이지 컨텍스트 응답 로직:** [`docs/references/general-chatbot-page-context.md`](./references/general-chatbot-page-context.md)  
+**Documents 워처 · Qdrant 기동 · 포트:** [`docs/references/documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md)  
+**Lightsail Docker (n8n·Qdrant):** [`docs/guides/aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md)  
 **vLLM 수동 기동:** [`docs/references/vllm-setup.md`](./references/vllm-setup.md)  
+**AWS 앱 + PC vLLM (GPU 비용 회피):** [`docs/plans/2026-08-14-aws-app-pc-vllm.md`](./plans/2026-08-14-aws-app-pc-vllm.md)  
+**Lightsail 16GB + GPU 터널:** [`docs/guides/aws-lightsail-gpu-tunnel.md`](./guides/aws-lightsail-gpu-tunnel.md)  
+
 **보안 챗 타임아웃 플랜:** [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](./plans/2026-07-30-secure-chat-timeout-selfquery.md)  
-**일지:** [`docs/work-log/2026-08-02.md`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
+**일지:** [`docs/work-log/2026-08-14.md`](./work-log/2026-08-14.md) · [`2026-08-13`](./work-log/2026-08-13.md) · [`2026-08-10`](./work-log/2026-08-10.md) · [`2026-08-08`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
 
 > LLM/RAG 세팅·기법·다음 할 일 SSOT: [`docs/references/LLM 튜닝.md`](./references/LLM%20튜닝.md) §0·§4·§9
 
@@ -51,7 +57,7 @@
 - 보안 문서 경로 → 루트 `Documents/` · PDF/다포맷 ingest  
 - `user_chat_threads` / `user_chat_messages` + Prisma · BigInt JSON 패치  
 - 멀티턴 B: FE는 `message`+`thread_id`+`user_id`만 · Express 패스스루 · ai-service MariaDB 문맥 (`SECURE_GENERATE=0` · `no_docs` 유지)
-- 채팅 스레드 복원 API/UI · Documents pdf/txt/csv/xlsx → `Documents/ai-service/*.md` + watchdog ingest
+- 채팅 스레드 복원 API/UI · Documents pdf/txt/csv/xlsx → `Documents/<Clearance>/Markdown/*.md` + watchdog ingest
 
 ## 다음 우선순위
 
@@ -70,3 +76,4 @@
 - embed/rerank는 **CPU 강제** (채팅 LLM은 외부 로컬 서버)  
 - SelfQuery 교체 시에도 **unfiltered 재시도 + min_score** 제거 금지  
 - 모노레포 루트 `.env`만 사용 · 시크릿 커밋 금지
+- 운영 인프라: Lightsail **16GB CPU** (앱·MariaDB·n8n·Qdrant) + **이 PC GPU** (`ssh -R` → 서버 `127.0.0.1:8001`). AWS에 vLLM 설치 안 함

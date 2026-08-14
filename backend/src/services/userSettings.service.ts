@@ -4,11 +4,15 @@ import { AppError } from '../middleware/errorHandler.js'
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const REFRESH_INTERVALS = [1, 5, 10, 30] as const
 
+export type EmailCheck = 'O' | 'X'
+
 export type UserSettingsDto = {
   userId: string
   fontSize: number
   themeMode: 0 | 1
   refreshInterval: number
+  emailCheck: EmailCheck
+  n8nAlert: boolean
   updatedAt: string
 }
 
@@ -17,6 +21,7 @@ type UserSettingsRow = {
   font_size: number
   theme_mode: number
   refresh_interval: number
+  email_check: string | null
   updated_at: Date | string
 }
 
@@ -24,6 +29,7 @@ const DEFAULTS = {
   fontSize: 18,
   themeMode: 1 as 0 | 1,
   refreshInterval: 1,
+  emailCheck: 'X' as EmailCheck,
 }
 
 function formatDate(value: Date | string): string {
@@ -33,12 +39,21 @@ function formatDate(value: Date | string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+function toEmailCheck(value: unknown, fallback: EmailCheck = DEFAULTS.emailCheck): EmailCheck {
+  const raw = String(value ?? '').trim().toUpperCase()
+  if (raw === 'O' || raw === 'X') return raw
+  return fallback
+}
+
 function toDto(row: UserSettingsRow): UserSettingsDto {
+  const emailCheck = toEmailCheck(row.email_check)
   return {
     userId: row.user_id,
     fontSize: Number(row.font_size),
     themeMode: row.theme_mode === 0 ? 0 : 1,
     refreshInterval: Number(row.refresh_interval),
+    emailCheck,
+    n8nAlert: emailCheck === 'O',
     updatedAt: formatDate(row.updated_at),
   }
 }
@@ -59,19 +74,31 @@ function assertValidSettings(input: {
   }
 }
 
+function parseEmailCheckFromBody(
+  body: Record<string, unknown>,
+  fallback: EmailCheck,
+): EmailCheck {
+  if (body.emailCheck != null || body.EmailCheck != null) {
+    return toEmailCheck(body.emailCheck ?? body.EmailCheck, fallback)
+  }
+  if (typeof body.n8nAlert === 'boolean') return body.n8nAlert ? 'O' : 'X'
+  if (typeof body.n8n_alert === 'boolean') return body.n8n_alert ? 'O' : 'X'
+  return fallback
+}
+
 async function insertDefaults(userId: string): Promise<UserSettingsDto> {
   await query(
     `INSERT INTO user_settings
-      (user_id, font_size, theme_mode, refresh_interval)
-     VALUES (?, ?, ?, ?)`,
-    [userId, DEFAULTS.fontSize, DEFAULTS.themeMode, DEFAULTS.refreshInterval],
+      (user_id, font_size, theme_mode, refresh_interval, email_check)
+     VALUES (?, ?, ?, ?, ?)`,
+    [userId, DEFAULTS.fontSize, DEFAULTS.themeMode, DEFAULTS.refreshInterval, DEFAULTS.emailCheck],
   )
   return getUserSettings(userId)
 }
 
 export async function getUserSettings(userId: string): Promise<UserSettingsDto> {
   const rows = await query<UserSettingsRow[]>(
-    `SELECT user_id, font_size, theme_mode, refresh_interval, updated_at
+    `SELECT user_id, font_size, theme_mode, refresh_interval, email_check, updated_at
      FROM user_settings WHERE user_id = ? LIMIT 1`,
     [userId],
   )
@@ -85,28 +112,31 @@ export async function updateUserSettings(
   userId: string,
   body: Record<string, unknown>,
 ): Promise<UserSettingsDto> {
-  const fontSize = Number(body.fontSize ?? body.FontSize ?? DEFAULTS.fontSize)
-  const themeMode = Number(body.themeMode ?? body.ThemeMode ?? DEFAULTS.themeMode)
+  const current = await getUserSettings(userId)
+  const fontSize = Number(body.fontSize ?? body.FontSize ?? current.fontSize)
+  const themeMode = Number(body.themeMode ?? body.ThemeMode ?? current.themeMode)
   const refreshInterval = Number(
-    body.refreshInterval ?? body.RefreshInterval ?? DEFAULTS.refreshInterval,
+    body.refreshInterval ?? body.RefreshInterval ?? current.refreshInterval,
   )
+  const emailCheck = parseEmailCheckFromBody(body, current.emailCheck)
 
   assertValidSettings({ fontSize, themeMode, refreshInterval })
 
   await query(
     `INSERT INTO user_settings
-      (user_id, font_size, theme_mode, refresh_interval)
-     VALUES (?, ?, ?, ?)
+      (user_id, font_size, theme_mode, refresh_interval, email_check)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        font_size = VALUES(font_size),
        theme_mode = VALUES(theme_mode),
-       refresh_interval = VALUES(refresh_interval)`,
-    [userId, fontSize, themeMode, refreshInterval],
+       refresh_interval = VALUES(refresh_interval),
+       email_check = VALUES(email_check)`,
+    [userId, fontSize, themeMode, refreshInterval, emailCheck],
   )
 
   return getUserSettings(userId)
 }
 
 export async function resetUserSettings(userId: string): Promise<UserSettingsDto> {
-  return updateUserSettings(userId, { ...DEFAULTS })
+  return updateUserSettings(userId, { ...DEFAULTS, n8nAlert: false })
 }

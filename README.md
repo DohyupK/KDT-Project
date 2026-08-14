@@ -30,20 +30,22 @@
 | [`frontend/`](./frontend/) | UI · AppShell · GlobalChatbot · `/security` | [`frontend/README.md`](./frontend/README.md) |
 | [`backend/`](./backend/) | Express API · 세션 · 게이트 · LLM 키 · 프록시 | [`backend/README.md`](./backend/README.md) |
 | [`ai-service/`](./ai-service/) | FastAPI · predict · LangGraph · secure RAG | [`ai-service/README.md`](./ai-service/README.md) |
-| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-02.md) |
+| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-13.md) |
 | [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | — |
 
 ```text
 KDT-Project/
-├── package.json   ← 루트 npm run dev (3서비스)
+├── package.json   ← 루트 npm run dev (ai :8800 · backend :3001 · frontend :3000)
 ├── docs/          ← 사람·팀 “전체” 문서
 ├── frontend/      ← 화면 (:3000)
 ├── backend/       ← 서버 (:3001)
-├── ai-service/    ← AI (:8800)
+├── ai-service/    ← AI (:8800) · 기동 시 Qdrant Docker 시도
 ├── AGENTS.md
 ├── .cursor/       ← Cursor 룰·스킬
 └── .agents/       ← 에이전트 스킬
 ```
+
+Docker로만 뜨는 것(레포 밖): **Qdrant** `kdt-qdrant` :6333 · **n8n** `kdt-n8n` :5678 (수동).
 
 ### 제품 한눈에
 
@@ -58,22 +60,38 @@ KDT-Project/
 ## 로컬 실행 (권장)
 
 **실행 진입점은 저장소 루트 `npm run dev` 하나입니다.**  
-frontend(:3000) + backend(:3001) + ai-service(:8800)를 함께 켭니다.  
-보안 RAG까지면 **Qdrant(:6333)** · (요약 LLM 시) **LM Studio / vLLM(:8001)** 도 필요합니다.
+바로 켜지는 것은 **frontend(:3000) + backend(:3001) + ai-service(:8800)** 뿐입니다.  
+Qdrant는 ai-service가 Docker로 **같이 올리려고** 하고, **n8n · 로컬 LLM · MariaDB는 `npm run dev`가 켜지 않습니다.**
 
-| 패키지 | 포트 | 역할 |
-|--------|------|------|
-| `ai-service/` | **8800** | FastAPI · predict · chat · security-chat · **멀티턴 MariaDB** |
-| `backend/` | **3001** | Express · auth · 게이트 · 프록시 · `CHAT_STORE` 세션 |
-| `frontend/` | **3000** | Next.js UI |
-| (선택) Qdrant | **6333** | secure RAG · chat_history 벡터 |
-| (선택) LM Studio 등 | **8001** | 보안 탭 OpenAI 호환 LLM |
+상세·다이어그램: [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md)
+
+### 포트 · 누가 켜나 (현재 로컬)
+
+| 포트 | 서비스 | `npm run dev` | 기동 주체 |
+|------|--------|---------------|-----------|
+| **3000** | Next.js UI | **켬** | `dev:frontend` · `/api`→`:3001`, `/ai`→`:8800` rewrite |
+| **3001** | Express | **켬** | `dev:backend` (`AI_SERVICE_AUTOSTART=0` — ai 이중 기동 방지) · Documents 워처 자식 |
+| **8800** | FastAPI ai-service | **켬** | `dev:ai` (uvicorn) |
+| **6333** / **6334** | Qdrant HTTP / gRPC | **간접** | ai-service `QDRANT_AUTOSTART=1` → Docker `kdt-qdrant` (Docker Desktop 필요) |
+| **5678** | n8n UI · 이슈메일 웹훅 | **안 켬** | `docker compose up -d` → `kdt-n8n` |
+| **8001** | 보안 챗 로컬 LLM | **안 켬** | LM Studio / vLLM **수동** |
+| **3306** | MariaDB | **안 켬** | `.env` `DB_*` (원격 가능) |
+
+Express 안에 n8n·Qdrant를 넣지 않는다. Qdrant는 **ai-service와 함께** Docker로 뜨고, n8n은 **메일 쓸 때만** 컨테이너를 따로 켠다.
+
+| 루트 `npm run dev`가 하는 일 | 하지 않는 일 |
+|------------------------------|--------------|
+| concurrently: ai + backend + frontend | n8n start (별도 compose) |
+| backend → Documents 워처 Python | MariaDB · :8001 LLM |
+| ai → Qdrant `docker start`/`run` 시도 | — |
 
 ### 0) 사전 요구
 
 - Node.js LTS, npm  
 - Python **3.11+**, `pip`  
-- (선택) Qdrant, 로컬 LLM(:8001)
+- Docker (Qdrant · n8n)  
+- (선택) 로컬 LLM(:8001) · Tesseract OCR (`kor`+`eng`)  
+- (이슈 메일 · Qdrant) 루트에서 `docker compose up -d` — `kdt-n8n` :5678, `kdt-qdrant` :6333
 
 ### 1) 루트 `.env`
 
@@ -88,6 +106,7 @@ frontend(:3000) + backend(:3001) + ai-service(:8800)를 함께 켭니다.
 | `JWT_SECRET` | auth JWT |
 | `LLM_KEYS_ENCRYPTION_KEY` | 보안 탭 API 키 암호 (16자+) |
 | `CHAT_USE_LLM` · `CHAT_VLLM_*` · `SECURE_*` | 일반/보안 챗 · RAG |
+| `ISSUE_REPORT_MAIL_*` · `N8N_*` · `GMAIL_*` · `GOOGLE_MAIL_*` | 이슈 보고서 메일 (n8n 웹훅 · Gmail). JSON 본문·토큰 커밋 금지 · 경로·키 이름만 |
 
 **DB 스키마 (최초, MariaDB 사용 시)** — `DB_NAME`을 `.env`와 맞출 것:
 
@@ -122,6 +141,7 @@ npm install
 저장소 **루트** (`KDT-Project/`)에서:
 
 ```bash
+docker compose up -d
 npm run dev
 ```
 
@@ -141,6 +161,8 @@ npm run dev
 | [http://localhost:3000/main](http://localhost:3000/main) | UI 200 |
 | [http://127.0.0.1:3001/api/health](http://127.0.0.1:3001/api/health) | backend ok |
 | [http://127.0.0.1:8800/health](http://127.0.0.1:8800/health) | `registry_ready` · **`chat_history_db_ok`: true** (멀티턴 DB) |
+| [http://127.0.0.1:6333/readyz](http://127.0.0.1:6333/readyz) | Qdrant (ai가 Docker로 올린 뒤) |
+| [http://127.0.0.1:5678](http://127.0.0.1:5678) | n8n (메일을 쓸 때만 · `npm run dev`와 무관) |
 
 `chat_history_db_ok`가 false면 채팅은 될 수 있어도 **히스토리가 MariaDB에 안 남습니다.** `DATABASE_URL` / `DB_*` · PyMySQL을 점검한 뒤 ai(또는 루트 `npm run dev`)를 재시작하세요.
 
@@ -169,7 +191,8 @@ npm run dev
 | `ECONNREFUSED :3001` / Failed to proxy `/api` | frontend만 기동 | 루트 `npm run dev` |
 | `No module named 'MySQLdb'` · 채팅 히스토리 안 남음 · messages 404 | `DATABASE_URL=mysql://` (드라이버 잘못됨) | `mysql+pymysql://...` 로 바꾸거나 `DATABASE_URL` 비우고 `DB_*`만 · `/health`의 `chat_history_db_ok` 확인 |
 | React Client Manifest 500 · multiple lockfiles | Turbopack이 모노레포 루트를 잡음 | `frontend/next.config.ts`의 `turbopack.root` 적용됨 · **루트 `npm run dev` 재시작** |
-| 보안 RAG 빈약 / Qdrant 오류 | Qdrant·인덱스 없음 | Qdrant(:6333) · ingest · [`secure-rag.md`](./docs/references/secure-rag.md) |
+| 보안 RAG 빈약 / Qdrant 오류 | Qdrant·인덱스 없음 | Docker Desktop · `:6333` · ingest · [`secure-rag.md`](./docs/references/secure-rag.md) |
+| 이슈 메일 `webhook_404` | n8n 꺼짐 · unpublished | `docker start kdt-n8n` · [`issue-report-n8n 계획`](./docs/plans/2026-08-13-issue-report-n8n.md) |
 | 보안 요약 실패 | 로컬 LLM 없음 | LM Studio/vLLM(:8001) 또는 `SECURE_GENERATE=0` 발췌 모드 |
 
 ### 요청 흐름
@@ -202,6 +225,8 @@ Maximize / /security
 | 보안 RAG | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) |
 | LLM·RAG 튜닝 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) |
 | 챗봇 가이드 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) |
+| 일반 챗 · 페이지 컨텍스트 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) |
+| Documents 워처 · Qdrant · 포트 | [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) |
 | 스모크 | `cd ai-service && python scripts/smoke_secure_rag_e2e.py` |
 
 우하단 챗봇 → 「샘플 LOT 진단」으로 predict 연동을 확인할 수 있습니다.
@@ -228,13 +253,14 @@ Maximize / /security
 - **런타임:** Express 5, TypeScript (tsx), Node  
 - **인프라:** MariaDB connector, CORS, dotenv · 채팅/제어는 sqlite 병행 가능 (`CHAT_STORE`)  
 - **Auth:** bcryptjs, jsonwebtoken  
-- **개발:** typescript, tsx, `@types/express` 등  
+- **업로드:** multer (문의 첨부)  
+- **개발:** typescript, tsx, `@types/express`, `@types/multer` 등  
 → 기능·설계: [`backend/README.md`](./backend/README.md)
 
 ### ai-service
 - Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib, openpyxl  
 - FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
-- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, openpyxl, watchdog, SQLAlchemy, PyMySQL  
+- Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, pymupdf, Pillow, pytesseract, openpyxl, watchdog, SQLAlchemy, PyMySQL
   (bge-m3 / bge-reranker **CPU** · soft fallback · `FOLLOWUP_RE` · SSE `/security-chat/stream` · analytics `csv_lake`)  
 → [`ai-service/README.md`](./ai-service/README.md)
 
@@ -302,15 +328,26 @@ flowchart TD
 | 파일 | 역할 |
 |------|------|
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
+| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · Lightsail Docker · AWS+PC vLLM · Grafana env · compose |
+| [`docs/guides/aws-lightsail-gpu-tunnel.md`](./docs/guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU 터널 · IP/DB 변경 목록 |
+| [`docs/work-log/2026-08-13.md`](./docs/work-log/2026-08-13.md) | 이슈 보고서 n8n 메일 · 포트/`npm run dev` 기동 주체 |
+| [`docs/work-log/2026-08-10.md`](./docs/work-log/2026-08-10.md) | N_FOLDS 5→6 · [모델 학습 방법 SSOT](./docs/references/model-training-methods.md) |
+| [`docs/work-log/2026-08-08.md`](./docs/work-log/2026-08-08.md) | 메인 위험 LOT·당일 KPI 0.8 · 대시보드 생산 상세 · issues 리팩터 · 이슈 저장=완료/과거 자료 |
+| [`docs/work-log/2026-08-06.md`](./docs/work-log/2026-08-06.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
+| [`docs/work-log/2026-08-05.md`](./docs/work-log/2026-08-05.md) | lots/judgment/SPC 폴링 · 대시보드 residual 3컬럼 · 네모칸 후속 |
+| [`docs/work-log/2026-08-04.md`](./docs/work-log/2026-08-04.md) | Documents READ-ONLY · 인수인계 DB · ISS-yyMMdd-001 자동발급 |
 | [`docs/work-log/2026-08-02.md`](./docs/work-log/2026-08-02.md) | SSE · analytics · soft fallback · **3단계** chunk/min_score · 스택 스냅샷 |
 | [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md) | ai-service 기능 목록 (predict · 보안 RAG · analytics) |
+| [`ai-service/README.md`](./ai-service/README.md#성능-확인-clf--reg--residual) | ML 성능 확인 (metadata + `scripts/evaluate_models.py`) |
 | [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 자연 흐름 · SYS_RAG_EMPTY · 다문서 · 인덱스 |
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
 | [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |
+| [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) | 일반 챗 응답·페이지 참조 로직 SSOT |
+| [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) | Documents 워처 · Qdrant 자동기동 · 포트 SSOT |
 | [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |
 | [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 보안 RAG · E2E · 발췌 모드 |
 | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) | 보안 RAG · env · 스모크 |
-| [`docs/references/vllm-setup.md`](./docs/references/vllm-setup.md) | 로컬 LLM(:8001) 수동 기동 |
+| [`docs/references/vllm-setup.md`](./docs/references/vllm-setup.md) | 로컬 LLM(:8001) 수동 기동 · Lightsail 터널 |
 | [`.cursor/rules/`](./.cursor/rules/) | Cursor 룰 |
 
 목차: [`docs/README.md`](./docs/README.md)
@@ -324,3 +361,4 @@ flowchart TD
 - AI: [`ai-service/README.md`](./ai-service/README.md)  
 - AI 규칙: [`AGENTS.md`](./AGENTS.md)  
 - 작업 방향: [`docs/direction.md`](./docs/direction.md)
+- Lightsail Docker: [`docs/guides/aws-lightsail-docker.md`](./docs/guides/aws-lightsail-docker.md)

@@ -11,6 +11,8 @@
 | [prompts/](./prompts/) | Cursor에 다시 넣을 프롬프트 |
 | [references/](./references/) | 중요 경로 · 참조 · [LLM 튜닝 총정리](./references/LLM%20튜닝.md) |
 | [guides/login-ubuntu-mariadb.md](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 공용 DB 연동 절차 |
+| [guides/aws-lightsail-docker.md](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
+| [guides/aws-lightsail-gpu-tunnel.md](./guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU SSH 터널 |
 | [references/login-auth-tech-stack.md](./references/login-auth-tech-stack.md) | 로그인 Auth 기술스택·패키지 기록 |
 
 ## docs vs 룰·스킬
@@ -25,4 +27,4 @@
 
 작업 일지: [work-log/](./work-log/) · [2026-07-31](./work-log/2026-07-31.md) · [2026-07-30](./work-log/2026-07-30.md) · [2026-07-29](./work-log/2026-07-29.md)
 
-관련 계획·참조: [LLM 튜닝](./references/LLM%20튜닝.md) · [보안 RAG](./references/secure-rag.md) · [vLLM 기동](./references/vllm-setup.md) · [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [residual 스키마](./references/cathode-residual-schema.md) · [중요 경로](./references/important-paths.md)
+관련 계획·참조: [LLM 튜닝](./references/LLM%20튜닝.md) · [보안 RAG](./references/secure-rag.md) · [일반 챗 · 페이지 컨텍스트](./references/general-chatbot-page-context.md) · [Documents 워처 · Qdrant · 포트](./references/documents-watcher-qdrant.md) · [vLLM 기동](./references/vllm-setup.md) · [AWS 앱 + PC vLLM](./plans/2026-08-14-aws-app-pc-vllm.md) · [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [모델 학습 방법 SSOT](./references/model-training-methods.md) · [다중 모델 투표](./references/multi-model-voting.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [residual 스키마](./references/cathode-residual-schema.md) · [중요 경로](./references/important-paths.md)

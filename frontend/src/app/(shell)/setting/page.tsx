@@ -8,14 +8,9 @@ import {
   Moon,
   Type,
   RefreshCw,
-  Gauge,
   Bell,
+  KeyRound,
 } from 'lucide-react'
-import {
-  getControlBounds,
-  putControlBounds,
-  type ControlBounds,
-} from '@/api/settingsApi'
 import { authApi } from '@/api/authApi'
 import { getAuthUser, isLoggedIn } from '@/lib/authStorage'
 import {
@@ -24,6 +19,9 @@ import {
 } from '@/components/layout/AppShell'
 import type { UserSettingsDto } from '@/types'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
+import { usePageChat } from '@/context/PageChatContext'
+import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
 
 const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const DEFAULT_FONT_SIZE = 18
@@ -39,7 +37,7 @@ const DEFAULT_THEME_MODE = 1
 const DEFAULT_LANGUAGE = 'ko' as const
 const DEFAULT_REFRESH_INTERVAL = 1
 const DEFAULT_AUTO_REFRESH_ENABLED = true
-const DEFAULT_N8N_ALERT = true
+const DEFAULT_N8N_ALERT = false
 
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
@@ -184,6 +182,7 @@ function ToggleSwitch({
 }
 
 export default function SettingPage() {
+  const { setPagePayload } = usePageChat()
   const [fontSize, setFontSize] = useState<FontSize>(DEFAULT_FONT_SIZE)
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE)
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(DEFAULT_REFRESH_INTERVAL)
@@ -213,13 +212,31 @@ export default function SettingPage() {
     return () => clearToastTimer()
   }, [])
 
-  // Process control bounds: Setting UI → Express → ai-service/config/control_bounds.json → whatif
-  const [bounds, setBounds] = useState<ControlBounds>({
-    sintering_temp: { min: 700, max: 850 },
-    humidity: { min: 5, max: 95 },
-  })
-  const [boundsLoading, setBoundsLoading] = useState(false)
-  const [boundsMessage, setBoundsMessage] = useState('')
+  useEffect(() => {
+    setPagePayload(
+      '/setting',
+      {
+        page: 'setting',
+        fontSize,
+        themeMode: themeMode === 0 ? 'dark' : 'light',
+        autoRefreshEnabled,
+        refreshIntervalMinutes: refreshInterval,
+        n8nAlertEnabled: n8nAlert,
+        sections: ['font', 'theme', 'autoRefresh', 'n8nAlert', 'llmApiKeys', 'controlBounds'],
+        llmApiKeysNote: 'API key values are not sent to chat; manage keys in this page vault only.',
+      },
+      ['setting'],
+    )
+  }, [
+    setPagePayload,
+    fontSize,
+    themeMode,
+    autoRefreshEnabled,
+    refreshInterval,
+    n8nAlert,
+  ])
+
+  const [vaultRefreshKey, setVaultRefreshKey] = useState(0)
 
   const cacheSettingsLocally = (settings: UserSettingsDto) => {
     const currentConfig = readSystemSettingsConfig()
@@ -237,7 +254,7 @@ export default function SettingPage() {
       fontSize: settings.fontSize as FontSize,
       autoRefreshEnabled: settings.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
       refreshInterval: settings.refreshInterval as RefreshInterval,
-      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? true,
+      n8nAlert: settings.n8nAlert ?? currentConfig?.n8nAlert ?? false,
     }
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(local))
@@ -269,99 +286,93 @@ export default function SettingPage() {
     })
   }
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      if (isLoggedIn()) {
-        try {
-          const { data } = await authApi.getSettings()
-          if (cancelled) return
-          const s = data.settings
-          const currentConfig = readSystemSettingsConfig()
-          applySettingsToUi({
-            fontSize: s.fontSize as FontSize,
-            themeMode: s.themeMode,
-            language: s.language ?? currentConfig?.language ?? 'ko',
-            refreshInterval: s.refreshInterval as RefreshInterval,
-            autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
-            n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? true,
-          })
-          cacheSettingsLocally(s)
-          return
-        } catch {
-          if (!cancelled) {
-            setSaveMessage('서버 설정을 불러오지 못했습니다. 로컬 설정을 사용합니다.')
-          }
-        }
-      }
-
-      if (cancelled) return
-
-      const saved = loadSavedSettings()
-      const config = readSystemSettingsConfig()
-
-      let nextFontSize: FontSize = DEFAULT_FONT_SIZE
-      let nextTheme: ThemeMode = DEFAULT_THEME_MODE
-      let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
-      let nextAutoRefresh = DEFAULT_AUTO_REFRESH_ENABLED
-      let nextN8n = DEFAULT_N8N_ALERT
-      let nextLang: Language = DEFAULT_LANGUAGE
-
-      if (saved) {
-        const savedFontSize = parseSavedFontSize(saved)
-        if (savedFontSize) nextFontSize = savedFontSize
-        if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
-        if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
-          nextInterval = saved.RefreshInterval
-        }
-        if (saved.Language === 'ko' || saved.Language === 'en') nextLang = saved.Language
-      }
-
-      if (config) {
-        if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
-          nextFontSize = config.fontSize as FontSize
-        }
-        if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
-        if (
-          typeof config.refreshInterval === 'number' &&
-          REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
-        ) {
-          nextInterval = config.refreshInterval as RefreshInterval
-        }
-        if (typeof config.autoRefreshEnabled === 'boolean') nextAutoRefresh = config.autoRefreshEnabled
-        if (typeof config.n8nAlert === 'boolean') nextN8n = config.n8nAlert
-        if (config.language === 'ko' || config.language === 'en') nextLang = config.language
-      }
-
-      applySettingsToUi({
-        fontSize: nextFontSize,
-        themeMode: nextTheme,
-        language: nextLang,
-        refreshInterval: nextInterval,
-        autoRefreshEnabled: nextAutoRefresh,
-        n8nAlert: nextN8n,
-      })
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
+  const reloadPageSettings = async (isCancelled?: () => boolean) => {
+    if (isLoggedIn()) {
       try {
-        const data = await getControlBounds()
-        if (!cancelled && data.bounds) setBounds(data.bounds)
+        const { data } = await authApi.getSettings()
+        if (isCancelled?.()) return
+        const s = data.settings
+        const currentConfig = readSystemSettingsConfig()
+        cacheSettingsLocally(s)
+        applySettingsToUi({
+          fontSize: s.fontSize as FontSize,
+          themeMode: s.themeMode,
+          language: s.language ?? currentConfig?.language ?? 'ko',
+          refreshInterval: s.refreshInterval as RefreshInterval,
+          autoRefreshEnabled: s.autoRefreshEnabled ?? currentConfig?.autoRefreshEnabled ?? true,
+          n8nAlert: s.n8nAlert ?? currentConfig?.n8nAlert ?? false,
+        })
+        return
       } catch {
-        if (!cancelled) setBoundsMessage('한계치를 불러오지 못했습니다. backend(:3001)를 확인하세요.')
+        if (!isCancelled?.()) {
+          setSaveMessage('서버 설정을 불러오지 못했습니다. 로컬 설정을 사용합니다.')
+        }
       }
+    }
+
+    if (isCancelled?.()) return
+
+    const saved = loadSavedSettings()
+    const config = readSystemSettingsConfig()
+
+    let nextFontSize: FontSize = DEFAULT_FONT_SIZE
+    let nextTheme: ThemeMode = DEFAULT_THEME_MODE
+    let nextInterval: RefreshInterval = DEFAULT_REFRESH_INTERVAL
+    let nextAutoRefresh = DEFAULT_AUTO_REFRESH_ENABLED
+    let nextN8n = DEFAULT_N8N_ALERT
+    let nextLang: Language = DEFAULT_LANGUAGE
+
+    if (saved) {
+      const savedFontSize = parseSavedFontSize(saved)
+      if (savedFontSize) nextFontSize = savedFontSize
+      if (saved.ThemeMode === 0 || saved.ThemeMode === 1) nextTheme = saved.ThemeMode
+      if (REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === saved.RefreshInterval)) {
+        nextInterval = saved.RefreshInterval
+      }
+      if (saved.Language === 'ko' || saved.Language === 'en') nextLang = saved.Language
+    }
+
+    if (config) {
+      if (typeof config.fontSize === 'number' && FONT_SIZE_OPTIONS.includes(config.fontSize as FontSize)) {
+        nextFontSize = config.fontSize as FontSize
+      }
+      if (config.theme === 0 || config.theme === 1) nextTheme = config.theme
+      if (
+        typeof config.refreshInterval === 'number' &&
+        REFRESH_INTERVAL_OPTIONS.some((opt) => opt.value === config.refreshInterval)
+      ) {
+        nextInterval = config.refreshInterval as RefreshInterval
+      }
+      if (typeof config.autoRefreshEnabled === 'boolean') nextAutoRefresh = config.autoRefreshEnabled
+      if (typeof config.n8nAlert === 'boolean') nextN8n = config.n8nAlert
+      if (config.language === 'ko' || config.language === 'en') nextLang = config.language
+    }
+
+    applySettingsToUi({
+      fontSize: nextFontSize,
+      themeMode: nextTheme,
+      language: nextLang,
+      refreshInterval: nextInterval,
+      autoRefreshEnabled: nextAutoRefresh,
+      n8nAlert: nextN8n,
+    })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      await reloadPageSettings(() => cancelled)
     })()
+
     return () => {
       cancelled = true
     }
   }, [])
+
+  useShellRefresh(() => {
+    void reloadPageSettings()
+    setVaultRefreshKey((key) => key + 1)
+  })
 
   useEffect(() => { applyGlobalThemeMode(themeMode) }, [themeMode])
 
@@ -410,6 +421,7 @@ export default function SettingPage() {
     try {
       const { data } = await authApi.resetSettings()
       const s = data.settings
+      cacheSettingsLocally(s)
       applySettingsToUi({
         fontSize: s.fontSize as FontSize,
         themeMode: s.themeMode,
@@ -418,35 +430,10 @@ export default function SettingPage() {
         autoRefreshEnabled: s.autoRefreshEnabled,
         n8nAlert: s.n8nAlert,
       })
-      cacheSettingsLocally(s)
       setSaveMessage('')
       showToast('설정이 기본값으로 초기화되었습니다.')
     } catch {
       setSaveMessage('설정 초기화에 실패했습니다. backend(:3001)와 로그인을 확인해 주세요.')
-    }
-  }
-
-  /** Save admin equipment limits → Express → control_bounds.json (whatif mtime cache). */
-  const handleSaveBounds = async () => {
-    setBoundsLoading(true)
-    setBoundsMessage('')
-    try {
-      const res = await putControlBounds(bounds)
-      setBounds(res.bounds)
-      setBoundsMessage(
-        '한계치가 저장되었습니다. ai-service whatif가 다음 진단부터 새 값을 사용합니다(파일 mtime 캐시).',
-      )
-      setTimeout(() => setBoundsMessage(''), 5000)
-    } catch (err) {
-      let detail = '한계치 저장에 실패했습니다.'
-      if (err && typeof err === 'object') {
-        const ax = err as { message?: string; response?: { data?: { error?: unknown } } }
-        if (typeof ax.response?.data?.error === 'string') detail = ax.response.data.error
-        else if (ax.message) detail = ax.message
-      }
-      setBoundsMessage(detail)
-    } finally {
-      setBoundsLoading(false)
     }
   }
 
@@ -641,7 +628,7 @@ export default function SettingPage() {
               <h2 className={`text-lg font-bold ${textPrimary}`}>시스템 알림 설정</h2>
             </div>
             <p className={`mb-5 text-sm ${textSecondary}`}>
-              n8n 알림 수신 여부를 설정합니다. 실제 알림 발송이나 외부 연동은 수행하지 않습니다.
+              n8n 알림을 켜면 위험 LOT 이슈 보고서 메일을 받습니다. 메일은 발신 전용(No-reply)입니다.
             </p>
             <ToggleSwitch
               id="n8n-alert-toggle"
@@ -651,7 +638,7 @@ export default function SettingPage() {
                 setSaveMessage('')
               }}
               label="n8n 알림"
-              description="n8n 워크플로 기반 모니터링 알림을 사용합니다."
+              description="위험 LOT Top 이슈 보고서 메일 수신"
               isDarkMode={isDarkMode}
             />
           </section>
@@ -659,101 +646,13 @@ export default function SettingPage() {
 
         <section className={`w-full rounded-2xl border p-6 shadow-sm ${cardClass}`}>
           <div className="mb-4 flex items-center gap-2">
-            <Gauge size={20} className="text-orange-500" aria-hidden />
-            <h2 className={`text-lg font-bold ${textPrimary}`}>공정 제어 한계치</h2>
+            <KeyRound size={20} className="text-emerald-500" aria-hidden />
+            <h2 className={`text-lg font-bold ${textPrimary}`}>일반 챗봇 API 키</h2>
           </div>
           <p className={`mb-4 text-sm ${textSecondary}`}>
-            What-if 격자 탐색이 이 상·하한을 벗어나지 않습니다. Setting → Express →
-            ai-service/config/control_bounds.json → whatif 캐시로 연결됩니다.
+            일반 챗봇용 API 키를 등록합니다. 암호문은 ai-service/DB에 저장됩니다.
           </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className={`text-sm ${textSecondary}`}>
-              소성 온도 min (℃)
-              <input
-                type="number"
-                value={bounds.sintering_temp.min}
-                onChange={(e) =>
-                  setBounds((b) => ({
-                    ...b,
-                    sintering_temp: { ...b.sintering_temp, min: Number(e.target.value) },
-                  }))
-                }
-                className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
-                  isDarkMode
-                    ? 'border-slate-600 bg-slate-700 text-slate-100'
-                    : 'border-gray-200 bg-white text-gray-800'
-                }`}
-              />
-            </label>
-            <label className={`text-sm ${textSecondary}`}>
-              소성 온도 max (℃)
-              <input
-                type="number"
-                value={bounds.sintering_temp.max}
-                onChange={(e) =>
-                  setBounds((b) => ({
-                    ...b,
-                    sintering_temp: { ...b.sintering_temp, max: Number(e.target.value) },
-                  }))
-                }
-                className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
-                  isDarkMode
-                    ? 'border-slate-600 bg-slate-700 text-slate-100'
-                    : 'border-gray-200 bg-white text-gray-800'
-                }`}
-              />
-            </label>
-            <label className={`text-sm ${textSecondary}`}>
-              습도 min (%)
-              <input
-                type="number"
-                value={bounds.humidity.min}
-                onChange={(e) =>
-                  setBounds((b) => ({
-                    ...b,
-                    humidity: { ...b.humidity, min: Number(e.target.value) },
-                  }))
-                }
-                className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
-                  isDarkMode
-                    ? 'border-slate-600 bg-slate-700 text-slate-100'
-                    : 'border-gray-200 bg-white text-gray-800'
-                }`}
-              />
-            </label>
-            <label className={`text-sm ${textSecondary}`}>
-              습도 max (%)
-              <input
-                type="number"
-                value={bounds.humidity.max}
-                onChange={(e) =>
-                  setBounds((b) => ({
-                    ...b,
-                    humidity: { ...b.humidity, max: Number(e.target.value) },
-                  }))
-                }
-                className={`mt-1 w-full rounded-xl border-2 px-3 py-2 font-medium ${
-                  isDarkMode
-                    ? 'border-slate-600 bg-slate-700 text-slate-100'
-                    : 'border-gray-200 bg-white text-gray-800'
-                }`}
-              />
-            </label>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={boundsLoading}
-              onClick={() => void handleSaveBounds()}
-              className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
-            >
-              <Save size={16} aria-hidden />
-              한계치 저장
-            </button>
-            {boundsMessage ? (
-              <p className="text-sm font-medium text-orange-500">{boundsMessage}</p>
-            ) : null}
-          </div>
+          <LlmApiKeyVault key={`vault-${vaultRefreshKey}`} isDark={isDarkMode} />
         </section>
 
         <div className="mt-2 flex flex-col items-end gap-2">

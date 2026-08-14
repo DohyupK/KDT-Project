@@ -1,12 +1,18 @@
 'use client'
 
+import { useState } from 'react'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
-import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
+import { useShellRefresh } from '@/hooks/useShellRefresh'
 
 export default function SecurityPage() {
   const { isDark, language, copy } = useUiSettings()
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useShellRefresh(() => {
+    setRefreshKey((key) => key + 1)
+  })
 
   return (
     <div
@@ -34,15 +40,13 @@ export default function SecurityPage() {
           </h1>
           <p className={`mt-2 max-w-2xl text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
             {language === 'en'
-              ? 'Register general-chat API keys here (encrypted under ai-service/DB). Sensitive chat stays on local vLLM below.'
-              : '일반 챗봇용 API 키는 아래에서 등록합니다(암호문은 ai-service/DB). 기밀 질의는 아래 보안 챗(로컬 vLLM)을 사용합니다.'}
+              ? 'Sensitive chat runs on local vLLM here. Register general-chat API keys under Settings.'
+              : '기밀 질의는 로컬 vLLM 보안 챗을 사용합니다. 일반 챗봇 API 키 등록은 설정 페이지에서 합니다.'}
           </p>
         </div>
 
-        <LlmApiKeyVault isDark={isDark} />
-
         <div
-          className={`mt-10 max-w-xl ${
+          className={`max-w-xl ${
             isDark
               ? '[&>div]:border-slate-600 [&>div]:bg-slate-800 [&>div]:text-slate-400 [&>div>p:first-child]:text-slate-100 [&_code]:text-slate-300'
               : ''
@@ -51,7 +55,7 @@ export default function SecurityPage() {
           <h2 className={`mb-3 text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
             {language === 'en' ? 'Secure chat (local vLLM)' : '보안 챗 (로컬 vLLM)'}
           </h2>
-          <SecurityChatbot />
+          <SecurityChatbot key={`chat-${refreshKey}`} />
         </div>
         <p className={`mt-6 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
           참고: docs/references/security-chat-skeleton.md · docs/references/vllm-setup.md ·
