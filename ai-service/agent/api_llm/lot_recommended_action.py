@@ -87,20 +87,43 @@ def _resolve_doc_path(doc_id: str, title: str) -> str:
     return f"Confidential/qms-source/{fname}"
 
 
-def _cause_clause(c: dict[str, Any]) -> str:
+def _josa_i_ga(word: str) -> str:
+    if not word:
+        return "이"
+    last = word[-1]
+    if "가" <= last <= "힣":
+        return "이" if (ord(last) - 0xAC00) % 28 else "가"
+    return "이"
+
+
+def _is_decrease(direction: str) -> bool:
+    return direction in ("감소", "하락", "단축")
+
+
+def _item_text(c: dict[str, Any]) -> str:
     label = str(c.get("labelKo") or c.get("feature") or "")
-    direction = str(c.get("directionKo") or "변동")
     value_text = str(c.get("valueText") or c.get("value") or "")
-    ref_label = c.get("refLabel")
-    ref_bit = ""
-    if ref_label:
-        if direction in ("상승", "과다", "연장", "초과"):
-            ref_bit = f", {ref_label} 초과"
-        elif direction in ("하락", "단축"):
-            ref_bit = f", {ref_label} 미만"
-        else:
-            ref_bit = f", {ref_label} 대비"
-    return f"{label} {direction}({value_text}{ref_bit})"
+    return f"{label}({value_text})"
+
+
+def _join_group(items: list[dict[str, Any]]) -> str:
+    texts = [_item_text(c) for c in items]
+    last = texts[-1] if texts else ""
+    return f"{'·'.join(texts)}{_josa_i_ga(last)}"
+
+
+def _grouped_cause_phrase(causes: list[dict[str, Any]]) -> str:
+    up = [c for c in causes if not _is_decrease(str(c.get("directionKo") or "증가"))]
+    down = [c for c in causes if _is_decrease(str(c.get("directionKo") or ""))]
+    parts: list[str] = []
+    if up and down:
+        parts.append(f"{_join_group(up)} 증가하며")
+        parts.append(f"{_join_group(down)} 감소하여")
+    elif up:
+        parts.append(f"{_join_group(up)} 증가하여")
+    elif down:
+        parts.append(f"{_join_group(down)} 감소하여")
+    return ", ".join(parts)
 
 
 def _rule_summary(
@@ -110,23 +133,24 @@ def _rule_summary(
     residual_li: float | None,
     risk_level: str | None,
 ) -> str:
-    defect = drivers.get("defect_causes") or []
-    residual = drivers.get("residual_causes") or []
+    defect = (drivers.get("defect_causes") or [])[:3]
+    residual = (drivers.get("residual_causes") or [])[:3]
 
     prob_pct = f"{probability * 100:.2f}%" if probability is not None else "높은"
     res_txt = f"{residual_li:.2f} ppm" if residual_li is not None else "상향"
 
+    phrase = _grouped_cause_phrase(defect)
     para1 = (
-        f"{'과 '.join(_cause_clause(c) for c in defect[:2])}이(가) 불량확률 {prob_pct}에 주요 영향을 미치고 있습니다."
-        if defect
-        else f"불량확률에 영향을 미치고 있는 주요 인자를 확인하세요. (불량확률 {prob_pct})"
+        f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다."
+        if phrase
+        else f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct})"
     )
-    if residual:
-        para2 = (
-            f"잔류리튬 예측 {res_txt}에 {'과 '.join(_cause_clause(c) for c in residual[:2])}이(가) 주요 영향을 미치고 있습니다."
-        )
-    else:
-        para2 = ""
+    res_phrase = _grouped_cause_phrase(residual)
+    para2 = (
+        f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다."
+        if res_phrase
+        else ""
+    )
 
     out = f"{para1}\n\n{para2}".strip()[:1024]
     return out

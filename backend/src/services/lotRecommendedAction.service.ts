@@ -87,7 +87,7 @@ function contentHash(input: {
     residualLi: input.residualLi,
     spcStatus: input.spcStatus,
     drivers: input.drivers,
-    summaryFormat: 2,
+    summaryFormat: 4,
   })
   return createHash('sha1').update(payload).digest('hex')
 }
@@ -111,38 +111,56 @@ function roundDecimalText(text: string): string {
   })
 }
 
-function causeClause(c: DriverCause): string {
-  const label = c.labelKo || ''
-  const direction = c.directionKo || '변동'
-  const valueText = roundDecimalText(c.valueText || '')
-  let refBit = ''
-  if (c.refLabel) {
-    if (['상승', '과다', '연장', '초과'].includes(direction)) {
-      refBit = `, ${c.refLabel} 초과`
-    } else if (['하락', '단축'].includes(direction)) {
-      refBit = `, ${c.refLabel} 미만`
-    } else {
-      refBit = `, ${c.refLabel} 대비`
-    }
+function josaIGa(word: string): string {
+  if (!word) return '이'
+  const last = word.codePointAt(word.length - 1)
+  if (last == null) return '이'
+  if (last >= 0xac00 && last <= 0xd7a3) {
+    return (last - 0xac00) % 28 === 0 ? '가' : '이'
   }
-  return `${label} ${direction}(${valueText}${refBit})`
+  return '이'
 }
 
-/** Defect: share≥5% only (else top 1). Residual: top 2 with share≥1%. */
-function topCausesForSummary(
-  causes: DriverCause[],
-  kind: 'defect' | 'residual',
-): DriverCause[] {
+function isDecrease(direction: string): boolean {
+  return ['감소', '하락', '단축'].includes(direction)
+}
+
+function itemText(c: DriverCause): string {
+  const label = c.labelKo || ''
+  const valueText = roundDecimalText(c.valueText || '')
+  return `${label}(${valueText})`
+}
+
+function joinGroup(items: DriverCause[]): string {
+  const texts = items.map(itemText)
+  const last = texts[texts.length - 1] || ''
+  const body = texts.join('·')
+  return `${body}${josaIGa(last)}`
+}
+
+/** 증가끼리 · 감소끼리 묶어 "A(x)·B(y)이 증가하며, C(z)이 감소하여" */
+function groupedCausePhrase(causes: DriverCause[]): string {
+  const up = causes.filter((c) => !isDecrease(c.directionKo || '증가'))
+  const down = causes.filter((c) => isDecrease(c.directionKo || ''))
+  const parts: string[] = []
+  if (up.length && down.length) {
+    parts.push(`${joinGroup(up)} 증가하며`)
+    parts.push(`${joinGroup(down)} 감소하여`)
+  } else if (up.length) {
+    parts.push(`${joinGroup(up)} 증가하여`)
+  } else if (down.length) {
+    parts.push(`${joinGroup(down)} 감소하여`)
+  }
+  return parts.join(', ')
+}
+
+/** Raisers only (drivers already SHAP>0). Top 3 by share, skip <1% noise. */
+function topCausesForSummary(causes: DriverCause[]): DriverCause[] {
   const sorted = [...causes].sort(
     (a, b) => (Number(b.sharePct) || 0) - (Number(a.sharePct) || 0),
   )
-  if (kind === 'defect') {
-    const strong = sorted.filter((c) => (Number(c.sharePct) || 0) >= 5)
-    if (strong.length > 0) return strong.slice(0, 2)
-    return sorted.slice(0, 1)
-  }
   const meaningful = sorted.filter((c) => (Number(c.sharePct) || 0) >= 1)
-  return (meaningful.length > 0 ? meaningful : sorted.slice(0, 1)).slice(0, 2)
+  return (meaningful.length > 0 ? meaningful : sorted.slice(0, 1)).slice(0, 3)
 }
 
 /** Rule-based summary: defect paragraph + residual paragraph, 2-decimal values. */
@@ -158,11 +176,9 @@ export function buildRuleSummary(
 
   const defect = topCausesForSummary(
     (drivers.defect_causes as DriverCause[] | undefined) || [],
-    'defect',
   )
   const residual = topCausesForSummary(
     (drivers.residual_causes as DriverCause[] | undefined) || [],
-    'residual',
   )
 
   const probPct =
@@ -170,14 +186,16 @@ export function buildRuleSummary(
   const resTxt =
     opts.residualLi != null ? `${opts.residualLi.toFixed(2)} ppm` : '상향'
 
+  const phrase = groupedCausePhrase(defect)
   const para1 =
-    defect.length > 0
-      ? `${defect.slice(0, 2).map(causeClause).join('과 ')}이(가) 불량확률 ${probPct}에 주요 영향을 미치고 있습니다.`
-      : `불량확률에 영향을 미치고 있는 주요 인자를 확인하세요. (불량확률 ${probPct})`
+    phrase.length > 0
+      ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다.`
+      : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct})`
 
+  const resPhrase = groupedCausePhrase(residual)
   const para2 =
-    residual.length > 0
-      ? `잔류리튬 예측 ${resTxt}에 ${residual.slice(0, 2).map(causeClause).join('과 ')}이(가) 주요 영향을 미치고 있습니다.`
+    resPhrase.length > 0
+      ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다.`
       : ''
 
   return para2 ? `${para1}\n\n${para2}` : para1
