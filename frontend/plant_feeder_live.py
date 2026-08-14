@@ -11,7 +11,10 @@ plant_feeder_live.py — 가상 공장 실시간 데이터 피더 (학생 배포
 
 실행 (본인 프로젝트에서 별도 서비스로):
   pip install pymysql numpy
-  DB_HOST=127.0.0.1 DB_USER=root DB_PASSWORD=... DB_NAME=kdt python plant_feeder_live.py
+  python plant_feeder_live.py
+
+  모노레포 루트 `.env`의 DB_HOST / DB_USER / DB_PASSWORD / DB_NAME 을 자동으로 읽는다.
+  이미 OS에 설정된 환경변수가 있으면 그쪽이 우선이다.
 
 환경변수:
   DB_HOST / DB_PORT(3306) / DB_USER / DB_PASSWORD / DB_NAME
@@ -21,6 +24,7 @@ plant_feeder_live.py — 가상 공장 실시간 데이터 피더 (학생 배포
   RESIDUAL_DELAY_MIN=1440  잔류 리튬 도착 지연
   BACKFILL=12            첫 실행 시 미리 넣어줄 과거 LOT 수
   LOTS_TABLE=lots / RESULTS_TABLE=lot_results   적재 테이블명
+                         lots 는 id+timestamp (운영 스키마). seq 는 lot_results 에만 있음.
   DRY_RUN=1              DB 없이 콘솔 출력만 (동작 확인용)
 
 주의: 같은 폴더에 생기는 feeder_state.json(도착 대기 중인 검사 결과)은 열어보지 말 것.
@@ -33,6 +37,29 @@ from datetime import datetime
 
 import numpy as np
 
+
+def _load_root_env():
+    """모노레포 루트 `.env`를 프로세스 환경에 반영 (이미 있는 키는 덮지 않음)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(os.path.dirname(here), ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8-sig") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.lower().startswith("export "):
+                line = line[7:].strip()
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
+_load_root_env()
+
 SPEED = float(os.environ.get("SPEED", "1"))
 INTERVAL = float(os.environ.get("LOT_INTERVAL_MIN", "10"))
 DEFECT_DELAY = float(os.environ.get("DEFECT_DELAY_MIN", "60"))
@@ -40,8 +67,16 @@ RESIDUAL_DELAY = float(os.environ.get("RESIDUAL_DELAY_MIN", "1440"))
 BACKFILL = int(os.environ.get("BACKFILL", "12"))
 DRY = os.environ.get("DRY_RUN", "0") == "1"
 SIMPLE = os.environ.get("SIMPLE_MODE", "0") == "1"   # 1이면 결과값까지 한 테이블 한 행에 즉시
-T_LOTS = os.environ.get("LOTS_TABLE", "lots")
-T_RES = os.environ.get("RESULTS_TABLE", "lot_results")
+
+
+def _ident(name, default):
+    cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "" for ch in (name or ""))
+    return cleaned or default
+
+
+T_LOTS = _ident(os.environ.get("LOTS_TABLE", "lots"), "lots")
+T_RES = _ident(os.environ.get("RESULTS_TABLE", "lot_results"), "lot_results")
+APP_LOTS = False  # True: 운영 lots (id, timestamp). False: 피더 전용 (seq, lot_id, produced_at)
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "feeder_state.json")
 
@@ -137,6 +172,13 @@ if DRY:
     PH, IGNORE = "?", "INSERT OR IGNORE"
 else:
     import pymysql
+    missing = [k for k in ("DB_USER", "DB_PASSWORD", "DB_NAME") if k not in os.environ]
+    if missing:
+        raise SystemExit(
+            "DB 환경변수가 없습니다: "
+            + ", ".join(missing)
+            + " — 모노레포 루트 `.env`를 확인하세요."
+        )
     db = pymysql.connect(host=os.environ.get("DB_HOST", "127.0.0.1"),
                          port=int(os.environ.get("DB_PORT", "3306")),
                          user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"],
@@ -152,15 +194,42 @@ def q(sql, args=()):
     return c
 
 
+def table_exists(name):
+    if DRY:
+        row = q(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name={PH}",
+            (name,),
+        ).fetchone()
+        return bool(row)
+    return bool(q(f"SHOW TABLES LIKE {PH}", (name,)).fetchone())
+
+
+def colset(name):
+    if not table_exists(name):
+        return set()
+    if DRY:
+        return {r[1] for r in q(f"PRAGMA table_info({name})").fetchall()}
+    return {r[0] for r in q(f"SHOW COLUMNS FROM `{name}`").fetchall()}
+
+
 cols = ", ".join(f"{v} DOUBLE NULL" for v in NUM_VARS)
-if SIMPLE:
-    q(f"CREATE TABLE IF NOT EXISTS {T_LOTS} (seq INT PRIMARY KEY, lot_id VARCHAR(24), "
-      f"produced_at DATETIME, {cols}, operator_id VARCHAR(8) NULL, "
-      f"quality_defect TINYINT NULL, residual_li DOUBLE NULL)")
-else:
-    q(f"CREATE TABLE IF NOT EXISTS {T_LOTS} (seq INT PRIMARY KEY, lot_id VARCHAR(24), "
-      f"produced_at DATETIME, {cols}, operator_id VARCHAR(8) NULL)")
-    q(f"CREATE TABLE IF NOT EXISTS {T_RES} (seq INT PRIMARY KEY, lot_id VARCHAR(24), "
+existing_lots_cols = colset(T_LOTS)
+APP_LOTS = "id" in existing_lots_cols and "seq" not in existing_lots_cols
+if not existing_lots_cols:
+    if T_LOTS.lower() == "lots":
+        q(f"CREATE TABLE IF NOT EXISTS `{T_LOTS}` ("
+          f"id VARCHAR(64) NOT NULL PRIMARY KEY, `timestamp` DATETIME NOT NULL, "
+          f"{cols}, operator_id VARCHAR(32) NULL)")
+        APP_LOTS = True
+    elif SIMPLE:
+        q(f"CREATE TABLE IF NOT EXISTS `{T_LOTS}` (seq INT PRIMARY KEY, lot_id VARCHAR(24), "
+          f"produced_at DATETIME, {cols}, operator_id VARCHAR(8) NULL, "
+          f"quality_defect TINYINT NULL, residual_li DOUBLE NULL)")
+    else:
+        q(f"CREATE TABLE IF NOT EXISTS `{T_LOTS}` (seq INT PRIMARY KEY, lot_id VARCHAR(24), "
+          f"produced_at DATETIME, {cols}, operator_id VARCHAR(8) NULL)")
+if APP_LOTS or not SIMPLE:
+    q(f"CREATE TABLE IF NOT EXISTS `{T_RES}` (seq INT PRIMARY KEY, lot_id VARCHAR(64), "
       f"quality_defect TINYINT NULL, residual_li DOUBLE NULL, measured_at DATETIME)")
 
 
@@ -168,22 +237,45 @@ def now_str(ts=None):
     return datetime.fromtimestamp(ts or time.time()).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def max_seq():
+    src = T_RES if APP_LOTS else T_LOTS
+    row = q(f"SELECT MAX(seq) FROM `{src}`").fetchone()
+    return None if not row else row[0]
+
+
 def produce(seq, produced_ts, state):
     obs, defect, residual = gen_lot(seq)
     lot_id = f"LOT-{datetime.fromtimestamp(produced_ts):%Y%m%d}-{seq:05d}"
-    base_vals = [seq, lot_id, now_str(produced_ts)] + [obs[v] for v in NUM_VARS] + [obs["operator_id"]]
+    ts = now_str(produced_ts)
+    vars_vals = [obs[v] for v in NUM_VARS]
+    op = obs["operator_id"]
+    if APP_LOTS:
+        ph = ", ".join([PH] * (2 + len(NUM_VARS) + 1))
+        q(f"{IGNORE} INTO `{T_LOTS}` (id, `timestamp`, {', '.join(NUM_VARS)}, operator_id) "
+          f"VALUES ({ph})", [lot_id, ts] + vars_vals + [op])
+        if SIMPLE:
+            q(f"{IGNORE} INTO `{T_RES}` (seq, lot_id, quality_defect, residual_li, measured_at) "
+              f"VALUES ({PH}, {PH}, {PH}, {PH}, {PH})", (seq, lot_id, defect, residual, ts))
+            print(f"[생산] {lot_id} 불량={defect} 잔류Li={residual}")
+            return
+        q(f"{IGNORE} INTO `{T_RES}` (seq, lot_id, quality_defect, residual_li, measured_at) "
+          f"VALUES ({PH}, {PH}, NULL, NULL, NULL)", (seq, lot_id))
+        state[str(seq)] = {"lot_id": lot_id, "t": produced_ts,
+                           "d": enc(defect), "r": enc(residual)}
+        print(f"[생산] {lot_id}")
+        return
+    base_vals = [seq, lot_id, ts] + vars_vals + [op]
     if SIMPLE:
         ph = ", ".join([PH] * (len(base_vals) + 2))
-        q(f"{IGNORE} INTO {T_LOTS} (seq, lot_id, produced_at, {', '.join(NUM_VARS)}, "
+        q(f"{IGNORE} INTO `{T_LOTS}` (seq, lot_id, produced_at, {', '.join(NUM_VARS)}, "
           f"operator_id, quality_defect, residual_li) VALUES ({ph})",
           base_vals + [defect, residual])
         print(f"[생산] {lot_id} 불량={defect} 잔류Li={residual}")
         return
     ph = ", ".join([PH] * len(base_vals))
-    q(f"{IGNORE} INTO {T_LOTS} (seq, lot_id, produced_at, {', '.join(NUM_VARS)}, operator_id) "
+    q(f"{IGNORE} INTO `{T_LOTS}` (seq, lot_id, produced_at, {', '.join(NUM_VARS)}, operator_id) "
       f"VALUES ({ph})", base_vals)
-    # Immediate lot_results stub so lot_id exists; qd/residual filled later (+60m/+24h).
-    q(f"{IGNORE} INTO {T_RES} (seq, lot_id, quality_defect, residual_li, measured_at) "
+    q(f"{IGNORE} INTO `{T_RES}` (seq, lot_id, quality_defect, residual_li, measured_at) "
       f"VALUES ({PH}, {PH}, NULL, NULL, NULL)", (seq, lot_id))
     state[str(seq)] = {"lot_id": lot_id, "t": produced_ts,
                        "d": enc(defect), "r": enc(residual)}
@@ -195,16 +287,15 @@ def deliver(state):
     for k, it in state.items():
         age = (time.time() - it["t"]) / 60.0 * SPEED
         if "d" in it and age >= DEFECT_DELAY:
-            # Feeder measurement wins over AI NULL-fill; match by lot_id (not seq).
-            q(f"UPDATE {T_RES} SET quality_defect = {PH}, "
+            q(f"UPDATE `{T_RES}` SET quality_defect = {PH}, "
               f"measured_at = COALESCE(measured_at, {PH}) WHERE lot_id = {PH}",
               (int(dec(it["d"])), now_str(), it["lot_id"]))
-            q(f"{IGNORE} INTO {T_RES} (seq, lot_id, quality_defect, measured_at) "
+            q(f"{IGNORE} INTO `{T_RES}` (seq, lot_id, quality_defect, measured_at) "
               f"VALUES ({PH}, {PH}, {PH}, {PH})", (int(k), it["lot_id"], int(dec(it["d"])), now_str()))
             print(f"[실측 도착] {it['lot_id']} 불량판정={dec(it['d'])}")
             del it["d"]
         if "r" in it and age >= RESIDUAL_DELAY:
-            q(f"UPDATE {T_RES} SET residual_li = {PH}, measured_at = {PH} WHERE lot_id = {PH}",
+            q(f"UPDATE `{T_RES}` SET residual_li = {PH}, measured_at = {PH} WHERE lot_id = {PH}",
               (float(dec(it["r"])), now_str(), it["lot_id"]))
             print(f"[실측 도착] {it['lot_id']} 잔류리튬={dec(it['r'])}ppm")
             del it["r"]
@@ -216,9 +307,8 @@ def deliver(state):
 
 def main():
     state = load_state()
-    existing = q(f"SELECT MAX(seq) FROM {T_LOTS}").fetchone()[0]
+    existing = max_seq()
     if existing is None:
-        base = 10000 - 1
         for i in range(BACKFILL):
             produce(10000 + i, time.time() - (BACKFILL - i) * INTERVAL * 60 / SPEED, state)
         base = 10000 + BACKFILL - 1
@@ -228,10 +318,12 @@ def main():
         save_state(state)
     anchor = time.time()
     tick = max(1.0, INTERVAL * 60 / SPEED / 10)
-    print(f"가상 공장 가동 — {INTERVAL / SPEED * 60:.1f}초마다 LOT 1개 즉석 생산 (Ctrl+C로 정지)")
+    mode = "lots.id/timestamp" if APP_LOTS else f"{T_LOTS}.seq"
+    print(f"가상 공장 가동 — {mode} → {T_RES} · {INTERVAL / SPEED * 60:.1f}초마다 LOT 1개 (Ctrl+C로 정지)")
     while True:
         target = base + int((time.time() - anchor) * SPEED / 60.0 // INTERVAL)
-        cur_max = int(q(f"SELECT MAX(seq) FROM {T_LOTS}").fetchone()[0])
+        cur = max_seq()
+        cur_max = int(cur) if cur is not None else base
         for seq in range(cur_max + 1, target + 1):
             produce(seq, time.time(), state)
         if not SIMPLE:

@@ -94,6 +94,7 @@
 
 - 기술스택·패키지: [login-auth-tech-stack.md](../references/login-auth-tech-stack.md)
 - Auth API 요약: [backend/README.md](../../backend/README.md)
+- Lightsail Docker (n8n·Qdrant): [aws-lightsail-docker.md](./aws-lightsail-docker.md)
 
 ## 트러블슈팅: `Cannot find package 'bcryptjs'`
 
