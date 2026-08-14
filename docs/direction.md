@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-08 (이슈 처리 저장=완료 · 과거 자료 · 목업 제거)
+최종 갱신: 2026-08-14 (AWS 앱 + PC vLLM 계획)
 
 모노레포 기준입니다. `frontend` / `backend` / `ai-service`를 모두 포함합니다.
 
@@ -17,6 +17,7 @@
 **Documents 워처 · Qdrant 기동 · 포트:** [`docs/references/documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md)  
 **Lightsail Docker (n8n·Qdrant):** [`docs/guides/aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md)  
 **vLLM 수동 기동:** [`docs/references/vllm-setup.md`](./references/vllm-setup.md)  
+**AWS 앱 + PC vLLM (GPU 비용 회피):** [`docs/plans/2026-08-14-aws-app-pc-vllm.md`](./plans/2026-08-14-aws-app-pc-vllm.md)  
 **보안 챗 타임아웃 플랜:** [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](./plans/2026-07-30-secure-chat-timeout-selfquery.md)  
 **일지:** [`docs/work-log/2026-08-14.md`](./work-log/2026-08-14.md) · [`2026-08-13`](./work-log/2026-08-13.md) · [`2026-08-10`](./work-log/2026-08-10.md) · [`2026-08-08`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
 

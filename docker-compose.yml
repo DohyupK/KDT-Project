@@ -1,0 +1,36 @@
+# Local Docker: n8n + Qdrant only.
+# frontend / backend / ai-service → npm run dev
+# vLLM → GPU 서버에서 호스트 프로세스 :8001 (이 파일에 넣지 않음)
+# MariaDB → 서버 MariaDB 또는 Lightsail (`DB_HOST`)
+#
+#   docker compose up -d
+#   docker compose ps
+
+services:
+  qdrant:
+    image: qdrant/qdrant
+    container_name: kdt-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./DB/data/qdrant_storage:/qdrant/storage
+
+  n8n:
+    image: n8nio/n8n:2.34.5
+    container_name: kdt-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "false"
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://127.0.0.1:5678/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./DB/data/n8n:/home/node/.n8n

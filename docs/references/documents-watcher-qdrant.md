@@ -208,7 +208,7 @@ python ingest_secure.py
 
 ## 6. 권장 기동 순서
 
-1. **Docker Desktop 실행** (Qdrant 자동기동 · n8n 메일이면 `docker start kdt-n8n`)  
+1. **Docker Desktop 실행** 후 루트 `docker compose up -d` (`kdt-qdrant` · `kdt-n8n`, 데이터 `DB/data/`)  
 2. 루트 `npm run dev`  
    - ai → Qdrant ensure → uvicorn :8800  
    - backend → document watcher 자식 → Express :3001  

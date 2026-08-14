@@ -7,7 +7,13 @@ MariaDB 공용 DB는 이미 Lightsail Ubuntu다. 절차: [`login-ubuntu-mariadb.
 
 포트·주소 숫자는 **루트 `.env`** 만 본다. 이 파일에는 키 이름만 적는다. 시크릿·공인 IP·토큰 커밋 금지.
 
-로컬 포트·`npm run dev` 기동 주체: [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md).  
+로컬 PC에서는 루트 [`docker-compose.yml`](../../docker-compose.yml)로 `kdt-n8n` · `kdt-qdrant`를 켠다.
+
+```bash
+docker compose up -d
+```
+
+데이터: `DB/data/n8n/` · `DB/data/qdrant_storage/` (gitignore). FE/BE/ai는 여전히 `npm run dev`.  
 이슈 메일 계획: [`2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md).
 
 ---
