@@ -1,6 +1,6 @@
 # ai-service 기능 목록
 
-최종 갱신: 2026-08-14
+최종 갱신: 2026-08-15
 
 단가·우선순위 메모용 API 목록.  
 이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · RAG: [`secure-rag.md`](./secure-rag.md) · env·기법: [`LLM 튜닝.md`](./LLM%20튜닝.md)
@@ -30,5 +30,5 @@
 | 기능 | 비고 |
 |------|------|
 | PDF/TXT → MD · CSV/XLSX → lake | Documents 듀얼 엔진 |
-| ingest | `ingest_secure.py` · 워처 후 `reload_bm25()` |
+| ingest | CLI `ingest_secure.py` 는 최초/재색인만 · 워처 후 `reload_bm25()` · [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 |
 | 로그 | `logs/ai-service.log` Rotating 10MB×5 |

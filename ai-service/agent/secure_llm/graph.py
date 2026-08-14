@@ -31,6 +31,7 @@ from agent.secure_llm.prompts import (
     HIT_BUT_LLM_TIMEOUT_REPLY,
     NO_DOC_TOKEN,
     OFFLINE_REPLY,
+    RAG_NOT_READY_REPLY,
     SUMMARY_INSTRUCTION_SUFFIX,
     SYSTEM_SECURE_RAG,
     expand_retrieve_query,
@@ -118,7 +119,7 @@ def node_retrieve(state: SecureState) -> SecureState:
             return {
                 **state,
                 "sources": [],
-                "reply": OFFLINE_REPLY,
+                "reply": RAG_NOT_READY_REPLY,
                 "mode": "template",
                 "provider": "offline",
                 "error": err,

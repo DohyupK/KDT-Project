@@ -1,6 +1,6 @@
 # Lightsail 대시보드 공란 — 원인 분석 · 해결 (2026-08-14)
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 대상: 앱 Lightsail(`my-server-16gb`)에서 `npm run dev`로 UI를 열고, 브라우저가 공인 IP(`http://3.38.135.192/dashboard`)로 접속한 경우.
 
 관련: [aws-lightsail-gpu-tunnel.md](../guides/aws-lightsail-gpu-tunnel.md) · Nginx 샘플 [`deploy/nginx-kdt.conf`](../../deploy/nginx-kdt.conf) · 코드 `frontend/next.config.ts`
@@ -141,7 +141,7 @@ HTML 문서 요청은 이 가드의 대상이 아니라 `GET /dashboard 200`은 
 | `[spc-sync-poller] inserted: 0, scored: 0` | 위와 동일. 60초 주기 |
 | `CHAT_STORE=sqlite` | 루트 `.env`에 `CHAT_STORE=sqlite`가 **명시**됨. 레거시 챗 스토어. LOT 조회 경로 아님. `node:sqlite` ExperimentalWarning도 이 import |
 | `ai_ready=false` / `AI_SERVICE_AUTOSTART=0` | 루트 `npm run dev`가 ai-service를 concurrently로 이미 띄우므로 백엔드 감독은 끈다. uvicorn `:8800`은 떠 있음 |
-| `Qdrant collection 'secure_docs' missing` | 보안 RAG ingest 미실행. `/security`만 해당 |
+| `Qdrant collection 'secure_docs' missing` | 대시보드와 무관. 보안 RAG만. ingest 한 번 → [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 |
 | `boot-score nothing unscored` | 미채점 LOT이 없음. 데이터가 없다는 뜻이 아님 |
 
 ---

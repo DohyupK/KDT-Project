@@ -68,6 +68,12 @@ OFFLINE_REPLY = (
     "자세한 수동 절차는 docs/references/vllm-setup.md 를 참고하세요."
 )
 
+RAG_NOT_READY_REPLY = (
+    "보안 RAG를 초기화할 수 없어 로컬 LLM을 호출하지 않았습니다.\n\n"
+    "작업자 안내: Qdrant 컬렉션 secure_docs 가 없거나 RAG 엔진이 실패한 상태입니다. "
+    "ai-service에서 python ingest_secure.py 실행 후 재시작하세요."
+)
+
 HIT_BUT_LLM_TIMEOUT_REPLY = (
     "사내 보안 문서에서는 관련 내용을 찾았지만, "
     "로컬 LLM(vLLM/LM Studio) 응답이 시간 초과·실패했습니다. "

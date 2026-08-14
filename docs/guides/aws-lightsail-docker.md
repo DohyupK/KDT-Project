@@ -1,6 +1,6 @@
 # Lightsail에 Docker (n8n · Qdrant)
 
-최종 갱신: 2026-08-14
+최종 갱신: 2026-08-15
 
 MariaDB 공용 DB는 이미 Lightsail Ubuntu다. 절차: [`login-ubuntu-mariadb.md`](./login-ubuntu-mariadb.md).  
 이 문서는 **n8n·Qdrant 컨테이너를 그 서버(또는 같은 방식의 Ubuntu)에 올리는 방법**이다.
@@ -14,6 +14,7 @@ docker compose up -d
 ```
 
 데이터: `DB/data/n8n/` · `DB/data/qdrant_storage/` (gitignore). FE/BE/ai는 여전히 `npm run dev`.  
+Qdrant만 켜 둔 직후 `secure_docs` 가 비어 있으면 ingest **한 번**. 상시 구분: [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md) §6.  
 이슈 메일: [`issue-report.md`](../references/issue-report.md).
 
 ---

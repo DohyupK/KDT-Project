@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-14 (문서 중복 정리)
+최종 갱신: 2026-08-15
 
 모노레포 `frontend` / `backend` / `ai-service`.  
 목록: [`catalog.md`](./catalog.md) · 패키지: [`packages.md`](./packages.md) · 룰: [`references/agent-rules-and-skills.md`](./references/agent-rules-and-skills.md)

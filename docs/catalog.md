@@ -1,6 +1,6 @@
 # 프로젝트 문서 목록 (사용자 작성)
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 범위: **이 저장소에서 직접 쓴 마크다운**. `node_modules` README·CHANGELOG(약 1400건)는 npm 패키지 설명이며 프로젝트 문서가 아니다. Git에도 없다.
 
 `Documents/` 원본은 **삭제하지 않음** (RAG·등급 자료). 아래는 위치·한 줄 요지만.
@@ -42,6 +42,7 @@
 | [`2026-08-10.md`](./work-log/2026-08-10.md) | N_FOLDS 6 · 학습 SSOT |
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
+| [`2026-08-15.md`](./work-log/2026-08-15.md) | ingest 상시 아님 SSOT · 보안 챗 모드 URL |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 
@@ -61,7 +62,7 @@
 | [`general-chatbot-page-context.md`](./references/general-chatbot-page-context.md) | 일반 챗 · 화면 컨텍스트 |
 | [`security-chatbot-guide.md`](./references/security-chatbot-guide.md) | 챗봇 이용·라우팅 |
 | [`secure-rag.md`](./references/secure-rag.md) | 보안 RAG ingest·가드레일·스모크 |
-| [`documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md) | OCR 워처 · Qdrant · 포트 |
+| [`documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md) | OCR 워처 · Qdrant · 포트 · ingest 상시 구분 |
 | [`vllm-setup.md`](./references/vllm-setup.md) | 로컬 vLLM 수동 기동 |
 | [`LLM 튜닝.md`](./references/LLM%20튜닝.md) | RAG 기본값·env·모듈 |
 | [`ai-service-feature-catalog.md`](./references/ai-service-feature-catalog.md) | ai-service API 목록 |

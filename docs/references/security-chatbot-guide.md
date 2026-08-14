@@ -1,6 +1,6 @@
 # 보안·일반 챗봇 가이드 (이용 · 라우팅)
 
-최종 갱신: 2026-08-14
+최종 갱신: 2026-08-15
 
 챗봇 **두 계열**의 UI·API·라우팅.  
 RAG 동작·가드레일: [`secure-rag.md`](./secure-rag.md) · 기본값·env·모듈: [`LLM 튜닝.md`](./LLM%20튜닝.md) · vLLM 기동: [`vllm-setup.md`](./vllm-setup.md) · 포트: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md)
@@ -14,7 +14,7 @@ RAG 동작·가드레일: [`secure-rag.md`](./secure-rag.md) · 기본값·env·
 | UI | `GlobalChatbot` (셸 플로팅) | `/security` · Maximize → `SecurityChatbot` |
 | API | `POST /api/chat` → ai-service `/chat` | `POST /api/security-chat/stream` (SSE) · JSON `/api/security-chat` 병행 |
 | LLM | 보안 탭 등록 키 (Groq/Gemini 등) · Auto/수동 | **로컬만** `CHAT_VLLM_*` (:8001) · **클라우드 폴백 없음** |
-| 지식 | 일반 Knowledge / 도구(predict·whatif) | **Secure RAG** (`Documents/` → Qdrant `secure_docs`) |
+| 지식 | 일반 Knowledge / 도구(predict·whatif) | **Secure RAG** (`Documents/` → Qdrant `secure_docs`). 컬렉션 없으면 LLM 미호출 · ingest는 최초만 → [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 |
 | 멀티턴 | MariaDB 스레드 (채널 구분) | 동일 DB · `channel=security` |
 
 엔드포인트 목록: [`ai-service-feature-catalog.md`](./ai-service-feature-catalog.md)
@@ -37,10 +37,18 @@ RAG 동작·가드레일: [`secure-rag.md`](./secure-rag.md) · 기본값·env·
   → POST /api/security-chat/stream  (± JSON /api/security-chat)
   → ai-service /security-chat/stream
   → Secure RAG + 로컬 vLLM (:8001)
-  → 실패 시 offline 안내 (클라우드 폴백 없음)
+  → 실패 시 아래 상수 (클라우드 폴백 없음)
 ```
 
+플로팅 `GlobalChatbot`의 「보안 상담」은 `router.push`가 아니라 `history.pushState('/security')`. `/main` 등 현재 페이지는 유지되고 주소만 바뀐다. 「일반 상담」은 직전 경로로 복원. `popstate`로 모드 동기화. `AppShell` `PageChatRouteReset`은 `/security` 출입 때 일반 챗 컨텍스트를 지우지 않는다.
+
 앱 코드는 HuggingFace `transformers`로 모델을 로드하지 않는다. HF에서 받아 vLLM에 올린 뒤 연결한다.
+
+| 조건 | 상수 (`prompts.py`) | 의미 |
+|------|---------------------|------|
+| Qdrant `secure_docs` 없음 · RAG 엔진 실패 | `RAG_NOT_READY_REPLY` | **vLLM 미호출.** ingest는 최초만 → [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 |
+| `:8001` 연결 실패 | `OFFLINE_REPLY` | 이 PC vLLM · Lightsail이면 SSH `-R` 터널 |
+| RAG 히트 후 LLM 타임아웃 | `HIT_BUT_LLM_TIMEOUT_REPLY` | 모델 부하 · `SECURE_VLLM_TIMEOUT` |
 
 ---
 

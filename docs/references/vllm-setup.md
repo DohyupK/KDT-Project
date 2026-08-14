@@ -1,6 +1,6 @@
 # 로컬 vLLM 수동 기동 안내 (보안 탭)
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 앱 코드는 **OpenAI 호환 엔드포인트만** 호출한다.  
 `ai-service` 안에서 HuggingFace `transformers`로 모델을 로드하지 않는다.
 
@@ -45,6 +45,7 @@ vLLM은 이 PC에서만 켠다 (`--host 127.0.0.1 --port 8001`). 그다음 터�
 
 `vllm-tunnel.ps1`은 keepalive 후 끊기면 재연결한다. 서버 방화벽에 8001을 열지 않는다. `CHAT_VLLM_BASE_URL`은 서버에서도 `http://127.0.0.1:8001/v1` (이 PC로 이어진 구멍).
 
-라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md). vLLM이 꺼져 있으면 **클라우드 폴백 없음**.
+라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md). vLLM이 꺼져 있으면 **클라우드 폴백 없음**.  
+`ingest_secure.py` 는 vLLM이 아니다. 컬렉션 없을 때 한 번. [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6.
 
 코드: `ai-service/agent/secure_llm/llm.py` · `frontend/src/components/chat/SecurityChatbot.tsx` · `backend/src/routes/securityChat.ts`

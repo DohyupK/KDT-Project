@@ -1,11 +1,12 @@
 # 보안 탭 RAG (secure RAG)
 
-최종 갱신: 2026-08-14
+최종 갱신: 2026-08-15
 
 일반 Knowledge / 일반 `/chat` 과 **완전 분리**.  
 이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · 기본값·env: [`LLM 튜닝.md`](./LLM%20튜닝.md) §0 · §4
 
-경로: `SecurityChatbot` → `POST /api/security-chat/stream` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.
+경로: `SecurityChatbot` → `POST /api/security-chat/stream` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.  
+RAG 미초기화면 vLLM을 안 친다. 안내 상수: [`security-chatbot-guide.md`](./security-chatbot-guide.md).
 
 ## 라우팅 정책 (2026-08-01)
 
@@ -51,6 +52,8 @@ SECURE_DOCS_DIR=             # 기본 = <repo>/Documents
 ```
 
 ## Ingest
+
+명령·청크 크기: 아래. **상시 프로세스 여부·기동 순서**는 [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 만 본다 (`ingest_secure.py` 는 최초/재색인만).
 
 ```bash
 # Qdrant Docker 예

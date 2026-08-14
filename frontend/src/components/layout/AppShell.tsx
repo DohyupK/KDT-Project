@@ -424,6 +424,10 @@ function PageChatRouteReset() {
   const { resetForRoute } = usePageChat()
   const prevPath = useRef(pathname)
   useEffect(() => {
+    if (pathname === '/security' || prevPath.current === '/security') {
+      prevPath.current = pathname
+      return
+    }
     if (prevPath.current !== pathname) {
       resetForRoute(pathname)
       prevPath.current = pathname

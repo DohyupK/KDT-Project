@@ -1,6 +1,6 @@
 # LLM · Secure RAG 튜닝 총정리
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 **숫자·env·모듈 SSOT.** 코드: `ai-service/agent/*` · `app/main.py` · `ingest_secure.py`  
 이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · ingest·가드레일·스모크: [`secure-rag.md`](./secure-rag.md)
 
@@ -140,7 +140,7 @@
 | 메타 기본 | `category=SOP`, `security_level=internal` |
 | 클린 재빌드 | `python scripts/rebuild_secure_rag_clean.py` |
 
-**BM25 반영:** 워처 자동 ingest → `reload_bm25()` (재시작 불필요). CLI `ingest_secure.py` → **ai-service 재시작**.
+**BM25 반영:** 워처 자동 ingest → `reload_bm25()` (재시작 불필요). CLI `ingest_secure.py` → **ai-service 재시작**. CLI는 상시 실행이 아님 · 기동 구분 [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6.
 
 ---
 
