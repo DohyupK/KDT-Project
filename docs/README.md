@@ -11,6 +11,7 @@
 | [prompts/](./prompts/) | Cursor에 다시 넣을 프롬프트 |
 | [references/](./references/) | 중요 경로 · 참조 · [LLM 튜닝 총정리](./references/LLM%20튜닝.md) |
 | [guides/login-ubuntu-mariadb.md](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 공용 DB 연동 절차 |
+| [guides/aws-lightsail-docker.md](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
 | [references/login-auth-tech-stack.md](./references/login-auth-tech-stack.md) | 로그인 Auth 기술스택·패키지 기록 |
 
 ## docs vs 룰·스킬

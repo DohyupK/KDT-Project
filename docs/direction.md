@@ -15,9 +15,10 @@
 **챗봇 가이드(스택·이용):** [`docs/references/security-chatbot-guide.md`](./references/security-chatbot-guide.md)  
 **일반 챗 · 페이지 컨텍스트 응답 로직:** [`docs/references/general-chatbot-page-context.md`](./references/general-chatbot-page-context.md)  
 **Documents 워처 · Qdrant 기동 · 포트:** [`docs/references/documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md)  
+**Lightsail Docker (n8n·Qdrant):** [`docs/guides/aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md)  
 **vLLM 수동 기동:** [`docs/references/vllm-setup.md`](./references/vllm-setup.md)  
 **보안 챗 타임아웃 플랜:** [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](./plans/2026-07-30-secure-chat-timeout-selfquery.md)  
-**일지:** [`docs/work-log/2026-08-13.md`](./work-log/2026-08-13.md) · [`2026-08-10`](./work-log/2026-08-10.md) · [`2026-08-08`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
+**일지:** [`docs/work-log/2026-08-14.md`](./work-log/2026-08-14.md) · [`2026-08-13`](./work-log/2026-08-13.md) · [`2026-08-10`](./work-log/2026-08-10.md) · [`2026-08-08`](./work-log/2026-08-08.md) · [`2026-08-06`](./work-log/2026-08-06.md) · [`2026-08-05`](./work-log/2026-08-05.md) · [`2026-08-02`](./work-log/2026-08-02.md) · [`2026-08-01`](./work-log/2026-08-01.md) · [`2026-07-31`](./work-log/2026-07-31.md) · [`2026-07-30`](./work-log/2026-07-30.md)
 
 > LLM/RAG 세팅·기법·다음 할 일 SSOT: [`docs/references/LLM 튜닝.md`](./references/LLM%20튜닝.md) §0·§4·§9
 
