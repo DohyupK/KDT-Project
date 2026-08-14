@@ -1,10 +1,8 @@
 # LLM · Secure RAG 튜닝 총정리
 
-최종 갱신: 2026-08-03  
-**코드 SSOT:** `ai-service/agent/*` · `ai-service/app/main.py` · `ai-service/ingest_secure.py`  
-본 문서는 **현재 코드와 일치**하는 세팅·설정·기법·적용 코드를 한곳에 둔다.
-
-연관: [`secure-rag.md`](./secure-rag.md) · [`security-chatbot-guide.md`](./security-chatbot-guide.md) · [`ai-service-feature-catalog.md`](./ai-service-feature-catalog.md) · [`direction.md`](../direction.md) · [`work-log/2026-08-02.md`](../work-log/2026-08-02.md)
+최종 갱신: 2026-08-14  
+**숫자·env·모듈 SSOT.** 코드: `ai-service/agent/*` · `app/main.py` · `ingest_secure.py`  
+이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · ingest·가드레일·스모크: [`secure-rag.md`](./secure-rag.md)
 
 ---
 
@@ -46,25 +44,9 @@
 
 ---
 
-## 2. 엔드투엔드 경로
+## 2. 경로
 
-```text
-FE SecurityChatbot
-  → Express /api/security-chat/stream  (± JSON /api/security-chat)
-    → ai-service /security-chat/stream
-      → compose_secure[_stream]
-           · MariaDB 단기 히스토리 · prior_sources · semantic prune
-      → analytics? → Polars csv_lake (실패 시 RAG)
-      → node_retrieve (Hybrid)
-      → gate → generate | no_docs
-      → finalize_reply_sources ([SYS_RAG_EMPTY_RESULT])
-```
-
-| API | 역할 |
-|-----|------|
-| `POST /security-chat` | JSON · 스모크 |
-| `POST /security-chat/stream` | SSE · UI 기본 |
-| Express 프록시 | disconnect abort · 레거시 store는 done/replace만 |
+라우팅·API: [`security-chatbot-guide.md`](./security-chatbot-guide.md). 그래프 노드는 §6.
 
 ---
 
@@ -257,14 +239,7 @@ SSE는 동일 노드를 **수동 호출** (컴파일 그래프와 계약 동일)
 
 ## 7. 운영 체크리스트
 
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-cd ai-service
-python scripts/rebuild_secure_rag_clean.py   # CLI → 이후 서버 재시작
-uvicorn app.main:app --host 127.0.0.1 --port 8800
-# 로그: logs/ai-service.log
-# 워처 ingest 시: [secure-rag] bm25 reloaded n=...
-```
+Qdrant·포트: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) · ingest·스모크: [`secure-rag.md`](./secure-rag.md)
 
 검증: 슬러리 SOP · `그럼 EDA…`(확장 오탐 없음) · 통계→analytics/RAG · SYS→replace · soft_fallback `max_score` · 핫리로드 로그.
 
@@ -287,7 +262,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 
 ---
 
-## 9. 제약 (로드맵 핵심은 완료)
+## 9. 제약
 
 - `fillThreshold` 개명 · 보안 채널 클라우드 폴백 · 가짜 CSV/outcome 금지  
 - Guardrail C/D · Soft Fallback · SSE 버퍼 축소/삭제 금지  

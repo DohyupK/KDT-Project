@@ -335,7 +335,7 @@ flowchart TD
 | [`docs/work-log/2026-08-13.md`](./docs/work-log/2026-08-13.md) | 이슈 보고서 n8n 메일 · 포트/`npm run dev` 기동 주체 |
 | [`docs/work-log/2026-08-10.md`](./docs/work-log/2026-08-10.md) | N_FOLDS 5→6 · [모델 학습 방법 SSOT](./docs/references/model-training-methods.md) |
 | [`docs/work-log/2026-08-08.md`](./docs/work-log/2026-08-08.md) | 메인 위험 LOT·당일 KPI 0.8 · 대시보드 생산 상세 · issues 리팩터 · 이슈 저장=완료/과거 자료 |
-| [`docs/work-log/2026-08-06.md`](./docs/work-log/2026-08-06.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
+| [`docs/work-log/2026-08-06-07.md`](./docs/work-log/2026-08-06-07.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
 | [`docs/work-log/2026-08-05.md`](./docs/work-log/2026-08-05.md) | lots/judgment/SPC 폴링 · 대시보드 residual 3컬럼 · 네모칸 후속 |
 | [`docs/work-log/2026-08-04.md`](./docs/work-log/2026-08-04.md) | Documents READ-ONLY · 인수인계 DB · ISS-yyMMdd-001 자동발급 |
 | [`docs/work-log/2026-08-02.md`](./docs/work-log/2026-08-02.md) | SSE · analytics · soft fallback · **3단계** chunk/min_score · 스택 스냅샷 |
@@ -343,7 +343,7 @@ flowchart TD
 | [`docs/packages.md`](./docs/packages.md) | frontend · backend · ai-service · DB 안내 |
 | [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 자연 흐름 · SYS_RAG_EMPTY · 다문서 · 인덱스 |
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
-| [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |
+| [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 이용 · 라우팅 |
 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) | 일반 챗 응답·페이지 참조 로직 SSOT |
 | [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) | Documents 워처 · Qdrant 자동기동 · 포트 SSOT |
 | [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |

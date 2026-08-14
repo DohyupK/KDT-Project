@@ -1,25 +1,11 @@
 # 보안 탭 RAG (secure RAG)
 
-최종 갱신: 2026-08-02 (3단계 chunk/min_score · soft fallback · SSE · analytics)
+최종 갱신: 2026-08-14
 
 일반 Knowledge / 일반 `/chat` 과 **완전 분리**.  
-경로: `SecurityChatbot` → `POST /api/security-chat/stream` (또는 JSON `/api/security-chat`) → `ai-service` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.
+이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · 기본값·env: [`LLM 튜닝.md`](./LLM%20튜닝.md) §0 · §4
 
-운영·스택·이용 요약: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · 기법 총정리: [`LLM 튜닝.md`](./LLM%20튜닝.md)
-
-## 스택
-
-| 단계 | 구현 |
-|------|------|
-| Orchestration | LangGraph `analytics`\|`retrieve` → `gate` → `generate` \| `no_docs` · SSE는 동일 노드 수동 실행 |
-| Chunk / schema | LlamaIndex `SentenceSplitter` (**chunk_size=400**, **overlap=50**) |
-| Dense | Qdrant `secure_docs` + `BAAI/bge-m3` (**CPU**) |
-| Sparse | BM25 (`rank_bm25`, nodes in `data/secure_rag/bm25_nodes.json`) |
-| Fusion | Reciprocal Rank Fusion (`k=60`) |
-| Rerank | `BAAI/bge-reranker-v2-m3` CrossEncoder (**CPU**) · **doc당 최대 2청크** · soft fallback |
-| Self-Query (A) | LI `VectorIndexAutoRetriever` 또는 `SECURE_SELF_QUERY=0` heuristic · unfiltered 재시도(C) 유지 |
-| LLM | 로컬 vLLM only · 클라우드 폴백 **없음** |
-| 빈 근거 | 모델 출력에 `[SYS_RAG_EMPTY_RESULT]` 포함 시 고정 문구 + `sources=[]` |
+경로: `SecurityChatbot` → `POST /api/security-chat/stream` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.
 
 ## 라우팅 정책 (2026-08-01)
 
@@ -53,17 +39,15 @@
 
 ## 환경 변수
 
-모노레포 루트 `.env`에 설정 (패키지별 `.env` 없음):
+전체 표: [`LLM 튜닝.md`](./LLM%20튜닝.md) §4. 루트 `.env`만 (패키지별 `.env` 없음).
+
+운영에서 자주 바꾸는 것만:
 
 ```text
-QDRANT_URL=http://127.0.0.1:6333
-SECURE_QDRANT_COLLECTION=secure_docs
-SECURE_DOCS_DIR=  # optional; default repo Documents/
-SECURE_EMBED_MODEL=BAAI/bge-m3
-SECURE_RERANK_MODEL=BAAI/bge-reranker-v2-m3
-SECURE_RERANK_MIN_SCORE=0.15
-CHAT_VLLM_BASE_URL=http://127.0.0.1:8001/v1
-CHAT_VLLM_MODEL=<served-model-name>
+SECURE_SELF_QUERY=0          # heuristic만 (느린 LM Studio 권장)
+SECURE_GENERATE=0            # 초소형 양자화는 chat/completions가 ""/"." 로 stop → 0 유지
+SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
+SECURE_DOCS_DIR=             # 기본 = <repo>/Documents
 ```
 
 ## Ingest
@@ -85,26 +69,7 @@ python scripts/rebuild_secure_rag_clean.py
 
 문서: `Documents/<Clearance>/` — 수동 `.md`(Markdown/), 텍스트 `.txt`/`.pdf`(네이티브 ingest), 스캔 PDF·이미지는 OCR sidecar `.md` + MariaDB `text_match`. PDF 메타는 선택 `*.meta.json`.
 
-환경 (선택):
-
-```text
-SECURE_SELF_QUERY=0          # heuristic만 (느린 LM Studio 권장)
-SECURE_GENERATE=0            # Gemma 호출 생략 · 문서 발췌+출처만 (관련 질의 500·빈 content 방지)
-                             # gemma@q2_k 등 초소형 양자화는 chat/completions가 ""/"." 로 stop하는 경우 많음 → 0 유지
-                             # 요약 LLM이 필요하면 채팅용 더 큰 모델 + SECURE_GENERATE=1
-SECURE_VLLM_TIMEOUT=45       # SECURE_GENERATE=1 일 때 LLM 상한(초)
-SECURE_DOCS_WATCH=1          # document watcher daemon (backend-spawned)
-DOCUMENT_WATCHER_AUTOSTART=1 # Express starts scripts/run_document_watcher.py
-QDRANT_AUTOSTART=1           # ai-service lifespan starts Docker kdt-qdrant if /readyz fails
-QDRANT_URL=http://127.0.0.1:6333
-# Tables: Documents CSV/XLSX → move ai-service/data/csv_lake/ → Documents/Confidential/Markdown/*-profile.md
-# Text pdf/txt: native ingest (no matching .md). Scan PDF/images: OCR → Markdown/*.md + text_match → ingest
-SECURE_SELF_QUERY_TIMEOUT=20
-SECURE_SELF_QUERY_MAX_TOKENS=256
-# Chunk (ingest defaults): SentenceSplitter chunk_size=400 · overlap=50
-# Retrieve defaults (`SecureRagEngine.retrieve` + `node_retrieve`): top_k=12 · rerank_top_n=6
-# AI_SERVICE_LOG_FILE=logs/ai-service.log   # RotatingFileHandler 10MB × backup 5 (app/main.py)
-```
+워처·Qdrant 기동 플래그: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) (`DOCUMENT_WATCHER_AUTOSTART`, `QDRANT_AUTOSTART`).
 
 ## 가드레일 (필수) — SelfQuery 교체 후에도 유지
 
@@ -178,8 +143,4 @@ vLLM 미기동 시 **가짜 성공 금지** — 스크립트가 FAIL.
 
 ## 코드
 
-- `agent/rag_engine.py` · `agent/doc_clearance.py`
-- `agent/secure_llm/graph.py` · `llm.py` · `prompts.py`
-- `agent/api_llm/` (일반 챗 + Public/Confidential RAG)
-- `ingest_secure.py`
-- `scripts/smoke_secure_rag_e2e.py`
+모듈 표: [`LLM 튜닝.md`](./LLM%20튜닝.md) §8. 스모크: `scripts/smoke_secure_rag_e2e.py`.

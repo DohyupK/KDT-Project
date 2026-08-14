@@ -37,8 +37,7 @@
 | [`2026-08-02.md`](./work-log/2026-08-02.md) | SSE · analytics · 검색 튜닝 |
 | [`2026-08-04.md`](./work-log/2026-08-04.md) | 인수인계 DB · 이슈 ID |
 | [`2026-08-05.md`](./work-log/2026-08-05.md) | LOT 폴링 · 대시보드 residual |
-| [`2026-08-06.md`](./work-log/2026-08-06.md) | 생산 추이 · 모델 품질 기록 |
-| [`2026-08-06-07.md`](./work-log/2026-08-06-07.md) | 08-06~07 묶음 (학습 방법·실험) |
+| [`2026-08-06-07.md`](./work-log/2026-08-06-07.md) | 08-06 생산 추이·품질 · 08-07 학습·실험 (`2026-08-06.md`는 포인터) |
 | [`2026-08-08.md`](./work-log/2026-08-08.md) | 위험 LOT · KPI · issues 리팩터 |
 | [`2026-08-10.md`](./work-log/2026-08-10.md) | N_FOLDS 6 · 학습 SSOT |
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
@@ -60,13 +59,12 @@
 | [`issue-report.md`](./references/issue-report.md) | 이슈 보고서 메일 (n8n·Gmail) |
 | [`issue-lot-api.md`](./references/issue-lot-api.md) | 이슈/LOT/과거 자료 API · 채점 3단 |
 | [`general-chatbot-page-context.md`](./references/general-chatbot-page-context.md) | 일반 챗 · 화면 컨텍스트 |
-| [`security-chatbot-guide.md`](./references/security-chatbot-guide.md) | 보안 챗 이용·스택 |
-| [`security-chat-skeleton.md`](./references/security-chat-skeleton.md) | 보안 탭 라우팅·디렉터리 |
-| [`secure-rag.md`](./references/secure-rag.md) | 보안 RAG ingest·검색 |
+| [`security-chatbot-guide.md`](./references/security-chatbot-guide.md) | 챗봇 이용·라우팅 |
+| [`secure-rag.md`](./references/secure-rag.md) | 보안 RAG ingest·가드레일·스모크 |
 | [`documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md) | OCR 워처 · Qdrant · 포트 |
 | [`vllm-setup.md`](./references/vllm-setup.md) | 로컬 vLLM 수동 기동 |
-| [`LLM 튜닝.md`](./references/LLM%20튜닝.md) | LLM/RAG 기법·환경 총정리 |
-| [`ai-service-feature-catalog.md`](./references/ai-service-feature-catalog.md) | ai-service 기능 목록 |
+| [`LLM 튜닝.md`](./references/LLM%20튜닝.md) | RAG 기본값·env·모듈 |
+| [`ai-service-feature-catalog.md`](./references/ai-service-feature-catalog.md) | ai-service API 목록 |
 | [`model-training-methods.md`](./references/model-training-methods.md) | clf/reg/residual 학습 방법 |
 | [`multi-model-voting.md`](./references/multi-model-voting.md) | `/predict-voting` 앙상블 |
 | [`cathode-clf-schema.md`](./references/cathode-clf-schema.md) | O/X CSV 스키마 |
@@ -77,6 +75,7 @@
 | [`login-auth-tech-stack.md`](./references/login-auth-tech-stack.md) | 로그인 Auth 패키지 기록 |
 | [`important-paths.md`](./references/important-paths.md) | 자주 쓰는 코드 경로 |
 | [`chat-history-qdrant.md`](./references/chat-history-qdrant.md) | 챗 장기기억 Qdrant 컬렉션 |
+| [`scenario-smoke-checklist.md`](./references/scenario-smoke-checklist.md) | 시나리오 스모크 체크리스트 |
 
 ### 프롬프트 (`prompts/`)
 
@@ -145,17 +144,7 @@ SOP·매뉴얼·규칙: `sop-coating/humidity/sintering-v1`, `manual-metal/mixin
 
 ---
 
-## 4. 룰 · 스킬 원본
-
-목록: [`references/agent-rules-and-skills.md`](./references/agent-rules-and-skills.md)
-
-- `.cursor/rules/kdt-project.mdc` — 전체
-- `.cursor/rules/frontend-ui.mdc` — 프론트 UI
-- `.cursor/skills/project-control/SKILL.md` — 조율
-
----
-
-## 5. 이번 정리에서 지운 것
+## 4. 이번 정리에서 지운 것
 
 | 삭제 | 이유 |
 |------|------|
@@ -165,5 +154,8 @@ SOP·매뉴얼·규칙: `sop-coating/humidity/sintering-v1`, `manual-metal/mixin
 | `direction.md` 「다음 우선순위」 | 앞으로 할 계획 |
 | 스텁 룰·스킬 · `.agents/skills/` | Cursor 룰을 `kdt-project` + `frontend-ui` + `project-control`로 통합 |
 | 패키지 README 본문 · `frontend/docs/` · `secure_docs/README` · `DB/.../chat_history_qdrant.md` | [`packages.md`](./packages.md) · [`chat-history-qdrant.md`](./references/chat-history-qdrant.md)로 이동 |
+| `docs/references/security-chat-skeleton.md` | [`security-chatbot-guide.md`](./references/security-chatbot-guide.md)에 라우팅·디렉터리 합침 |
+| RAG 스택/포트/채점 3단 중복 표 | 숫자·env=`LLM 튜닝` · 포트=`documents-watcher-qdrant` · 3단=`issue-lot-api` |
+| 명세의 예정·미구현·할 일 | 코드에 없는 로드맵(Step 4 export, TS 불량률, Setting 한계치 UI, `/predict*` voting 프록시 등) |
 
 `node_modules` 문서는 손대지 않음 (의존성 패키지).

@@ -1,6 +1,6 @@
 # Issue / LOT / 과거 자료 API (백엔드)
 
-최종 갱신: 2026-08-13
+최종 갱신: 2026-08-14
 
 ## 규칙
 
@@ -16,7 +16,7 @@
 - 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `risk_level` 심각 (`analysis_lots` JOIN)
 - **이슈 보고서 메일:** 신규 Top LOT → HTML을 `send_email.mail_contents`에 넣고 n8n → Gmail API. 수신은 `user_settings.email_check = 'O'`. SSOT: [`issue-report.md`](./issue-report.md)
 - 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
-- **채점 3단 SSOT** (`lot.service` `updateLotScore`):  
+- **채점 3단 SSOT** (`lot.service` `updateLotScore`). 앙상블 가중: [`multi-model-voting.md`](./multi-model-voting.md).  
   1. `/predict-voting` → **`lot_results`** NULL-fill (`quality_defect`·`residual_li`만; 피더 실측은 COALESCE로 불변)  
   2. **`judgment_lots`** — qd/residual ← `lot_results`, capacity/probability ← voting, `spc` ← SPC; 기존 실측/시드는 `COALESCE` 유지  
   3. **`analysis_lots`** — **judgment 기준 2차 추론** (`combineLotScore` + SPC → risk/`scored_at`); judgment만 찬·analysis만 빈 경우 `scoreAnalysisFromJudgment`  
@@ -25,7 +25,8 @@
 - **폴러:** 백엔드 기동 시 **즉시** SPC sync + analysis sync 틱 + `SCORE_ON_BOOT`(기본 on) 1회 **채점만**(risk_reason/이슈는 폴러). 이후 SPC ~60s · analysis ~10m. A큐(judgment/analysis/`scored_at`/LR행 결손·**최신 DESC**) ~70% → B큐(LR qd/residual NULL·ASC). **score 락 해제 후** `risk_reason`(vLLM) → 이슈 시드.
   - 미채점: analysis/`probability`/`scored_at`/judgment residual·capacity **또는** `lot_results` 행/`residual_li`/`quality_defect` NULL
   - 피더 실측이 `lot_results`에 있으면 AI가 **덮지 않음**(COALESCE) · 대시보드 잔류는 계속 `judgment_lots`
-- 목록의 `date`, `riskLevel`은 잘못된 값을 보내면 `400`을 반환 (**`status` 필터 없음**)
+- **피더:** `frontend/plant_feeder_live.py` → `SPC_LOT` / `SPC_LOT_results` (qd +60분, residual +24h). 앱 `lots`는 피더가 직접 쓰지 않음. backend `spcLotSync`(~60s)가 `SPC_LOT` → `lots` 미러 후 채점.
+- 목록의 `date`, `riskLevel`은 잘못된 값을 보내면 `400`을 반환 (**`status` 필터 없음**).
 
 ## 테이블 분리 (`lots` / `analysis_lots` / `issues`)
 
@@ -46,14 +47,24 @@
 |--------|------|------|------|
 | GET | `/api/lots/risk-top?page=1&pageSize=8` | 선택 | 최근 3일·심각 LOT (`analysis_lots`) |
 | GET | `/api/lots/daily-kpi` | 선택 | 당일 probability 양품/불량 KPI (임계 0.8) |
+| GET | `/api/lots/q-cost` | 선택 | 품질 비용 KPI |
 | GET | `/api/lots/:lotId` | 선택 | LOT 상세 (공정+채점 JOIN) |
 | POST | `/api/lots/import` | JWT | CSV→`lots` 공정 적재·채점(+`analysis_lots`) + 이슈 시드 |
+| POST | `/api/lots/score` | JWT | 미채점 LOT 채점 |
 | GET | `/api/issues` | 선택 | 미완료 (`completed_at IS NULL`); `riskLevel`은 analysis_lots |
 | GET | `/api/issues/:issueId` | 선택 | 상세(조치내용 포함) |
 | PUT | `/api/issues/:issueId` | JWT | body: `actionContent`, `completed` — **FE 저장은 `completed: true`만** (미완료 draft PUT 없음). `completed_at = NOW()`, `action_content` 저장, 담당자=`users` 로그인 사용자 |
 | GET | `/api/knowledge/past-issues` | 선택 | **과거 자료** (`completed_at IS NOT NULL`) |
 | GET | `/api/knowledge/past-issues/:issueId` | 선택 | 과거 자료 상세(조치·LOT JOIN) |
 | GET | `/api/knowledge/handover-history` | 선택 | 인수인계 (`?status=pending\|completed`) |
+| POST | `/api/knowledge/handover` | JWT | 인수인계 등록 |
+| POST | `/api/knowledge/analyze` | JWT | Knowledge 분석 (`AI_Library_analysis`) |
+| GET | `/api/dashboard/lot-risks` | 선택 | 대시보드 위험 LOT |
+| GET | `/api/dashboard/lot-risks/:lotId` | 선택 | 대시보드 LOT 상세 |
+| GET | `/api/dashboard/production-trend` | 선택 | 생산 추이 |
+| GET | `/api/dashboard/production-daily` | 선택 | 일별 생산 |
+| GET | `/api/dashboard/lots.csv` | 선택 | LOT CSV 내보내기 |
+| GET | `/api/dashboard/feature-importance` | 선택 | 피처 중요도 |
 | POST | `/api/internal/n8n/send-email-result` | `N8N_WEBHOOK_SECRET` | n8n 콜백. `{ id, send: 'O'\|'X' }` → `send_email.send` |
 
 ## DTO 필드
@@ -70,11 +81,9 @@
 | `completed` / `completedAt` | `completed_at IS NOT NULL` / `completed_at` |
 | `analysis` (상세) | `analysis_lots` 스냅샷: `lotId`, `probability`, `spcStatus`, `riskLevel`, `riskReason`, `createdAt`, **`scoredAt`** |
 
-## 이슈 상세 분석 UI (시각화 초안)
+## 이슈 상세 분석 UI
 
-- `GET /api/issues/:id` → `analysis`로 `analysis_lots` 전 필드 표시
-- 카드: `probability` 게이지 · `risk_level` · `spc_status` · `risk_reason` 콜아웃 · 필드 테이블
-- 현재 UI는 `analysis_lots` 실데이터 확인용 (게이지·리스크·SPC·사유)
+- `GET /api/issues/:issueId` → `analysis`로 `analysis_lots` 표시 (`probability` · `risk_level` · `spc_status` · `risk_reason`)
 
 ## 이슈 페이지 시드
 

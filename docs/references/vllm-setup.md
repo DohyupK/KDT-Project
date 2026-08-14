@@ -7,14 +7,7 @@
 확정 운영: vLLM은 **이 PC GPU**. Lightsail 16GB는 CPU이므로 서버에 vLLM을 설치하지 않는다.  
 AWS 앱이 요약을 쓰려면 이 PC에서 역방향 터널을 연다. [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md)
 
-## 포트
-
-| 서비스 | 포트 |
-|--------|------|
-| Next.js frontend | 3000 |
-| Express backend | 3001 |
-| FastAPI ai-service | **8800** |
-| vLLM (보안 탭) | **8001** |
+앱 포트·기동 주체: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md). vLLM만 **8001** (수동).
 
 환경 변수 (모노레포 루트 `.env`):
 
@@ -52,17 +45,6 @@ vLLM은 이 PC에서만 켠다 (`--host 127.0.0.1 --port 8001`). 그다음 터�
 
 서버 방화벽에 8001을 열지 않는다. `CHAT_VLLM_BASE_URL`은 서버에서도 `http://127.0.0.1:8001/v1`.
 
-## 앱 경로
+라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md). vLLM이 꺼져 있으면 **클라우드 폴백 없음**.
 
-```text
-SecurityChatbot → POST /api/security-chat → POST ai-service/security-chat
-  → ChatOpenAI(base_url=CHAT_VLLM_BASE_URL, api_key=EMPTY)
-```
-
-vLLM이 꺼져 있으면 **클라우드 폴백 없음** — offline 안내 문구만 반환.
-
-## 관련 코드
-
-- `ai-service/agent/secure_llm/llm.py`
-- `frontend/src/components/chat/SecurityChatbot.tsx`
-- `backend/src/routes/securityChat.ts`
+코드: `ai-service/agent/secure_llm/llm.py` · `frontend/src/components/chat/SecurityChatbot.tsx` · `backend/src/routes/securityChat.ts`

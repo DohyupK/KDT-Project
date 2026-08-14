@@ -5,7 +5,7 @@
 
 GPU Lightsail/EC2를 사지 않는다. 첨부 매뉴얼의 「한 대 GPU에서 vLLM까지」는 이 설계가 아니다.
 
-관련: [login-ubuntu-mariadb.md](./login-ubuntu-mariadb.md) · [vllm-setup.md](../references/vllm-setup.md)
+관련: [login-ubuntu-mariadb.md](./login-ubuntu-mariadb.md) · [vllm-setup.md](../references/vllm-setup.md) · 로컬 포트: [documents-watcher-qdrant.md](../references/documents-watcher-qdrant.md)
 
 ---
 
@@ -47,7 +47,7 @@ GPU Lightsail/EC2를 사지 않는다. 첨부 매뉴얼의 「한 대 GPU에서 
 프론트 코드의 Grafana URL은 `frontend/src/lib/grafanaEmbed.ts`가 `.env` 호스트를 붙인다. IP를 페이지에 다시 적지 않는다.
 
 **열지 말 것 (Lightsail 방화벽):** 3000, 3001, 3306(앱이 같은 기계일 때), 5678, 6333, 8001, 8800.  
-**열 것:** SSH 22(내 IP), HTTP 80, (나중에) HTTPS 443. Grafana를 이 서버에서 iframe으로 쓰면 TCP 4000도 필요(또는 Nginx로 프록시).
+**열 것:** SSH 22(내 IP), HTTP 80. Grafana를 이 서버에서 iframe으로 쓰면 TCP 4000도 필요(또는 Nginx로 프록시).
 
 ---
 

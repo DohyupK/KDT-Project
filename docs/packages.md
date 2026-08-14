@@ -40,15 +40,16 @@ Express `:3001`. 세션 · 보안 게이트 · ai-service 프록시 · auth · �
 |--------|------|
 | `GET /api/health` | 헬스 |
 | `/api/auth/*` | JWT 로그인·가입·프로필·탈퇴 |
-| `POST /api/chat` | 보안 게이트 → ai-service |
+| `POST /api/chat` · `/api/chat/stream` | 보안 게이트 → ai-service |
 | `/api/security-chat` · `/stream` | 클라우드 폴백 없음 |
-| `/api/issues` · `/api/lots/*` · `/api/dashboard/*` | 이슈·LOT·KPI |
+| `/api/issues` · `/api/lots/*` · `/api/dashboard/*` · `/api/knowledge/*` | 이슈·LOT·KPI·인수인계 |
 | `/api/inquiries` | 문의·첨부 |
-| `/api/settings/control-bounds` | 공정 한계치 |
+| `/api/docs/*` | Documents 트리·파일 (읽기 전용) |
+| `/api/settings/control-bounds` | 공정 한계치 (파일 SSOT, Setting UI 없음) |
 | `/api/llm-keys` | 보안 탭 키 → `DB/data/llm_keys.sqlite` |
 | `/api/control/*` | 승인·Undo·outcome |
 
-Auth: `check-id` · `register` · `login` · `find-id` · `verify-reset` · `reset-password` · `logout` · `GET/PUT profile` · `DELETE account`.
+Auth: `check-id` · `register` · `login` · `find-id` · `verify-reset` · `reset-password` · `logout` · `GET/PUT profile` · `DELETE account` · `GET/PUT settings` · 헤더 알림.
 
 LOT 채점 3단·이슈 메일: [`issue-lot-api.md`](./references/issue-lot-api.md) · [`issue-report.md`](./references/issue-report.md).
 
@@ -65,15 +66,8 @@ npm run send:one-issue-report
 
 ## ai-service
 
-진단 ML · FastAPI `:8800` · LangGraph · Secure RAG. **CWD는 항상 `ai-service/`**.
-
-| 기능 | 경로 |
-|------|------|
-| Health | `GET /health` |
-| O/X · 용량 · 잔여 Li | `POST /predict` · `/predict-capacity` · `/predict-residual` |
-| 투표 채점 | `POST /predict-voting` |
-| 일반 챗 | `POST /chat` |
-| 보안 챗 | `POST /security-chat` · `/security-chat/stream` |
+진단 ML · FastAPI `:8800` · LangGraph · Secure RAG. **CWD는 항상 `ai-service/`**.  
+API 목록: [`ai-service-feature-catalog.md`](./references/ai-service-feature-catalog.md).
 
 학습 스키마: [`cathode-clf-schema.md`](./references/cathode-clf-schema.md) · [reg](./references/cathode-reg-schema.md) · [residual](./references/cathode-residual-schema.md) · [학습 방법](./references/model-training-methods.md).  
 RAG: [`secure-rag.md`](./references/secure-rag.md). 원본 문서는 루트 `Documents/` (`SECURE_DOCS_DIR`).

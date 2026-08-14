@@ -45,7 +45,7 @@
 | UI | 모달 팝업 (`PersonalInfoModal`). `/setting`으로 이동하지 않음 |
 | API | `GET/PUT /api/auth/profile` |
 | 편집 | 이메일·연락처·비밀번호 / 아이디·성명 읽기 전용 |
-| 설정 페이지 | 폰트·테마·새로고침·알림·제어 한계치만 |
+| 설정 페이지 | 폰트·테마·새로고침·알림·LLM 키. 공정 한계치는 API만 (`/api/settings/control-bounds`) |
 
 ## 백엔드 패키지 (`backend/package.json`)
 
@@ -127,7 +127,7 @@
 `package.json`에만 있고 `npm install`을 안 한 경우(예: auth 커밋 pull 직후) 위 오류가 납니다.
 
 ```powershell
-cd C:\Projects\KDT-Project\backend
+cd backend
 npm install
 npm run dev
 ```

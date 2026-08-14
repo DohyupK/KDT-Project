@@ -5,7 +5,7 @@
 MariaDB 공용 DB는 이미 Lightsail Ubuntu다. 절차: [`login-ubuntu-mariadb.md`](./login-ubuntu-mariadb.md).  
 이 문서는 **n8n·Qdrant 컨테이너를 그 서버(또는 같은 방식의 Ubuntu)에 올리는 방법**이다.
 
-포트·주소 숫자는 **루트 `.env`** 만 본다. 이 파일에는 키 이름만 적는다. 시크릿·공인 IP·토큰 커밋 금지.
+포트·주소 숫자는 **루트 `.env`** 만 본다. 로컬 포트·기동 주체: [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md). 시크릿·공인 IP·토큰 커밋 금지.
 
 로컬 PC에서는 루트 [`docker-compose.yml`](../../docker-compose.yml)로 `kdt-n8n` · `kdt-qdrant`를 켠다.
 
