@@ -328,16 +328,8 @@ flowchart TD
 | 파일 | 역할 |
 |------|------|
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
-<<<<<<< HEAD
-| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · [Lightsail Docker](./docs/guides/aws-lightsail-docker.md) · [AWS+PC vLLM 계획](./docs/plans/2026-08-14-aws-app-pc-vllm.md) |
-=======
-<<<<<<< HEAD
+| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · Lightsail Docker · AWS+PC vLLM · Grafana env · compose |
 | [`docs/guides/aws-lightsail-gpu-tunnel.md`](./docs/guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU 터널 · IP/DB 변경 목록 |
-| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 16GB 이전 · Grafana 호스트 env · compose/nginx |
-=======
-| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · [Lightsail Docker](./docs/guides/aws-lightsail-docker.md) |
->>>>>>> d2418839cb20b11e55cfa30fbd218aff0de2dd21
->>>>>>> cb55f73157bdbf23380ec24591fd0562fc4c391d
 | [`docs/work-log/2026-08-13.md`](./docs/work-log/2026-08-13.md) | 이슈 보고서 n8n 메일 · 포트/`npm run dev` 기동 주체 |
 | [`docs/work-log/2026-08-10.md`](./docs/work-log/2026-08-10.md) | N_FOLDS 5→6 · [모델 학습 방법 SSOT](./docs/references/model-training-methods.md) |
 | [`docs/work-log/2026-08-08.md`](./docs/work-log/2026-08-08.md) | 메인 위험 LOT·당일 KPI 0.8 · 대시보드 생산 상세 · issues 리팩터 · 이슈 저장=완료/과거 자료 |
