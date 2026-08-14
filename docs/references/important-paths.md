@@ -29,7 +29,9 @@
 | `frontend/src/api/axios.ts` | `baseURL: '/api'` (backend) |
 | `frontend/src/components/layout/UserAuthMenu.tsx` | 헤더 로그인/프로필 · 로그아웃 |
 | `frontend/src/components/layout/PersonalInfoModal.tsx` | 내 정보 팝업 (프로필 API) |
-| `frontend/next.config.ts` | `/api` → `:3001`; `/ai` → `127.0.0.1:8800` |
+| `frontend/next.config.ts` | `/api` → `:3001`; `/ai` → `127.0.0.1:8800`; `allowedDevOrigins` (공인 IP `next dev`) |
+| `frontend/src/proxy.ts` | 개발 요청 추적 (`[dev-proxy]`) |
+| `deploy/nginx-kdt.conf` | :80 → :3000. HMR만 `Connection upgrade` |
 
 ## backend
 

@@ -37,7 +37,7 @@ GPU Lightsail/EC2를 사지 않는다. 첨부 매뉴얼의 「한 대 GPU에서 
 | 무엇을 | 어디서 | 새 서버에서 |
 |--------|--------|-------------|
 | MariaDB 호스트 | 루트 `.env` `DB_HOST` · `DATABASE_URL` | **서버 안 앱:** `127.0.0.1`. **이 PC `npm run dev`:** 새 공인 IP (그때만 방화벽 3306) |
-| CORS | `CORS_ORIGIN` `CORS_ORIGINS` | 서버: `http://<퍼블릭IP>` (끝 슬래시 없음). 이 PC 개발: `http://localhost:3000` |
+| CORS | `CORS_ORIGIN` `CORS_ORIGINS` | 서버: `http://<퍼블릭IP>` (끝 슬래시 없음). 이 PC 개발: `http://localhost:3000`. 서버에서 `next dev`로 공인 IP UI를 열면 이 값이 `allowedDevOrigins`에도 쓰임 — 공란 사고: [aws-dashboard-empty-next-dev.md](../references/aws-dashboard-empty-next-dev.md) |
 | Grafana iframe | `NEXT_PUBLIC_GRAFANA_HOST` `NEXT_PUBLIC_GRAFANA_PORT` | Grafana를 16GB로 옮기면 새 IP. 구 서버에 남겨 두면 구 IP 유지 |
 | vLLM | `CHAT_VLLM_BASE_URL` | **양쪽 모두** `http://127.0.0.1:8001/v1` (터널). 8001을 인터넷에 열지 않음 |
 | n8n · Qdrant | `N8N_ISSUE_REPORT_WEBHOOK_URL` `QDRANT_URL` | `http://127.0.0.1:5678/...` · `http://127.0.0.1:6333` |
@@ -112,7 +112,7 @@ cd ~/KDT-Project
 docker compose up -d
 ```
 
-Nginx 샘플: [`deploy/nginx-kdt.conf`](../../deploy/nginx-kdt.conf).
+Nginx 샘플: [`deploy/nginx-kdt.conf`](../../deploy/nginx-kdt.conf). HMR은 `/_next/webpack-hmr`만 upgrade. 공인 IP + `next dev` 공란은 [aws-dashboard-empty-next-dev.md](../references/aws-dashboard-empty-next-dev.md).
 
 이 PC에서 개발을 유지할 때 CORS는 `localhost:3000`을 그대로 두고, `DB_HOST`만 새 공인 IP로 바꾼다. 서버용 `.env`와 로컬 `.env`를 섞지 말 것.
 
@@ -126,6 +126,8 @@ Nginx 샘플: [`deploy/nginx-kdt.conf`](../../deploy/nginx-kdt.conf).
 ```powershell
 .\scripts\vllm-tunnel.ps1 -KeyPath "C:\Users\OWNER\Downloads\키.pem" -PublicHost "<16GB공인IP>"
 ```
+
+스크립트는 SSH keepalive 후 끊기면 재연결한다. Ctrl+C로 중단. 서버 `127.0.0.1:8001`은 이 PC vLLM로 가는 구멍이지, Lightsail에 모델이 있다는 뜻이 아니다.
 
 또는:
 

@@ -43,7 +43,7 @@ vLLM은 이 PC에서만 켠다 (`--host 127.0.0.1 --port 8001`). 그다음 터�
 .\scripts\vllm-tunnel.ps1 -KeyPath "C:\Users\OWNER\Downloads\키.pem" -PublicHost "<16GB공인IP>"
 ```
 
-서버 방화벽에 8001을 열지 않는다. `CHAT_VLLM_BASE_URL`은 서버에서도 `http://127.0.0.1:8001/v1`.
+`vllm-tunnel.ps1`은 keepalive 후 끊기면 재연결한다. 서버 방화벽에 8001을 열지 않는다. `CHAT_VLLM_BASE_URL`은 서버에서도 `http://127.0.0.1:8001/v1` (이 PC로 이어진 구멍).
 
 라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md). vLLM이 꺼져 있으면 **클라우드 폴백 없음**.
 
