@@ -6,6 +6,7 @@ import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
+import { dispatchNewRiskTopIssueReports } from './issueReportN8n.js'
 
 const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
 
@@ -80,6 +81,15 @@ if (analysisOnlyIds.length > 0) {
     if (issuesCreated) console.log('[analysis-sync] issues_created', issuesCreated)
   } catch (err) {
     console.error('[analysis-sync] issues_failed', err)
+  }
+
+  try {
+    const mailed = await dispatchNewRiskTopIssueReports()
+    if (mailed.enabled && (mailed.inserted || mailed.baseline)) {
+      console.log('[analysis-sync] issue_reports', mailed)
+    }
+  } catch (err) {
+    console.error('[analysis-sync] issue_reports_failed', err)
   }
 }
 

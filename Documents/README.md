@@ -16,11 +16,32 @@ Documents/
 | `api_llm` (클라우드 API) | Public, Confidential |
 | `secure_llm` (로컬 vLLM) | Public, Confidential, Secret, TopSecret |
 
-## 지원 형식
+## 지원 형식 · 변환 정책
 
-- `.md` (YAML frontmatter) — `*/Markdown/`에 두면 바로 ingest
-- `.txt` / `.pdf` — 각 등급 폴더에 두면 워처가 `Markdown/<stem>.md`로 변환
-- `.csv` / `.xlsx` — `ai-service/data/csv_lake/`로 이동 후 profile MD만 `Confidential/Markdown/`
+| 형식 | 동작 |
+|------|------|
+| `.md` (YAML frontmatter) | `*/Markdown/`에 두면 바로 ingest (수동 작성) |
+| `.txt` / **텍스트 레이어 있는** `.pdf` | 등급 폴더에 두면 **네이티브 추출로 ingest**. 매칭 `.md`를 **만들지 않음** |
+| 스캔 PDF / 이미지 (`.png` `.jpg` `.jpeg` `.webp` `.tif` `.tiff` `.gif`) | 네이티브 텍스트가 비면 **OCR(Tesseract)** → `Markdown/<stem>.md` + MariaDB `text_match` 연동 |
+| `.csv` / `.xlsx` | `ai-service/data/csv_lake/`로 이동 후 profile MD만 `Confidential/Markdown/` |
+
+워처: **Express backend** 기동 시 `documentWatcherSupervisor`가  
+`ai-service/scripts/run_document_watcher.py`를 자식 프로세스로 띄움 (`DOCUMENT_WATCHER_AUTOSTART=1`).  
+OCR·변환 코드는 계속 `ai-service/agent/document_convert.py`에 있음.
+
+Qdrant(:6333): **ai-service** 기동 시 `qdrant_supervisor`가 Docker 컨테이너 `kdt-qdrant`를 자동 기동 (`QDRANT_AUTOSTART=1`).  
+스토리지: `DB/data/qdrant_storage/`.
+
+일회 정리(텍스트 PDF에 대해 예전에 만든 converted `.md` 삭제):
+
+```bash
+cd ai-service
+python scripts/cleanup_converted_md.py --dry-run
+python scripts/cleanup_converted_md.py
+python ingest_secure.py
+```
+
+OCR 요구: OS **Tesseract** (`kor`+`eng`), Python `Pillow` · `pytesseract` · 스캔 PDF 렌더는 `pymupdf`.
 
 Override: env `SECURE_DOCS_DIR` (기본값 = 이 디렉터리).
 

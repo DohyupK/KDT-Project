@@ -27,7 +27,8 @@
 | 보안 챗 SSE | `POST /security-chat/stream` | `meta`/`delta`/`replace`/`done`/`error` |
 | Secure RAG | `secure_graph` · Qdrant `secure_docs` | Hybrid + BM25 + RRF + CPU rerank |
 | Analytics | `node_analytics` · `csv_lake` | Polars 집계 · Smart Fallback→RAG |
-| Ingest | `ingest_secure.py` · watchdog | Documents → MD/인덱스 · BM25 핫리로드 |
+| Ingest | `ingest_secure.py` · backend-spawned watcher · OCR | 텍스트 pdf/txt 네이티브 · 스캔/이미지→OCR md+`text_match` · BM25 핫리로드 |
+| Qdrant | `agent/qdrant_supervisor.py` | ai-service 기동 시 Docker `kdt-qdrant` (`QDRANT_AUTOSTART=1`) |
 
 상세 목록: [`ai-service-feature-catalog.md`](../docs/references/ai-service-feature-catalog.md)
 
@@ -203,6 +204,13 @@ clf는 capacity/residual을 입력으로 쓰지 않는다. What-if: 불량 최�
 
 모노레포 스택 SSOT: [루트 README — 기술 스택](../README.md#기술-스택-모노레포)  
 직접 의존성 원본: [`requirements.txt`](./requirements.txt)
+
+**Documents OCR:** OS에 [Tesseract](https://github.com/tesseract-ocr/tesseract) 설치 (`kor`+`eng`).  
+Windows: `winget install UB-Mannheim.TesseractOCR` 후 `kor.traineddata`는  
+`%LOCALAPPDATA%\tesseract-tessdata\tessdata\`에 두면 됨 (Program Files 쓰기 권한 불필요).  
+선택 env: `TESSERACT_CMD`. Python: `pip install pymupdf Pillow pytesseract`.  
+정리: `python scripts/cleanup_converted_md.py` → Qdrant(:6333) 기동 후 `python ingest_secure.py`.  
+MariaDB `text_match` DDL: [`DB/text_match.sql`](../DB/text_match.sql) · `python DB/ai-service/apply_text_match.py`.
 
 ---
 

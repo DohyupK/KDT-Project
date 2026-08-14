@@ -18,7 +18,7 @@
     "migrate:handover-fk": "tsx scripts/migrate-handover-fk.ts",
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
-    "migrate:inquiry-attachments": "tsx scripts/migrate-inquiry-attachments.ts",
+    "migrate:send-email": "tsx scripts/migrate-send-email.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
     "seed:judgment-lots": "tsx scripts/seed-judgment-lots.ts",
@@ -34,12 +34,16 @@
     "migrate:lot-recommended-actions": "tsx scripts/migrate-lot-recommended-actions.ts",
     "migrate:align-schema": "tsx scripts/migrate-align-schema.ts",
     "migrate:issues-refactor": "tsx scripts/migrate-issues-refactor.ts",
-    "smoke:issue-content": "tsx scripts/smoke-issue-content.ts",
+    "send:one-issue-report": "tsx scripts/send-one-issue-report.ts",
     "fill:all-issue-content": "tsx scripts/fill-all-issue-content.ts",
     "inspect:schema": "tsx scripts/inspect-schema.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",
     "sync:spc-lots": "tsx scripts/sync-spc-lots.ts",
+<<<<<<< HEAD
     "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts tests/lotRecommendedAction.summary.test.ts"
+=======
+    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts tests/issueReportHtml.test.ts"
+>>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
   },
   "keywords": [],
   "author": "",

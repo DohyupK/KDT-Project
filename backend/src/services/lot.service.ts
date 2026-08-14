@@ -307,7 +307,7 @@ export type RiskTopResult = {
   totalPages: number
 }
 
-const RISK_TOP_WHERE = `a.risk_level = '심각'
+export const RISK_TOP_WHERE = `a.risk_level = '심각'
   AND l.\`timestamp\` >= DATE_SUB(NOW(), INTERVAL 3 DAY)`
 
 /** Recent 3 days · risk_level 심각 — paginated for Main 「위험 LOT Top」. */

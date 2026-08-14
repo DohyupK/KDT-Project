@@ -12,7 +12,8 @@ Express API: 세션 · 보안 게이트 · ai-service 프록시 · auth · 이�
 
 ## 한 줄 역할
 
-- `DB/schema.sql` (repo root): `users`, settings, `lots` (공정), `analysis_lots` (채점), `judgment_lots` (품질·용량·잔류), issues, handover, inquiries
+- `DB/schema.sql` (repo root): `users`, settings, `lots` (공정), `analysis_lots` (채점), `judgment_lots` (품질·용량·잔류), issues, handover, inquiries, `send_email`
+- `DB/send_email.sql`: `user_settings.email_check` + `send_email` (or `npm run migrate:send-email`)
 - `DB/inquiries.sql`: inquiries only (or `npm run migrate:inquiries`)
 - `DB/chat_schema.sql`: chat sessions/messages (when using MariaDB chat store)
 
@@ -177,3 +178,4 @@ npm run sync:spc-lots -- --skip-score
 - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (기본 DB명 예: `kdt_project`)
 - `CORS_ORIGINS` 또는 `CORS_ORIGIN` (예: `http://localhost:3000`)
 - `PORT` (기본 `3001`)
+- 이슈 보고서 메일(n8n / Gmail API): `ISSUE_REPORT_MAIL_ENABLED`, `ISSUE_REPORT_MAIL_FROM`, `N8N_ISSUE_REPORT_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `GOOGLE_MAIL_SERVICE_ACCOUNT_FILE`(JSON 경로만), `GOOGLE_MAIL_DELEGATED_USER`
