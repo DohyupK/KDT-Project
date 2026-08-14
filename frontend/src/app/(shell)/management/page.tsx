@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
+import DateInput from '@/components/DateInput'
 import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 
@@ -57,14 +58,35 @@ function isValidRange(range: DateRangeFilter): boolean {
   return range.startDate <= range.endDate
 }
 
+function localDayStartMs(isoDate: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
+  if (!match) return Number.NaN
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  return new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+}
+
+function localDayEndMs(isoDate: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
+  if (!match) return Number.NaN
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  return new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
+}
+
 function applyDateRangeToGrafanaUrl(baseUrl: string, range: DateRangeFilter | null): string {
   if (!range || !isValidRange(range)) return baseUrl
   try {
     const url = new URL(baseUrl)
-    const from = new Date(`${range.startDate}T00:00:00`).getTime()
-    const to = new Date(`${range.endDate}T23:59:59.999`).getTime()
+    const from = localDayStartMs(range.startDate)
+    const to = localDayEndMs(range.endDate)
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return baseUrl
     url.searchParams.set('from', String(from))
     url.searchParams.set('to', String(to))
+    // Absolute range: live refresh can keep the dashboard's now-2h window.
+    url.searchParams.delete('refresh')
     return url.toString()
   } catch {
     return baseUrl
@@ -84,35 +106,11 @@ function GrafanaDateRangeFilter({
   onReset: () => void
   isDark: boolean
 }) {
-  const startRef = useRef<HTMLInputElement>(null)
-  const endRef = useRef<HTMLInputElement>(null)
   const canApply = isValidRange(draft)
   const muted = isDark ? 'text-slate-500' : 'text-slate-400'
-  const inputClass = isDark
-    ? 'h-8 w-[9.5rem] shrink-0 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs tabular-nums text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
-    : 'h-8 w-[9.5rem] shrink-0 rounded-md border border-slate-200 bg-white px-2 text-xs tabular-nums text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
   const secondaryBtnClass = isDark
     ? 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-600 px-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
     : 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
-
-  const openEndPicker = () => {
-    window.requestAnimationFrame(() => {
-      endRef.current?.focus()
-      endRef.current?.showPicker?.()
-    })
-  }
-
-  const handleStartChange = (startDate: string) => {
-    onDraftChange({ ...draft, startDate })
-    if (!startDate) return
-    startRef.current?.blur()
-    if (!draft.endDate) openEndPicker()
-  }
-
-  const handleEndChange = (endDate: string) => {
-    onDraftChange({ ...draft, endDate })
-    if (endDate) endRef.current?.blur()
-  }
 
   return (
     <div
@@ -122,24 +120,22 @@ function GrafanaDateRangeFilter({
       aria-label="조회 기간"
     >
       <span className={`shrink-0 text-[11px] font-medium ${muted}`}>조회</span>
-      <input
-        ref={startRef}
-        type="date"
-        value={draft.startDate}
-        max={draft.endDate || undefined}
-        onChange={(e) => handleStartChange(e.target.value)}
-        className={inputClass}
+      <DateInput
         aria-label="시작일"
+        value={draft.startDate}
+        onChange={(startDate) => onDraftChange({ ...draft, startDate })}
+        isDark={isDark}
+        compact
+        className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
       />
       <span className={`shrink-0 text-xs ${muted}`}>~</span>
-      <input
-        ref={endRef}
-        type="date"
-        value={draft.endDate}
-        min={draft.startDate || undefined}
-        onChange={(e) => handleEndChange(e.target.value)}
-        className={inputClass}
+      <DateInput
         aria-label="종료일"
+        value={draft.endDate}
+        onChange={(endDate) => onDraftChange({ ...draft, endDate })}
+        isDark={isDark}
+        compact
+        className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
       />
       <button
         type="button"
@@ -193,7 +189,7 @@ function GrafanaEmbed({
   if (variant === 'modal') {
     return (
       <iframe
-        key={refreshKey}
+        key={`${refreshKey}:${src}`}
         src={src}
         title={title}
         scrolling="no"
@@ -204,11 +200,11 @@ function GrafanaEmbed({
 
   return (
     <iframe
-      key={refreshKey}
-      src={src}
-      title={title}
-      scrolling="no"
-      className="absolute inset-0 block h-full w-full border-0"
+        key={`${refreshKey}:${src}`}
+        src={src}
+        title={title}
+        scrolling="no"
+        className="absolute inset-0 block h-full w-full border-0"
     />
   )
 }
