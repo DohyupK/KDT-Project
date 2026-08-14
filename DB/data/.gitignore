@@ -2,4 +2,5 @@
 *.sqlite
 *.sqlite-*
 qdrant_storage/
+n8n/
 !.gitkeep

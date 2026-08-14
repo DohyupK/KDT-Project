@@ -73,7 +73,7 @@ Qdrant는 ai-service가 Docker로 **같이 올리려고** 하고, **n8n · 로�
 | **3001** | Express | **켬** | `dev:backend` (`AI_SERVICE_AUTOSTART=0` — ai 이중 기동 방지) · Documents 워처 자식 |
 | **8800** | FastAPI ai-service | **켬** | `dev:ai` (uvicorn) |
 | **6333** / **6334** | Qdrant HTTP / gRPC | **간접** | ai-service `QDRANT_AUTOSTART=1` → Docker `kdt-qdrant` (Docker Desktop 필요) |
-| **5678** | n8n UI · 이슈메일 웹훅 | **안 켬** | 수동 `docker start kdt-n8n` |
+| **5678** | n8n UI · 이슈메일 웹훅 | **안 켬** | `docker compose up -d` → `kdt-n8n` |
 | **8001** | 보안 챗 로컬 LLM | **안 켬** | LM Studio / vLLM **수동** |
 | **3306** | MariaDB | **안 켬** | `.env` `DB_*` (원격 가능) |
 
@@ -81,17 +81,17 @@ Express 안에 n8n·Qdrant를 넣지 않는다. Qdrant는 **ai-service와 함께
 
 | 루트 `npm run dev`가 하는 일 | 하지 않는 일 |
 |------------------------------|--------------|
-| concurrently: ai + backend + frontend | n8n(`kdt-n8n`) start |
+| concurrently: ai + backend + frontend | n8n start (별도 compose) |
 | backend → Documents 워처 Python | MariaDB · :8001 LLM |
-| ai → Qdrant `docker start`/`run` 시도 | n8n 워크플로·로그인 (컨테이너 데이터) |
+| ai → Qdrant `docker start`/`run` 시도 | — |
 
 ### 0) 사전 요구
 
 - Node.js LTS, npm  
 - Python **3.11+**, `pip`  
-- Docker (Qdrant 자동기동 · 이슈 메일이면 n8n `kdt-n8n`)  
+- Docker (Qdrant · n8n)  
 - (선택) 로컬 LLM(:8001) · Tesseract OCR (`kor`+`eng`)  
-- (이슈 메일) `docker start kdt-n8n` — 워크플로 Published, 웹훅 `/webhook/issue-report`
+- (이슈 메일 · Qdrant) 루트에서 `docker compose up -d` — `kdt-n8n` :5678, `kdt-qdrant` :6333
 
 ### 1) 루트 `.env`
 
@@ -141,6 +141,7 @@ npm install
 저장소 **루트** (`KDT-Project/`)에서:
 
 ```bash
+docker compose up -d
 npm run dev
 ```
 
@@ -328,11 +329,15 @@ flowchart TD
 |------|------|
 | [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
 <<<<<<< HEAD
+| [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · [Lightsail Docker](./docs/guides/aws-lightsail-docker.md) · [AWS+PC vLLM 계획](./docs/plans/2026-08-14-aws-app-pc-vllm.md) |
+=======
+<<<<<<< HEAD
 | [`docs/guides/aws-lightsail-gpu-tunnel.md`](./docs/guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU 터널 · IP/DB 변경 목록 |
 | [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 16GB 이전 · Grafana 호스트 env · compose/nginx |
 =======
 | [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · [Lightsail Docker](./docs/guides/aws-lightsail-docker.md) |
 >>>>>>> d2418839cb20b11e55cfa30fbd218aff0de2dd21
+>>>>>>> cb55f73157bdbf23380ec24591fd0562fc4c391d
 | [`docs/work-log/2026-08-13.md`](./docs/work-log/2026-08-13.md) | 이슈 보고서 n8n 메일 · 포트/`npm run dev` 기동 주체 |
 | [`docs/work-log/2026-08-10.md`](./docs/work-log/2026-08-10.md) | N_FOLDS 5→6 · [모델 학습 방법 SSOT](./docs/references/model-training-methods.md) |
 | [`docs/work-log/2026-08-08.md`](./docs/work-log/2026-08-08.md) | 메인 위험 LOT·당일 KPI 0.8 · 대시보드 생산 상세 · issues 리팩터 · 이슈 저장=완료/과거 자료 |

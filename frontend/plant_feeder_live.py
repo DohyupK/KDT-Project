@@ -5,9 +5,10 @@ plant_feeder_live.py — 가상 공장 실시간 데이터 피더 (학생 배포
 서비스를 켜두면 10분(설정 가능)마다 LOT 1개를 **그 자리에서 생성**하여
 현재 시각 기준으로 여러분의 MariaDB에 직접 적재한다. 별도 데이터 파일 불필요.
 
-  - 공정변수 10개 : 생산 즉시  → lots (+ lot_results stub: lot_id만, qd/residual NULL)
-  - 불량 판정     : 생산 +60분 → lot_results.quality_defect
-  - 잔류 리튬     : 생산 +24h  → lot_results.residual_li
+  - 공정변수 10개 : 생산 즉시  → SPC_LOT (+ SPC_LOT_results stub: lot_id만, qd/residual NULL)
+  - 불량 판정     : 생산 +60분 → SPC_LOT_results.quality_defect
+  - 잔류 리튬     : 생산 +24h  → SPC_LOT_results.residual_li
+  - 앱 lots 는 피더가 직접 쓰지 않음. backend spcLotSync 가 SPC_LOT → lots 미러.
 
 실행 (본인 프로젝트에서 별도 서비스로):
   pip install pymysql numpy
@@ -23,8 +24,8 @@ plant_feeder_live.py — 가상 공장 실시간 데이터 피더 (학생 배포
   DEFECT_DELAY_MIN=60    불량 판정 도착 지연
   RESIDUAL_DELAY_MIN=1440  잔류 리튬 도착 지연
   BACKFILL=12            첫 실행 시 미리 넣어줄 과거 LOT 수
-  LOTS_TABLE=lots / RESULTS_TABLE=lot_results   적재 테이블명
-                         lots 는 id+timestamp (운영 스키마). seq 는 lot_results 에만 있음.
+  LOTS_TABLE=SPC_LOT / RESULTS_TABLE=SPC_LOT_results   적재 테이블명
+                         SPC_LOT 는 seq+lot_id+produced_at. 운영 lots(id+timestamp)는 싱크가 채움.
   DRY_RUN=1              DB 없이 콘솔 출력만 (동작 확인용)
 
 주의: 같은 폴더에 생기는 feeder_state.json(도착 대기 중인 검사 결과)은 열어보지 말 것.
@@ -74,9 +75,9 @@ def _ident(name, default):
     return cleaned or default
 
 
-T_LOTS = _ident(os.environ.get("LOTS_TABLE", "lots"), "lots")
-T_RES = _ident(os.environ.get("RESULTS_TABLE", "lot_results"), "lot_results")
-APP_LOTS = False  # True: 운영 lots (id, timestamp). False: 피더 전용 (seq, lot_id, produced_at)
+T_LOTS = _ident(os.environ.get("LOTS_TABLE", "SPC_LOT"), "SPC_LOT")
+T_RES = _ident(os.environ.get("RESULTS_TABLE", "SPC_LOT_results"), "SPC_LOT_results")
+APP_LOTS = False  # True: 운영 lots (id, timestamp). False: 피더 전용 SPC_LOT (seq, lot_id, produced_at)
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "feeder_state.json")
 
