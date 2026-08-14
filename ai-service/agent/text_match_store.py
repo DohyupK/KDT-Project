@@ -40,7 +40,7 @@ def upsert(
             conn.execute(
                 text(
                     """
-                    INSERT INTO text_match (
+                    INSERT INTO TEXT_MATCH (
                       source_path, md_path, clearance, source_ext,
                       extract_method, source_sha1, status, error_message
                     ) VALUES (
@@ -88,7 +88,7 @@ def get_by_source(source_path: str) -> dict[str, Any] | None:
                     SELECT id, source_path, md_path, clearance, source_ext,
                            extract_method, source_sha1, status, error_message,
                            created_at, updated_at
-                    FROM text_match
+                    FROM TEXT_MATCH
                     WHERE source_path = :source_path
                     LIMIT 1
                     """
@@ -115,7 +115,7 @@ def get_by_md(md_path: str) -> dict[str, Any] | None:
                     SELECT id, source_path, md_path, clearance, source_ext,
                            extract_method, source_sha1, status, error_message,
                            created_at, updated_at
-                    FROM text_match
+                    FROM TEXT_MATCH
                     WHERE md_path = :md_path
                     LIMIT 1
                     """
@@ -137,7 +137,7 @@ def delete_by_source(source_path: str) -> bool:
 
         with engine.begin() as conn:
             conn.execute(
-                text("DELETE FROM text_match WHERE source_path = :source_path"),
+                text("DELETE FROM TEXT_MATCH WHERE source_path = :source_path"),
                 {"source_path": source_path[:512]},
             )
         return True

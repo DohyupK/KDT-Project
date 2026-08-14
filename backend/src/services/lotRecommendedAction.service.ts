@@ -207,9 +207,9 @@ export async function loadLotContext(lotId: string): Promise<LotContext | null> 
             j.residual_li,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
      WHERE l.id = ? LIMIT 1`,
     [lotId],
   )
@@ -222,7 +222,7 @@ export async function getRecommendedActionForLot(
   const rows = await query<RecommendedActionRow[]>(
     `SELECT lot_id, summary, steps_json, sources_json, drivers_json, status,
             error_message, content_hash, generated_at
-     FROM lot_recommended_actions WHERE lot_id = ? LIMIT 1`,
+     FROM LOT_RECOMMENDED_ACTIONS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   const r = rows[0]
@@ -269,7 +269,7 @@ async function upsertRecommendedAction(
   },
 ): Promise<void> {
   await query(
-    `INSERT INTO lot_recommended_actions (
+    `INSERT INTO LOT_RECOMMENDED_ACTIONS (
        lot_id, summary, steps_json, sources_json, drivers_json,
        status, error_message, content_hash, generated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
@@ -331,7 +331,7 @@ export async function generateRecommendedActionForLot(
 
   if (!opts.force) {
     const existing = await query<{ content_hash: string | null; status: string }[]>(
-      `SELECT content_hash, status FROM lot_recommended_actions WHERE lot_id = ? LIMIT 1`,
+      `SELECT content_hash, status FROM LOT_RECOMMENDED_ACTIONS WHERE lot_id = ? LIMIT 1`,
       [lotId],
     )
     if (
@@ -398,7 +398,7 @@ export async function fillRecommendedActionsForLots(
   let ids = lotIds
   if (ids == null) {
     const rows = await query<{ lot_id: string }[]>(
-      `SELECT a.lot_id FROM analysis_lots a WHERE a.lot_id <> 'LOT-SYS-HANDOVER'`,
+      `SELECT a.lot_id FROM ANALYSIS_LOTS a WHERE a.lot_id <> 'LOT-SYS-HANDOVER'`,
     )
     ids = rows.map((r) => r.lot_id)
   }
@@ -464,7 +464,7 @@ export async function generateFromFeatures(
   }
 
   const residualRows = await query<{ residual_li: number | null }[]>(
-    `SELECT residual_li FROM judgment_lots WHERE lot_id = ? LIMIT 1`,
+    `SELECT residual_li FROM JUDGMENT_LOTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   const residualLi = residualRows[0]?.residual_li ?? null
@@ -479,7 +479,7 @@ export async function generateFromFeatures(
   })
 
   const existing = await query<{ content_hash: string | null; status: string }[]>(
-    `SELECT content_hash, status FROM lot_recommended_actions WHERE lot_id = ? LIMIT 1`,
+    `SELECT content_hash, status FROM LOT_RECOMMENDED_ACTIONS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   if (

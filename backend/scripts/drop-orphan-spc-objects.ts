@@ -7,11 +7,10 @@ import mariadb from 'mariadb'
 const DROP_NAMES = [
   'v_spc_charts',
   'lot_spc_results',
-  'spc_limits',
   'control_bounds',
 ] as const
 
-const KEEP_NAMES = ['SPC_LOT', 'SPC_LOT_results', 'lot_results'] as const
+const KEEP_NAMES = ['SPC_LOT', 'SPC_LOT_results', 'LOT_RESULTS'] as const
 
 async function main() {
   const sqlPath = path.resolve(
@@ -29,13 +28,16 @@ async function main() {
     multipleStatements: true,
   })
 
+  const names = [...DROP_NAMES, ...KEEP_NAMES]
+  const inList = names.map(() => '?').join(', ')
+
   try {
     const before = (await conn.query(
       `SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME IN (?, ?, ?, ?, ?, ?, ?)
+         AND TABLE_NAME IN (${inList})
        ORDER BY TABLE_NAME`,
-      [...DROP_NAMES, ...KEEP_NAMES],
+      names,
     )) as { TABLE_NAME: string; TABLE_TYPE: string }[]
     console.log(
       'BEFORE',
@@ -48,9 +50,9 @@ async function main() {
     const after = (await conn.query(
       `SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME IN (?, ?, ?, ?, ?, ?, ?)
+         AND TABLE_NAME IN (${inList})
        ORDER BY TABLE_NAME`,
-      [...DROP_NAMES, ...KEEP_NAMES],
+      names,
     )) as { TABLE_NAME: string; TABLE_TYPE: string }[]
     const remaining = after.map((r) => r.TABLE_NAME)
     const droppedGone = DROP_NAMES.every((n) => !remaining.includes(n))
@@ -64,11 +66,13 @@ async function main() {
     console.log('KEPT_TABLES', keptPresent)
 
     if (!droppedGone) {
-      throw new Error(`Expected orphans gone; still present: ${remaining.filter((n) => (DROP_NAMES as readonly string[]).includes(n)).join(', ')}`)
+      throw new Error(
+        `Expected orphans gone; still present: ${remaining.filter((n) => (DROP_NAMES as readonly string[]).includes(n)).join(', ')}`,
+      )
     }
     if (!keptPresent) {
       console.warn(
-        'WARN: SPC_LOT / SPC_LOT_results / lot_results missing (feeder or DDL may CREATE later)',
+        'WARN: SPC_LOT / SPC_LOT_results / LOT_RESULTS missing (feeder or DDL may CREATE later)',
       )
     }
   } finally {

@@ -2,7 +2,7 @@ import '../src/loadRootEnv.js'
 import mariadb from 'mariadb'
 
 const LOTS_DDL = `
-CREATE TABLE lots (
+CREATE TABLE LOTS (
   id                VARCHAR(64)  NOT NULL PRIMARY KEY,
   \`timestamp\`       DATETIME     NOT NULL,
   d50               DOUBLE       NULL,
@@ -19,7 +19,7 @@ CREATE TABLE lots (
 )`
 
 const ANALYSIS_DDL = `
-CREATE TABLE analysis_lots (
+CREATE TABLE ANALYSIS_LOTS (
   lot_id                   VARCHAR(64)  NOT NULL PRIMARY KEY,
   probability              DOUBLE       NULL,
   spc_status               VARCHAR(32)  NULL,
@@ -27,7 +27,7 @@ CREATE TABLE analysis_lots (
   risk_reason              VARCHAR(255) NULL,
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_analysis_lots_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    FOREIGN KEY (lot_id) REFERENCES LOTS(id)
     ON DELETE CASCADE,
   INDEX idx_analysis_risk (risk_level)
 )`
@@ -45,7 +45,7 @@ async function main() {
     const before = await conn.query(
       `SELECT TABLE_NAME FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME IN ('lots', 'analysis_lots')
+         AND TABLE_NAME IN ('LOTS', 'ANALYSIS_LOTS')
        ORDER BY TABLE_NAME`,
     )
     console.log(
@@ -55,29 +55,29 @@ async function main() {
 
     // Same connection: pool release would lose session FOREIGN_KEY_CHECKS.
     await conn.query('SET FOREIGN_KEY_CHECKS = 0')
-    await conn.query('DROP TABLE IF EXISTS analysis_lots')
-    await conn.query('DROP TABLE IF EXISTS lots')
+    await conn.query('DROP TABLE IF EXISTS ANALYSIS_LOTS')
+    await conn.query('DROP TABLE IF EXISTS LOTS')
     await conn.query(LOTS_DDL)
     await conn.query(ANALYSIS_DDL)
     await conn.query('SET FOREIGN_KEY_CHECKS = 1')
 
     const colsLots = (await conn.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lots'
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'LOTS'
        ORDER BY ORDINAL_POSITION`,
     )) as { COLUMN_NAME: string }[]
     const colsAnalysis = (await conn.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'analysis_lots'
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ANALYSIS_LOTS'
        ORDER BY ORDINAL_POSITION`,
     )) as { COLUMN_NAME: string }[]
     const counts = (await conn.query(
       `SELECT
-         (SELECT COUNT(*) FROM lots) AS lots,
-         (SELECT COUNT(*) FROM analysis_lots) AS analysis_lots`,
+         (SELECT COUNT(*) FROM LOTS) AS lots,
+         (SELECT COUNT(*) FROM ANALYSIS_LOTS) AS analysis_lots`,
     )) as { lots: bigint | number; analysis_lots: bigint | number }[]
 
-    console.log('AFTER_TABLES', ['analysis_lots', 'lots'])
+    console.log('AFTER_TABLES', ['ANALYSIS_LOTS', 'LOTS'])
     console.log('LOTS_COLS', colsLots.map((r) => r.COLUMN_NAME).join(', '))
     console.log('ANALYSIS_COLS', colsAnalysis.map((r) => r.COLUMN_NAME).join(', '))
     console.log('ROW_COUNTS', {

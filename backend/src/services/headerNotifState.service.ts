@@ -73,13 +73,13 @@ function toDto(row: HeaderNotifStateRow | undefined): HeaderNotifStateDto {
 async function ensureRow(userId: string): Promise<HeaderNotifStateDto> {
   const rows = await query<HeaderNotifStateRow[]>(
     `SELECT user_id, read_ids, dismissed_ids
-     FROM user_header_notif_state WHERE user_id = ? LIMIT 1`,
+     FROM USER_HEADER_NOTIF_STATE WHERE user_id = ? LIMIT 1`,
     [userId],
   )
   if (rows[0]) return toDto(rows[0])
 
   await query(
-    `INSERT INTO user_header_notif_state (user_id, read_ids, dismissed_ids)
+    `INSERT INTO USER_HEADER_NOTIF_STATE (user_id, read_ids, dismissed_ids)
      VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE user_id = user_id`,
     [userId, '[]', '[]'],
@@ -91,7 +91,7 @@ async function saveState(userId: string, state: HeaderNotifStateDto): Promise<He
   const readJson = JSON.stringify(trimIds(state.readIds))
   const dismissedJson = JSON.stringify(trimIds(state.dismissedIds))
   await query(
-    `INSERT INTO user_header_notif_state (user_id, read_ids, dismissed_ids)
+    `INSERT INTO USER_HEADER_NOTIF_STATE (user_id, read_ids, dismissed_ids)
      VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE
        read_ids = VALUES(read_ids),

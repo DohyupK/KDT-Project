@@ -13,7 +13,7 @@ async function main() {
   let lotIds: string[] | undefined
   if (limit != null && Number.isFinite(limit) && limit > 0) {
     const rows = await query<{ lot_id: string }[]>(
-      `SELECT lot_id FROM analysis_lots
+      `SELECT lot_id FROM ANALYSIS_LOTS
        WHERE lot_id <> 'LOT-SYS-HANDOVER'
        ORDER BY lot_id ASC
        LIMIT ?`,
@@ -29,7 +29,7 @@ async function main() {
 
   const sample = await query(
     `SELECT lot_id, risk_level, spc_status, risk_reason
-     FROM analysis_lots ORDER BY lot_id DESC LIMIT 5`,
+     FROM ANALYSIS_LOTS ORDER BY lot_id DESC LIMIT 5`,
   )
   console.log('SAMPLE', JSON.stringify(sample, null, 2))
 }

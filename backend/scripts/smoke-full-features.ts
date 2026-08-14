@@ -21,11 +21,11 @@ function pass(name: string, ok: boolean, detail?: string) {
 }
 
 async function cleanup() {
-  await query(`DELETE FROM issues WHERE lot_id = ?`, [MOCK_ID])
-  await query(`DELETE FROM lot_results WHERE lot_id = ?`, [MOCK_ID])
-  await query(`DELETE FROM judgment_lots WHERE lot_id = ?`, [MOCK_ID])
-  await query(`DELETE FROM analysis_lots WHERE lot_id = ?`, [MOCK_ID])
-  await query(`DELETE FROM lots WHERE id = ?`, [MOCK_ID])
+  await query(`DELETE FROM ISSUES WHERE lot_id = ?`, [MOCK_ID])
+  await query(`DELETE FROM LOT_RESULTS WHERE lot_id = ?`, [MOCK_ID])
+  await query(`DELETE FROM JUDGMENT_LOTS WHERE lot_id = ?`, [MOCK_ID])
+  await query(`DELETE FROM ANALYSIS_LOTS WHERE lot_id = ?`, [MOCK_ID])
+  await query(`DELETE FROM LOTS WHERE id = ?`, [MOCK_ID])
   await query(`DELETE FROM SPC_LOT WHERE lot_id = ?`, [MOCK_ID]).catch(() => undefined)
 }
 
@@ -81,9 +81,9 @@ async function main() {
       `SELECT COUNT(*) AS lots,
               SUM(j.lot_id IS NOT NULL) AS j,
               SUM(a.lot_id IS NOT NULL) AS a
-       FROM lots l
-       LEFT JOIN judgment_lots j ON j.lot_id = l.id
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
+       FROM LOTS l
+       LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
+       LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
        WHERE l.id <> 'LOT-SYS-HANDOVER'`,
     )
     const lots = Number(cover[0]?.lots ?? 0)
@@ -112,7 +112,7 @@ async function main() {
   // 4) score one mock lot: 3-stage + chart + scored_at
   await cleanup()
   await query(
-    `INSERT INTO lots (
+    `INSERT INTO LOTS (
       id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
       process_time, sintering_temp, humidity, tank_pressure, operator_id
     ) VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -132,10 +132,10 @@ async function main() {
   >(
     `SELECT lr.lot_id AS lr, j.lot_id AS j, a.lot_id AS a, a.scored_at,
             CASE WHEN a.spc_chart_json IS NULL THEN NULL ELSE 'yes' END AS chart
-     FROM lots l
-     LEFT JOIN lot_results lr ON lr.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN LOT_RESULTS lr ON lr.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE l.id = ?`,
     [MOCK_ID],
   )
@@ -235,7 +235,7 @@ async function main() {
       Array<{ analysis_scored_at: Date | string | null }>
     >(
       `SELECT a.scored_at AS analysis_scored_at
-       FROM analysis_lots a WHERE a.lot_id = ? LIMIT 1`,
+       FROM ANALYSIS_LOTS a WHERE a.lot_id = ? LIMIT 1`,
       [MOCK_ID],
     )
     pass(

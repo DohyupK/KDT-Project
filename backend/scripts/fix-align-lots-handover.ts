@@ -28,7 +28,7 @@ const HANDOVER_EXPECTED = [
 ] as const
 
 const HANDOVER_CREATE = `
-CREATE TABLE handover_history (
+CREATE TABLE HANDOVER_HISTORY (
   history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
   handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
   action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
@@ -39,7 +39,7 @@ CREATE TABLE handover_history (
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
   archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
   CONSTRAINT fk_handover_assignee
-    FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
+    FOREIGN KEY (assignee_user_id) REFERENCES USERS(user_id)
     ON DELETE SET NULL,
   INDEX idx_handover_created (created_at),
   INDEX idx_handover_action (action(32))
@@ -72,9 +72,9 @@ async function indexExists(table: string, name: string) {
 
 async function purgeMockRows() {
   // Handover mock/test authors
-  const hBefore = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM handover_history`)
+  const hBefore = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM HANDOVER_HISTORY`)
   const hDel = await query<unknown>(
-    `DELETE FROM handover_history
+    `DELETE FROM HANDOVER_HISTORY
      WHERE assignee_user_id = 'aa'
         OR handover_from IN ('a', 'mock')
         OR handover_content LIKE '%목업%'`,
@@ -83,7 +83,7 @@ async function purgeMockRows() {
     hDel && typeof hDel === 'object' && 'affectedRows' in hDel
       ? Number((hDel as { affectedRows: number }).affectedRows)
       : hDel
-  const hAfter = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM handover_history`)
+  const hAfter = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM HANDOVER_HISTORY`)
   console.log('PURGE_HANDOVER', {
     before: Number(hBefore[0]?.c ?? 0),
     deleted: hAffected,
@@ -92,7 +92,7 @@ async function purgeMockRows() {
 
   // analysis_lots: system placeholder lot scored by poller — not real process data.
   const aDel = await query<unknown>(
-    `DELETE FROM analysis_lots WHERE lot_id = 'LOT-SYS-HANDOVER' OR lot_id LIKE 'LOT-CA-%'`,
+    `DELETE FROM ANALYSIS_LOTS WHERE lot_id = 'LOT-SYS-HANDOVER' OR lot_id LIKE 'LOT-CA-%'`,
   )
   const aAffected =
     aDel && typeof aDel === 'object' && 'affectedRows' in aDel
@@ -102,19 +102,19 @@ async function purgeMockRows() {
 }
 
 async function alignAnalysisLots() {
-  let set = await colSet('analysis_lots')
-  console.log('ANALYSIS_BEFORE', (await cols('analysis_lots')).join(', '))
+  let set = await colSet('ANALYSIS_LOTS')
+  console.log('ANALYSIS_BEFORE', (await cols('ANALYSIS_LOTS')).join(', '))
 
   if (set.has('defect_prob') && set.has('probability')) {
     await query(
-      `UPDATE analysis_lots
+      `UPDATE ANALYSIS_LOTS
        SET probability = COALESCE(probability, defect_prob)
        WHERE probability IS NULL AND defect_prob IS NOT NULL`,
     )
-    await query('ALTER TABLE analysis_lots DROP COLUMN defect_prob')
+    await query('ALTER TABLE ANALYSIS_LOTS DROP COLUMN defect_prob')
     console.log('MERGED+DROPPED defect_prob')
   } else if (set.has('defect_prob') && !set.has('probability')) {
-    await query(`ALTER TABLE analysis_lots CHANGE COLUMN defect_prob probability DOUBLE NULL`)
+    await query(`ALTER TABLE ANALYSIS_LOTS CHANGE COLUMN defect_prob probability DOUBLE NULL`)
     console.log('RENAMED defect_prob → probability')
   }
 
@@ -125,33 +125,33 @@ async function alignAnalysisLots() {
     'updated_at',
     'defect_prob',
   ]) {
-    set = await colSet('analysis_lots')
+    set = await colSet('ANALYSIS_LOTS')
     if (set.has(col)) {
-      await query(`ALTER TABLE analysis_lots DROP COLUMN \`${col}\``)
+      await query(`ALTER TABLE ANALYSIS_LOTS DROP COLUMN \`${col}\``)
       console.log('DROPPED analysis_lots.' + col)
     }
   }
 
-  set = await colSet('analysis_lots')
+  set = await colSet('ANALYSIS_LOTS')
   if (!set.has('scored_at')) {
     await query(
-      `ALTER TABLE analysis_lots
+      `ALTER TABLE ANALYSIS_LOTS
        ADD COLUMN scored_at DATETIME NULL COMMENT '마지막 채점 시각' AFTER created_at`,
     )
     await query(
-      `UPDATE analysis_lots
+      `UPDATE ANALYSIS_LOTS
        SET scored_at = COALESCE(scored_at, created_at)
        WHERE scored_at IS NULL`,
     )
     console.log('ADDED analysis_lots.scored_at')
   }
 
-  if (!(await indexExists('analysis_lots', 'idx_analysis_scored'))) {
-    await query('ALTER TABLE analysis_lots ADD INDEX idx_analysis_scored (scored_at)')
+  if (!(await indexExists('ANALYSIS_LOTS', 'idx_analysis_scored'))) {
+    await query('ALTER TABLE ANALYSIS_LOTS ADD INDEX idx_analysis_scored (scored_at)')
     console.log('ADDED_INDEX idx_analysis_scored')
   }
 
-  const after = await cols('analysis_lots')
+  const after = await cols('ANALYSIS_LOTS')
   const afterSet = new Set(after)
   const missing = ANALYSIS_EXPECTED.filter((c) => !afterSet.has(c))
   const unexpected = after.filter((c) => !(ANALYSIS_EXPECTED as readonly string[]).includes(c))
@@ -165,57 +165,57 @@ async function alignAnalysisLots() {
 }
 
 async function alignHandover() {
-  const n = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM handover_history`)
+  const n = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM HANDOVER_HISTORY`)
   const count = Number(n[0]?.c ?? 0)
-  console.log('HANDOVER_BEFORE', (await cols('handover_history')).join(', '), 'rows', count)
+  console.log('HANDOVER_BEFORE', (await cols('HANDOVER_HISTORY')).join(', '), 'rows', count)
 
   if (count === 0) {
-    await query('DROP TABLE IF EXISTS handover_history')
+    await query('DROP TABLE IF EXISTS HANDOVER_HISTORY')
     await query(HANDOVER_CREATE)
     console.log('RECREATED handover_history')
   } else {
-    let set = await colSet('handover_history')
+    let set = await colSet('HANDOVER_HISTORY')
     if (set.has('archived_at') && !set.has('created_at')) {
       await query(
-        `ALTER TABLE handover_history
+        `ALTER TABLE HANDOVER_HISTORY
          CHANGE COLUMN archived_at created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각'`,
       )
     }
-    set = await colSet('handover_history')
+    set = await colSet('HANDOVER_HISTORY')
     if (set.has('situation') && !set.has('handover_content')) {
       await query(
-        `ALTER TABLE handover_history
+        `ALTER TABLE HANDOVER_HISTORY
          CHANGE COLUMN situation handover_content VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)'`,
       )
     }
     for (const col of ['situation', 'event_date', 'snapshot_json'] as const) {
-      set = await colSet('handover_history')
+      set = await colSet('HANDOVER_HISTORY')
       if (set.has(col)) {
-        await query(`ALTER TABLE handover_history DROP COLUMN \`${col}\``)
+        await query(`ALTER TABLE HANDOVER_HISTORY DROP COLUMN \`${col}\``)
         console.log('DROPPED handover_history.' + col)
       }
     }
-    if (await indexExists('handover_history', 'idx_handover_date')) {
-      await query('ALTER TABLE handover_history DROP INDEX idx_handover_date')
+    if (await indexExists('HANDOVER_HISTORY', 'idx_handover_date')) {
+      await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_date')
     }
-    set = await colSet('handover_history')
+    set = await colSet('HANDOVER_HISTORY')
     if (!set.has('archived_at')) {
       await query(
-        `ALTER TABLE handover_history
+        `ALTER TABLE HANDOVER_HISTORY
          ADD COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
       )
     } else {
       await query(
-        `ALTER TABLE handover_history
+        `ALTER TABLE HANDOVER_HISTORY
          MODIFY COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
       )
     }
-    if (!(await indexExists('handover_history', 'idx_handover_created'))) {
-      await query('ALTER TABLE handover_history ADD INDEX idx_handover_created (created_at)')
+    if (!(await indexExists('HANDOVER_HISTORY', 'idx_handover_created'))) {
+      await query('ALTER TABLE HANDOVER_HISTORY ADD INDEX idx_handover_created (created_at)')
     }
   }
 
-  const after = await cols('handover_history')
+  const after = await cols('HANDOVER_HISTORY')
   const afterSet = new Set(after)
   const missing = HANDOVER_EXPECTED.filter((c) => !afterSet.has(c))
   const unexpected = after.filter((c) => !(HANDOVER_EXPECTED as readonly string[]).includes(c))
@@ -234,8 +234,8 @@ async function main() {
   await alignAnalysisLots()
   await alignHandover()
 
-  const aN = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM analysis_lots`)
-  const hN = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM handover_history`)
+  const aN = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`)
+  const hN = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM HANDOVER_HISTORY`)
   console.log('FINAL_ROWS', {
     analysis_lots: Number(aN[0]?.c ?? 0),
     handover_history: Number(hN[0]?.c ?? 0),

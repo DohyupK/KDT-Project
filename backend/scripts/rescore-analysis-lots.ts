@@ -11,15 +11,15 @@ import { fillRecommendedActionsForLots } from '../src/services/lotRecommendedAct
 
 async function main() {
   const before = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM analysis_lots`,
+    `SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`,
   )
   console.log('ANALYSIS_BEFORE', Number(before[0]?.c ?? 0))
 
-  await query(`DELETE FROM analysis_lots`)
+  await query(`DELETE FROM ANALYSIS_LOTS`)
   console.log('ANALYSIS_CLEARED')
 
   const lots = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM lots WHERE id <> 'LOT-SYS-HANDOVER'`,
+    `SELECT COUNT(*) AS c FROM LOTS WHERE id <> 'LOT-SYS-HANDOVER'`,
   )
   console.log('LOTS_TO_SCORE', Number(lots[0]?.c ?? 0))
 
@@ -67,7 +67,7 @@ async function main() {
   console.log('ISSUES_CREATED', issuesCreated)
 
   const after = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM analysis_lots`,
+    `SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`,
   )
   const sample = await query<
     {
@@ -79,7 +79,7 @@ async function main() {
     }[]
   >(
     `SELECT lot_id, probability, spc_status, risk_level, risk_reason
-     FROM analysis_lots
+     FROM ANALYSIS_LOTS
      ORDER BY lot_id DESC
      LIMIT 5`,
   )

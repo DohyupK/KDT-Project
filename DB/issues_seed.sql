@@ -1,10 +1,10 @@
--- Seed optional mock lots for issue page (issues rows left empty by default).
--- analysis_lots is scored by backend (not seeded).
+-- Seed optional mock LOTS for issue page (ISSUES rows left empty by default).
+-- ANALYSIS_LOTS is scored by backend (not seeded).
 -- Safe to re-run: existing PK rows are not overwritten (INSERT IGNORE).
--- To seed issues, insert with: issue_id, lot_id, issue_content, action_content,
+-- To seed ISSUES, insert with: issue_id, lot_id, issue_content, action_content,
 --   assignee_user_id, completed_at, created_at (no status / risk_level).
 
-INSERT IGNORE INTO lots
+INSERT IGNORE INTO LOTS
   (id, `timestamp`)
 VALUES
   ('LOT-CA-260721-08', '2026-07-21 15:42:00'),
@@ -16,9 +16,9 @@ VALUES
   ('LOT-CA-260719-02', '2026-07-19 09:22:00'),
   ('LOT-CA-260718-11', '2026-07-18 21:10:00');
 
--- issues intentionally empty after migrate:issues-refactor.
+-- ISSUES intentionally empty after migrate:ISSUES-refactor.
 -- Example (commented):
--- INSERT IGNORE INTO issues
+-- INSERT IGNORE INTO ISSUES
 --   (issue_id, lot_id, issue_content, action_content, assignee_user_id, completed_at, created_at)
 -- VALUES
 --   ('ISS-260721-018', 'LOT-CA-260721-08', '소성로 온도 상한 초과 요약',

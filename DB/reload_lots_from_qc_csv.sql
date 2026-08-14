@@ -1,11 +1,11 @@
--- Optional reference for reload-lots-from-qc-csv.ts (do not run LOAD DATA as-is).
--- Live reload uses: ALTER DROP residual_li → FK_CHECKS=0 → DELETE lots →
+-- Optional reference for reload-LOTS-from-qc-csv.ts (do not run LOAD DATA as-is).
+-- Live reload uses: ALTER DROP residual_li → FK_CHECKS=0 → DELETE LOTS →
 -- bulk INSERT from ai-service/data/cathode_qc_reg_data.csv
 -- (id, timestamp, d50…tank_pressure, operator_id) → FK_CHECKS=1.
--- CSV residual_li is NOT loaded; judgment_lots.residual_li is the API source.
+-- CSV residual_li is NOT loaded; JUDGMENT_LOTS.residual_li is the API source.
 --
--- ALTER TABLE lots DROP COLUMN IF EXISTS residual_li;
+-- ALTER TABLE LOTS DROP COLUMN IF EXISTS residual_li;
 -- SET FOREIGN_KEY_CHECKS = 0;
--- DELETE FROM lots;
--- -- INSERT … (see backend/scripts/reload-lots-from-qc-csv.ts)
+-- DELETE FROM LOTS;
+-- -- INSERT … (see backend/scripts/reload-LOTS-from-qc-csv.ts)
 -- SET FOREIGN_KEY_CHECKS = 1;

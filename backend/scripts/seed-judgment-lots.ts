@@ -98,14 +98,14 @@ function loadResidual(filePath: string): Map<string, number | null> {
 }
 
 const DDL = `
-CREATE TABLE IF NOT EXISTS judgment_lots (
+CREATE TABLE IF NOT EXISTS JUDGMENT_LOTS (
   lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,
   quality_defect  TINYINT(1)   NOT NULL,
   capacity        DOUBLE       NULL,
   residual_li     DOUBLE       NULL,
   probability     DOUBLE       NULL,
   CONSTRAINT fk_judgment_lots_lot
-    FOREIGN KEY (lot_id) REFERENCES lots(id)
+    FOREIGN KEY (lot_id) REFERENCES LOTS(id)
     ON DELETE CASCADE
 )`
 
@@ -137,7 +137,7 @@ async function main() {
     await conn.query(DDL)
     console.log('DDL_OK')
 
-    const lotRows = (await conn.query('SELECT id FROM lots')) as { id: string }[]
+    const lotRows = (await conn.query('SELECT id FROM LOTS')) as { id: string }[]
     const lotIds = new Set(lotRows.map((r) => r.id))
     console.log('LOTS', lotIds.size)
 
@@ -165,17 +165,17 @@ async function main() {
       const placeholders = slice.map(() => '(?, ?, ?, ?)').join(', ')
       const params = slice.flat()
       await conn.query(
-        `REPLACE INTO judgment_lots (lot_id, quality_defect, capacity, residual_li)
+        `REPLACE INTO JUDGMENT_LOTS (lot_id, quality_defect, capacity, residual_li)
          VALUES ${placeholders}`,
         params,
       )
     }
 
     const countRows = (await conn.query(
-      'SELECT COUNT(*) AS c FROM judgment_lots',
+      'SELECT COUNT(*) AS c FROM JUDGMENT_LOTS',
     )) as { c: bigint | number }[]
     const sample = (await conn.query(
-      'SELECT lot_id, quality_defect, capacity, residual_li FROM judgment_lots ORDER BY lot_id ASC LIMIT 3',
+      'SELECT lot_id, quality_defect, capacity, residual_li FROM JUDGMENT_LOTS ORDER BY lot_id ASC LIMIT 3',
     )) as {
       lot_id: string
       quality_defect: number
@@ -185,7 +185,7 @@ async function main() {
     const fk = (await conn.query(
       `SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
        FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'judgment_lots' AND REFERENCED_TABLE_NAME IS NOT NULL`,
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'JUDGMENT_LOTS' AND REFERENCED_TABLE_NAME IS NOT NULL`,
       [process.env.DB_NAME],
     )) as {
       COLUMN_NAME: string

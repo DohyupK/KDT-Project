@@ -1,5 +1,5 @@
--- Inquiry board table (see also DB/inquiry_attachments.sql)
-CREATE TABLE IF NOT EXISTS inquiries (
+-- Inquiry board table (see also DB/INQUIRY_ATTACHMENTS.sql)
+CREATE TABLE IF NOT EXISTS INQUIRIES (
   id                   INT AUTO_INCREMENT PRIMARY KEY,
   inquiry_code         VARCHAR(32)  NOT NULL,
   category             VARCHAR(64)  NOT NULL,
@@ -16,10 +16,10 @@ CREATE TABLE IF NOT EXISTS inquiries (
   created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_inquiries_code (inquiry_code),
   CONSTRAINT fk_inquiries_author
-    FOREIGN KEY (author_user_id) REFERENCES users(user_id)
+    FOREIGN KEY (author_user_id) REFERENCES USERS(user_id)
     ON DELETE SET NULL,
   CONSTRAINT fk_inquiries_answerer
-    FOREIGN KEY (answered_by_user_id) REFERENCES users(user_id)
+    FOREIGN KEY (answered_by_user_id) REFERENCES USERS(user_id)
     ON DELETE SET NULL,
   INDEX idx_inquiries_category (category),
   INDEX idx_inquiries_status (status),

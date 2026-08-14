@@ -11,13 +11,13 @@ import { pickUnscoredLotIds } from '../src/services/unscoredLots.js'
 
 async function backfillScoredAt(): Promise<number> {
   await query(
-    `UPDATE analysis_lots
+    `UPDATE ANALYSIS_LOTS
      SET scored_at = COALESCE(scored_at, created_at, NOW())
      WHERE scored_at IS NULL
        AND (probability IS NOT NULL OR spc_status IS NOT NULL OR risk_reason IS NOT NULL)`,
   )
   const after = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM analysis_lots WHERE scored_at IS NULL`,
+    `SELECT COUNT(*) AS c FROM ANALYSIS_LOTS WHERE scored_at IS NULL`,
   )
   return Number(after[0]?.c ?? 0)
 }
@@ -36,10 +36,10 @@ async function snapshot() {
        SUM(lr.lot_id IS NULL) AS miss_lr,
        SUM(lr.lot_id IS NOT NULL AND lr.residual_li IS NULL) AS miss_lr_res,
        SUM(a.lot_id IS NOT NULL AND a.scored_at IS NULL) AS miss_scored
-     FROM lots l
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
-     LEFT JOIN lot_results lr ON lr.lot_id = l.id
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
+     LEFT JOIN LOT_RESULTS lr ON lr.lot_id = l.id
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE l.id <> 'LOT-SYS-HANDOVER'`,
   )
   return rows[0]
@@ -79,10 +79,10 @@ async function main() {
       }>
     >(
       `SELECT j.lot_id AS j, lr.lot_id AS lr, lr.residual_li AS residual, a.scored_at
-       FROM lots l
-       LEFT JOIN judgment_lots j ON j.lot_id = l.id
-       LEFT JOIN lot_results lr ON lr.lot_id = l.id
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
+       FROM LOTS l
+       LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
+       LEFT JOIN LOT_RESULTS lr ON lr.lot_id = l.id
+       LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
        WHERE l.id = ?`,
       [id],
     )

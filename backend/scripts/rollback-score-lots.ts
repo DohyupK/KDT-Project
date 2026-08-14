@@ -8,10 +8,10 @@ import { query } from '../src/db/connection.js'
  */
 async function main() {
   const beforeScores = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM analysis_lots WHERE probability IS NOT NULL`,
+    `SELECT COUNT(*) AS c FROM ANALYSIS_LOTS WHERE probability IS NOT NULL`,
   )
   const beforeIssues = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM issues
+    `SELECT COUNT(*) AS c FROM ISSUES
      WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,
@@ -22,7 +22,7 @@ async function main() {
   })
 
   const delResult = await query<unknown>(
-    `DELETE FROM issues
+    `DELETE FROM ISSUES
      WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,
@@ -33,9 +33,9 @@ async function main() {
       : delResult
   console.log('ISSUES_DELETED', deleted)
 
-  await query(`UPDATE judgment_lots SET residual_li = NULL, probability = NULL`)
+  await query(`UPDATE JUDGMENT_LOTS SET residual_li = NULL, probability = NULL`)
   await query(
-    `UPDATE analysis_lots SET
+    `UPDATE ANALYSIS_LOTS SET
       probability = NULL,
       spc_status = NULL,
       risk_level = '안정',
@@ -45,10 +45,10 @@ async function main() {
   console.log('ANALYSIS_LOTS_SCORES_CLEARED')
 
   const afterScores = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM analysis_lots WHERE probability IS NOT NULL`,
+    `SELECT COUNT(*) AS c FROM ANALYSIS_LOTS WHERE probability IS NOT NULL`,
   )
   const afterIssues = await query<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM issues
+    `SELECT COUNT(*) AS c FROM ISSUES
      WHERE assignee_user_id IS NULL
        AND (action_content IS NULL OR action_content = '')
        AND completed_at IS NULL`,

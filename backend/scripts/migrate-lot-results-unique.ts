@@ -7,15 +7,15 @@ import { query } from '../src/db/connection.js'
 
 async function main() {
   const dupes = await query<Array<{ lot_id: string; c: number }>>(
-    `SELECT lot_id, COUNT(*) AS c FROM lot_results GROUP BY lot_id HAVING COUNT(*) > 1 LIMIT 20`,
+    `SELECT lot_id, COUNT(*) AS c FROM LOT_RESULTS GROUP BY lot_id HAVING COUNT(*) > 1 LIMIT 20`,
   )
   console.log('DUPES_SAMPLE', dupes.length, dupes.slice(0, 5))
 
   await query(
-    `DELETE lr FROM lot_results lr
+    `DELETE lr FROM LOT_RESULTS lr
      INNER JOIN (
        SELECT lot_id, MIN(seq) AS keep_seq
-       FROM lot_results
+       FROM LOT_RESULTS
        GROUP BY lot_id
        HAVING COUNT(*) > 1
      ) d ON lr.lot_id = d.lot_id AND lr.seq <> d.keep_seq`,
@@ -23,10 +23,10 @@ async function main() {
   console.log('DEDUPE_DONE')
 
   const idx = await query<Array<{ Key_name: string }>>(
-    `SHOW INDEX FROM lot_results WHERE Key_name = 'uq_lot_results_lot_id'`,
+    `SHOW INDEX FROM LOT_RESULTS WHERE Key_name = 'uq_lot_results_lot_id'`,
   )
   if (idx.length === 0) {
-    await query(`ALTER TABLE lot_results ADD UNIQUE KEY uq_lot_results_lot_id (lot_id)`)
+    await query(`ALTER TABLE LOT_RESULTS ADD UNIQUE KEY uq_lot_results_lot_id (lot_id)`)
     console.log('ADDED_UNIQUE')
   } else {
     console.log('UNIQUE_EXISTS')

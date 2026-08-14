@@ -9,7 +9,7 @@ import { query } from '../src/db/connection.js'
 async function columnNames(): Promise<Set<string>> {
   const rows = await query<{ COLUMN_NAME: string }[]>(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'analysis_lots'`,
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ANALYSIS_LOTS'`,
   )
   return new Set(rows.map((r) => r.COLUMN_NAME))
 }
@@ -26,13 +26,13 @@ async function main() {
   }
 
   const merged = await query<{ affectedRows?: number }>(
-    `UPDATE analysis_lots
+    `UPDATE ANALYSIS_LOTS
      SET probability = COALESCE(probability, defect_prob)
      WHERE probability IS NULL AND defect_prob IS NOT NULL`,
   )
   console.log('MERGED_NULL_PROBABILITY', merged)
 
-  await query('ALTER TABLE analysis_lots DROP COLUMN defect_prob')
+  await query('ALTER TABLE ANALYSIS_LOTS DROP COLUMN defect_prob')
   console.log('DROPPED defect_prob')
 
   const after = await columnNames()
@@ -40,7 +40,7 @@ async function main() {
   if (after.has('defect_prob')) {
     throw new Error('defect_prob still present after DROP')
   }
-  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM analysis_lots`)
+  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`)
   console.log('ROWS', Number(rows[0]?.c ?? 0))
   console.log('OK analysis_lots.defect_prob removed')
 }

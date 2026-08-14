@@ -18,7 +18,7 @@ const EXPECTED = [
 ] as const
 
 const CREATE_SQL = `
-CREATE TABLE handover_history (
+CREATE TABLE HANDOVER_HISTORY (
   history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
   handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
   action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
@@ -29,7 +29,7 @@ CREATE TABLE handover_history (
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
   archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
   CONSTRAINT fk_handover_assignee
-    FOREIGN KEY (assignee_user_id) REFERENCES users(user_id)
+    FOREIGN KEY (assignee_user_id) REFERENCES USERS(user_id)
     ON DELETE SET NULL,
   INDEX idx_handover_created (created_at),
   INDEX idx_handover_action (action(32))
@@ -39,7 +39,7 @@ CREATE TABLE handover_history (
 async function columnsOrdered(): Promise<string[]> {
   const rows = await query<{ COLUMN_NAME: string }[]>(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
      ORDER BY ORDINAL_POSITION`,
   )
   return rows.map((r) => r.COLUMN_NAME)
@@ -52,7 +52,7 @@ async function columnSet(): Promise<Set<string>> {
 async function indexExists(name: string): Promise<boolean> {
   const rows = await query<{ INDEX_NAME: string }[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history' AND INDEX_NAME = ?
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY' AND INDEX_NAME = ?
      LIMIT 1`,
     [name],
   )
@@ -60,7 +60,7 @@ async function indexExists(name: string): Promise<boolean> {
 }
 
 async function rowCount(): Promise<number> {
-  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM handover_history`)
+  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM HANDOVER_HISTORY`)
   return Number(rows[0]?.c ?? 0)
 }
 
@@ -81,7 +81,7 @@ function assertPlanMatch(ordered: string[]) {
 
 async function recreateEmpty() {
   console.log('RECREATE empty handover_history from schema.sql')
-  await query('DROP TABLE IF EXISTS handover_history')
+  await query('DROP TABLE IF EXISTS HANDOVER_HISTORY')
   await query(CREATE_SQL)
 }
 
@@ -91,7 +91,7 @@ async function alterInPlace() {
 
   if (cols.has('archived_at') && !cols.has('created_at')) {
     await query(
-      `ALTER TABLE handover_history
+      `ALTER TABLE HANDOVER_HISTORY
        CHANGE COLUMN archived_at created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각'`,
     )
     console.log('RENAMED archived_at → created_at')
@@ -100,7 +100,7 @@ async function alterInPlace() {
   cols = await columnSet()
   if (cols.has('situation') && !cols.has('handover_content')) {
     await query(
-      `ALTER TABLE handover_history
+      `ALTER TABLE HANDOVER_HISTORY
        CHANGE COLUMN situation handover_content VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)'`,
     )
     console.log('RENAMED situation → handover_content')
@@ -110,24 +110,24 @@ async function alterInPlace() {
   for (const fk of ['fk_handover_lot', 'fk_handover_issue'] as const) {
     const fks = await query<{ CONSTRAINT_NAME: string }[]>(
       `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
          AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = ?`,
       [fk],
     )
     if (fks.length) {
-      await query(`ALTER TABLE handover_history DROP FOREIGN KEY ${fk}`)
+      await query(`ALTER TABLE HANDOVER_HISTORY DROP FOREIGN KEY ${fk}`)
       console.log('DROPPED_FK', fk)
     }
   }
 
   if (await indexExists('idx_handover_date')) {
-    await query('ALTER TABLE handover_history DROP INDEX idx_handover_date')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_date')
   }
   if (await indexExists('idx_handover_lot')) {
-    await query('ALTER TABLE handover_history DROP INDEX idx_handover_lot')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_lot')
   }
   if (await indexExists('idx_handover_issue')) {
-    await query('ALTER TABLE handover_history DROP INDEX idx_handover_issue')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_issue')
   }
 
   for (const col of [
@@ -142,7 +142,7 @@ async function alterInPlace() {
   ] as const) {
     cols = await columnSet()
     if (cols.has(col)) {
-      await query(`ALTER TABLE handover_history DROP COLUMN \`${col}\``)
+      await query(`ALTER TABLE HANDOVER_HISTORY DROP COLUMN \`${col}\``)
       console.log('DROPPED', col)
     }
   }
@@ -150,24 +150,24 @@ async function alterInPlace() {
   cols = await columnSet()
   if (!cols.has('archived_at')) {
     await query(
-      `ALTER TABLE handover_history
+      `ALTER TABLE HANDOVER_HISTORY
        ADD COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
     )
   } else {
     await query(
-      `ALTER TABLE handover_history
+      `ALTER TABLE HANDOVER_HISTORY
        MODIFY COLUMN archived_at DATETIME NULL COMMENT '완료 시각 (완료 버튼 시 NOW)' AFTER created_at`,
     )
   }
 
   await query(
-    `UPDATE handover_history
+    `UPDATE HANDOVER_HISTORY
      SET archived_at = created_at
      WHERE action = '완료' AND archived_at IS NULL`,
   )
 
   if (!(await indexExists('idx_handover_created'))) {
-    await query('ALTER TABLE handover_history ADD INDEX idx_handover_created (created_at)')
+    await query('ALTER TABLE HANDOVER_HISTORY ADD INDEX idx_handover_created (created_at)')
   }
 }
 

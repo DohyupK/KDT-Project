@@ -97,7 +97,7 @@ async function main() {
       `SELECT id AS lot_id, \`timestamp\` AS recorded_at,
               d50, d90, metal_impurity, lithium_input, additive_ratio,
               process_time, sintering_temp, humidity, tank_pressure, operator_id
-       FROM lots
+       FROM LOTS
        WHERE id <> 'LOT-SYS-HANDOVER'
        ORDER BY id ASC
        LIMIT ?`,

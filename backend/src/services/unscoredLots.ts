@@ -47,10 +47,10 @@ const SELECT_FLAGS = `SELECT l.id,
               (lr.lot_id IS NULL) AS miss_lot_results,
               (lr.lot_id IS NOT NULL AND lr.residual_li IS NULL) AS miss_lr_residual,
               (lr.lot_id IS NOT NULL AND lr.quality_defect IS NULL) AS miss_lr_qd
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
-       LEFT JOIN judgment_lots j ON j.lot_id = l.id
-       LEFT JOIN lot_results lr ON lr.lot_id = l.id`
+       FROM LOTS l
+       LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+       LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
+       LEFT JOIN LOT_RESULTS lr ON lr.lot_id = l.id`
 
 function countReasons(rows: UnscoredLotRow[]) {
   return {

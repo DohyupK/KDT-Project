@@ -8,7 +8,7 @@ import { query } from '../src/db/connection.js'
 async function columnNames(): Promise<Set<string>> {
   const rows = await query<{ COLUMN_NAME: string }[]>(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'analysis_lots'`,
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ANALYSIS_LOTS'`,
   )
   return new Set(rows.map((r) => r.COLUMN_NAME))
 }
@@ -16,7 +16,7 @@ async function columnNames(): Promise<Set<string>> {
 async function indexExists(name: string): Promise<boolean> {
   const rows = await query<{ INDEX_NAME: string }[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'analysis_lots' AND INDEX_NAME = ?
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ANALYSIS_LOTS' AND INDEX_NAME = ?
      LIMIT 1`,
     [name],
   )
@@ -25,20 +25,20 @@ async function indexExists(name: string): Promise<boolean> {
 
 async function main() {
   let cols = await columnNames()
-  const countBefore = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM analysis_lots`)
+  const countBefore = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`)
   console.log('BEFORE_COLS', [...cols].sort().join(', '))
   console.log('BEFORE_ROWS', Number(countBefore[0]?.c ?? 0))
 
   if (cols.has('defect_prob') && cols.has('probability')) {
     await query(
-      `UPDATE analysis_lots
+      `UPDATE ANALYSIS_LOTS
        SET probability = COALESCE(probability, defect_prob)
        WHERE probability IS NULL AND defect_prob IS NOT NULL`,
     )
-    await query('ALTER TABLE analysis_lots DROP COLUMN defect_prob')
+    await query('ALTER TABLE ANALYSIS_LOTS DROP COLUMN defect_prob')
     console.log('MERGED defect_prob → probability, DROPPED defect_prob')
   } else if (cols.has('defect_prob') && !cols.has('probability')) {
-    await query(`ALTER TABLE analysis_lots CHANGE COLUMN defect_prob probability DOUBLE NULL`)
+    await query(`ALTER TABLE ANALYSIS_LOTS CHANGE COLUMN defect_prob probability DOUBLE NULL`)
     console.log('RENAMED defect_prob → probability')
   } else if (cols.has('probability')) {
     console.log('SKIP_RENAME probability already present')
@@ -55,7 +55,7 @@ async function main() {
   ]) {
     const now = await columnNames()
     if (now.has(col)) {
-      await query(`ALTER TABLE analysis_lots DROP COLUMN \`${col}\``)
+      await query(`ALTER TABLE ANALYSIS_LOTS DROP COLUMN \`${col}\``)
       console.log('DROPPED', col)
     } else {
       console.log('SKIP_DROP', col)
@@ -65,11 +65,11 @@ async function main() {
   cols = await columnNames()
   if (!cols.has('scored_at')) {
     await query(
-      `ALTER TABLE analysis_lots
+      `ALTER TABLE ANALYSIS_LOTS
        ADD COLUMN scored_at DATETIME NULL COMMENT '마지막 채점 시각' AFTER created_at`,
     )
     await query(
-      `UPDATE analysis_lots
+      `UPDATE ANALYSIS_LOTS
        SET scored_at = COALESCE(scored_at, created_at)
        WHERE scored_at IS NULL`,
     )
@@ -79,14 +79,14 @@ async function main() {
   }
 
   if (!(await indexExists('idx_analysis_scored'))) {
-    await query('ALTER TABLE analysis_lots ADD INDEX idx_analysis_scored (scored_at)')
+    await query('ALTER TABLE ANALYSIS_LOTS ADD INDEX idx_analysis_scored (scored_at)')
     console.log('ADDED_INDEX idx_analysis_scored')
   } else {
     console.log('SKIP_INDEX idx_analysis_scored')
   }
 
   const after = await columnNames()
-  const countAfter = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM analysis_lots`)
+  const countAfter = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ANALYSIS_LOTS`)
   console.log('AFTER_COLS', [...after].sort().join(', '))
   console.log('AFTER_ROWS', Number(countAfter[0]?.c ?? 0))
 

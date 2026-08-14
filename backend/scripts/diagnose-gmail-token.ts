@@ -5,8 +5,8 @@ import { diagnoseGmailAuth } from '../src/services/issueReportN8n.js'
 async function main() {
   const optedUsers = await query<{ email: string }[]>(
     `SELECT u.email
-     FROM users u
-     INNER JOIN user_settings s ON s.user_id = u.user_id
+     FROM USERS u
+     INNER JOIN USER_SETTINGS s ON s.user_id = u.user_id
      WHERE s.email_check = 'O' AND TRIM(u.email) <> ''
      LIMIT 1`,
   )

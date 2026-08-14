@@ -191,8 +191,8 @@ export async function listOpenIssues(q: IssueListQuery): Promise<{
   }
 
   const whereSql = where.join(' AND ')
-  const fromSql = `FROM issues i
-     LEFT JOIN analysis_lots a ON a.lot_id = i.lot_id
+  const fromSql = `FROM ISSUES i
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = i.lot_id
      WHERE ${whereSql}`
 
   const countRows = await query<{ c: number }[]>(
@@ -216,9 +216,9 @@ export async function listOpenIssueDetailsByLotId(lotId: string): Promise<IssueD
   const rows = await query<IssueRow[]>(
     `SELECT ${ISSUE_DETAIL_SELECT},
             u.name AS assignee_name
-     FROM issues i
-     LEFT JOIN analysis_lots a ON a.lot_id = i.lot_id
-     LEFT JOIN users u ON u.user_id = i.assignee_user_id
+     FROM ISSUES i
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = i.lot_id
+     LEFT JOIN USERS u ON u.user_id = i.assignee_user_id
      WHERE i.lot_id = ? AND i.completed_at IS NULL
      ORDER BY i.created_at DESC`,
     [lotId],
@@ -230,9 +230,9 @@ export async function getIssueById(issueId: string): Promise<IssueDetail> {
   const rows = await query<IssueRow[]>(
     `SELECT ${ISSUE_DETAIL_SELECT},
             u.name AS assignee_name
-     FROM issues i
-     LEFT JOIN analysis_lots a ON a.lot_id = i.lot_id
-     LEFT JOIN users u ON u.user_id = i.assignee_user_id
+     FROM ISSUES i
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = i.lot_id
+     LEFT JOIN USERS u ON u.user_id = i.assignee_user_id
      WHERE i.issue_id = ? LIMIT 1`,
     [issueId],
   )
@@ -266,7 +266,7 @@ export async function updateIssue(
 
   // 완료 → 과거 자료 (completed_at). handover_history는 독립 — 여기서 갱신하지 않음.
   await query(
-    `UPDATE issues SET
+    `UPDATE ISSUES SET
        action_content = ?, assignee_user_id = ?,
        completed_at = CASE WHEN ? = 1 THEN COALESCE(completed_at, NOW()) ELSE NULL END
      WHERE issue_id = ?`,
@@ -299,8 +299,8 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   >(
     `SELECT i.issue_id, i.lot_id, i.created_at, i.issue_content, i.completed_at,
             u.name AS assignee_name
-     FROM issues i
-     LEFT JOIN users u ON u.user_id = i.assignee_user_id
+     FROM ISSUES i
+     LEFT JOIN USERS u ON u.user_id = i.assignee_user_id
      WHERE i.completed_at IS NOT NULL
      ORDER BY i.completed_at DESC, i.created_at DESC`,
   )
@@ -347,9 +347,9 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     `SELECT l.id AS lot_id, a.risk_reason,
             COALESCE(j.probability, a.probability) AS probability,
             j.residual_li AS residual_lithium, a.spc_status
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
      WHERE l.id = ? LIMIT 1`,
     [issue.lotId],
   )
@@ -433,7 +433,7 @@ export async function listHandoverHistory(
 
   const rows = await query<HandoverRow[]>(
     `SELECT ${HANDOVER_SELECT}
-     FROM handover_history
+     FROM HANDOVER_HISTORY
      WHERE ${where}
      ${orderBy}`,
   )
@@ -463,7 +463,7 @@ export async function createHandoverNote(
   const author = actor.name.trim() || actor.userId
 
   const result = (await query(
-    `INSERT INTO handover_history (
+    `INSERT INTO HANDOVER_HISTORY (
        handover_content, action,
        handover_from, handover_to, assignee_user_id,
        category, archived_at
@@ -476,7 +476,7 @@ export async function createHandoverNote(
 
   const rows = await query<HandoverRow[]>(
     `SELECT ${HANDOVER_SELECT}
-     FROM handover_history WHERE history_id = ? LIMIT 1`,
+     FROM HANDOVER_HISTORY WHERE history_id = ? LIMIT 1`,
     [historyId],
   )
   if (!rows[0]) throw new AppError(500, '인수인계 등록에 실패했습니다.')
@@ -493,14 +493,14 @@ export async function completeHandoverNote(
 
   const existing = await query<HandoverRow[]>(
     `SELECT ${HANDOVER_SELECT}
-     FROM handover_history WHERE history_id = ? LIMIT 1`,
+     FROM HANDOVER_HISTORY WHERE history_id = ? LIMIT 1`,
     [historyId],
   )
   if (!existing[0]) throw new AppError(404, '인수인계 사항을 찾을 수 없습니다.')
 
   const toName = actor.name.trim() || actor.userId
   await query(
-    `UPDATE handover_history
+    `UPDATE HANDOVER_HISTORY
      SET action = '완료',
          handover_to = COALESCE(?, handover_to),
          archived_at = COALESCE(archived_at, NOW())
@@ -510,7 +510,7 @@ export async function completeHandoverNote(
 
   const rows = await query<HandoverRow[]>(
     `SELECT ${HANDOVER_SELECT}
-     FROM handover_history WHERE history_id = ? LIMIT 1`,
+     FROM HANDOVER_HISTORY WHERE history_id = ? LIMIT 1`,
     [historyId],
   )
   if (!rows[0]) throw new AppError(404, '인수인계 사항을 찾을 수 없습니다.')
