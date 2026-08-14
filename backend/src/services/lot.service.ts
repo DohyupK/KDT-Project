@@ -177,7 +177,7 @@ export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
 const Q_COST_APPRAISAL = {
   stable: 50_000,
   warning: 100_000,
-  critical: 150_000,
+  critical: 250_000,
 } as const
 const Q_COST_INTERNAL_UNIT = 500_000
 const Q_COST_EXTERNAL_UNIT = 3_000_000
