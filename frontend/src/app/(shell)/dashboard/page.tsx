@@ -2044,6 +2044,7 @@ export default function DashBoardPage() {
     lotFetchingRef.current = true;
     markFetchStart();
     try {
+      console.info('[dashboard] fetching GET /api/dashboard/lot-risks');
       const lotResponse = await dashboardApi.listLotRisks(
         lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
       );
@@ -2938,6 +2939,8 @@ export default function DashBoardPage() {
                         >
                           {lotRiskFetchError
                             ? lotRiskFetchError
+                            : liveStatus === 'idle' || liveStatus === 'updating'
+                            ? 'LOT 위험 데이터를 불러오는 중입니다.'
                             : lotRiskFilterActive
                             ? '검색 조건에 해당하는 LOT가 없습니다. 조건을 바꾼 뒤 검색을 눌러 주세요.'
                             : '표시할 LOT 위험등급 데이터가 없습니다.'}
