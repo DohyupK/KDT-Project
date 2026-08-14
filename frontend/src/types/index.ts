@@ -71,7 +71,9 @@ export interface UserSettingsDto {
   autoRefreshEnabled: boolean
   refreshInterval: number
   n8nAlert: boolean
+  /** user_settings.email_check — O=수신, X=거부 */
+  emailCheck: 'O' | 'X'
   updatedAt: string
 }
 
-export type UpdateUserSettingsRequest = Omit<UserSettingsDto, 'userId' | 'updatedAt'>
+export type UpdateUserSettingsRequest = Partial<Omit<UserSettingsDto, 'userId' | 'updatedAt'>>

@@ -1086,9 +1086,6 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
 /**
- * Create open issues when analysis_lots is 심각 AND spc_status is 주의|이탈.
- * issue_content: vLLM 요약(risk_reason 기반), 실패 시 buildIssueTitle fallback.
-/**
  * Create open issues when analysis_lots is 심각.
  * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
  */
@@ -1169,6 +1166,11 @@ export type SpcChartMetric = {
 
 export type SpcChartSnapshot = { metrics: SpcChartMetric[] }
 
+/** Dashboard I-charts: 이탈·주의 항목만. 안정 LOT은 metrics [] → 안내 문구. */
+export function isChartableSpcStatus(status: string): boolean {
+  return status.includes('이탈') || status.includes('주의')
+}
+
 export function buildSpcChartSnapshot(
   history: Record<SpcParamKey, number[]>,
   timestamps: string[],
@@ -1177,27 +1179,28 @@ export function buildSpcChartSnapshot(
   const evaled = evaluateLotSpc(history)
   const limits = loadPhase1Limits()
   const window = SPC_DETAIL_CHART_WINDOW
-  // Dashboard SPC 관리도: 안정 포함 전 파라미터 (이탈/주의만이면 안정 LOT이 빈 화면이 됨)
   return {
-    metrics: evaled.params.map((p) => {
-      const series = history[p.key]
-      const start = Math.max(0, series.length - window)
-      const lim = limits[p.key]
-      return {
-        key: p.key,
-        label: lim.label,
-        status: p.status,
-        currentValue: p.value,
-        centerLine: lim.CL_I,
-        upperControlLimit: lim.UCL_I,
-        lowerControlLimit: lim.LCL_I,
-        violatedRules: p.violatedRules,
-        data: series.slice(start).map((value, i) => ({
-          timestamp: timestamps[start + i] || String(start + i),
-          value,
-        })),
-      }
-    }),
+    metrics: evaled.params
+      .filter((p) => isChartableSpcStatus(p.status))
+      .map((p) => {
+        const series = history[p.key]
+        const start = Math.max(0, series.length - window)
+        const lim = limits[p.key]
+        return {
+          key: p.key,
+          label: lim.label,
+          status: p.status,
+          currentValue: p.value,
+          centerLine: lim.CL_I,
+          upperControlLimit: lim.UCL_I,
+          lowerControlLimit: lim.LCL_I,
+          violatedRules: p.violatedRules,
+          data: series.slice(start).map((value, i) => ({
+            timestamp: timestamps[start + i] || String(start + i),
+            value,
+          })),
+        }
+      }),
   }
 }
 
@@ -1266,33 +1269,12 @@ export async function getLotSpcDetail(lotId: string): Promise<{
   }
 
   const evaled = evaluateLotSpc(history)
-  const limits = loadPhase1Limits()
-  const window = SPC_DETAIL_CHART_WINDOW
-  const metrics = evaled.params.map((p) => {
-    const series = history[p.key]
-    const start = Math.max(0, series.length - window)
-    const data = series.slice(start).map((value, i) => ({
-      timestamp: timestamps[start + i] || String(start + i),
-      value,
-    }))
-    const lim = limits[p.key]
-    return {
-      key: p.key,
-      label: lim.label,
-      status: p.status,
-      currentValue: p.value,
-      centerLine: lim.CL_I,
-      upperControlLimit: lim.UCL_I,
-      lowerControlLimit: lim.LCL_I,
-      violatedRules: p.violatedRules,
-      data,
-    }
-  })
+  const snapshot = buildSpcChartSnapshot(history, timestamps)
 
   return {
     lotId,
     spcStatus: evaled.status,
-    metrics,
+    metrics: snapshot.metrics,
   }
 }
 

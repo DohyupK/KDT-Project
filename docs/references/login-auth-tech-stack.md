@@ -150,3 +150,4 @@ npm run dev
 | 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
 | 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |
 | 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/profile-personal-info-modal.mdc`. |
+| 2026-08-13 | 헤더 알림 팝오버 「이메일 자동 발신」 토글. `GET\|PUT /api/auth/settings`의 `emailCheck` ↔ `user_settings.email_check` (`O`/`X`, 로그인 계정만 UPDATE). |

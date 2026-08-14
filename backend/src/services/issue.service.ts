@@ -14,6 +14,8 @@ export type IssueListItem = {
   /** analysis_lots.spc_status (목록 SPC 필터용) */
   spcStatus: string | null
   issueContent: string
+  /** 이슈 처리 관리에 조치 내용이 입력되었는지 */
+  hasAction: boolean
 }
 
 /** analysis_lots 스냅샷 (이슈 상세 분석 UI) */
@@ -106,6 +108,7 @@ function toListItem(row: IssueRow): IssueListItem {
     riskLevel: toRisk(row.risk_level),
     spcStatus: row.spc_status ?? row.analysis_spc_status ?? null,
     issueContent: row.issue_content,
+    hasAction: Boolean(row.action_content?.trim()),
   }
 }
 

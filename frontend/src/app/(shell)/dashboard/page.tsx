@@ -326,6 +326,10 @@ function isSpcUnjudged(spc: string | null | undefined): boolean {
   return value === '' || value === '-' || value === '—';
 }
 
+function isAbnormalSpcMetric(metric: SpcMetric): boolean {
+  return metric.status.includes('이탈') || metric.status.includes('주의');
+}
+
 function formatSpcStatusLabel(spc: string | null | undefined): string {
   if (isSpcUnjudged(spc)) return '미판정';
   return (spc ?? '').trim();
@@ -1775,7 +1779,7 @@ export default function DashBoardPage() {
   const selectedSpcUnjudged = isSpcUnjudged(selectedSpcStatus);
   const selectedSpcMetrics =
     selectedLotRiskDetail?.lotId === selectedLotRisk?.lot
-      ? selectedLotRiskDetail?.spc?.metrics ?? []
+      ? (selectedLotRiskDetail?.spc?.metrics ?? []).filter(isAbnormalSpcMetric)
       : [];
   const selectedSpcDetailLoading =
     !!selectedLotRisk &&
@@ -3386,7 +3390,6 @@ export default function DashBoardPage() {
                               : (selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) ===
                                   '안정'
                                 ? [
-                                    'SPC 안정 상태입니다. 관리도 시리즈를 준비 중이면 잠시 후 다시 열어 주세요.',
                                     '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
                                   ]
                                 : ['표시할 SPC 관리도 데이터가 없습니다.']

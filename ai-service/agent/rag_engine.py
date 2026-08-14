@@ -81,6 +81,20 @@ def qdrant_url() -> str:
     ).rstrip("/")
 
 
+def _qdrant_reachable(timeout_s: float = 0.4) -> bool:
+    try:
+        import socket
+        from urllib.parse import urlparse
+
+        parsed = urlparse(qdrant_url())
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 6333
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
 def collection_name() -> str:
     return (
         os.environ.get("SECURE_QDRANT_COLLECTION") or DEFAULT_COLLECTION
@@ -142,12 +156,16 @@ class SecureRagEngine:
     def ensure(self) -> None:
         if self._ready or self._init_error:
             return
+        if not _qdrant_reachable():
+            self._init_error = f"Qdrant not reachable at {qdrant_url()}"
+            logger.warning("[rag] skip warm: %s", self._init_error)
+            return
         try:
             self._load()
             self._ready = True
         except Exception as exc:  # noqa: BLE001
             self._init_error = str(exc)[:400]
-            logger.exception("SecureRagEngine init failed")
+            logger.warning("SecureRagEngine init failed: %s", self._init_error)
 
     def _load(self) -> None:
         from qdrant_client import QdrantClient

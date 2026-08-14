@@ -10,6 +10,8 @@ import {
 
 export const HEADER_NOTIF_LOOKBACK_DAYS = 3
 export const HEADER_NOTIF_PAGE_SIZE = 5
+/** 미조치(action 없음) 이슈 에스컬레이션: 생성 후 30분 */
+export const PENDING_ISSUE_ESCALATION_MS = 30 * 60 * 1000
 
 const READ_KEY = 'kdt-header-notif-read'
 const DISMISSED_KEY = 'kdt-header-notif-dismissed'
@@ -20,7 +22,7 @@ const PRIORITY_ORDER: Record<NotificationPriority, number> = {
   P2: 2,
 }
 
-type RawNotification = HeaderNotification & { sortAt: number }
+type RawNotification = HeaderNotification & { sortAt: number; lotId?: string }
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')
@@ -36,9 +38,11 @@ function lookbackCutoff(now = new Date()): Date {
   return d
 }
 
+/** Accepts ISO or backend `YYYY-MM-DD HH:mm:ss`. */
 function parseTime(value: string | null | undefined): number {
   if (!value) return 0
-  const t = Date.parse(value)
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
+  const t = Date.parse(normalized)
   return Number.isFinite(t) ? t : 0
 }
 
@@ -130,6 +134,8 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
   const startDate = toYmd(cutoff)
   const endDate = toYmd(now)
   const raw: RawNotification[] = []
+  const escalatedLotIds = new Set<string>()
+  const coveredLotIds = new Set<string>()
 
   const [riskSettled, spcSettled, issuesSettled, handoverSettled, inquirySettled] =
     await Promise.allSettled([
@@ -140,11 +146,43 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
       inquiryApi.list({ status: '접수', startDate, endDate, page: 1, pageSize: 50 }),
     ])
 
+  // 1) 30분 미조치 이슈 → pending_issue (에스컬레이션)
+  if (issuesSettled.status === 'fulfilled') {
+    const spec = NOTIFICATION_TYPE_SPEC.pending_issue
+    for (const issue of issuesSettled.value.data.issues ?? []) {
+      if (!isWithinLookback(issue.createdAt, cutoffMs)) continue
+      if (issue.hasAction) continue
+      const sortAt = parseTime(issue.createdAt)
+      if (!sortAt || now.getTime() - sortAt < PENDING_ISSUE_ESCALATION_MS) continue
+
+      escalatedLotIds.add(issue.lotId)
+      coveredLotIds.add(issue.lotId)
+      raw.push({
+        id: `pending_issue:${issue.issueId}`,
+        type: 'pending_issue',
+        priority: spec.priority,
+        time: formatRelativeTime(issue.createdAt, now),
+        title: spec.titleTemplate,
+        message: fillTemplate(spec.messageTemplate, {
+          issueId: issue.issueId,
+          title: (issue.issueContent || '').trim() || issue.lotId,
+        }),
+        unread: true,
+        href: `/issue?issueId=${encodeURIComponent(issue.issueId)}&lotId=${encodeURIComponent(issue.lotId)}`,
+        sortAt,
+        lotId: issue.lotId,
+      })
+    }
+  }
+
+  // 2) 고위험 LOT — 에스컬레이션된 LOT은 제외
   if (riskSettled.status === 'fulfilled') {
     const spec = NOTIFICATION_TYPE_SPEC.high_risk_lot
     for (const lot of riskSettled.value.data.lots ?? []) {
       if (!isWithinLookback(lot.recordedAt, cutoffMs)) continue
+      if (escalatedLotIds.has(lot.lotId)) continue
       const sortAt = parseTime(lot.recordedAt)
+      coveredLotIds.add(lot.lotId)
       raw.push({
         id: `high_risk_lot:${lot.lotId}`,
         type: 'high_risk_lot',
@@ -157,17 +195,21 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
           reason: (lot.riskReason || '').trim() || '고위험 LOT',
         }),
         unread: true,
-        href: spec.defaultHref,
+        href: `/issue?lotId=${encodeURIComponent(lot.lotId)}`,
         sortAt,
+        lotId: lot.lotId,
       })
     }
   }
 
+  // 3) SPC — 이미 고위험/에스컬레이션된 LOT은 생략
   if (spcSettled.status === 'fulfilled') {
     const spec = NOTIFICATION_TYPE_SPEC.spc_breach
     for (const lot of spcSettled.value.data.items ?? []) {
       if (!isWithinLookback(lot.recordedAt, cutoffMs)) continue
+      if (coveredLotIds.has(lot.lotId)) continue
       const sortAt = parseTime(lot.recordedAt)
+      coveredLotIds.add(lot.lotId)
       const param =
         (lot.riskReason || '').trim() ||
         (lot.spcStatus ? `SPC ${lot.spcStatus}` : 'SPC')
@@ -184,28 +226,7 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
         unread: true,
         href: spec.defaultHref,
         sortAt,
-      })
-    }
-  }
-
-  if (issuesSettled.status === 'fulfilled') {
-    const spec = NOTIFICATION_TYPE_SPEC.pending_issue
-    for (const issue of issuesSettled.value.data.issues ?? []) {
-      if (!isWithinLookback(issue.createdAt, cutoffMs)) continue
-      const sortAt = parseTime(issue.createdAt)
-      raw.push({
-        id: `pending_issue:${issue.issueId}`,
-        type: 'pending_issue',
-        priority: spec.priority,
-        time: formatRelativeTime(issue.createdAt, now),
-        title: spec.titleTemplate,
-        message: fillTemplate(spec.messageTemplate, {
-          issueId: issue.issueId,
-          title: (issue.issueContent || '').trim() || issue.lotId,
-        }),
-        unread: true,
-        href: spec.defaultHref,
-        sortAt,
+        lotId: lot.lotId,
       })
     }
   }
@@ -247,7 +268,7 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
           category: item.category || '문의',
         }),
         unread: true,
-        href: spec.defaultHref,
+        href: `/inquiry?id=${encodeURIComponent(item.id)}`,
         sortAt: sortAt || now.getTime(),
       })
     }
@@ -259,6 +280,7 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
 /** Fetch live sources (3-day window), apply localStorage read/dismiss, return UI list. */
 export async function loadHeaderNotifications(): Promise<HeaderNotification[]> {
   const raw = await collectRaw()
-  const withoutSort = raw.map(({ sortAt: _sortAt, ...item }) => item)
-  return applyLocalState(withoutSort)
+  return applyLocalState(
+    raw.map(({ sortAt: _sortAt, lotId: _lotId, ...item }) => item),
+  )
 }

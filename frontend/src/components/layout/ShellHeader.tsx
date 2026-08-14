@@ -17,6 +17,11 @@ import {
 } from '@/components/layout/AppShell'
 import UserAuthMenu from '@/components/layout/UserAuthMenu'
 import type { HeaderNotification } from '@/config/headerNotificationSpec'
+import { authApi } from '@/api/authApi'
+import {
+  AUTH_CHANGED_EVENT,
+  isLoggedIn,
+} from '@/lib/authStorage'
 import {
   HEADER_NOTIF_PAGE_SIZE,
   dismissNotifications,
@@ -52,6 +57,10 @@ export default function ShellHeader() {
   const [notifyLoading, setNotifyLoading] = useState(false)
   const [notifyError, setNotifyError] = useState(false)
   const [notifyPage, setNotifyPage] = useState(1)
+  const [emailCheck, setEmailCheck] = useState<'O' | 'X'>('X')
+  const [emailCheckLoading, setEmailCheckLoading] = useState(false)
+  const [emailCheckSaving, setEmailCheckSaving] = useState(false)
+  const [loggedIn, setLoggedIn] = useState(false)
 
   const notifyRef = useRef<HTMLDivElement | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
@@ -122,9 +131,41 @@ export default function ShellHeader() {
     return () => window.clearInterval(timer)
   }, [])
 
+  const fetchEmailCheck = useCallback(async () => {
+    if (!isLoggedIn()) {
+      setLoggedIn(false)
+      setEmailCheck('X')
+      return
+    }
+    setLoggedIn(true)
+    setEmailCheckLoading(true)
+    try {
+      const { data } = await authApi.getSettings()
+      setEmailCheck(data.settings.emailCheck === 'O' ? 'O' : 'X')
+    } catch {
+      setEmailCheck('X')
+    } finally {
+      setEmailCheckLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     void fetchNotifications()
   }, [fetchNotifications])
+
+  useEffect(() => {
+    const syncAuth = () => {
+      setLoggedIn(isLoggedIn())
+      void fetchEmailCheck()
+    }
+    syncAuth()
+    window.addEventListener(AUTH_CHANGED_EVENT, syncAuth)
+    window.addEventListener('storage', syncAuth)
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, syncAuth)
+      window.removeEventListener('storage', syncAuth)
+    }
+  }, [fetchEmailCheck])
 
   /** Settings → auto refresh (skipped on management — Grafana embeds handle their own refresh). */
   useEffect(() => {
@@ -145,6 +186,7 @@ export default function ShellHeader() {
   useEffect(() => {
     if (!isNotifyOpen) return
     void fetchNotifications()
+    void fetchEmailCheck()
 
     const onPointerDown = (event: globalThis.MouseEvent) => {
       if (notifyRef.current && !notifyRef.current.contains(event.target as Node)) {
@@ -161,7 +203,7 @@ export default function ShellHeader() {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [isNotifyOpen, fetchNotifications])
+  }, [isNotifyOpen, fetchNotifications, fetchEmailCheck])
 
   useEffect(() => {
     return () => {
@@ -225,13 +267,29 @@ export default function ShellHeader() {
     })
   }
 
+  const toggleEmailCheck = async () => {
+    if (!loggedIn || emailCheckSaving) return
+    const next: 'O' | 'X' = emailCheck === 'O' ? 'X' : 'O'
+    const prev = emailCheck
+    setEmailCheck(next)
+    setEmailCheckSaving(true)
+    try {
+      const { data } = await authApi.updateSettings({ emailCheck: next })
+      setEmailCheck(data.settings.emailCheck === 'O' ? 'O' : 'X')
+    } catch {
+      setEmailCheck(prev)
+    } finally {
+      setEmailCheckSaving(false)
+    }
+  }
+
   const iconBtnClass = isDark
     ? 'inline-flex items-center justify-center rounded-lg border border-slate-600/80 bg-slate-800 text-slate-100 shadow-sm transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
     : 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
 
-  const actionLinkClass = isDark
-    ? 'text-xs font-medium text-slate-400 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40'
-    : 'text-xs font-medium text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40'
+  const notifyActionBtnClass = isDark
+    ? 'inline-flex items-center justify-center rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    : 'inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
 
   return (
     <>
@@ -301,7 +359,7 @@ export default function ShellHeader() {
           {isNotifyOpen ? (
             <div
               role="menu"
-              className={`absolute right-0 top-12 z-50 w-[min(92vw,340px)] overflow-hidden rounded-xl border shadow-lg ${
+              className={`absolute right-0 top-12 z-50 w-[min(92vw,400px)] overflow-hidden rounded-xl border shadow-lg ${
                 isDark ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-white'
               }`}
             >
@@ -313,16 +371,16 @@ export default function ShellHeader() {
                 <strong className={`text-sm ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>
                   알림
                 </strong>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                   {unreadCount > 0 ? (
-                    <button type="button" className={actionLinkClass} onClick={markAllRead}>
+                    <button type="button" className={notifyActionBtnClass} onClick={markAllRead}>
                       모두 읽음
                     </button>
                   ) : null}
                   {readCount > 0 ? (
                     <button
                       type="button"
-                      className={actionLinkClass}
+                      className={notifyActionBtnClass}
                       onClick={removeReadNotifications}
                     >
                       읽은 알림 제거
@@ -443,6 +501,57 @@ export default function ShellHeader() {
                   ) : null}
                 </>
               )}
+
+              <div
+                className={`flex items-start justify-between gap-3 border-t px-4 py-3 ${
+                  isDark ? 'border-slate-700 bg-slate-950/50' : 'border-gray-100 bg-slate-50/80'
+                }`}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-sm font-semibold ${
+                      isDark ? 'text-slate-100' : 'text-gray-800'
+                    }`}
+                  >
+                    이메일 자동 발신
+                  </p>
+                  <p
+                    className={`mt-0.5 text-xs leading-relaxed ${
+                      isDark ? 'text-slate-400' : 'text-gray-500'
+                    }`}
+                  >
+                    {loggedIn
+                      ? '위험등급이 심각인 LOT 이슈 보고서를 메일로 받습니다.'
+                      : '로그인 후 수신 여부를 설정할 수 있습니다.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={emailCheck === 'O'}
+                  aria-label="이메일 자동 발신"
+                  disabled={!loggedIn || emailCheckLoading || emailCheckSaving}
+                  onClick={() => {
+                    void toggleEmailCheck()
+                  }}
+                  className={`relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+                    emailCheck === 'O'
+                      ? 'bg-blue-600'
+                      : isDark
+                        ? 'bg-slate-600'
+                        : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      emailCheck === 'O' ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
