@@ -29,9 +29,9 @@ const DEFAULT_SQLITE = path.resolve(__dirname, '../../../DB/data/chat.sqlite')
 let sqliteDb: DatabaseSync | null = null
 
 function storeMode(): ChatStoreMode {
-  const raw = (process.env.CHAT_STORE || 'sqlite').trim().toLowerCase()
+  const raw = (process.env.CHAT_STORE || 'mariadb').trim().toLowerCase()
   if (raw === 'memory' || raw === 'mariadb' || raw === 'sqlite') return raw
-  return 'sqlite'
+  return 'mariadb'
 }
 
 export function getChatStoreMode(): ChatStoreMode {
