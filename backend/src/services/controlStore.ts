@@ -61,12 +61,12 @@ function storeMode(): ControlStoreMode {
   const raw = (
     process.env.CONTROL_STORE ||
     process.env.CHAT_STORE ||
-    'sqlite'
+    'mariadb'
   )
     .trim()
     .toLowerCase()
   if (raw === 'memory' || raw === 'mariadb' || raw === 'sqlite') return raw
-  return 'sqlite'
+  return 'mariadb'
 }
 
 export function getControlStoreMode(): ControlStoreMode {
