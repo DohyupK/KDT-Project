@@ -8,7 +8,28 @@ const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(frontendRoot, '..')
 loadEnvConfig(repoRoot)
 
+const extraDevOrigins = [
+  process.env.CORS_ORIGIN,
+  process.env.CORS_ORIGINS,
+  process.env.ALLOWED_DEV_ORIGINS,
+]
+  .filter(Boolean)
+  .join(',')
+  .split(',')
+  .map((part) => {
+    const s = part.trim()
+    if (!s) return ''
+    try {
+      return new URL(s.includes('://') ? s : `http://${s}`).hostname
+    } catch {
+      return s
+    }
+  })
+  .filter(Boolean)
+
 const nextConfig: NextConfig = {
+  // Public-IP `next dev` (Lightsail) needs this or Turbopack HMR websocket is rejected.
+  allowedDevOrigins: [...new Set(['localhost', '127.0.0.1', ...extraDevOrigins])],
   // Root package-lock makes Turbopack pick monorepo root; pin to frontend to avoid RSC manifest 500.
   turbopack: {
     root: frontendRoot,
