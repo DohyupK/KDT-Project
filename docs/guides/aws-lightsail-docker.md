@@ -5,7 +5,7 @@
 MariaDB 공용 DB는 이미 Lightsail Ubuntu다. 절차: [`login-ubuntu-mariadb.md`](./login-ubuntu-mariadb.md).  
 이 문서는 **n8n·Qdrant 컨테이너를 그 서버(또는 같은 방식의 Ubuntu)에 올리는 방법**이다.
 
-포트·주소 숫자는 **루트 `.env`** 만 본다. 이 파일에는 키 이름만 적는다. 시크릿·공인 IP·토큰 커밋 금지.
+포트·주소 숫자는 **루트 `.env`** 만 본다. 로컬 포트·기동 주체: [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md). 시크릿·공인 IP·토큰 커밋 금지.
 
 로컬 PC에서는 루트 [`docker-compose.yml`](../../docker-compose.yml)로 `kdt-n8n` · `kdt-qdrant`를 켠다.
 
@@ -14,7 +14,7 @@ docker compose up -d
 ```
 
 데이터: `DB/data/n8n/` · `DB/data/qdrant_storage/` (gitignore). FE/BE/ai는 여전히 `npm run dev`.  
-이슈 메일 계획: [`2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md).
+이슈 메일: [`issue-report.md`](../references/issue-report.md).
 
 ---
 
@@ -144,4 +144,4 @@ npm run send:one-issue-report
 
 - [`login-ubuntu-mariadb.md`](./login-ubuntu-mariadb.md) — Lightsail MariaDB  
 - [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md) — 포트 · `npm run dev`  
-- [`2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md) — 메일 파이프라인  
+- [`issue-report.md`](../references/issue-report.md) — 메일 파이프라인  

@@ -7,9 +7,9 @@
 
 **실행 전 승인:** `pip` 설치, `train_model`/Optuna 학습, `predict` 스모크·테스트는  
 사용자에게 무엇을·왜·예상 시간을 보고하고 **승인받은 뒤에만** 실행한다.  
-(전체 룰: `.cursor/rules/ask-before-run.mdc`)
+(전체 룰: `.cursor/rules/kdt-project.mdc`)
 
-**설치 후:** `pip`로 새 패키지를 넣으면 `README.md` 기술 스택·루트 README 모노레포 스택을 같은 작업에서 갱신한다.
+**설치 후:** `pip`로 새 패키지를 넣으면 루트 `README.md` 기술 스택(ai-service)을 같은 작업에서 갱신한다.
 
 **v1.2.0 파이프라인:** 도메인 피처(온도 편차·임계 플래그·온습도 교차·particle_span) + `domain_thresholds.json`.  
 이전: `logs/train.log`, Optuna `gc.collect`, metadata 버전·해시·`feature_types`,  
@@ -178,7 +178,7 @@ ai-service/
 ```
 
 프론트 챗봇 UI 목업: `frontend/src/app/(shell)/main/page.tsx`  
-연동 작업서: `docs/plans/2026-07-23-chatbot-integration.md`
+경로 지도: `docs/references/important-paths.md` · `docs/catalog.md`
 
 ---
 
@@ -201,7 +201,7 @@ ai-service/
 | `docs/direction.md` | 제품 전체 방향 |
 | `docs/prompts/train-pipeline-ox-classifier.md` | 1단계 코드 생성용 전문 프롬프트 |
 | `docs/references/cathode-clf-schema.md` | CSV 컬럼 계약 |
-| `docs/plans/2026-07-22-ox-classifier-prompt.md` | 보강 확정 요약 |
+| `docs/references/model-training-methods.md` | 학습 방법 SSOT |
 
 이 파일(`ai-service/AGENTS.md`)이 **챗봇·모델 작업의 1차 진입점**이다.  
 충돌 시: 스키마·predict 계약은 `docs/references` + 이 파일 4절이 우선이고, 장문 프롬프트는 구현 체크리스트로 쓴다.

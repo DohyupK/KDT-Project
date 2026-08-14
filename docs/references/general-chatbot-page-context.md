@@ -5,13 +5,7 @@
 **범위:** 셸 `GlobalChatbot` → `POST /api/chat` · `/api/chat/stream` → ai-service `/chat` · `/chat/stream`  
 **제외:** 보안 오버레이(`SecurityChatbot`, `/security-chat`) — 별도 [`security-chatbot-guide.md`](./security-chatbot-guide.md)
 
-관련 확정 플랜:  
-[`2026-08-13-page-context-chatbot.md`](../plans/2026-08-13-page-context-chatbot.md) ·  
-[`2026-08-13-slim-focus-events.md`](../plans/2026-08-13-slim-focus-events.md) ·  
-[`2026-08-13-page-context-sync.md`](../plans/2026-08-13-page-context-sync.md) ·  
-[`2026-08-13-visible-ui-spacing.md`](../plans/2026-08-13-visible-ui-spacing.md) ·  
-[`2026-08-13-focus-lot-spacing.md`](../plans/2026-08-13-focus-lot-spacing.md) ·  
-[`2026-08-13-reply-spacing.md`](../plans/2026-08-13-reply-spacing.md)
+이 파일이 일반 챗 페이지 컨텍스트 SSOT다.
 
 ---
 

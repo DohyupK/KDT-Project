@@ -27,10 +27,10 @@
 
 | 폴더 / 파일 | 하는 일 | 기능·설계 |
 |-------------|---------|-----------|
-| [`frontend/`](./frontend/) | UI · AppShell · GlobalChatbot · `/security` | [`frontend/README.md`](./frontend/README.md) |
-| [`backend/`](./backend/) | Express API · 세션 · 게이트 · LLM 키 · 프록시 | [`backend/README.md`](./backend/README.md) |
-| [`ai-service/`](./ai-service/) | FastAPI · predict · LangGraph · secure RAG | [`ai-service/README.md`](./ai-service/README.md) |
-| [`docs/`](./docs/) | 방향 · 일지 · 계획 · 스키마 참조 | [일지](./docs/work-log/2026-08-13.md) |
+| [`frontend/`](./frontend/) | UI · AppShell · GlobalChatbot · `/security` | [`docs/packages.md`](./docs/packages.md) |
+| [`backend/`](./backend/) | Express API · 세션 · 게이트 · LLM 키 · 프록시 | [`docs/packages.md`](./docs/packages.md) |
+| [`ai-service/`](./ai-service/) | FastAPI · predict · LangGraph · secure RAG | [`docs/packages.md`](./docs/packages.md) |
+| [`docs/`](./docs/) | 방향 · 일지 · 구현 명세 | [목록](./docs/catalog.md) · [일지](./docs/work-log/2026-08-14.md) |
 | [`AGENTS.md`](./AGENTS.md) | AI 공통 bullet | — |
 
 ```text
@@ -41,8 +41,7 @@ KDT-Project/
 ├── backend/       ← 서버 (:3001)
 ├── ai-service/    ← AI (:8800) · 기동 시 Qdrant Docker 시도
 ├── AGENTS.md
-├── .cursor/       ← Cursor 룰·스킬
-└── .agents/       ← 에이전트 스킬
+└── .cursor/       ← kdt-project.mdc · frontend-ui.mdc · project-control 스킬
 ```
 
 Docker로만 뜨는 것(레포 밖): **Qdrant** `kdt-qdrant` :6333 · **n8n** `kdt-n8n` :5678 (수동).
@@ -192,7 +191,7 @@ npm run dev
 | `No module named 'MySQLdb'` · 채팅 히스토리 안 남음 · messages 404 | `DATABASE_URL=mysql://` (드라이버 잘못됨) | `mysql+pymysql://...` 로 바꾸거나 `DATABASE_URL` 비우고 `DB_*`만 · `/health`의 `chat_history_db_ok` 확인 |
 | React Client Manifest 500 · multiple lockfiles | Turbopack이 모노레포 루트를 잡음 | `frontend/next.config.ts`의 `turbopack.root` 적용됨 · **루트 `npm run dev` 재시작** |
 | 보안 RAG 빈약 / Qdrant 오류 | Qdrant·인덱스 없음 | Docker Desktop · `:6333` · ingest · [`secure-rag.md`](./docs/references/secure-rag.md) |
-| 이슈 메일 `webhook_404` | n8n 꺼짐 · unpublished | `docker start kdt-n8n` · [`issue-report-n8n 계획`](./docs/plans/2026-08-13-issue-report-n8n.md) |
+| 이슈 메일 `webhook_404` | n8n 꺼짐 · unpublished | `docker start kdt-n8n` · [`이슈 보고서`](./docs/references/issue-report.md) |
 | 보안 요약 실패 | 로컬 LLM 없음 | LM Studio/vLLM(:8001) 또는 `SECURE_GENERATE=0` 발췌 모드 |
 
 ### 요청 흐름
@@ -235,9 +234,9 @@ Maximize / /security
 
 ## 기술 스택 (모노레포)
 
-**기술 스택의의 단일 출처(SSOT)는 이 섹션입니다.**  
-기능·세부 설계·실행 절차는 각 패키지 README에 둡니다.  
-**새 의존성 설치 시 이 목록을 반드시 갱신**합니다. (`.cursor/rules/ask-before-run.mdc`)
+**기술 스택의 단일 출처(SSOT)는 이 섹션입니다.**  
+패키지 역할·단독 기동은 [`docs/packages.md`](./docs/packages.md).  
+**새 의존성 설치 시 이 목록을 반드시 갱신**합니다. (`.cursor/rules/kdt-project.mdc`)
 
 ### root (dev orchestrator)
 - concurrently — `npm run dev`로 frontend · backend · ai-service 동시 기동
@@ -247,7 +246,7 @@ Maximize / /security
 - **UI·상태:** Tailwind CSS, Zustand, Lucide React, Recharts, Day.js  
 - **HTTP·데이터:** Axios, Prisma (`@prisma/client`) — MariaDB `user_chat_*` 참조  
 - **개발:** ESLint, eslint-config-next, prisma CLI, `@tailwindcss/postcss`, `@types/*`  
-→ 기능·설계: [`frontend/README.md`](./frontend/README.md)
+→ 기능·설계: [`docs/packages.md`](./docs/packages.md#frontend)
 
 ### backend
 - **런타임:** Express 5, TypeScript (tsx), Node  
@@ -255,20 +254,20 @@ Maximize / /security
 - **Auth:** bcryptjs, jsonwebtoken  
 - **업로드:** multer (문의 첨부)  
 - **개발:** typescript, tsx, `@types/express`, `@types/multer` 등  
-→ 기능·설계: [`backend/README.md`](./backend/README.md)
+→ 기능·설계: [`docs/packages.md`](./docs/packages.md#backend)
 
 ### ai-service
 - Python 3.11+, Polars, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, SHAP, joblib, openpyxl  
 - FastAPI, Uvicorn, Pydantic · LangGraph / LangChain  
 - Secure RAG: qdrant-client, sentence-transformers, rank-bm25, torch, llama-index-core, llama-index-llms-openai, llama-index-vector-stores-qdrant, pypdf, pymupdf, Pillow, pytesseract, openpyxl, watchdog, SQLAlchemy, PyMySQL
   (bge-m3 / bge-reranker **CPU** · soft fallback · `FOLLOWUP_RE` · SSE `/security-chat/stream` · analytics `csv_lake`)  
-→ [`ai-service/README.md`](./ai-service/README.md)
+→ [`docs/packages.md`](./docs/packages.md#ai-service)
 
 ---
 
 ## AI 서비스 실행 (ai-service)
 
-단독 기동·엔드포인트·학습 설계는 **[`ai-service/README.md`](./ai-service/README.md)**.  
+단독 기동·엔드포인트·학습 설계는 **[`docs/packages.md`](./docs/packages.md#ai-service)**.  
 전체 실연동은 위 [한 번에 기동](#3-매번--한-번에-기동).
 
 | 엔드포인트 | 설명 |
@@ -290,7 +289,7 @@ Maximize / /security
 | **루트 README** | 사람 | `/README.md` | **실행 진입점** · 지도 · **모노레포 기술 스택** |
 | **루트 AGENTS** | AI | `/AGENTS.md` | 전 패키지 **짧은** 규칙 |
 | **패키지 README** | 사람 | `frontend/` · `backend/` · `ai-service/` | 기능 · 세부 설계 · 패키지별 실행 보충 |
-| **docs/** | 사람 (+ AI가 방향 확인) | `/docs/` | 방향 · 일지 · 계획 · 스키마 |
+| **docs/** | 사람 (+ AI가 방향 확인) | `/docs/` | 방향 · 일지 · 구현 명세 |
 
 - **README** = 설명서  
 - **AGENTS** = AI 수칙 (짧게)  
@@ -303,52 +302,55 @@ Maximize / /security
 ```mermaid
 flowchart TD
   start[작업 시작]
-  global[전체 룰 항상 적용]
+  global[kdt-project.mdc 항상 적용]
   direction[docs/direction.md 확인]
   work[frontend / backend / ai-service 작업]
-  page[중요 페이지만 개별 룰·스킬]
+  ui[프론트면 frontend-ui.mdc]
   log[docs/work-log 기록]
 
   start --> global
   global --> direction
   direction --> work
-  work --> page
-  page --> log
+  work --> ui
+  ui --> log
 ```
 
-| 종류 | 의미 | 예 |
-|------|------|-----|
-| **전체 룰** | 어디를 건드려도 | `main-project.mdc`, `docs-workflow.mdc`, `ask-before-run.mdc` |
-| **전체 스킬** | 조율 | `project-control` |
-| **개별 룰·스킬** | 특정 화면·API | Setting / Management · `*-api` |
-| **docs** | 지금 방향·일자별 일지 | `direction.md`, `work-log/` |
+| 종류 | 의미 | 파일 |
+|------|------|------|
+| **전체 룰** | 어디를 건드려도 | [`kdt-project.mdc`](./.cursor/rules/kdt-project.mdc) |
+| **프론트 UI 룰** | app/components TSX | [`frontend-ui.mdc`](./.cursor/rules/frontend-ui.mdc) |
+| **스킬** | 조율 | [`project-control`](./.cursor/skills/project-control/SKILL.md) |
+| **docs** | 방향·일지·목록 | `direction.md`, `work-log/`, `catalog.md` |
 
 ### 자주 보는 파일
 
 | 파일 | 역할 |
 |------|------|
-| [`docs/direction.md`](./docs/direction.md) | 지금 우선순위 |
+| [`docs/direction.md`](./docs/direction.md) | 제품 방향 · 제약 |
+| [`docs/catalog.md`](./docs/catalog.md) | 사용자 작성 문서 전체 목록 |
+| [`docs/references/agent-rules-and-skills.md`](./docs/references/agent-rules-and-skills.md) | 룰·스킬 한곳 정리 |
+| [`docs/references/issue-report.md`](./docs/references/issue-report.md) | 이슈 보고서 메일 (n8n) |
 | [`docs/work-log/2026-08-14.md`](./docs/work-log/2026-08-14.md) | 이슈 메일 재발송 · Lightsail Docker · AWS+PC vLLM · Grafana env · compose |
 | [`docs/guides/aws-lightsail-gpu-tunnel.md`](./docs/guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU 터널 · IP/DB 변경 목록 |
 | [`docs/work-log/2026-08-13.md`](./docs/work-log/2026-08-13.md) | 이슈 보고서 n8n 메일 · 포트/`npm run dev` 기동 주체 |
 | [`docs/work-log/2026-08-10.md`](./docs/work-log/2026-08-10.md) | N_FOLDS 5→6 · [모델 학습 방법 SSOT](./docs/references/model-training-methods.md) |
 | [`docs/work-log/2026-08-08.md`](./docs/work-log/2026-08-08.md) | 메인 위험 LOT·당일 KPI 0.8 · 대시보드 생산 상세 · issues 리팩터 · 이슈 저장=완료/과거 자료 |
-| [`docs/work-log/2026-08-06.md`](./docs/work-log/2026-08-06.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
+| [`docs/work-log/2026-08-06-07.md`](./docs/work-log/2026-08-06-07.md) | 생산 추이 · [model_quality](./Documents/Public/model_quality.md) · [blending](./Documents/Public/model-blending-correlation.md) |
 | [`docs/work-log/2026-08-05.md`](./docs/work-log/2026-08-05.md) | lots/judgment/SPC 폴링 · 대시보드 residual 3컬럼 · 네모칸 후속 |
 | [`docs/work-log/2026-08-04.md`](./docs/work-log/2026-08-04.md) | Documents READ-ONLY · 인수인계 DB · ISS-yyMMdd-001 자동발급 |
 | [`docs/work-log/2026-08-02.md`](./docs/work-log/2026-08-02.md) | SSE · analytics · soft fallback · **3단계** chunk/min_score · 스택 스냅샷 |
 | [`docs/references/ai-service-feature-catalog.md`](./docs/references/ai-service-feature-catalog.md) | ai-service 기능 목록 (predict · 보안 RAG · analytics) |
-| [`ai-service/README.md`](./ai-service/README.md#성능-확인-clf--reg--residual) | ML 성능 확인 (metadata + `scripts/evaluate_models.py`) |
+| [`docs/packages.md`](./docs/packages.md) | frontend · backend · ai-service · DB 안내 |
 | [`docs/work-log/2026-08-01.md`](./docs/work-log/2026-08-01.md) | 보안 RAG 자연 흐름 · SYS_RAG_EMPTY · 다문서 · 인덱스 |
 | [`docs/references/LLM 튜닝.md`](./docs/references/LLM%20튜닝.md) | Secure RAG·SSE·analytics 기법·과정 총정리 (코드 SSOT) |
-| [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 스택 · 기법 · ai-service 이용 |
+| [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md) | 챗봇 이용 · 라우팅 |
 | [`docs/references/general-chatbot-page-context.md`](./docs/references/general-chatbot-page-context.md) | 일반 챗 응답·페이지 참조 로직 SSOT |
 | [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md) | Documents 워처 · Qdrant 자동기동 · 포트 SSOT |
 | [`docs/work-log/2026-07-31.md`](./docs/work-log/2026-07-31.md) | Documents 경로 · PDF ingest · MariaDB 멀티턴 B |
 | [`docs/work-log/2026-07-30.md`](./docs/work-log/2026-07-30.md) | 보안 RAG · E2E · 발췌 모드 |
 | [`docs/references/secure-rag.md`](./docs/references/secure-rag.md) | 보안 RAG · env · 스모크 |
 | [`docs/references/vllm-setup.md`](./docs/references/vllm-setup.md) | 로컬 LLM(:8001) 수동 기동 · Lightsail 터널 |
-| [`.cursor/rules/`](./.cursor/rules/) | Cursor 룰 |
+| [`.cursor/rules/kdt-project.mdc`](./.cursor/rules/kdt-project.mdc) | Cursor 전체 룰 |
 
 목차: [`docs/README.md`](./docs/README.md)
 
@@ -356,9 +358,7 @@ flowchart TD
 
 ## 관련 문서
 
-- 프론트: [`frontend/README.md`](./frontend/README.md)  
-- 백엔드: [`backend/README.md`](./backend/README.md)  
-- AI: [`ai-service/README.md`](./ai-service/README.md)  
+- 패키지 안내: [`docs/packages.md`](./docs/packages.md)  
 - AI 규칙: [`AGENTS.md`](./AGENTS.md)  
 - 작업 방향: [`docs/direction.md`](./docs/direction.md)
 - Lightsail Docker: [`docs/guides/aws-lightsail-docker.md`](./docs/guides/aws-lightsail-docker.md)
