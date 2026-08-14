@@ -1,11 +1,11 @@
 # Lightsail 16GB 앱 서버 + 이 PC GPU 터널
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 확정 설계: **앱·DB·n8n·Qdrant는 AWS Lightsail CPU**, **보안 챗 요약(vLLM)은 이 PC GPU**를 SSH 역방향 터널로 붙인다.
 
 GPU Lightsail/EC2를 사지 않는다. 첨부 매뉴얼의 「한 대 GPU에서 vLLM까지」는 이 설계가 아니다.
 
-관련: [login-ubuntu-mariadb.md](./login-ubuntu-mariadb.md) · [vllm-setup.md](../references/vllm-setup.md) · 로컬 포트: [documents-watcher-qdrant.md](../references/documents-watcher-qdrant.md)
+관련: [login-ubuntu-mariadb.md](./login-ubuntu-mariadb.md) · [vllm-setup.md](../references/vllm-setup.md) · 포트·ingest 상시 구분: [documents-watcher-qdrant.md](../references/documents-watcher-qdrant.md) §6
 
 ---
 
@@ -137,6 +137,8 @@ ssh -i "키.pem" -N -R 8001:127.0.0.1:8001 ubuntu@<16GB공인IP>
 
 3. 서버에서 `curl -s http://127.0.0.1:8001/v1/models` 가 되면 요약(`SECURE_GENERATE=1`) 가능.  
    터널이 꺼지면 클라우로 안 넘어가고 실패 안내만 난다.
+
+보안 RAG 컬렉션 `secure_docs` 가 없으면 챗이 vLLM을 안 친다. 서버에서 **한 번** `cd ai-service && python ingest_secure.py`. 상시가 아니다. 구분: [documents-watcher-qdrant.md](../references/documents-watcher-qdrant.md) §6.
 
 n8n UI는 5678을 방화벽에 열지 말고:
 

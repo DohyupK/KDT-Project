@@ -1,6 +1,6 @@
 # Documents 워처 · Qdrant 기동 · 포트 (SSOT)
 
-최종 갱신: 2026-08-14
+최종 갱신: 2026-08-15
 
 이 문서는 **Documents OCR/`text_match` 워처**와 **Qdrant 자동 기동**, 그리고 모노레포 **포트·프로세스 소유권(SSOT)** 을 정리한다.  
 vLLM 기동: [`vllm-setup.md`](./vllm-setup.md) · Lightsail 토폴로지: [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md)  
@@ -216,8 +216,19 @@ python ingest_secure.py
    - ai → Qdrant ensure → uvicorn :8800  
    - backend → document watcher 자식 → Express :3001  
    - frontend :3000  
-3. (최초/정리 후) 필요 시 `cd ai-service && python ingest_secure.py`  
-4. 보안 챗 LLM이 필요하면 :8001 수동
+3. (최초·컬렉션 없음·전체 재색인) `cd ai-service && python ingest_secure.py` — **상시 프로세스가 아니다.** 아래 표.
+4. 보안 챗 LLM이 필요하면 :8001 수동 + (Lightsail이면) 이 PC에서 터널. [`vllm-setup.md`](./vllm-setup.md)
+
+`ingest_secure.py` 는 Qdrant `secure_docs` 를 **한 번 채우는 작업**이다. 컬렉션은 Qdrant 볼륨에 남는다. `npm run dev` / 터널처럼 창을 열어 두지 않는다.
+
+| 무엇 | 상시? | 언제 |
+|------|--------|------|
+| `python ingest_secure.py` | **아니오** | 컬렉션 없음 · 전체 재빌드 |
+| Qdrant (`kdt-qdrant`) | 예 | `docker compose up -d` |
+| document watcher | 예 | backend가 자식으로 기동. 이후 파일 변경분 |
+| vLLM `:8001` + `vllm-tunnel.ps1` | 보안 챗 LLM을 쓸 때 | 이 PC. AWS `npm run dev`가 터널을 켜지 않음 |
+
+컬렉션이 없으면 보안 챗은 vLLM을 호출하지 않고 RAG 미초기화로 끝난다. AWS 로그 `Qdrant collection 'secure_docs' missing` 이 그 경우다.
 
 Tesseract(Windows): `winget install UB-Mannheim.TesseractOCR`,  
 `kor` 언어팩은 `%LOCALAPPDATA%\tesseract-tessdata\tessdata\` (Program Files 쓰기 권한 이슈 회피).  
@@ -237,14 +248,15 @@ MariaDB `text_match`: [`DB/text_match.sql`](../../DB/text_match.sql) · `python 
 | OCR fail / no kor | Tesseract · tessdata · `TESSERACT_CMD` |
 | `[text_match] DB unavailable` | 루트 `.env` `DB_*` / `DATABASE_URL` |
 | `:8800` EADDRINUSE | `dev:ai`와 backend `AI_SERVICE_AUTOSTART=1` 이중 기동 여부 |
-| 이슈 메일 `webhook_404` | n8n 꺼짐 · 워크플로 unpublished · 경로 `issue-report` |
+| 보안 챗이 vLLM 연결 불가처럼 보임 · `secure_docs` missing | 컬렉션 없음. ingest **한 번** (§6). 터널과 무관 |
 
 ---
 
 ## 8. 관련 링크
 
 - [`Documents/README.md`](../../Documents/README.md) — 변환 정책  
-- [`secure-rag.md`](./secure-rag.md) — RAG · ingest · 환경  
+- [`secure-rag.md`](./secure-rag.md) — RAG · ingest 명령 · 환경  
+- [`security-chatbot-guide.md`](./security-chatbot-guide.md) — `RAG_NOT_READY_REPLY` vs `OFFLINE_REPLY`  
 - [`general-chatbot-page-context.md`](./general-chatbot-page-context.md) — 일반 챗 페이지 컨텍스트  
 - [`issue-report.md`](./issue-report.md) — 이슈 보고서 메일  
 - [`docs/guides/aws-lightsail-docker.md`](../guides/aws-lightsail-docker.md) — Lightsail에 n8n·Qdrant  

@@ -1,6 +1,6 @@
 # 패키지 안내 (frontend · backend · ai-service · DB)
 
-최종 갱신: 2026-08-14  
+최종 갱신: 2026-08-15  
 저장소 실행·기술 스택 SSOT: [루트 README](../README.md).  
 이 파일은 **패키지 README를 한곳으로 모은** 사람용 설명이다. AI 규약은 각 `AGENTS.md` · [`.cursor/rules/kdt-project.mdc`](../.cursor/rules/kdt-project.mdc).
 
@@ -83,7 +83,7 @@ python scripts/evaluate_models.py
 
 단독 기동: `pip install -r requirements.txt` 후 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8800`.  
 일반 챗 API 키는 `.env`가 아니라 `/security` → `DB/data/llm_keys.sqlite`.  
-OCR: OS Tesseract (`kor`+`eng`). `python ingest_secure.py`. AI 규칙: [`ai-service/AGENTS.md`](../ai-service/AGENTS.md).
+OCR: OS Tesseract (`kor`+`eng`). 최초 ingest는 [`documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md) §6 (`python ingest_secure.py` 는 상시 아님). AI 규칙: [`ai-service/AGENTS.md`](../ai-service/AGENTS.md).
 
 ---
 
