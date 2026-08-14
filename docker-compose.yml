@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Local Docker: n8n + Qdrant only.
 # frontend / backend / ai-service → npm run dev
 # vLLM → GPU 서버에서 호스트 프로세스 :8001 (이 파일에 넣지 않음)
@@ -5,11 +6,18 @@
 #
 #   docker compose up -d
 #   docker compose ps
+=======
+# n8n + Qdrant only. App code is NOT in Docker.
+# Bind 127.0.0.1 so 5678/6333 are not on the public internet.
+# Lightsail: docker compose up -d
+# 이미 같은 이름의 컨테이너가 있으면 compose 전에 docker ps 로 확인.
+>>>>>>> cb55f73157bdbf23380ec24591fd0562fc4c391d
 
 services:
   qdrant:
     image: qdrant/qdrant
     container_name: kdt-qdrant
+<<<<<<< HEAD
     restart: unless-stopped
     ports:
       - "6333:6333"
@@ -34,3 +42,27 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./DB/data/n8n:/home/node/.n8n
+=======
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - ./DB/data/qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n
+    container_name: kdt-n8n
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - ./DB/data/n8n:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://127.0.0.1:5678/
+    restart: unless-stopped
+>>>>>>> cb55f73157bdbf23380ec24591fd0562fc4c391d

@@ -7,7 +7,11 @@ import {
   DEFECT_JUDGE_THRESHOLD,
   type RiskLevel,
 } from './lotScore.js'
-import { getLotSpcDetail, parseSpcChartSnapshot } from './lot.service.js'
+import {
+  getLotSpcDetail,
+  isChartableSpcStatus,
+  parseSpcChartSnapshot,
+} from './lot.service.js'
 import { getRecommendedActionForLot } from './lotRecommendedAction.service.js'
 import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
 
@@ -361,31 +365,20 @@ export async function getLotRiskDetail(lotId: string) {
 
   const storedSnapshot = parseSpcChartSnapshot(r.spc_chart_json)
   let spc: Awaited<ReturnType<typeof getLotSpcDetail>> | null = null
-  // Prefer non-empty stored snapshot. Empty metrics[] is common for older
-  // "이상만 저장" 스냅샷 — live recompute so 안정 LOT도 관리도가 보이게 함.
-  if (storedSnapshot && storedSnapshot.metrics.length > 0) {
+  // Empty metrics[] is 안정 (이탈·주의 없음). Do not live-recompute that into full charts.
+  if (storedSnapshot) {
     spc = {
       lotId: r.lot_id,
       spcStatus: storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
-      metrics: storedSnapshot.metrics,
+      metrics: storedSnapshot.metrics.filter((m) => isChartableSpcStatus(m.status)),
     }
   } else {
     try {
       spc = await getLotSpcDetail(lotId)
     } catch {
-      spc =
-        storedSnapshot != null
-          ? {
-              lotId: r.lot_id,
-              spcStatus:
-                storedSpcStatus && storedSpcStatus !== '-' ? storedSpcStatus : '안정',
-              metrics: storedSnapshot.metrics,
-            }
-          : null
+      spc = null
     }
   }
-
-  // Prefer stored spc_chart_json; live recompute only if snapshot missing/empty
   const resolvedSpc = !processComplete
     ? '-'
     : spc?.spcStatus

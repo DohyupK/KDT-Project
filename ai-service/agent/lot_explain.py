@@ -7,9 +7,17 @@ from typing import Any
 
 import numpy as np
 import polars as pl
-import shap
+import xgboost as xgb
 
-from voting_predict import _apply_imputer, _load_member, _maybe_domain, _row_from_features, load_voting_config
+from voting_predict import (
+    CAT_COL,
+    _apply_imputer,
+    _load_member,
+    _maybe_domain,
+    _row_from_features,
+    load_voting_config,
+)
+import xgboost as xgb
 
 FEATURE_LABELS: dict[str, str] = {
     "metal_impurity": "금속 불순물",
@@ -44,6 +52,17 @@ REF_DEFAULTS: dict[str, tuple[float, str]] = {
     "sintering_temp": (800.0, "목표 800°C"),
 }
 
+# U-shape / process targets: 증가·감소의 기준점 (SHAP 부호와 별개).
+PROCESS_TARGETS: dict[str, tuple[float, str]] = {
+    "sintering_temp": (800.0, "목표 800°C"),
+    "temp_dev_from_800": (0.0, "목표 0°C"),
+}
+
+# temp_dev SHAP는 소성온도 표시로 합산 (증가/감소를 온도 원값으로 씀).
+DISPLAY_MERGE: dict[str, str] = {
+    "temp_dev_from_800": "sintering_temp",
+}
+
 DISPLAY_FEATURES = frozenset(
     {
         "humidity",
@@ -64,32 +83,40 @@ def _top_weight_member(members: list[dict[str, Any]]) -> dict[str, Any]:
     return max(members, key=lambda m: float(m.get("weight", 0)))
 
 
-def _direction_ko(value: float, ref: float | None, feature: str) -> str:
+def _direction_ko(value: float, ref: float | None, _feature: str) -> str:
+    """측정값이 기준보다 큰지/작은지. 예측을 올렸는지는 SHAP 부호로 따로 가린다."""
     if ref is None:
         return "변동"
     delta = value - ref
-    if feature == "temp_dev_from_800":
-        return "이탈" if abs(delta) > 1e-6 else "변동"
-    if abs(delta) < 1e-6:
+    if abs(delta) < 1e-9:
         return "변동"
-    if delta > 0:
-        if feature == "humidity":
-            return "상승"
-        if feature in ("lithium_input", "metal_impurity"):
-            return "과다"
-        if feature == "process_time":
-            return "연장"
-        return "상승"
-    if feature == "process_time":
-        return "단축"
-    return "하락"
+    return "증가" if delta > 0 else "감소"
+
+
+def _imputer_means(imputer: dict[str, Any] | None) -> dict[str, float]:
+    if not imputer:
+        return {}
+    raw = imputer.get("numeric_means") or imputer.get("numeric") or {}
+    out: dict[str, float] = {}
+    for k, v in raw.items():
+        try:
+            out[str(k)] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _ref_for_feature(
     feature: str,
     _value: float,
     spc_refs: dict[str, float] | None,
+    imputer_means: dict[str, float] | None = None,
 ) -> tuple[float | None, str | None]:
+    if feature in PROCESS_TARGETS:
+        return PROCESS_TARGETS[feature]
+    means = imputer_means or {}
+    if feature in means:
+        return float(means[feature]), None
     if spc_refs and feature in spc_refs:
         center = float(spc_refs[feature])
         unit = FEATURE_UNITS.get(feature, "")
@@ -120,21 +147,45 @@ def _format_value(feature: str, value: float) -> str:
     return f"{text}{unit}" if unit else text
 
 
-def _select_causes(causes: list[dict[str, Any]], *, top_k: int = 3, min_share_pct: float = 5.0) -> list[dict[str, Any]]:
-    """Top 3 meaningful drivers; 4th+ only when share >= min_share_pct."""
-    meaningful = [c for c in causes if float(c.get("sharePct") or 0) >= 1.0]
+def _select_causes(causes: list[dict[str, Any]], *, top_k: int = 3, min_share_pct: float = 1.0) -> list[dict[str, Any]]:
+    """Positive SHAP drivers: up to top_k with share >= min_share_pct."""
+    meaningful = [c for c in causes if float(c.get("sharePct") or 0) >= min_share_pct]
     if not meaningful:
         meaningful = causes[:1]
-    out: list[dict[str, Any]] = []
-    for c in meaningful:
-        share = float(c.get("sharePct") or 0)
-        if len(out) < top_k:
-            out.append(c)
-        elif share >= min_share_pct:
-            out.append(c)
-        if len(out) >= top_k + 2:
-            break
-    return out[: top_k + 2]
+    return meaningful[:top_k]
+
+
+def _shap_row_for_xgb(model: Any, X: np.ndarray) -> np.ndarray:
+    """Per-row SHAP via booster pred_contribs (sklearn TreeExplainer is brittle on loaded JSON)."""
+    booster = model.get_booster() if hasattr(model, "get_booster") else model
+    dmat = xgb.DMatrix(np.ascontiguousarray(X, dtype=np.float64))
+    contrib = booster.predict(dmat, pred_contribs=True)
+    arr = np.asarray(contrib, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    return arr[0, :-1]
+
+
+def _model_matrix(
+    bundle: dict[str, Any],
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    cat_cols: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    """Same numeric+encoded-cat layout as voting_predict._predict_member."""
+    nums = [c for c in numeric_cols if c in df.columns]
+    parts: list[np.ndarray] = []
+    if nums:
+        parts.append(df.select(nums).to_numpy().astype(np.float64))
+    encoder = bundle.get("encoder")
+    if cat_cols and encoder is not None:
+        present = [c for c in cat_cols if c in df.columns]
+        if present:
+            parts.append(encoder.transform(df.select(present).to_numpy()).astype(np.float64))
+    if not parts:
+        return np.zeros((1, 0), dtype=np.float64), nums
+    X = np.hstack(parts) if len(parts) > 1 else parts[0]
+    return np.ascontiguousarray(X, dtype=np.float64), nums
 
 
 def _causes_from_shap(
@@ -143,48 +194,46 @@ def _causes_from_shap(
     spc_refs: dict[str, float] | None,
     *,
     top_k: int = 3,
-    min_share_pct: float = 5.0,
+    min_share_pct: float = 1.0,
 ) -> list[dict[str, Any]]:
     meta = bundle["meta"]
     feature_columns: list[str] = meta["feature_columns"]
     numeric_cols: list[str] = meta.get("numeric_cols") or [
-        c for c in feature_columns if c != "operator_id"
+        c for c in feature_columns if c != CAT_COL
     ]
+    cat_cols: list[str] = meta.get("cat_features") or []
     df = _row_from_features(features, feature_columns)
     df = _maybe_domain(df)
     for c in feature_columns:
         if c not in df.columns:
             df = df.with_columns(pl.lit(None).alias(c))
     df = _apply_imputer(df, bundle["imputer"])
-    nums = [c for c in numeric_cols if c in df.columns]
-    X = df.select(nums).to_numpy().astype(np.float64)
+    X, nums = _model_matrix(bundle, df, numeric_cols, cat_cols)
+    row = _shap_row_for_xgb(bundle["xgb"], X)
+    row = row[: len(nums)]
 
-    shap_vals = shap.TreeExplainer(bundle["xgb"]).shap_values(X)
-    if isinstance(shap_vals, list):
-        shap_vals = shap_vals[1] if len(shap_vals) > 1 else shap_vals[0]
-    row = np.asarray(shap_vals)[0]
-    abs_row = np.abs(row)
-    total = float(abs_row.sum()) or 1.0
-
-    ranked: list[tuple[str, float, float]] = []
+    pos: dict[str, float] = {}
     for i, col in enumerate(nums):
-        if col not in DISPLAY_FEATURES:
+        shap_i = float(row[i])
+        if shap_i <= 0:
             continue
-        ranked.append((col, float(row[i]), float(abs_row[i])))
-    ranked.sort(key=lambda x: x[2], reverse=True)
+        display = DISPLAY_MERGE.get(col, col)
+        if display not in DISPLAY_FEATURES:
+            continue
+        pos[display] = pos.get(display, 0.0) + shap_i
+
+    pos_total = float(sum(pos.values())) or 1.0
+    ranked = sorted(pos.items(), key=lambda x: x[1], reverse=True)
+    means = _imputer_means(bundle.get("imputer"))
 
     causes: list[dict[str, Any]] = []
-    for idx, (feat, _raw, ab) in enumerate(ranked):
-        share = (ab / total) * 100.0
-        if idx >= top_k and share < min_share_pct:
-            continue
+    for feat, shap_i in ranked:
+        share = (shap_i / pos_total) * 100.0
         raw_val = features.get(feat)
-        if raw_val is None and feat == "temp_dev_from_800" and features.get("sintering_temp") is not None:
-            raw_val = abs(float(features["sintering_temp"]) - 800.0)
         if raw_val is None:
             continue
         val = float(raw_val)
-        ref_val, ref_label = _ref_for_feature(feat, val, spc_refs)
+        ref_val, ref_label = _ref_for_feature(feat, val, spc_refs, means)
         causes.append(
             {
                 "feature": feat,
@@ -193,6 +242,7 @@ def _causes_from_shap(
                 "valueText": _format_value(feat, val),
                 "refLabel": ref_label,
                 "sharePct": round(share, 1),
+                "shapValue": round(shap_i, 6),
             }
         )
     return _select_causes(causes, top_k=top_k, min_share_pct=min_share_pct)
@@ -206,9 +256,15 @@ def explain_lot_drivers(
     cfg = load_voting_config()
     out: dict[str, Any] = {"defect_causes": [], "residual_causes": []}
 
+    prob_cfg = cfg.get("probability") or {}
+    raw_members = (
+        prob_cfg.get("members")
+        or (prob_cfg.get("blend") or {}).get("members")
+        or []
+    )
     prob_members = [
         m
-        for m in cfg["probability"]["members"]
+        for m in raw_members
         if str(m.get("kind") or "clf_proba") in ("clf_proba", "clf_proba_cascade")
     ]
     if prob_members:

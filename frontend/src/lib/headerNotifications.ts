@@ -1,3 +1,4 @@
+import { authApi } from '@/api/authApi'
 import { dashboardApi } from '@/api/dashboardApi'
 import { inquiryApi } from '@/api/inquiryApi'
 import { issueApi } from '@/api/issueApi'
@@ -7,12 +8,16 @@ import {
   type HeaderNotification,
   type NotificationPriority,
 } from '@/config/headerNotificationSpec'
+import { isLoggedIn } from '@/lib/authStorage'
 
 export const HEADER_NOTIF_LOOKBACK_DAYS = 3
 export const HEADER_NOTIF_PAGE_SIZE = 5
+/** 미조치(action 없음) 이슈 에스컬레이션: 생성 후 30분 */
+export const PENDING_ISSUE_ESCALATION_MS = 30 * 60 * 1000
 
 const READ_KEY = 'kdt-header-notif-read'
 const DISMISSED_KEY = 'kdt-header-notif-dismissed'
+const LOCAL_MIGRATED_KEY = 'kdt-header-notif-migrated'
 
 const PRIORITY_ORDER: Record<NotificationPriority, number> = {
   P0: 0,
@@ -20,7 +25,12 @@ const PRIORITY_ORDER: Record<NotificationPriority, number> = {
   P2: 2,
 }
 
-type RawNotification = HeaderNotification & { sortAt: number }
+type RawNotification = HeaderNotification & { sortAt: number; lotId?: string }
+
+export type HeaderNotifState = {
+  readIds: string[]
+  dismissedIds: string[]
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')
@@ -36,9 +46,11 @@ function lookbackCutoff(now = new Date()): Date {
   return d
 }
 
+/** Accepts ISO or backend `YYYY-MM-DD HH:mm:ss`. */
 function parseTime(value: string | null | undefined): number {
   if (!value) return 0
-  const t = Date.parse(value)
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T')
+  const t = Date.parse(normalized)
   return Number.isFinite(t) ? t : 0
 }
 
@@ -65,7 +77,7 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? '')
 }
 
-function readIdSet(key: string): Set<string> {
+function readLocalIdSet(key: string): Set<string> {
   if (typeof window === 'undefined') return new Set()
   try {
     const raw = localStorage.getItem(key)
@@ -78,36 +90,19 @@ function readIdSet(key: string): Set<string> {
   }
 }
 
-function writeIdSet(key: string, ids: Set<string>) {
+function clearLocalNotifKeys() {
   if (typeof window === 'undefined') return
-  localStorage.setItem(key, JSON.stringify([...ids]))
+  localStorage.removeItem(READ_KEY)
+  localStorage.removeItem(DISMISSED_KEY)
+  localStorage.setItem(LOCAL_MIGRATED_KEY, '1')
 }
 
-export function getReadNotificationIds(): Set<string> {
-  return readIdSet(READ_KEY)
-}
-
-export function getDismissedNotificationIds(): Set<string> {
-  return readIdSet(DISMISSED_KEY)
-}
-
-export function markNotificationsRead(ids: string[]) {
-  if (ids.length === 0) return
-  const next = getReadNotificationIds()
-  for (const id of ids) next.add(id)
-  writeIdSet(READ_KEY, next)
-}
-
-export function dismissNotifications(ids: string[]) {
-  if (ids.length === 0) return
-  const next = getDismissedNotificationIds()
-  for (const id of ids) next.add(id)
-  writeIdSet(DISMISSED_KEY, next)
-}
-
-function applyLocalState(items: HeaderNotification[]): HeaderNotification[] {
-  const dismissed = getDismissedNotificationIds()
-  const read = getReadNotificationIds()
+function applyState(
+  items: HeaderNotification[],
+  state: HeaderNotifState,
+): HeaderNotification[] {
+  const dismissed = new Set(state.dismissedIds)
+  const read = new Set(state.readIds)
   return items
     .filter((item) => !dismissed.has(item.id))
     .map((item) => ({
@@ -130,6 +125,8 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
   const startDate = toYmd(cutoff)
   const endDate = toYmd(now)
   const raw: RawNotification[] = []
+  const escalatedLotIds = new Set<string>()
+  const coveredLotIds = new Set<string>()
 
   const [riskSettled, spcSettled, issuesSettled, handoverSettled, inquirySettled] =
     await Promise.allSettled([
@@ -140,11 +137,43 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
       inquiryApi.list({ status: '접수', startDate, endDate, page: 1, pageSize: 50 }),
     ])
 
+  // 1) 30분 미조치 이슈 → pending_issue (에스컬레이션)
+  if (issuesSettled.status === 'fulfilled') {
+    const spec = NOTIFICATION_TYPE_SPEC.pending_issue
+    for (const issue of issuesSettled.value.data.issues ?? []) {
+      if (!isWithinLookback(issue.createdAt, cutoffMs)) continue
+      if (issue.hasAction) continue
+      const sortAt = parseTime(issue.createdAt)
+      if (!sortAt || now.getTime() - sortAt < PENDING_ISSUE_ESCALATION_MS) continue
+
+      escalatedLotIds.add(issue.lotId)
+      coveredLotIds.add(issue.lotId)
+      raw.push({
+        id: `pending_issue:${issue.issueId}`,
+        type: 'pending_issue',
+        priority: spec.priority,
+        time: formatRelativeTime(issue.createdAt, now),
+        title: spec.titleTemplate,
+        message: fillTemplate(spec.messageTemplate, {
+          issueId: issue.issueId,
+          title: (issue.issueContent || '').trim() || issue.lotId,
+        }),
+        unread: true,
+        href: `/issue?issueId=${encodeURIComponent(issue.issueId)}&lotId=${encodeURIComponent(issue.lotId)}`,
+        sortAt,
+        lotId: issue.lotId,
+      })
+    }
+  }
+
+  // 2) 고위험 LOT — 에스컬레이션된 LOT은 제외
   if (riskSettled.status === 'fulfilled') {
     const spec = NOTIFICATION_TYPE_SPEC.high_risk_lot
     for (const lot of riskSettled.value.data.lots ?? []) {
       if (!isWithinLookback(lot.recordedAt, cutoffMs)) continue
+      if (escalatedLotIds.has(lot.lotId)) continue
       const sortAt = parseTime(lot.recordedAt)
+      coveredLotIds.add(lot.lotId)
       raw.push({
         id: `high_risk_lot:${lot.lotId}`,
         type: 'high_risk_lot',
@@ -157,17 +186,21 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
           reason: (lot.riskReason || '').trim() || '고위험 LOT',
         }),
         unread: true,
-        href: spec.defaultHref,
+        href: `/issue?lotId=${encodeURIComponent(lot.lotId)}`,
         sortAt,
+        lotId: lot.lotId,
       })
     }
   }
 
+  // 3) SPC — 이미 고위험/에스컬레이션된 LOT은 생략
   if (spcSettled.status === 'fulfilled') {
     const spec = NOTIFICATION_TYPE_SPEC.spc_breach
     for (const lot of spcSettled.value.data.items ?? []) {
       if (!isWithinLookback(lot.recordedAt, cutoffMs)) continue
+      if (coveredLotIds.has(lot.lotId)) continue
       const sortAt = parseTime(lot.recordedAt)
+      coveredLotIds.add(lot.lotId)
       const param =
         (lot.riskReason || '').trim() ||
         (lot.spcStatus ? `SPC ${lot.spcStatus}` : 'SPC')
@@ -184,28 +217,7 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
         unread: true,
         href: spec.defaultHref,
         sortAt,
-      })
-    }
-  }
-
-  if (issuesSettled.status === 'fulfilled') {
-    const spec = NOTIFICATION_TYPE_SPEC.pending_issue
-    for (const issue of issuesSettled.value.data.issues ?? []) {
-      if (!isWithinLookback(issue.createdAt, cutoffMs)) continue
-      const sortAt = parseTime(issue.createdAt)
-      raw.push({
-        id: `pending_issue:${issue.issueId}`,
-        type: 'pending_issue',
-        priority: spec.priority,
-        time: formatRelativeTime(issue.createdAt, now),
-        title: spec.titleTemplate,
-        message: fillTemplate(spec.messageTemplate, {
-          issueId: issue.issueId,
-          title: (issue.issueContent || '').trim() || issue.lotId,
-        }),
-        unread: true,
-        href: spec.defaultHref,
-        sortAt,
+        lotId: lot.lotId,
       })
     }
   }
@@ -247,7 +259,7 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
           category: item.category || '문의',
         }),
         unread: true,
-        href: spec.defaultHref,
+        href: `/inquiry?id=${encodeURIComponent(item.id)}`,
         sortAt: sortAt || now.getTime(),
       })
     }
@@ -256,9 +268,77 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
   return sortRaw(raw)
 }
 
-/** Fetch live sources (3-day window), apply localStorage read/dismiss, return UI list. */
+/**
+ * One-shot: push legacy localStorage read/dismiss to server when account state is empty.
+ */
+async function migrateLocalStateIfNeeded(server: HeaderNotifState): Promise<HeaderNotifState> {
+  if (typeof window === 'undefined') return server
+  if (localStorage.getItem(LOCAL_MIGRATED_KEY) === '1') {
+    // Still clear leftover keys if migration flag is set
+    if (localStorage.getItem(READ_KEY) || localStorage.getItem(DISMISSED_KEY)) {
+      clearLocalNotifKeys()
+    }
+    return server
+  }
+
+  const localRead = [...readLocalIdSet(READ_KEY)]
+  const localDismissed = [...readLocalIdSet(DISMISSED_KEY)]
+  const serverEmpty = server.readIds.length === 0 && server.dismissedIds.length === 0
+  const hasLocal = localRead.length > 0 || localDismissed.length > 0
+
+  if (serverEmpty && hasLocal) {
+    try {
+      let next = server
+      if (localRead.length > 0) {
+        const { data } = await authApi.markNotificationsRead(localRead)
+        next = data
+      }
+      if (localDismissed.length > 0) {
+        const { data } = await authApi.dismissNotifications(localDismissed)
+        next = data
+      }
+      clearLocalNotifKeys()
+      return next
+    } catch {
+      // Keep local keys; retry on next load
+      return server
+    }
+  }
+
+  clearLocalNotifKeys()
+  return server
+}
+
+async function fetchServerState(): Promise<HeaderNotifState> {
+  if (!isLoggedIn()) {
+    return { readIds: [], dismissedIds: [] }
+  }
+  try {
+    const { data } = await authApi.getNotificationState()
+    return await migrateLocalStateIfNeeded(data)
+  } catch {
+    // Fallback: empty overlay (do not use localStorage as source of truth)
+    return { readIds: [], dismissedIds: [] }
+  }
+}
+
+/** Mark notifications read on the server (fire-and-forget safe). */
+export async function markNotificationsRead(ids: string[]): Promise<void> {
+  if (ids.length === 0 || !isLoggedIn()) return
+  await authApi.markNotificationsRead(ids)
+}
+
+/** Dismiss notifications on the server (fire-and-forget safe). */
+export async function dismissNotifications(ids: string[]): Promise<void> {
+  if (ids.length === 0 || !isLoggedIn()) return
+  await authApi.dismissNotifications(ids)
+}
+
+/** Fetch live sources (3-day window), apply per-user server read/dismiss, return UI list. */
 export async function loadHeaderNotifications(): Promise<HeaderNotification[]> {
-  const raw = await collectRaw()
-  const withoutSort = raw.map(({ sortAt: _sortAt, ...item }) => item)
-  return applyLocalState(withoutSort)
+  const [raw, state] = await Promise.all([collectRaw(), fetchServerState()])
+  return applyState(
+    raw.map(({ sortAt: _sortAt, lotId: _lotId, ...item }) => item),
+    state,
+  )
 }

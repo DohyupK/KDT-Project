@@ -19,19 +19,23 @@ import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 import { LotRecommendedActionPanel, type RecommendedActionData } from '@/components/dashboard/LotRecommendedActionPanel'
+import { grafanaEmbed } from '@/lib/grafanaEmbed'
 
 /**
  * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
- * Share → Embed의 src만 넣으세요.
+ * Host: `NEXT_PUBLIC_GRAFANA_HOST` / `NEXT_PUBLIC_GRAFANA_PORT` (루트 `.env`).
  */
-const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10'
+const GRAFANA_BOTTOM_PANEL_URL = grafanaEmbed(
+  '/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10',
+)
 
 /**
  * 실시간 생산 게이지 Embed URL.
- * Share → Embed의 src만 넣으세요. theme=light 권장(패널 검정 배경 완화).
+ * theme=light 권장(패널 검정 배경 완화).
  */
-const GRAFANA_GAUGE_PANEL_URL =
-  'http://3.36.100.128:4000/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1'
+const GRAFANA_GAUGE_PANEL_URL = grafanaEmbed(
+  '/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1',
+)
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -324,6 +328,10 @@ function lotRiskProbPercent(prob: number): number {
 function isSpcUnjudged(spc: string | null | undefined): boolean {
   const value = (spc ?? '').trim();
   return value === '' || value === '-' || value === '—';
+}
+
+function isAbnormalSpcMetric(metric: SpcMetric): boolean {
+  return metric.status.includes('이탈') || metric.status.includes('주의');
 }
 
 function formatSpcStatusLabel(spc: string | null | undefined): string {
@@ -1775,7 +1783,7 @@ export default function DashBoardPage() {
   const selectedSpcUnjudged = isSpcUnjudged(selectedSpcStatus);
   const selectedSpcMetrics =
     selectedLotRiskDetail?.lotId === selectedLotRisk?.lot
-      ? selectedLotRiskDetail?.spc?.metrics ?? []
+      ? (selectedLotRiskDetail?.spc?.metrics ?? []).filter(isAbnormalSpcMetric)
       : [];
   const selectedSpcDetailLoading =
     !!selectedLotRisk &&
@@ -3386,7 +3394,6 @@ export default function DashBoardPage() {
                               : (selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) ===
                                   '안정'
                                 ? [
-                                    'SPC 안정 상태입니다. 관리도 시리즈를 준비 중이면 잠시 후 다시 열어 주세요.',
                                     '관리 한계 이내입니다. 이탈·주의 항목이 없어 관리도를 표시하지 않습니다.',
                                   ]
                                 : ['표시할 SPC 관리도 데이터가 없습니다.']

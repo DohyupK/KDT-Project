@@ -226,12 +226,17 @@ const PARAM_PATTERNS = [
     dark: 'text-emerald-400 font-semibold',
   },
   {
-    regex: /공정시간[^(]*\([^)]+\)/gi,
+    regex: /공정\s*시간[^(]*\([^)]+\)/gi,
     light: 'text-orange-700 font-semibold',
     dark: 'text-orange-400 font-semibold',
   },
   {
-    regex: /탱크압력[^(]*\([^)]+\)/gi,
+    regex: /첨가제\s*비율[^(]*\([^)]+\)/gi,
+    light: 'text-teal-700 font-semibold',
+    dark: 'text-teal-400 font-semibold',
+  },
+  {
+    regex: /탱크\s*압력[^(]*\([^)]+\)/gi,
     light: 'text-indigo-700 font-semibold',
     dark: 'text-indigo-400 font-semibold',
   },
@@ -259,7 +264,7 @@ function getMatchedTokenStyle(matched: string, isDark: boolean): string {
 
 function HighlightableText({ text, isDark }: { text: string; isDark: boolean }) {
   const combinedRegex = new RegExp(
-    '(?:금속\\s*불순물[^(]*\\([^)]+\\)|금속이물[^(]*\\([^)]+\\)|습도[^(]*\\([^)]+\\)|(?:소성온도|소성)[^(]*\\([^)]+\\)|(?:리튬\\s*투입량|투입량)[^(]*\\([^)]+\\)|(?:입도|D50|D90)[^(]*\\([^)]+\\)|공정시간[^(]*\\([^)]+\\)|탱크압력[^(]*\\([^)]+\\)|불량확률\\s*[\\d.]+%?|잔류리튬\\s*(?:예측)?\\s*[\\d.]+\\s*ppm)',
+    '(?:금속\\s*불순물[^(]*\\([^)]+\\)|금속이물[^(]*\\([^)]+\\)|습도[^(]*\\([^)]+\\)|(?:소성온도|소성)[^(]*\\([^)]+\\)|(?:리튬\\s*투입량|투입량)[^(]*\\([^)]+\\)|(?:입도|D50|D90)[^(]*\\([^)]+\\)|공정\\s*시간[^(]*\\([^)]+\\)|첨가제\\s*비율[^(]*\\([^)]+\\)|탱크\\s*압력[^(]*\\([^)]+\\)|불량확률\\s*[\\d.]+%?|잔류리튬\\s*(?:예측)?\\s*[\\d.]+\\s*ppm)',
     'gi',
   )
 

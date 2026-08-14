@@ -18,6 +18,8 @@ export type IssueListItem = {
   /** analysis_lots.spc_status */
   spcStatus: string | null
   issueContent: string
+  /** 이슈 처리 관리에 조치 내용이 입력되었는지 */
+  hasAction: boolean
 }
 
 /** analysis_lots snapshot for 이슈 상세 분석 visualization */

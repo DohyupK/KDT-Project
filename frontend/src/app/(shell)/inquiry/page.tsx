@@ -9,6 +9,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
 } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Download, Paperclip } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
@@ -277,6 +278,8 @@ function visibilityBadgeStyle(visibility: Visibility, isDark: boolean): CSSPrope
 export default function InquiryPage() {
   const { isDark, language } = useUiSettings();
   const { setPagePayload, trackPageChatEvent } = usePageChat();
+  const searchParams = useSearchParams();
+  const deepLinkInquiryRef = useRef<string | null>(null);
   const [inquiries, setInquiries] = useState<InquiryItem[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -440,10 +443,39 @@ export default function InquiryPage() {
 
   useEffect(() => {
     if (!selectedInquiryId) return;
-    if (!filteredInquiries.some((item) => item.id === selectedInquiryId)) {
-      setSelectedInquiryId(null);
+    if (filteredInquiries.some((item) => item.id === selectedInquiryId)) return;
+    const deepId = searchParams.get('id')?.trim();
+    if (deepId && deepId === selectedInquiryId) return;
+    setSelectedInquiryId(null);
+  }, [filteredInquiries, selectedInquiryId, searchParams]);
+
+  useEffect(() => {
+    if (inquiries.length === 0) return;
+    const id = searchParams.get('id')?.trim();
+    if (!id) return;
+    if (deepLinkInquiryRef.current === id && selectedInquiryId === id) return;
+
+    const match = inquiries.find((item) => item.id === id);
+    if (!match) {
+      deepLinkInquiryRef.current = id;
+      setToastTone('warning');
+      setToastMessage(`${id} 문의를 찾을 수 없습니다.`);
+      return;
     }
-  }, [filteredInquiries, selectedInquiryId]);
+
+    deepLinkInquiryRef.current = id;
+    setDraftFilters(EMPTY_INQUIRY_FILTERS);
+    setAppliedFilters(EMPTY_INQUIRY_FILTERS);
+    setSelectedInquiryId(id);
+  }, [inquiries, searchParams, selectedInquiryId]);
+
+  useEffect(() => {
+    const id = searchParams.get('id')?.trim();
+    if (!id || selectedInquiryId !== id) return;
+    const idx = filteredInquiries.findIndex((item) => item.id === id);
+    if (idx < 0) return;
+    setCurrentPage(Math.floor(idx / PAGE_SIZE) + 1);
+  }, [filteredInquiries, searchParams, selectedInquiryId]);
 
   useEffect(() => {
     setAnswerDraft('');
