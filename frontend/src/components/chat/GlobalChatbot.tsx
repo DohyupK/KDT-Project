@@ -159,7 +159,14 @@ function formatThreadTime(iso?: string | null): string {
   return iso.replace('T', ' ').slice(0, 16)
 }
 
+function pushChatPath(path: string) {
+  if (typeof window === 'undefined') return
+  if (window.location.pathname === path) return
+  window.history.pushState(null, '', path)
+}
+
 export default function GlobalChatbot() {
+  const returnPathRef = useRef('/main')
   const { isDark } = useUiSettings()
   const pageChat = usePageChatOptional()
   const [chatOpen, setChatOpen] = useState(false)
@@ -360,6 +367,16 @@ export default function GlobalChatbot() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isExpanded])
+
+  useEffect(() => {
+    const onPop = () => {
+      const secure = window.location.pathname === '/security'
+      setChatMode(secure ? 'secure' : 'general')
+      if (secure) setChatOpen(true)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   const clearUndoTimer = () => {
     if (undoTimerRef.current) {
@@ -863,7 +880,12 @@ export default function GlobalChatbot() {
                 <button
                   type="button"
                   aria-pressed={chatMode === 'general'}
-                  onClick={() => setChatMode('general')}
+                  onClick={() => {
+                    setChatMode('general')
+                    if (window.location.pathname === '/security') {
+                      pushChatPath(returnPathRef.current || '/main')
+                    }
+                  }}
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'general'
                       ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
@@ -878,7 +900,14 @@ export default function GlobalChatbot() {
                 <button
                   type="button"
                   aria-pressed={chatMode === 'secure'}
-                  onClick={() => setChatMode('secure')}
+                  onClick={() => {
+                    setChatMode('secure')
+                    const here = window.location.pathname
+                    if (here !== '/security') {
+                      returnPathRef.current = here || '/main'
+                      pushChatPath('/security')
+                    }
+                  }}
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'secure'
                       ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500'

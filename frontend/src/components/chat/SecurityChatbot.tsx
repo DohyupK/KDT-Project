@@ -546,6 +546,7 @@ export default function SecurityChatbot({
   const send = async (raw: string) => {
     const text = raw.trim()
     if (!text || pending) return
+    console.info('[security-chat] POST /api/security-chat/stream')
 
     let tid = getSecurityChatThreadId()
     if (!tid) tid = newSecurityChatThreadId()
