@@ -5,7 +5,7 @@ import '../src/loadRootEnv.js'
 import { query } from '../src/db/connection.js'
 
 async function main() {
-  const tables = ['analysis_lots', 'handover_history', 'judgment_lots', 'lots', 'issues']
+  const tables = ['ANALYSIS_LOTS', 'HANDOVER_HISTORY', 'JUDGMENT_LOTS', 'LOTS', 'ISSUES']
   for (const t of tables) {
     try {
       const cols = await query<{ Field: string; Type: string; Null: string; Key: string; Default: unknown }[]>(

@@ -238,9 +238,9 @@ export async function listLotRisks(q: LotRiskListQuery) {
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-  const fromJoin = `FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
-     LEFT JOIN analysis_lots a ON a.lot_id = j.lot_id`
+  const fromJoin = `FROM JUDGMENT_LOTS j
+     INNER JOIN LOTS l ON l.id = j.lot_id
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = j.lot_id`
   const countRows = await query<{ c: number }[]>(
     `SELECT COUNT(*) AS c ${fromJoin} ${whereSql}`,
     params,
@@ -279,6 +279,7 @@ export async function listLotRisks(q: LotRiskListQuery) {
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset],
   )
+  console.log('DEBUG FETCH:', rows)
 
   const items = rows.map((r) => {
     const residual = r.residual_lithium != null ? Number(r.residual_lithium) : null
@@ -340,14 +341,14 @@ export async function getLotRiskDetail(lotId: string) {
     `SELECT j.lot_id, l.\`timestamp\` AS recorded_at, j.residual_li AS residual_lithium,
             j.probability, j.spc AS j_spc, a.spc_status AS a_spc,
             a.risk_level, a.risk_reason, a.spc_chart_json,
-            (SELECT i.action_content FROM issues i
+            (SELECT i.action_content FROM ISSUES i
              WHERE i.lot_id = j.lot_id
              ORDER BY i.created_at DESC LIMIT 1) AS action_content,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
-     FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
-     LEFT JOIN analysis_lots a ON a.lot_id = j.lot_id
+     FROM JUDGMENT_LOTS j
+     INNER JOIN LOTS l ON l.id = j.lot_id
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = j.lot_id
      WHERE j.lot_id = ? LIMIT 1`,
     [lotId],
   )
@@ -420,9 +421,9 @@ async function getAllProductionPoints() {
     `SELECT l.\`timestamp\` AS recorded_at, 0 AS quality_defect,
             COALESCE(j.probability, a.probability) AS probability,
             l.metal_impurity, l.sintering_temp, l.humidity
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
      ORDER BY l.\`timestamp\` ASC`,
   )
 
@@ -475,8 +476,8 @@ export async function getProductionTrend(params: {
   if (!from || !to) {
     const latestRows = await query<Array<{ latest: Date | string | null }>>(
       `SELECT MAX(l.\`timestamp\`) AS latest
-       FROM judgment_lots j
-       INNER JOIN lots l ON l.id = j.lot_id`,
+       FROM JUDGMENT_LOTS j
+       INNER JOIN LOTS l ON l.id = j.lot_id`,
     )
     const latestRaw = latestRows[0]?.latest
     const latestKey = latestRaw != null ? dateKey(latestRaw) : formatIsoDate(new Date())
@@ -494,8 +495,8 @@ export async function getProductionTrend(params: {
     Array<{ recorded_at: Date | string; quality_defect: number | boolean }>
   >(
     `SELECT l.\`timestamp\` AS recorded_at, j.quality_defect
-     FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
+     FROM JUDGMENT_LOTS j
+     INNER JOIN LOTS l ON l.id = j.lot_id
      WHERE DATE(l.\`timestamp\`) >= ? AND DATE(l.\`timestamp\`) <= ?
      ORDER BY l.\`timestamp\` ASC`,
     [from, to],
@@ -604,7 +605,7 @@ export async function getProductionDaily(q: ProductionDailyQuery = {}) {
   const [operatorRows, rows] = await Promise.all([
     query<{ operator_id: string }[]>(
       `SELECT DISTINCT l.operator_id AS operator_id
-       FROM lots l
+       FROM LOTS l
        WHERE l.operator_id IS NOT NULL AND l.operator_id <> ''
        ORDER BY l.operator_id ASC`,
     ),
@@ -628,8 +629,8 @@ export async function getProductionDaily(q: ProductionDailyQuery = {}) {
       `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.probability,
               l.metal_impurity, l.sintering_temp, l.humidity, l.lithium_input,
               l.additive_ratio, l.tank_pressure, l.process_time, l.operator_id, l.d50, l.d90
-       FROM lots l
-       LEFT JOIN analysis_lots a ON a.lot_id = l.id
+       FROM LOTS l
+       LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
        ${whereSql}
        ORDER BY l.\`timestamp\` ASC`,
       params,
@@ -724,9 +725,9 @@ export async function exportLotsCsvByDate(date: string): Promise<string> {
             0 AS quality_defect,
             COALESCE(j.probability, a.probability) AS probability,
             j.residual_li AS residual_lithium, a.spc_status, a.risk_level, a.risk_reason
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
      WHERE DATE(l.\`timestamp\`) = ?
      ORDER BY l.\`timestamp\` ASC, l.id ASC`,
     [date],
@@ -915,8 +916,8 @@ export async function getFeatureImportance(params: {
     `SELECT j.quality_defect,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
-     FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
+     FROM JUDGMENT_LOTS j
+     INNER JOIN LOTS l ON l.id = j.lot_id
      WHERE DATE(l.\`timestamp\`) >= ? AND DATE(l.\`timestamp\`) <= ?
        AND l.\`timestamp\` <= NOW()`,
     [from, to],

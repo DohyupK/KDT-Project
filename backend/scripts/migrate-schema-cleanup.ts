@@ -43,7 +43,7 @@ async function main() {
 
   try {
     for (const col of ['language', 'auto_refresh_enabled', 'n8n_alert']) {
-      await dropColumnIfExists(conn, 'user_settings', col)
+      await dropColumnIfExists(conn, 'USER_SETTINGS', col)
     }
 
     if (await tableExists(conn, 'issue_analyses')) {
@@ -54,7 +54,7 @@ async function main() {
     }
 
     for (const col of ['completed', 'created_at', 'updated_at']) {
-      await dropColumnIfExists(conn, 'issues', col)
+      await dropColumnIfExists(conn, 'ISSUES', col)
     }
 
     console.log('SCHEMA_CLEANUP_OK')

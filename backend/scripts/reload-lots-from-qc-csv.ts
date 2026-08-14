@@ -112,15 +112,15 @@ async function main() {
 
   try {
     const beforeJl = (await conn.query(
-      'SELECT COUNT(*) AS c FROM judgment_lots',
+      'SELECT COUNT(*) AS c FROM JUDGMENT_LOTS',
     )) as { c: bigint | number }[]
     const jlBefore = Number(beforeJl[0]?.c ?? 0)
 
-    await conn.query('ALTER TABLE lots DROP COLUMN IF EXISTS residual_li')
+    await conn.query('ALTER TABLE LOTS DROP COLUMN IF EXISTS residual_li')
     console.log('DROPPED_residual_li')
 
     await conn.query('SET FOREIGN_KEY_CHECKS = 0')
-    await conn.query('DELETE FROM lots')
+    await conn.query('DELETE FROM LOTS')
     console.log('LOTS_CLEARED')
 
     const CHUNK = 500
@@ -134,7 +134,7 @@ async function main() {
         params.push(r.id, r.timestamp, ...r.features, r.operator_id)
       }
       await conn.query(
-        `INSERT INTO lots (
+        `INSERT INTO LOTS (
           id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
           process_time, sintering_temp, humidity, tank_pressure, operator_id
         ) VALUES ${placeholders}`,
@@ -144,25 +144,25 @@ async function main() {
     await conn.query('SET FOREIGN_KEY_CHECKS = 1')
     console.log('LOTS_INSERTED', rows.length)
 
-    const afterLots = (await conn.query('SELECT COUNT(*) AS c FROM lots')) as {
+    const afterLots = (await conn.query('SELECT COUNT(*) AS c FROM LOTS')) as {
       c: bigint | number
     }[]
     const afterJl = (await conn.query(
-      'SELECT COUNT(*) AS c FROM judgment_lots',
+      'SELECT COUNT(*) AS c FROM JUDGMENT_LOTS',
     )) as { c: bigint | number }[]
     const orphans = (await conn.query(
-      `SELECT COUNT(*) AS c FROM judgment_lots j
-       LEFT JOIN lots l ON l.id = j.lot_id
+      `SELECT COUNT(*) AS c FROM JUDGMENT_LOTS j
+       LEFT JOIN LOTS l ON l.id = j.lot_id
        WHERE l.id IS NULL`,
     )) as { c: bigint | number }[]
     const cols = (await conn.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lots'
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'LOTS'
        ORDER BY ORDINAL_POSITION`,
       [process.env.DB_NAME],
     )) as { COLUMN_NAME: string }[]
     const sample = (await conn.query(
-      'SELECT id, \`timestamp\`, d50, operator_id FROM lots ORDER BY id ASC LIMIT 1',
+      'SELECT id, \`timestamp\`, d50, operator_id FROM LOTS ORDER BY id ASC LIMIT 1',
     )) as { id: string; timestamp: Date; d50: number; operator_id: string }[]
 
     console.log('VERIFY', {

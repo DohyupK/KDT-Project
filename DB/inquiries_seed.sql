@@ -1,7 +1,7 @@
--- Seed mock inquiries from FE INITIAL_INQUIRIES (author_user_id NULL)
+-- Seed mock INQUIRIES from FE INITIAL_INQUIRIES (author_user_id NULL)
 -- Safe to re-run: skips existing inquiry_code
 
-INSERT IGNORE INTO inquiries
+INSERT IGNORE INTO INQUIRIES
   (inquiry_code, category, visibility, status, title, content,
    author_user_id, author_name, author_email, answer, answered_at, answered_by_user_id, created_at)
 VALUES

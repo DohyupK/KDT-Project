@@ -1,7 +1,7 @@
 -- Apply on existing MariaDB when schema.sql full re-run is not used.
 -- Source: Documents OCR sidecar pairing (ai-service text_match_store).
 
-CREATE TABLE IF NOT EXISTS text_match (
+CREATE TABLE IF NOT EXISTS TEXT_MATCH (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   source_path     VARCHAR(512) NOT NULL COMMENT 'repo-relative e.g. Documents/Public/a.pdf',
   md_path         VARCHAR(512) NOT NULL COMMENT 'repo-relative Markdown sidecar',

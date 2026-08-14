@@ -33,7 +33,7 @@
     "migrate:ai-library-analysis": "tsx scripts/migrate-ai-library-analysis.ts",
     "migrate:spc-standard": "tsx scripts/migrate-spc-standard.ts",
     "migrate:lot-recommended-actions": "tsx scripts/migrate-lot-recommended-actions.ts",
-    "migrate:align-schema": "tsx scripts/migrate-align-schema.ts",
+    "migrate:uppercase-tables": "tsx scripts/migrate-uppercase-tables.ts",
     "migrate:issues-refactor": "tsx scripts/migrate-issues-refactor.ts",
     "send:one-issue-report": "tsx scripts/send-one-issue-report.ts",
     "fill:all-issue-content": "tsx scripts/fill-all-issue-content.ts",

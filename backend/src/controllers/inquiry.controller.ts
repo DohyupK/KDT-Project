@@ -11,7 +11,7 @@ function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => P
 
 async function loadAuthorEmail(userId: string): Promise<string> {
   const rows = await query<{ email: string }[]>(
-    'SELECT email FROM users WHERE user_id = ? LIMIT 1',
+    'SELECT email FROM USERS WHERE user_id = ? LIMIT 1',
     [userId],
   )
   const email = rows[0]?.email

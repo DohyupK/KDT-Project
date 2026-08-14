@@ -88,7 +88,7 @@ function parseEmailCheckFromBody(
 
 async function insertDefaults(userId: string): Promise<UserSettingsDto> {
   await query(
-    `INSERT INTO user_settings
+    `INSERT INTO USER_SETTINGS
       (user_id, font_size, theme_mode, refresh_interval, email_check)
      VALUES (?, ?, ?, ?, ?)`,
     [userId, DEFAULTS.fontSize, DEFAULTS.themeMode, DEFAULTS.refreshInterval, DEFAULTS.emailCheck],
@@ -99,7 +99,7 @@ async function insertDefaults(userId: string): Promise<UserSettingsDto> {
 export async function getUserSettings(userId: string): Promise<UserSettingsDto> {
   const rows = await query<UserSettingsRow[]>(
     `SELECT user_id, font_size, theme_mode, refresh_interval, email_check, updated_at
-     FROM user_settings WHERE user_id = ? LIMIT 1`,
+     FROM USER_SETTINGS WHERE user_id = ? LIMIT 1`,
     [userId],
   )
   if (!rows[0]) {
@@ -123,7 +123,7 @@ export async function updateUserSettings(
   assertValidSettings({ fontSize, themeMode, refreshInterval })
 
   await query(
-    `INSERT INTO user_settings
+    `INSERT INTO USER_SETTINGS
       (user_id, font_size, theme_mode, refresh_interval, email_check)
      VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE

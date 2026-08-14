@@ -19,7 +19,7 @@ const EXPECTED = [
 async function colsOrdered(): Promise<string[]> {
   const rows = await query<{ COLUMN_NAME: string }[]>(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
      ORDER BY ORDINAL_POSITION`,
   )
   return rows.map((r) => r.COLUMN_NAME)
@@ -28,7 +28,7 @@ async function colsOrdered(): Promise<string[]> {
 async function fkExists(name: string): Promise<boolean> {
   const rows = await query<{ CONSTRAINT_NAME: string }[]>(
     `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
        AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = ?
      LIMIT 1`,
     [name],
@@ -39,7 +39,7 @@ async function fkExists(name: string): Promise<boolean> {
 async function indexExists(name: string): Promise<boolean> {
   const rows = await query<{ INDEX_NAME: string }[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history' AND INDEX_NAME = ?
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY' AND INDEX_NAME = ?
      LIMIT 1`,
     [name],
   )
@@ -50,19 +50,19 @@ async function main() {
   console.log('BEFORE', (await colsOrdered()).join(', '))
 
   if (await fkExists('fk_handover_lot')) {
-    await query('ALTER TABLE handover_history DROP FOREIGN KEY fk_handover_lot')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP FOREIGN KEY fk_handover_lot')
     console.log('DROPPED_FK fk_handover_lot')
   }
 
   if (await indexExists('idx_handover_lot')) {
-    await query('ALTER TABLE handover_history DROP INDEX idx_handover_lot')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_lot')
     console.log('DROPPED_INDEX idx_handover_lot')
   }
 
   for (const col of ['lot_id', 'risk_level', 'cause', 'manager'] as const) {
     const set = new Set(await colsOrdered())
     if (set.has(col)) {
-      await query(`ALTER TABLE handover_history DROP COLUMN \`${col}\``)
+      await query(`ALTER TABLE HANDOVER_HISTORY DROP COLUMN \`${col}\``)
       console.log('DROPPED', col)
     } else {
       console.log('SKIP', col)

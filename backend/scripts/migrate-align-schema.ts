@@ -73,21 +73,21 @@ async function main() {
     console.log('DB', process.env.DB_NAME, process.env.DB_HOST)
 
     // ── analysis_lots ─────────────────────────────────────────────
-    if (!(await tableExists(conn, 'analysis_lots'))) {
+    if (!(await tableExists(conn, 'ANALYSIS_LOTS'))) {
       throw new Error('analysis_lots table missing — run recreate-lots-analysis or apply schema.sql first')
     }
 
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'defect_prob',
       'defect_prob DOUBLE NULL AFTER lot_id',
     )
 
     // Backfill defect_prob from legacy `probability` if present
-    if (await columnExists(conn, 'analysis_lots', 'probability')) {
+    if (await columnExists(conn, 'ANALYSIS_LOTS', 'probability')) {
       const res = await conn.query(
-        `UPDATE analysis_lots
+        `UPDATE ANALYSIS_LOTS
          SET defect_prob = probability
          WHERE defect_prob IS NULL AND probability IS NOT NULL`,
       )
@@ -96,37 +96,37 @@ async function main() {
 
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'clf_model_version',
       'clf_model_version VARCHAR(64) NULL AFTER risk_reason',
     )
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'residual_model_version',
       'residual_model_version VARCHAR(64) NULL AFTER clf_model_version',
     )
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'spc_limit_version',
       'spc_limit_version VARCHAR(64) NULL AFTER residual_model_version',
     )
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'scored_at',
       'scored_at DATETIME NULL AFTER spc_limit_version',
     )
     await addColumnIfMissing(
       conn,
-      'analysis_lots',
+      'ANALYSIS_LOTS',
       'updated_at',
       'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at',
     )
 
-    if (!(await indexExists(conn, 'analysis_lots', 'idx_analysis_scored'))) {
-      await conn.query('ALTER TABLE analysis_lots ADD INDEX idx_analysis_scored (scored_at)')
+    if (!(await indexExists(conn, 'ANALYSIS_LOTS', 'idx_analysis_scored'))) {
+      await conn.query('ALTER TABLE ANALYSIS_LOTS ADD INDEX idx_analysis_scored (scored_at)')
       console.log('ADD INDEX idx_analysis_scored')
     } else {
       console.log('SKIP INDEX idx_analysis_scored')
@@ -134,7 +134,7 @@ async function main() {
 
     // If scored_at empty but row has scores, mark as scored (created_at fallback)
     await conn.query(
-      `UPDATE analysis_lots
+      `UPDATE ANALYSIS_LOTS
        SET scored_at = COALESCE(scored_at, created_at, NOW())
        WHERE scored_at IS NULL
          AND (defect_prob IS NOT NULL OR spc_status IS NOT NULL OR risk_reason IS NOT NULL)`,
@@ -142,17 +142,17 @@ async function main() {
     console.log('BACKFILL analysis_lots.scored_at')
 
     // ── handover_history ──────────────────────────────────────────
-    if (await tableExists(conn, 'handover_history')) {
+    if (await tableExists(conn, 'HANDOVER_HISTORY')) {
       await addColumnIfMissing(
         conn,
-        'handover_history',
+        'HANDOVER_HISTORY',
         'situation',
         "situation VARCHAR(255) NULL COMMENT '인수인계 내용(본문)' AFTER risk_level",
       )
 
-      if (await columnExists(conn, 'handover_history', 'handover_content')) {
+      if (await columnExists(conn, 'HANDOVER_HISTORY', 'handover_content')) {
         await conn.query(
-          `UPDATE handover_history
+          `UPDATE HANDOVER_HISTORY
            SET situation = handover_content
            WHERE (situation IS NULL OR situation = '')
              AND handover_content IS NOT NULL AND handover_content <> ''`,
@@ -162,28 +162,28 @@ async function main() {
 
       // Fill remaining NULLs so NOT NULL constraint can apply if desired
       await conn.query(
-        `UPDATE handover_history SET situation = '' WHERE situation IS NULL`,
+        `UPDATE HANDOVER_HISTORY SET situation = '' WHERE situation IS NULL`,
       )
 
       await addColumnIfMissing(
         conn,
-        'handover_history',
+        'HANDOVER_HISTORY',
         'event_date',
         "event_date DATE NULL COMMENT '날짜' AFTER manager",
       )
 
       // Backfill event_date from issues.created_at, else archived_at/created_at
       await conn.query(
-        `UPDATE handover_history h
-         LEFT JOIN issues i ON i.issue_id = h.issue_id
+        `UPDATE HANDOVER_HISTORY h
+         LEFT JOIN ISSUES i ON i.issue_id = h.issue_id
          SET h.event_date = DATE(COALESCE(i.created_at, h.archived_at, h.created_at, NOW()))
          WHERE h.event_date IS NULL`,
       )
       console.log('BACKFILL handover_history.event_date')
 
-      if (!(await indexExists(conn, 'handover_history', 'idx_handover_date'))) {
+      if (!(await indexExists(conn, 'HANDOVER_HISTORY', 'idx_handover_date'))) {
         try {
-          await conn.query('ALTER TABLE handover_history ADD INDEX idx_handover_date (event_date)')
+          await conn.query('ALTER TABLE HANDOVER_HISTORY ADD INDEX idx_handover_date (event_date)')
           console.log('ADD INDEX idx_handover_date')
         } catch (e) {
           console.log('SKIP idx_handover_date', e instanceof Error ? e.message : e)
@@ -194,16 +194,16 @@ async function main() {
     }
 
     // ── judgment_lots.spc ─────────────────────────────────────────
-    if (await tableExists(conn, 'judgment_lots')) {
+    if (await tableExists(conn, 'JUDGMENT_LOTS')) {
       await addColumnIfMissing(
         conn,
-        'judgment_lots',
+        'JUDGMENT_LOTS',
         'spc',
         'spc VARCHAR(16) NULL AFTER probability',
       )
       await conn.query(
-        `UPDATE judgment_lots j
-         INNER JOIN analysis_lots a ON a.lot_id = j.lot_id
+        `UPDATE JUDGMENT_LOTS j
+         INNER JOIN ANALYSIS_LOTS a ON a.lot_id = j.lot_id
          SET j.spc = CASE
            WHEN a.spc_status IS NULL OR a.spc_status = '' THEN NULL
            WHEN a.spc_status LIKE '%이탈%' THEN '이탈'
@@ -236,11 +236,11 @@ async function main() {
 
     // ── verify ────────────────────────────────────────────────────
     for (const [table, col] of [
-      ['analysis_lots', 'defect_prob'],
-      ['analysis_lots', 'scored_at'],
-      ['handover_history', 'situation'],
-      ['handover_history', 'event_date'],
-      ['judgment_lots', 'spc'],
+      ['ANALYSIS_LOTS', 'defect_prob'],
+      ['ANALYSIS_LOTS', 'scored_at'],
+      ['HANDOVER_HISTORY', 'situation'],
+      ['HANDOVER_HISTORY', 'event_date'],
+      ['JUDGMENT_LOTS', 'spc'],
     ] as const) {
       const ok = await columnExists(conn, table, col)
       console.log(`VERIFY ${table}.${col}=${ok}`)

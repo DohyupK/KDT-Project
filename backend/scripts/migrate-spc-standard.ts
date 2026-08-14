@@ -23,8 +23,8 @@ async function main() {
   }
 
   const backfill = await query<{ affectedRows?: number }>(
-    `UPDATE judgment_lots j
-     INNER JOIN analysis_lots a ON a.lot_id = j.lot_id
+    `UPDATE JUDGMENT_LOTS j
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = j.lot_id
      SET j.spc = CASE
        WHEN a.spc_status IS NULL OR a.spc_status = '' THEN NULL
        WHEN a.spc_status LIKE '%이탈%' THEN '이탈'
@@ -35,9 +35,9 @@ async function main() {
   )
   console.log('BACKFILL_SPC', backfill)
 
-  const limCount = await query<{ c: number }[]>('SELECT COUNT(*) AS c FROM spc_limits')
-  const std = await query<unknown[]>('SELECT * FROM standard WHERE id = 1')
-  console.log('spc_limits', limCount[0]?.c, 'standard', std[0])
+  const limCount = await query<{ c: number }[]>('SELECT COUNT(*) AS c FROM SPC_LIMITS')
+  const std = await query<unknown[]>('SELECT * FROM STANDARD WHERE id = 1')
+  console.log('SPC_LIMITS', limCount[0]?.c, 'STANDARD', std[0])
 }
 
 main()

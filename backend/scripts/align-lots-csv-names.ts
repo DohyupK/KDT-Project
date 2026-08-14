@@ -22,7 +22,7 @@ async function main() {
   })
 
   try {
-    const beforeCount = (await conn.query('SELECT COUNT(*) AS c FROM lots')) as {
+    const beforeCount = (await conn.query('SELECT COUNT(*) AS c FROM LOTS')) as {
       c: bigint | number
     }[]
     console.log('BEFORE', { count: Number(beforeCount[0]?.c ?? 0) })
@@ -32,14 +32,14 @@ async function main() {
 
     const cols = (await conn.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lots'
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'LOTS'
        ORDER BY ORDINAL_POSITION`,
       [db],
     )) as { COLUMN_NAME: string }[]
     const fks = (await conn.query(
       `SELECT TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_COLUMN_NAME
        FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME = 'lots'`,
+       WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME = 'LOTS'`,
       [db],
     )) as {
       TABLE_NAME: string
@@ -47,11 +47,11 @@ async function main() {
       COLUMN_NAME: string
       REFERENCED_COLUMN_NAME: string
     }[]
-    const afterCount = (await conn.query('SELECT COUNT(*) AS c FROM lots')) as {
+    const afterCount = (await conn.query('SELECT COUNT(*) AS c FROM LOTS')) as {
       c: bigint | number
     }[]
     const sample = (await conn.query(
-      'SELECT id, `timestamp`, operator_id FROM lots ORDER BY `timestamp` ASC LIMIT 1',
+      'SELECT id, `timestamp`, operator_id FROM LOTS ORDER BY `timestamp` ASC LIMIT 1',
     )) as { id: string; timestamp: Date; operator_id: string }[]
 
     console.log('COLS', cols.map((c) => c.COLUMN_NAME).join(', '))

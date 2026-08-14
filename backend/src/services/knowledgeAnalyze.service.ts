@@ -80,7 +80,7 @@ export async function runKnowledgeAnalyze(
   let insertId: number
   try {
     const result = (await query(
-      `INSERT INTO AI_Library_analysis (user_id, name, analysis_content)
+      `INSERT INTO AI_LIBRARY_ANALYSIS (user_id, name, analysis_content)
        VALUES (?, ?, ?)`,
       [input.userId, name, reply],
     )) as { insertId?: number | bigint }
@@ -96,7 +96,7 @@ export async function runKnowledgeAnalyze(
   }
 
   const rows = await query<{ created_at: Date | string }[]>(
-    `SELECT created_at FROM AI_Library_analysis WHERE id = ? LIMIT 1`,
+    `SELECT created_at FROM AI_LIBRARY_ANALYSIS WHERE id = ? LIMIT 1`,
     [insertId],
   )
   const createdRaw = rows[0]?.created_at

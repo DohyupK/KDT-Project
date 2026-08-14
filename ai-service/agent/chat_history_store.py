@@ -171,14 +171,14 @@ def ensure_thread(
         with engine.begin() as conn:
             row = conn.execute(
                 text(
-                    "SELECT id FROM user_chat_threads WHERE id = :id LIMIT 1"
+                    "SELECT id FROM USER_CHAT_THREADS WHERE id = :id LIMIT 1"
                 ),
                 {"id": tid},
             ).fetchone()
             if row:
                 conn.execute(
                     text(
-                        "UPDATE user_chat_threads SET updated_at = :now WHERE id = :id"
+                        "UPDATE USER_CHAT_THREADS SET updated_at = :now WHERE id = :id"
                     ),
                     {"id": tid, "now": datetime.utcnow()},
                 )
@@ -186,7 +186,7 @@ def ensure_thread(
             conn.execute(
                 text(
                     """
-                    INSERT INTO user_chat_threads (id, user_id, channel, title, created_at, updated_at)
+                    INSERT INTO USER_CHAT_THREADS (id, user_id, channel, title, created_at, updated_at)
                     VALUES (:id, :user_id, :channel, :title, :now, :now)
                     """
                 ),
@@ -226,7 +226,7 @@ def list_threads(
                 text(
                     """
                     SELECT id, user_id, channel, title, created_at, updated_at
-                    FROM user_chat_threads
+                    FROM USER_CHAT_THREADS
                     WHERE user_id = :uid AND channel = :channel
                     ORDER BY updated_at DESC
                     LIMIT :lim
@@ -271,7 +271,7 @@ def thread_owned_by(*, thread_id: str | None, user_id: str | None) -> bool:
             row = conn.execute(
                 text(
                     """
-                    SELECT 1 FROM user_chat_threads
+                    SELECT 1 FROM USER_CHAT_THREADS
                     WHERE id = :tid AND user_id = :uid
                     LIMIT 1
                     """
@@ -307,7 +307,7 @@ def load_messages(
                 text(
                     """
                     SELECT role, content, mode, provider, sources, created_at
-                    FROM user_chat_messages
+                    FROM USER_CHAT_MESSAGES
                     WHERE thread_id = :tid
                     ORDER BY created_at DESC
                     LIMIT :lim
@@ -447,7 +447,7 @@ def insert_message(
             result = conn.execute(
                 text(
                     """
-                    INSERT INTO user_chat_messages
+                    INSERT INTO USER_CHAT_MESSAGES
                       (thread_id, role, content, mode, provider, sources, created_at)
                     VALUES
                       (:thread_id, :role, :content, :mode, :provider, :sources, :now)
@@ -465,7 +465,7 @@ def insert_message(
             )
             conn.execute(
                 text(
-                    "UPDATE user_chat_threads SET updated_at = :now WHERE id = :id"
+                    "UPDATE USER_CHAT_THREADS SET updated_at = :now WHERE id = :id"
                 ),
                 {"id": thread_id, "now": datetime.utcnow()},
             )

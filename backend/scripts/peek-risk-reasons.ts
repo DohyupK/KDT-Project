@@ -3,7 +3,7 @@ import { query } from '../src/db/connection.js'
 
 const rows = await query(
   `SELECT lot_id, risk_level, spc_status, risk_reason
-   FROM analysis_lots
+   FROM ANALYSIS_LOTS
    WHERE lot_id <> ?
    ORDER BY lot_id ASC
    LIMIT 5`,

@@ -30,7 +30,7 @@ function createToken(user: UserRow) {
 }
 
 export async function checkDuplicateUserId(userId: string) {
-  const rows = await query<UserRow[]>('SELECT id FROM users WHERE user_id = ?', [userId])
+  const rows = await query<UserRow[]>('SELECT id FROM USERS WHERE user_id = ?', [userId])
   return rows.length === 0
 }
 
@@ -60,7 +60,7 @@ export async function registerUser(input: {
 
   const hashed = await bcrypt.hash(password, 10)
   await query(
-    'INSERT INTO users (user_id, password, name, phone, email) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO USERS (user_id, password, name, phone, email) VALUES (?, ?, ?, ?, ?)',
     [userId.trim(), hashed, name.trim(), normalizePhone(phone), email.trim()],
   )
 
@@ -68,7 +68,7 @@ export async function registerUser(input: {
 }
 
 export async function loginUser(userId: string, password: string) {
-  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [
+  const rows = await query<UserRow[]>('SELECT * FROM USERS WHERE user_id = ? LIMIT 1', [
     userId.trim(),
   ])
 
@@ -90,7 +90,7 @@ export async function loginUser(userId: string, password: string) {
 
 export async function findUserId(name: string, phone: string) {
   const rows = await query<UserRow[]>(
-    'SELECT user_id FROM users WHERE name = ? AND phone = ? LIMIT 1',
+    'SELECT user_id FROM USERS WHERE name = ? AND phone = ? LIMIT 1',
     [name.trim(), normalizePhone(phone)],
   )
 
@@ -104,7 +104,7 @@ export async function findUserId(name: string, phone: string) {
 
 async function findUserForReset(name: string, phone: string, userId: string) {
   const rows = await query<UserRow[]>(
-    'SELECT * FROM users WHERE name = ? AND phone = ? AND user_id = ? LIMIT 1',
+    'SELECT * FROM USERS WHERE name = ? AND phone = ? AND user_id = ? LIMIT 1',
     [name.trim(), normalizePhone(phone), userId.trim()],
   )
 
@@ -134,14 +134,14 @@ export async function resetPassword(
   }
 
   const hashed = await bcrypt.hash(newPassword, 10)
-  await query('UPDATE users SET password = ? WHERE id = ?', [hashed, user.id])
+  await query('UPDATE USERS SET password = ? WHERE id = ?', [hashed, user.id])
 
   return { message: '비밀번호가 변경되었습니다.' }
 }
 
 /** 현재 비밀번호 실시간 확인용 — 실패해도 401을 쓰지 않음(세션 유지) */
 export async function verifyCurrentPassword(userId: string, password: string) {
-  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
+  const rows = await query<UserRow[]>('SELECT * FROM USERS WHERE user_id = ? LIMIT 1', [userId])
   const user = rows[0]
   if (!user) throw new AppError(404, '사용자를 찾을 수 없습니다.')
 
@@ -161,7 +161,7 @@ export async function updateProfile(
   userId: string,
   input: { email?: string; phone?: string; password?: string; currentPassword?: string },
 ) {
-  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
+  const rows = await query<UserRow[]>('SELECT * FROM USERS WHERE user_id = ? LIMIT 1', [userId])
   const user = rows[0]
   if (!user) throw new AppError(404, '사용자를 찾을 수 없습니다.')
 
@@ -206,14 +206,14 @@ export async function updateProfile(
   }
 
   params.push(user.id)
-  await query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params)
+  await query(`UPDATE USERS SET ${updates.join(', ')} WHERE id = ?`, params)
 
-  const updated = await query<UserRow[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [user.id])
+  const updated = await query<UserRow[]>('SELECT * FROM USERS WHERE id = ? LIMIT 1', [user.id])
   return { user: toAuthUser(updated[0]), message: '정보가 수정되었습니다.' }
 }
 
 export async function withdrawAccount(userId: string, password: string) {
-  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
+  const rows = await query<UserRow[]>('SELECT * FROM USERS WHERE user_id = ? LIMIT 1', [userId])
   const user = rows[0]
   if (!user) throw new AppError(404, '사용자를 찾을 수 없습니다.')
 
@@ -222,12 +222,12 @@ export async function withdrawAccount(userId: string, password: string) {
     throw new AppError(401, '비밀번호가 올바르지 않습니다.')
   }
 
-  await query('DELETE FROM users WHERE id = ?', [user.id])
+  await query('DELETE FROM USERS WHERE id = ?', [user.id])
   return { message: '회원탈퇴가 완료되었습니다.' }
 }
 
 export async function getUserProfile(userId: string) {
-  const rows = await query<UserRow[]>('SELECT * FROM users WHERE user_id = ? LIMIT 1', [userId])
+  const rows = await query<UserRow[]>('SELECT * FROM USERS WHERE user_id = ? LIMIT 1', [userId])
   const user = rows[0]
   if (!user) throw new AppError(404, '사용자를 찾을 수 없습니다.')
   return { user: toAuthUser(user) }

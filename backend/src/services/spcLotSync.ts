@@ -125,7 +125,7 @@ let actionsUpdated = 0
               s.additive_ratio, s.process_time, s.sintering_temp, s.humidity, s.tank_pressure,
               s.operator_id
        FROM \`${table}\` s
-       LEFT JOIN lots l ON l.id = s.lot_id
+       LEFT JOIN LOTS l ON l.id = s.lot_id
        WHERE l.id IS NULL AND s.lot_id IS NOT NULL
        ORDER BY s.produced_at ASC, s.lot_id ASC`,
     )
@@ -156,7 +156,7 @@ let actionsUpdated = 0
         inserted.push(r.lot_id)
       }
       await query(
-        `INSERT INTO lots (
+        `INSERT INTO LOTS (
           id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
           process_time, sintering_temp, humidity, tank_pressure, operator_id
         ) VALUES ${placeholders}`,

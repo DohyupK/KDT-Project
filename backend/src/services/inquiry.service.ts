@@ -181,7 +181,7 @@ async function loadAttachmentsByInquiryIds(inquiryIds: number[]): Promise<Map<nu
   if (inquiryIds.length === 0) return map
   const placeholders = inquiryIds.map(() => '?').join(', ')
   const rows = await query<AttachmentRow[]>(
-    `SELECT * FROM inquiry_attachments
+    `SELECT * FROM INQUIRY_ATTACHMENTS
      WHERE inquiry_id IN (${placeholders})
      ORDER BY id ASC`,
     inquiryIds,
@@ -214,7 +214,7 @@ async function removeDirIfExists(dir: string) {
 
 async function nextInquiryCode(): Promise<string> {
   const rows = await query<{ inquiry_code: string }[]>(
-    `SELECT inquiry_code FROM inquiries
+    `SELECT inquiry_code FROM INQUIRIES
      WHERE inquiry_code REGEXP '^INQ-[0-9]+$'
      ORDER BY CAST(SUBSTRING(inquiry_code, 5) AS UNSIGNED) DESC
      LIMIT 1`,
@@ -279,13 +279,13 @@ export async function listInquiries(
   const whereSql = where.join(' AND ')
 
   const countRows = await query<{ cnt: number }[]>(
-    `SELECT COUNT(*) AS cnt FROM inquiries WHERE ${whereSql}`,
+    `SELECT COUNT(*) AS cnt FROM INQUIRIES WHERE ${whereSql}`,
     params,
   )
   const total = Number(countRows[0]?.cnt ?? 0)
 
   const rows = await query<InquiryRow[]>(
-    `SELECT * FROM inquiries
+    `SELECT * FROM INQUIRIES
      WHERE ${whereSql}
      ORDER BY created_at DESC, id DESC
      LIMIT ? OFFSET ?`,
@@ -304,7 +304,7 @@ export async function listInquiries(
 
 export async function getInquiryByCode(inquiryCode: string, viewerUserId: string) {
   const rows = await query<InquiryRow[]>(
-    'SELECT * FROM inquiries WHERE inquiry_code = ? LIMIT 1',
+    'SELECT * FROM INQUIRIES WHERE inquiry_code = ? LIMIT 1',
     [inquiryCode],
   )
   const row = rows[0]
@@ -352,7 +352,7 @@ export async function createInquiry(
   try {
     await withTransaction(async (conn) => {
       const insertResult = (await conn.query(
-        `INSERT INTO inquiries
+        `INSERT INTO INQUIRIES
           (inquiry_code, category, visibility, status, title, content,
            author_user_id, author_name, author_email)
          VALUES (?, ?, ?, '접수', ?, ?, ?, ?, ?)`,
@@ -382,7 +382,7 @@ export async function createInquiry(
         const absPath = path.join(uploadDir, storedName)
         await fs.writeFile(absPath, file.buffer)
         await conn.query(
-          `INSERT INTO inquiry_attachments
+          `INSERT INTO INQUIRY_ATTACHMENTS
             (inquiry_id, original_name, stored_name, mime_type, size_bytes)
            VALUES (?, ?, ?, ?, ?)`,
           [
@@ -413,7 +413,7 @@ export async function openInquiryAttachment(
   }
 
   const rows = await query<InquiryRow[]>(
-    'SELECT * FROM inquiries WHERE inquiry_code = ? LIMIT 1',
+    'SELECT * FROM INQUIRIES WHERE inquiry_code = ? LIMIT 1',
     [inquiryCode],
   )
   const row = rows[0]
@@ -424,7 +424,7 @@ export async function openInquiryAttachment(
   }
 
   const files = await query<AttachmentRow[]>(
-    'SELECT * FROM inquiry_attachments WHERE id = ? AND inquiry_id = ? LIMIT 1',
+    'SELECT * FROM INQUIRY_ATTACHMENTS WHERE id = ? AND inquiry_id = ? LIMIT 1',
     [attachmentId, row.id],
   )
   const file = files[0]
@@ -467,13 +467,13 @@ export async function upsertAnswer(
   }
 
   const rows = await query<InquiryRow[]>(
-    'SELECT * FROM inquiries WHERE inquiry_code = ? LIMIT 1',
+    'SELECT * FROM INQUIRIES WHERE inquiry_code = ? LIMIT 1',
     [inquiryCode],
   )
   if (!rows[0]) throw new AppError(404, '문의를 찾을 수 없습니다.')
 
   await query(
-    `UPDATE inquiries
+    `UPDATE INQUIRIES
      SET answer = ?, answered_at = NOW(), answered_by_user_id = ?, status = '답변완료'
      WHERE inquiry_code = ?`,
     [answer, adminUserId, inquiryCode],

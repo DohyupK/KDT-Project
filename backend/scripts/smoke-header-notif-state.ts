@@ -17,7 +17,7 @@ function assert(cond: unknown, msg: string): asserts cond {
 
 async function main() {
   const users = await query<{ user_id: string }[]>(
-    'SELECT user_id FROM users ORDER BY id ASC LIMIT 1',
+    'SELECT user_id FROM USERS ORDER BY id ASC LIMIT 1',
   )
   assert(users[0]?.user_id, 'no users in DB')
   const userId = users[0].user_id
@@ -48,7 +48,7 @@ async function main() {
   const cleanedRead = again.readIds.filter((id) => !id.startsWith(`${tag}:`))
   const cleanedDismissed = again.dismissedIds.filter((id) => !id.startsWith(`${tag}:`))
   await query(
-    `UPDATE user_header_notif_state
+    `UPDATE USER_HEADER_NOTIF_STATE
      SET read_ids = ?, dismissed_ids = ?
      WHERE user_id = ?`,
     [JSON.stringify(cleanedRead), JSON.stringify(cleanedDismissed), userId],

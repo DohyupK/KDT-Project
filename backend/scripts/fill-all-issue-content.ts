@@ -72,7 +72,7 @@ async function summarizeIssueContent(
 
 async function nextIssueId(day: string): Promise<string> {
   const last = await query<{ issue_id: string }[]>(
-    `SELECT issue_id FROM issues
+    `SELECT issue_id FROM ISSUES
      WHERE issue_id REGEXP ?
      ORDER BY issue_id DESC LIMIT 1`,
     [`^ISS-${day}-[0-9]{3}$`],
@@ -85,10 +85,10 @@ async function nextIssueId(day: string): Promise<string> {
 }
 
 async function main() {
-  const before = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM issues`)
+  const before = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ISSUES`)
   console.log('DELETE_BEFORE', Number(before[0]?.c ?? 0))
-  await query(`DELETE FROM issues`)
-  const afterDel = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM issues`)
+  await query(`DELETE FROM ISSUES`)
+  const afterDel = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ISSUES`)
   console.log('DELETE_AFTER', Number(afterDel[0]?.c ?? 0))
 
   const lots = await query<
@@ -101,8 +101,8 @@ async function main() {
     }[]
   >(
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.spc_status, a.risk_reason
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE a.risk_level = '심각'
        AND a.spc_status IN ('주의', '이탈')
        AND a.risk_reason IS NOT NULL AND TRIM(a.risk_reason) <> ''
@@ -138,7 +138,7 @@ async function main() {
       const issueId = await nextIssueId(day)
 
       await query(
-        `INSERT INTO issues (issue_id, lot_id, issue_content, created_at)
+        `INSERT INTO ISSUES (issue_id, lot_id, issue_content, created_at)
          VALUES (?, ?, ?, ?)`,
         [issueId, lot.lot_id, text, createdAt],
       )
@@ -162,7 +162,7 @@ async function main() {
     }
   }
 
-  const finalCount = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM issues`)
+  const finalCount = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM ISSUES`)
   console.log('DONE', {
     total,
     ok,

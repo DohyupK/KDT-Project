@@ -123,7 +123,7 @@ def main() -> None:
             temp_ids = [str(r[0]) for r in cur.fetchall()]
             cur.execute(
                 "SELECT lot_id, quality_defect, capacity, residual_li, probability "
-                "FROM judgment_lots"
+                "FROM JUDGMENT_LOTS"
             )
             jl_rows = cur.fetchall()
     finally:
