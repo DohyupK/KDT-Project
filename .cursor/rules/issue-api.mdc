@@ -1,8 +1,0 @@
----
-description: Rules for the IssuePage API module
-globs: frontend/src/api/issueApi.ts
-alwaysApply: false
----
-# Issue API
-
-API-specific rules will be defined here.

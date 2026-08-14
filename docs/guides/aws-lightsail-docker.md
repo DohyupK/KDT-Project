@@ -14,7 +14,7 @@ docker compose up -d
 ```
 
 데이터: `DB/data/n8n/` · `DB/data/qdrant_storage/` (gitignore). FE/BE/ai는 여전히 `npm run dev`.  
-이슈 메일 계획: [`2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md).
+이슈 메일: [`issue-report.md`](../references/issue-report.md).
 
 ---
 
@@ -144,4 +144,4 @@ npm run send:one-issue-report
 
 - [`login-ubuntu-mariadb.md`](./login-ubuntu-mariadb.md) — Lightsail MariaDB  
 - [`documents-watcher-qdrant.md`](../references/documents-watcher-qdrant.md) — 포트 · `npm run dev`  
-- [`2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md) — 메일 파이프라인  
+- [`issue-report.md`](../references/issue-report.md) — 메일 파이프라인  

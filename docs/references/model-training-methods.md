@@ -171,7 +171,7 @@ python train_pipeline.py
 # 투표 멤버: USE_GPU=0 python scripts/train_all_voting_models.py
 ```
 
-재학습·Optuna·스모크는 `.cursor/rules/ask-before-run.mdc`에 따라 **사용자 승인 후**만.
+재학습·Optuna·스모크는 `.cursor/rules/kdt-project.mdc`에 따라 **사용자 승인 후**만.
 
 ---
 

@@ -179,5 +179,5 @@ python train_residual_pipeline.py
 - [`secure-rag.md`](./secure-rag.md) — RAG 스키마·가드레일·스모크  
 - [`vllm-setup.md`](./vllm-setup.md) — 로컬 LLM 기동  
 - [`security-chat-skeleton.md`](./security-chat-skeleton.md) — 보안 채널 골격  
-- [`ai-service/README.md`](../../ai-service/README.md) — ML·스택·실행  
+- [`docs/packages.md`](../packages.md#ai-service) — ML·실행  
 - [`docs/work-log/2026-08-01.md`](../work-log/2026-08-01.md) — 당일 패치 일지  

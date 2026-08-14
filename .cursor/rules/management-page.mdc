@@ -1,8 +1,0 @@
----
-description: Rules for the Management page UI (important page)
-globs: frontend/src/app/management/page.tsx
-alwaysApply: false
----
-# Management Page (개별 룰)
-
-Page-specific rules will be defined here.

@@ -13,9 +13,9 @@ Cursor / Codex 등이 `frontend` · `backend` · `ai-service` **어디에 작업
 - Preserve the existing project structure and TypeScript compatibility.
 - Keep page, component, and API responsibilities clearly separated.
 - Do not add, remove, or refactor features outside the requested scope.
-- Validate changes with type checks, linting, and a production build — only after asking the user and getting approval to run them (same for installs, tests, training). See `.cursor/rules/ask-before-run.mdc`.
+- Validate changes with type checks, linting, and a production build — only after asking the user and getting approval to run them (same for installs, tests, training). See `.cursor/rules/kdt-project.mdc`.
 - Never store API keys, credentials, or other secrets in the repository.
-- After any approved package install (`pip`/`npm`/…), update the matching README tech-stack section (and root README monorepo stack). See `.cursor/rules/ask-before-run.mdc`.
+- After any approved package install (`pip`/`npm`/…), update the matching README tech-stack section (and root README monorepo stack). See `.cursor/rules/kdt-project.mdc`.
 
 ---
 

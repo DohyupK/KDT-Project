@@ -194,7 +194,7 @@ python ingest_secure.py
 ## 5. n8n (메일 · 수동 Docker)
 
 이슈 보고서 메일: backend가 `N8N_ISSUE_REPORT_WEBHOOK_URL`(기본 `http://127.0.0.1:5678/webhook/issue-report`)로 POST → n8n이 Gmail API → `POST :3001/api/internal/n8n/send-email-result`.  
-계획: [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md).
+명세: [`issue-report.md`](./issue-report.md).
 
 | 항목 | 내용 |
 |------|------|
@@ -245,6 +245,6 @@ MariaDB `text_match`: [`DB/text_match.sql`](../../DB/text_match.sql) · `python 
 - [`Documents/README.md`](../../Documents/README.md) — 변환 정책  
 - [`secure-rag.md`](./secure-rag.md) — RAG · ingest · 환경  
 - [`general-chatbot-page-context.md`](./general-chatbot-page-context.md) — 일반 챗 페이지 컨텍스트  
-- [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md) — 이슈 보고서 메일  
+- [`issue-report.md`](./issue-report.md) — 이슈 보고서 메일  
 - [`docs/guides/aws-lightsail-docker.md`](../guides/aws-lightsail-docker.md) — Lightsail에 n8n·Qdrant  
 - DDL: [`DB/text_match.sql`](../../DB/text_match.sql) · [`DB/schema.sql`](../../DB/schema.sql)

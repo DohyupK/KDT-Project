@@ -168,7 +168,7 @@ vLLM 미기동 시 **가짜 성공 금지** — 스크립트가 FAIL.
 - **단계 진단:** 실패 시 챗에 `HTTP · stage · elapsed · trace` 표시 (뭉뚱그린「연결 실패」제거).
 - **반드시 재시작:** 진단·타임아웃 코드 반영을 위해 **backend(:3001) · frontend · ai-service(:8800)** 모두 재기동.
 - ai-service 콘솔: `[secure-chat] stage=...` / Express: `[security-chat] proxy_*`
-- 수정 플랜: [`docs/plans/2026-07-30-secure-chat-timeout-selfquery.md`](../plans/2026-07-30-secure-chat-timeout-selfquery.md)
+- 구현: FE 보안 전용 timeout 180s · BE `AbortSignal` (일지 [`2026-07-30`](../work-log/2026-07-30.md))
 
 ## 수동 Maximize 체크리스트
 

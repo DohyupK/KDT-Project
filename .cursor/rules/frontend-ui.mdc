@@ -1,0 +1,31 @@
+---
+description: Frontend UI — 반응형 레이아웃 · SPC Grafana
+globs: frontend/src/app/**/*.tsx,frontend/src/components/**/*.tsx
+alwaysApply: false
+---
+# Frontend UI
+
+전체 룰은 [`kdt-project.mdc`](kdt-project.mdc).
+
+---
+
+## Responsive layout
+
+- Mobile-first: 기본은 모바일, `md:` `lg:` `xl:`로 PC 확장
+- 고정 px 너비 레이아웃 금지 (예: `w-[400px]`)
+- 화면 전체 zoom/transform scale 금지 — flex/grid + breakpoint
+- Sidebar+Content: 모바일 `flex-col`, PC `lg:flex-row`
+- Tailwind: sm 640 · md 768 · lg 1024 · xl 1280
+- Root: `min-h-screen w-full` (`w-screen` + `overflow-hidden` 남용 금지)
+- Sidebar: `w-full lg:w-[18%]`, Content: `w-full lg:w-[82%]`
+- Grid: `grid-cols-1 md:grid-cols-2`
+- Header: `flex-col md:flex-row`, 검색창 `w-full md:w-[40%]`
+- `html` font-size % 로 전체 UI 스케일 금지
+- 페이지마다 서로 다른 breakpoint 혼용 금지
+- 검증: 375px / 768px / 1280px
+
+---
+
+## Management / SPC
+
+전용 `managementApi.ts` 없음. Grafana 임베드는 `frontend/src/app/(shell)/management/page.tsx`에 둔다. 빈 API 스텁을 다시 만들지 않는다.

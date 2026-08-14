@@ -12,9 +12,9 @@
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번은 **issues** 전용. 인수인계 등록은 이슈를 만들지 않음.
 - **이슈 자동 생성:** `analysis_lots.risk_level = '심각'` 인 완전 공정 LOT만 (`ensureIssuesForRiskLots`; SPC 이탈 등은 이미 risk_level에 반영). SPC/분석 폴러는 **채점 대상이 없어도** 매 틱 시드 실행.
 - **`issue_content`:** `risk_reason` → 로컬 vLLM 한 문장 요약 (`composeIssueContentViaVllm`). 실패 시 `buildIssueTitle` fallback. 폴러는 **score → risk_reason → 이슈 시드** 순.
-- 과거 자료 필터·표 형태 전환: **후속** (형태 미정)
+- 과거 자료: 완료 이슈(`completed_at IS NOT NULL`) 목록 API
 - 위험 LOT Top: `GET /api/lots/risk-top` — 최근 3일 · `risk_level` 심각 (`analysis_lots` JOIN)
-- **이슈 보고서 메일:** 신규 Top LOT → HTML을 `send_email.mail_contents`에 넣고 n8n → Gmail API. 수신은 `user_settings.email_check = 'O'`. 계획: [`docs/plans/2026-08-13-issue-report-n8n.md`](../plans/2026-08-13-issue-report-n8n.md)
+- **이슈 보고서 메일:** 신규 Top LOT → HTML을 `send_email.mail_contents`에 넣고 n8n → Gmail API. 수신은 `user_settings.email_check = 'O'`. SSOT: [`issue-report.md`](./issue-report.md)
 - 당일 KPI: `GET /api/lots/daily-kpi` — 당일 00시~ · `analysis_lots.probability` · 임계 0.8
 - **채점 3단 SSOT** (`lot.service` `updateLotScore`):  
   1. `/predict-voting` → **`lot_results`** NULL-fill (`quality_defect`·`residual_li`만; 피더 실측은 COALESCE로 불변)  
@@ -74,7 +74,7 @@
 
 - `GET /api/issues/:id` → `analysis`로 `analysis_lots` 전 필드 표시
 - 카드: `probability` 게이지 · `risk_level` · `spc_status` · `risk_reason` 콜아웃 · 필드 테이블
-- 목적·차트 고도화는 **후속** (현재는 UI 구성·실데이터 확인용)
+- 현재 UI는 `analysis_lots` 실데이터 확인용 (게이지·리스크·SPC·사유)
 
 ## 이슈 페이지 시드
 

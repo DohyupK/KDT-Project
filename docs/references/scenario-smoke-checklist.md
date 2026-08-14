@@ -1,14 +1,14 @@
 # 시나리오 스모크 체크리스트
 
 최종 갱신: 2026-08-13  
-실행은 [ask-before-run](../../.cursor/rules/ask-before-run.mdc) 승인 후. 자동 테스트 강제 아님.
+실행은 [kdt-project](../../.cursor/rules/kdt-project.mdc) 승인 후. 자동 테스트 강제 아님.
 
 전제: frontend `:3000`, backend `:3001`, ai-service `:8800`, `models/` 학습 산출물 존재.
 
 **API 스모크 (2026-07-24 오전):** backend·ai-service 재기동 후 **14/14 PASS** (당시 `approved_logged`).  
 이후 상태값은 **`approved` / `reverted`** 로 변경됨 — 재스모크 시 아래 7·8항 확인.
 
-화면 컨텍스트 일반 챗 확정: [`docs/plans/2026-08-13-page-context-chatbot.md`](../plans/2026-08-13-page-context-chatbot.md)
+화면 컨텍스트 일반 챗: [`general-chatbot-page-context.md`](./general-chatbot-page-context.md)
 
 ## 1. 보안 게이트
 

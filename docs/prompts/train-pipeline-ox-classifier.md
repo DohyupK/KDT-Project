@@ -2,7 +2,7 @@
 
 아래를 Cursor / 코드 생성기에 붙여 사용한다.  
 데이터 계약: [cathode-clf-schema.md](../references/cathode-clf-schema.md)  
-확정 요약: [2026-07-22-ox-classifier-prompt.md](../plans/2026-07-22-ox-classifier-prompt.md)
+학습 방법: [model-training-methods.md](../references/model-training-methods.md)
 
 ---
 

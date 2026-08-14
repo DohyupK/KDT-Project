@@ -7,12 +7,15 @@
 | `frontend/` | Next.js UI |
 | `backend/` | Express + MariaDB (챗 세션 · 보안 게이트 · 프록시) |
 | `ai-service/` | ML 진단 · FastAPI · 챗봇 Agent |
-| `docs/` | 방향·일지·계획 |
-| `docs/plans/2026-07-23-chatbot-integration.md` | AI 챗봇·연동 작업서 (경로 지도) |
-| `docs/plans/2026-07-23-llm-formal-integration.md` | LLM 정식 연동 · 보안 · 세션 |
+| `docs/` | 방향·일지·구현 명세 ([catalog](../catalog.md)) |
+| `docs/references/general-chatbot-page-context.md` | 일반 챗 · 페이지 컨텍스트 |
+| `docs/references/security-chat-skeleton.md` | 보안 탭 라우팅 |
 | `docs/references/issue-lot-api.md` | Issue/LOT/과거 자료 API |
+| `docs/references/issue-report.md` | 이슈 보고서 메일 |
 | `AGENTS.md` | 전체 공통 규칙 |
-| `.cursor/rules/` | 전체·개별 룰 (`ask-before-run.mdc` 포함) |
+| `.cursor/rules/kdt-project.mdc` | 전체 룰 (승인·DB·문서·프로필) |
+| `.cursor/rules/frontend-ui.mdc` | 프론트 UI (반응형 · SPC) |
+| `.cursor/skills/project-control/` | 조율 스킬 |
 
 ## Frontend
 
@@ -64,4 +67,5 @@
 |------|------|
 | `docs/direction.md` | 현재 작업 방향 |
 | `docs/work-log/` | 날짜별 상세 |
-| `docs/plans/` | 확정 계획 |
+| `docs/catalog.md` | 사용자 작성 문서 목록 |
+| `docs/references/agent-rules-and-skills.md` | 룰·스킬 인덱스 |

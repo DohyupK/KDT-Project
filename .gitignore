@@ -31,3 +31,7 @@ venv/
 node_modules/
 dist/
 .next/
+
+# Local runtime / one-off dumps (do not commit)
+temp/
+frontend/feeder_state.json
