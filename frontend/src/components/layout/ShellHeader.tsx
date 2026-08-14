@@ -157,6 +157,7 @@ export default function ShellHeader() {
     const syncAuth = () => {
       setLoggedIn(isLoggedIn())
       void fetchEmailCheck()
+      void fetchNotifications()
     }
     syncAuth()
     window.addEventListener(AUTH_CHANGED_EVENT, syncAuth)
@@ -165,7 +166,7 @@ export default function ShellHeader() {
       window.removeEventListener(AUTH_CHANGED_EVENT, syncAuth)
       window.removeEventListener('storage', syncAuth)
     }
-  }, [fetchEmailCheck])
+  }, [fetchEmailCheck, fetchNotifications])
 
   /** Settings → auto refresh (skipped on management — Grafana embeds handle their own refresh). */
   useEffect(() => {
@@ -231,7 +232,7 @@ export default function ShellHeader() {
   }
 
   const openNotification = (item: HeaderNotification) => {
-    markNotificationsRead([item.id])
+    void markNotificationsRead([item.id])
     setNotifications((prev) =>
       prev.map((row) => (row.id === item.id ? { ...row, unread: false } : row)),
     )
@@ -241,7 +242,7 @@ export default function ShellHeader() {
 
   const dismissOne = (item: HeaderNotification, event: MouseEvent) => {
     event.stopPropagation()
-    dismissNotifications([item.id])
+    void dismissNotifications([item.id])
     setNotifications((prev) => {
       const next = prev.filter((row) => row.id !== item.id)
       const pages = Math.max(1, Math.ceil(next.length / HEADER_NOTIF_PAGE_SIZE))
@@ -251,14 +252,14 @@ export default function ShellHeader() {
   }
 
   const markAllRead = () => {
-    markNotificationsRead(notifications.map((item) => item.id))
+    void markNotificationsRead(notifications.map((item) => item.id))
     setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })))
   }
 
   const removeReadNotifications = () => {
     const readIds = notifications.filter((item) => !item.unread).map((item) => item.id)
     if (readIds.length === 0) return
-    dismissNotifications(readIds)
+    void dismissNotifications(readIds)
     setNotifications((prev) => {
       const next = prev.filter((item) => item.unread)
       const pages = Math.max(1, Math.ceil(next.length / HEADER_NOTIF_PAGE_SIZE))
@@ -288,8 +289,8 @@ export default function ShellHeader() {
     : 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60'
 
   const notifyActionBtnClass = isDark
-    ? 'inline-flex items-center justify-center rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
-    : 'inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
+    ? 'inline-flex items-center justify-center rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-slate-800'
+    : 'inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white'
 
   return (
     <>
@@ -377,10 +378,11 @@ export default function ShellHeader() {
                       모두 읽음
                     </button>
                   ) : null}
-                  {readCount > 0 ? (
+                  {notifications.length > 0 ? (
                     <button
                       type="button"
                       className={notifyActionBtnClass}
+                      disabled={readCount === 0}
                       onClick={removeReadNotifications}
                     >
                       읽은 알림 제거
@@ -466,39 +468,37 @@ export default function ShellHeader() {
                     </div>
                   ))}
 
-                  {notifications.length > HEADER_NOTIF_PAGE_SIZE ? (
-                    <div
-                      className={`flex items-center justify-between gap-2 border-t px-3 py-2 ${
-                        isDark ? 'border-slate-700' : 'border-gray-100'
+                  <div
+                    className={`flex items-center justify-between gap-2 border-t px-3 py-2 ${
+                      isDark ? 'border-slate-700' : 'border-gray-100'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      aria-label="이전 알림 페이지"
+                      disabled={safePage <= 1}
+                      className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
+                      onClick={() => setNotifyPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft size={16} aria-hidden />
+                    </button>
+                    <span
+                      className={`text-xs tabular-nums ${
+                        isDark ? 'text-slate-400' : 'text-gray-500'
                       }`}
                     >
-                      <button
-                        type="button"
-                        aria-label="이전 알림 페이지"
-                        disabled={safePage <= 1}
-                        className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
-                        onClick={() => setNotifyPage((p) => Math.max(1, p - 1))}
-                      >
-                        <ChevronLeft size={16} aria-hidden />
-                      </button>
-                      <span
-                        className={`text-xs tabular-nums ${
-                          isDark ? 'text-slate-400' : 'text-gray-500'
-                        }`}
-                      >
-                        {safePage} / {totalPages}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="다음 알림 페이지"
-                        disabled={safePage >= totalPages}
-                        className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
-                        onClick={() => setNotifyPage((p) => Math.min(totalPages, p + 1))}
-                      >
-                        <ChevronRight size={16} aria-hidden />
-                      </button>
-                    </div>
-                  ) : null}
+                      {safePage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="다음 알림 페이지"
+                      disabled={safePage >= totalPages}
+                      className={`${iconBtnClass} h-8 w-8 min-h-0 min-w-0`}
+                      onClick={() => setNotifyPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      <ChevronRight size={16} aria-hidden />
+                    </button>
+                  </div>
                 </>
               )}
 

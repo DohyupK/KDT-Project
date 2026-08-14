@@ -52,4 +52,17 @@ export const authApi = {
 
   resetSettings: () =>
     apiClient.post<{ settings: UserSettingsDto; message: string }>('/auth/settings/reset'),
+
+  getNotificationState: () =>
+    apiClient.get<{ readIds: string[]; dismissedIds: string[] }>('/auth/notifications/state'),
+
+  markNotificationsRead: (ids: string[]) =>
+    apiClient.post<{ readIds: string[]; dismissedIds: string[] }>('/auth/notifications/read', {
+      ids,
+    }),
+
+  dismissNotifications: (ids: string[]) =>
+    apiClient.post<{ readIds: string[]; dismissedIds: string[] }>('/auth/notifications/dismiss', {
+      ids,
+    }),
 }

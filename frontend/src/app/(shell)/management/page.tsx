@@ -5,6 +5,7 @@ import { useUiSettings } from '@/components/layout/AppShell'
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent'
 import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
+import { grafanaEmbed } from '@/lib/grafanaEmbed'
 
 type SpcCardTitle =
   | 'd50'
@@ -31,20 +32,37 @@ const SPC_CARD_LABELS: Record<SpcCardTitle, string> = {
 
 /**
  * Grafana solo-panel embed URL (Share → Embed).
- * 실제 URL로 교체하세요. 예:
- * https://<GRAFANA_HOST>/d-solo/<uid>/<slug>?orgId=1&panelId=1&from=now-2h&to=now&refresh=30s&theme=light
+ * Host: `NEXT_PUBLIC_GRAFANA_HOST` / `NEXT_PUBLIC_GRAFANA_PORT` (루트 `.env`).
  * 패널 자체 refresh를 쓰면 iframe 통째 리로드는 불필요합니다.
  */
 const GRAFANA_PANEL_URLS: Record<SpcCardTitle, string> = {
-  d50: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-1',
-  d90: 'http://3.36.100.128:4000/d-solo/adwh4tx/d90?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&showCategory=Panel%20options&panelId=panel-2',
-  metal_impurity: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-3',
-  lithium_input: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-4',
-  additive_ratio: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-5',
-  process_time: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-6',
-  sintering_temp: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-9',
-  humidity: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-7',
-  tank_pressure: 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-8',
+  d50: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-1',
+  ),
+  d90: grafanaEmbed(
+    '/d-solo/adwh4tx/d90?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&showCategory=Panel%20options&panelId=panel-2',
+  ),
+  metal_impurity: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-3',
+  ),
+  lithium_input: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-4',
+  ),
+  additive_ratio: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-5',
+  ),
+  process_time: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-6',
+  ),
+  sintering_temp: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-9',
+  ),
+  humidity: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-7',
+  ),
+  tank_pressure: grafanaEmbed(
+    '/d-solo/adwh4tx/d50?orgId=1&from=now-2h&to=now&timezone=browser&refresh=5m&panelId=panel-8',
+  ),
 }
 
 type DateRangeFilter = {

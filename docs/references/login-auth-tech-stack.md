@@ -13,7 +13,7 @@
 | 백엔드 | Express 5, TypeScript, tsx | `/api/auth` 라우트, 비즈니스 로직 |
 | DB 접속 | `mariadb` (npm) | `backend/src/db/connection.ts` 커넥션 풀 |
 | DB 서버 | MariaDB (Ubuntu apt) | `users`, `user_settings`, `chat_*`, `optimization_events` 등 |
-| 인프라 | Amazon Lightsail Instance | Ubuntu 서버 상시 기동 (공용 DB 위치) |
+| 인프라 | Amazon Lightsail Instance | Ubuntu 상시 기동. **16GB(`my-server-16gb`)**: 앱+DB. vLLM은 이 PC GPU 터널 |
 | 비밀번호 해시 | bcryptjs | 회원가입·로그인 검증 |
 | 세션 토큰 | jsonwebtoken (JWT) | 로그인 후 인증 |
 | 설정 | dotenv + `.env` | `DB_HOST`, `DB_USER`, `JWT_SECRET` 등 (Git 제외) |
@@ -84,7 +84,7 @@
 
 | 도구 | 용도 |
 |------|------|
-| Amazon Lightsail | Ubuntu 인스턴스 (DB 서버) |
+| Amazon Lightsail | Ubuntu. 16GB는 앱 서버, 구 2GB는 이관 전 DB/Grafana일 수 있음 |
 | Lightsail 브라우저 SSH | 서버 접속·MariaDB 설치·SQL |
 | `mysql` / MariaDB CLI | SSH 안 또는 PC에서 원격 접속 |
 | HeidiSQL 등 (선택) | GUI로 원격 DB 조회 (필수는 아님) |
@@ -94,7 +94,7 @@
 
 | 변수 | 의미 |
 |------|------|
-| `DB_HOST` | Ubuntu 공인 IP (로컬만 쓸 때는 `127.0.0.1`) |
+| `DB_HOST` | 서버 안 앱: `127.0.0.1`. 이 PC→원격 DB: Ubuntu 공인 IP |
 | `DB_PORT` | 기본 `3306` |
 | `DB_USER` / `DB_PASSWORD` | 앱 DB 계정 (예: `kdt`) |
 | `DB_NAME` | `kdt_project` |
@@ -151,3 +151,4 @@ npm run dev
 | 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |
 | 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/profile-personal-info-modal.mdc`. |
 | 2026-08-13 | 헤더 알림 팝오버 「이메일 자동 발신」 토글. `GET\|PUT /api/auth/settings`의 `emailCheck` ↔ `user_settings.email_check` (`O`/`X`, 로그인 계정만 UPDATE). |
+| 2026-08-14 | 16GB 앱 서버 + 로컬 GPU 터널. `DB_HOST`는 같은 기계면 127.0.0.1. Grafana는 `NEXT_PUBLIC_GRAFANA_HOST`. 절차 [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md). |

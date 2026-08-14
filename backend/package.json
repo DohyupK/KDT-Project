@@ -19,6 +19,7 @@
     "migrate:schema-cleanup": "tsx scripts/migrate-schema-cleanup.ts",
     "migrate:inquiries": "tsx scripts/migrate-inquiries.ts",
     "migrate:send-email": "tsx scripts/migrate-send-email.ts",
+    "migrate:header-notif-state": "tsx scripts/migrate-header-notif-state.ts",
     "seed:inquiries": "tsx scripts/seed-inquiries.ts",
     "seed:issues": "tsx scripts/seed-issues.ts",
     "seed:judgment-lots": "tsx scripts/seed-judgment-lots.ts",
@@ -39,11 +40,7 @@
     "inspect:schema": "tsx scripts/inspect-schema.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",
     "sync:spc-lots": "tsx scripts/sync-spc-lots.ts",
-<<<<<<< HEAD
-    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts tests/lotRecommendedAction.summary.test.ts"
-=======
-    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts tests/issueReportHtml.test.ts"
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
+    "test": "tsx --test tests/issue.validation.test.ts tests/lotScore.spc.test.ts tests/docxPreview.test.ts tests/lotRecommendedAction.summary.test.ts tests/issueReportHtml.test.ts"
   },
   "keywords": [],
   "author": "",

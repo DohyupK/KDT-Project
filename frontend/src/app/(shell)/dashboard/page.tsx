@@ -19,19 +19,23 @@ import { dashboardApi, type DashboardLotRiskItem } from '@/api/dashboardApi'
 import { usePageChat } from '@/context/PageChatContext'
 import { useShellRefresh } from '@/hooks/useShellRefresh'
 import { LotRecommendedActionPanel, type RecommendedActionData } from '@/components/dashboard/LotRecommendedActionPanel'
+import { grafanaEmbed } from '@/lib/grafanaEmbed'
 
 /**
  * 하단 Grafana 패널 Embed URL (구 생산 상세 테이블 자리).
- * Share → Embed의 src만 넣으세요.
+ * Host: `NEXT_PUBLIC_GRAFANA_HOST` / `NEXT_PUBLIC_GRAFANA_PORT` (루트 `.env`).
  */
-const GRAFANA_BOTTOM_PANEL_URL = 'http://3.36.100.128:4000/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10'
+const GRAFANA_BOTTOM_PANEL_URL = grafanaEmbed(
+  '/d-solo/adwh4tx/d50?orgId=1&from=1786496729402&to=1786507529402&timezone=browser&refresh=5m&theme=light&panelId=panel-10',
+)
 
 /**
  * 실시간 생산 게이지 Embed URL.
- * Share → Embed의 src만 넣으세요. theme=light 권장(패널 검정 배경 완화).
+ * theme=light 권장(패널 검정 배경 완화).
  */
-const GRAFANA_GAUGE_PANEL_URL =
-  'http://3.36.100.128:4000/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1'
+const GRAFANA_GAUGE_PANEL_URL = grafanaEmbed(
+  '/d-solo/adw5ngg/new-dashboard?orgId=1&from=1786345370672&to=1786431770672&timezone=browser&refresh=5m&theme=light&panelId=panel-1',
+)
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */

@@ -15,13 +15,21 @@ CREATE TABLE IF NOT EXISTS user_settings (
   font_size             INT          NOT NULL DEFAULT 18,
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
-<<<<<<< HEAD
   email_check           CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=심각 LOT 보고서 메일 수신, X=거부',
-=======
-  email_check           CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=receive issue-report mail, X=opt-out',
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE
+);
+
+-- Header bell read/dismiss overlay per user (list still aggregated on frontend).
+-- See also DB/user_header_notif_state.sql
+CREATE TABLE IF NOT EXISTS user_header_notif_state (
+  user_id         VARCHAR(50)  NOT NULL PRIMARY KEY,
+  read_ids        JSON         NOT NULL,
+  dismissed_ids   JSON         NOT NULL,
+  updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_user_header_notif_state_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
     ON DELETE CASCADE
 );

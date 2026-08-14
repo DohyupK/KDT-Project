@@ -12,10 +12,7 @@ export type UserSettingsDto = {
   themeMode: 0 | 1
   refreshInterval: number
   emailCheck: EmailCheck
-<<<<<<< HEAD
-=======
   n8nAlert: boolean
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
   updatedAt: string
 }
 
@@ -42,23 +39,10 @@ function formatDate(value: Date | string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-<<<<<<< HEAD
-function normalizeEmailCheck(value: unknown): EmailCheck {
-  const v = String(value ?? '').trim().toUpperCase()
-  return v === 'O' ? 'O' : 'X'
-}
-
-function parseEmailCheck(value: unknown): EmailCheck | undefined {
-  if (value === undefined || value === null || value === '') return undefined
-  const v = String(value).trim().toUpperCase()
-  if (v === 'O' || v === 'X') return v
-  throw new AppError(400, '이메일 수신 설정이 올바르지 않습니다.')
-=======
 function toEmailCheck(value: unknown, fallback: EmailCheck = DEFAULTS.emailCheck): EmailCheck {
   const raw = String(value ?? '').trim().toUpperCase()
   if (raw === 'O' || raw === 'X') return raw
   return fallback
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
 }
 
 function toDto(row: UserSettingsRow): UserSettingsDto {
@@ -68,12 +52,8 @@ function toDto(row: UserSettingsRow): UserSettingsDto {
     fontSize: Number(row.font_size),
     themeMode: row.theme_mode === 0 ? 0 : 1,
     refreshInterval: Number(row.refresh_interval),
-<<<<<<< HEAD
-    emailCheck: normalizeEmailCheck(row.email_check),
-=======
     emailCheck,
     n8nAlert: emailCheck === 'O',
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
     updatedAt: formatDate(row.updated_at),
   }
 }
@@ -133,26 +113,12 @@ export async function updateUserSettings(
   body: Record<string, unknown>,
 ): Promise<UserSettingsDto> {
   const current = await getUserSettings(userId)
-<<<<<<< HEAD
-  const fontSize = Number(
-    body.fontSize ?? body.FontSize ?? current.fontSize,
-  )
-  const themeMode = Number(
-    body.themeMode ?? body.ThemeMode ?? current.themeMode,
-  )
-  const refreshInterval = Number(
-    body.refreshInterval ?? body.RefreshInterval ?? current.refreshInterval,
-  )
-  const emailCheck =
-    parseEmailCheck(body.emailCheck ?? body.email_check) ?? current.emailCheck
-=======
   const fontSize = Number(body.fontSize ?? body.FontSize ?? current.fontSize)
   const themeMode = Number(body.themeMode ?? body.ThemeMode ?? current.themeMode)
   const refreshInterval = Number(
     body.refreshInterval ?? body.RefreshInterval ?? current.refreshInterval,
   )
   const emailCheck = parseEmailCheckFromBody(body, current.emailCheck)
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
 
   assertValidSettings({ fontSize, themeMode, refreshInterval })
 
@@ -172,13 +138,5 @@ export async function updateUserSettings(
 }
 
 export async function resetUserSettings(userId: string): Promise<UserSettingsDto> {
-<<<<<<< HEAD
-  return updateUserSettings(userId, {
-    fontSize: DEFAULTS.fontSize,
-    themeMode: DEFAULTS.themeMode,
-    refreshInterval: DEFAULTS.refreshInterval,
-  })
-=======
   return updateUserSettings(userId, { ...DEFAULTS, n8nAlert: false })
->>>>>>> 6205edccac40ee7c89e51bf045bdc88b8b07490d
 }

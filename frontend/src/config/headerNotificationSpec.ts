@@ -5,7 +5,8 @@
  * Escalation: 심각 LOT → immediate `high_risk_lot`; after 30 minutes without
  * issue action (`hasAction`), that LOT switches to `pending_issue` only in the
  * header bell (Main/Dashboard/Issue pages still show the LOT).
- * Read / dismiss: localStorage `kdt-header-notif-read`, `kdt-header-notif-dismissed`.
+ * Read / dismiss: per-user server state via
+ * `GET|POST /api/auth/notifications/*` (legacy localStorage keys migrated once).
  * Deep links: `/issue?lotId=` | `/issue?issueId=&lotId=` | `/inquiry?id=`.
  */
 

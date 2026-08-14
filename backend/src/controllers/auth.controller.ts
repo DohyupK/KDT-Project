@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import * as authService from '../services/auth.service.js'
 import * as userSettingsService from '../services/userSettings.service.js'
+import * as headerNotifStateService from '../services/headerNotifState.service.js'
 import { AppError } from '../middleware/errorHandler.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
@@ -106,4 +107,28 @@ export const resetSettings = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
   const settings = await userSettingsService.resetUserSettings(req.auth.userId)
   res.status(200).json({ settings, message: '설정이 기본값으로 초기화되었습니다.' })
+})
+
+export const getHeaderNotifState = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const state = await headerNotifStateService.getHeaderNotifState(req.auth.userId)
+  res.status(200).json(state)
+})
+
+export const markHeaderNotifsRead = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const state = await headerNotifStateService.markHeaderNotifsRead(
+    req.auth.userId,
+    req.body?.ids,
+  )
+  res.status(200).json(state)
+})
+
+export const dismissHeaderNotifs = asyncHandler(async (req, res) => {
+  if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
+  const state = await headerNotifStateService.dismissHeaderNotifs(
+    req.auth.userId,
+    req.body?.ids,
+  )
+  res.status(200).json(state)
 })
