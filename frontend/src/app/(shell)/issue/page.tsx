@@ -1781,7 +1781,7 @@ export default function IssuePage() {
   const { isDark } = useUiSettings();
   const { setPagePayload, trackPageChatEvent } = usePageChat();
   const searchParams = useSearchParams();
-  const deepLinkAppliedRef = useRef(false);
+  const deepLinkAppliedRef = useRef<string | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [isListRefreshing, setIsListRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1823,26 +1823,35 @@ export default function IssuePage() {
   });
 
   useEffect(() => {
-    if (deepLinkAppliedRef.current || issues.length === 0) return;
-    const lotId = searchParams.get('lotId')?.trim();
-    if (!lotId) return;
+    if (issues.length === 0) return;
+    const issueId = searchParams.get('issueId')?.trim() || '';
+    const lotId = searchParams.get('lotId')?.trim() || '';
+    if (!issueId && !lotId) return;
 
-    const match = issues.find(
-      (issue) => issue.lot === lotId && !isIssueCompleted(issue),
-    );
-    deepLinkAppliedRef.current = true;
+    const key = `${issueId}|${lotId}`;
+    if (deepLinkAppliedRef.current === key) return;
+
+    const match = issueId
+      ? issues.find((issue) => issue.id === issueId && !isIssueCompleted(issue))
+      : issues.find((issue) => issue.lot === lotId && !isIssueCompleted(issue));
+
+    deepLinkAppliedRef.current = key;
 
     if (!match) {
-      setToastMessage(`${lotId}의 미완료 이슈가 없습니다.`);
+      setToastMessage(
+        issueId
+          ? `${issueId} 미완료 이슈를 찾을 수 없습니다.`
+          : `${lotId}의 미완료 이슈가 없습니다.`,
+      );
       setShowToast(true);
       return;
     }
 
-    setDraftFilters((current) => ({ ...current, lot: lotId }));
-    setAppliedFilters((current) => ({ ...current, lot: lotId }));
+    setDraftFilters((current) => ({ ...current, lot: match.lot }));
+    setAppliedFilters((current) => ({ ...current, lot: match.lot }));
     setCurrentPage(1);
 
-    const actionDraft = readIssueActionDraft(lotId);
+    const actionDraft = readIssueActionDraft(match.lot);
     void handleSelectIssue(match.id, {
       actionOverride: actionDraft,
       scrollTo: 'action',

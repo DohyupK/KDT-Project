@@ -1,6 +1,6 @@
 # Documents 워처 · Qdrant 기동 · 포트 (SSOT)
 
-최종 갱신: 2026-08-13
+최종 갱신: 2026-08-14
 
 이 문서는 **Documents OCR/`text_match` 워처**와 **Qdrant 자동 기동**, 그리고 모노레포 **포트·프로세스 소유권**을 정리한다.  
 일반 챗 페이지 컨텍스트는 [`general-chatbot-page-context.md`](./general-chatbot-page-context.md), 보안 RAG 튜닝은 [`secure-rag.md`](./secure-rag.md).
@@ -79,6 +79,8 @@ flowchart LR
 루트 `npm run dev` = concurrently `ai` + `backend` + `frontend`만. Express·n8n·Qdrant를 **한 프로세스에 합치지 않는다.**  
 backend가 ai를 또 띄우지 않도록 [`scripts/dev-backend.cjs`](../../scripts/dev-backend.cjs)가 `AI_SERVICE_AUTOSTART=0`을 넣는다.  
 n8n Task Broker(`5679`)는 **컨테이너 내부** 포트이며 호스트에 열려 있지 않다.
+
+Lightsail 16GB에서 앱을 돌릴 때 Qdrant·n8n은 레포 [`docker-compose.yml`](../../docker-compose.yml) (`127.0.0.1` 바인드). vLLM은 이 PC GPU + `ssh -R`. [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md)
 
 ---
 
