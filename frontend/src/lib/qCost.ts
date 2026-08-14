@@ -27,7 +27,7 @@ export type QCostResult = {
 export const APPRAISAL_UNIT = {
   stable: 50_000,
   warning: 100_000,
-  critical: 150_000,
+  critical: 250_000,
 } as const
 
 /** Internal failure per defect */
