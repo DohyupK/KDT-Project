@@ -8,9 +8,9 @@ router.get('/lots/risk-top', issueController.getRiskTop)
 router.get('/lots/daily-kpi', issueController.getDailyKpi)
 router.get('/lots/q-cost', issueController.getQCost)
 router.get('/lots/:lotId', issueController.getLot)
-/** Admin/dev: reload CSV features into lots. Optional ?score=1&limit=N for AI/SPC scoring. */
+/** Admin/dev: reload CSV features into LOTS. Optional ?score=1&limit=N for AI/SPC scoring. */
 router.post('/lots/import', authMiddleware, issueController.importLots)
-/** Admin/dev: re-score existing lots via ai-service + Phase I SPC */
+/** Admin/dev: re-score existing LOTS via ai-service + Phase I SPC */
 router.post('/lots/score', authMiddleware, issueController.scoreLots)
 
 router.get('/issues', issueController.listIssues)
@@ -19,7 +19,7 @@ router.put('/issues/:issueId', authMiddleware, issueController.updateIssue)
 
 router.get('/knowledge/past-issues', issueController.listPastIssues)
 router.get('/knowledge/past-issues/:issueId', issueController.getPastIssue)
-/** Knowledge AI 맞춤 분석 (보안 게이트·chatStore 미사용, 답변만 AI_Library_analysis 저장) */
+/** Knowledge AI 맞춤 분석 (보안 게이트·chatStore 미사용, 답변만 AI_LIBRARY_ANALYSIS 저장) */
 router.post('/knowledge/analyze', authMiddleware, issueController.analyzeKnowledge)
 /** 인수인계: 등록 POST · 완료 PATCH · 목록 GET(?status=pending|completed) */
 router.get('/knowledge/handover-history', issueController.listHandoverHistory)

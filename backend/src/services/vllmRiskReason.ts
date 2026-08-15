@@ -1,5 +1,5 @@
 /**
- * Compose analysis_lots.risk_reason via local OpenAI-compatible vLLM
+ * Compose ANALYSIS_LOTS.risk_reason via local OpenAI-compatible vLLM
  * (CHAT_VLLM_BASE_URL) — same stack as security chat, no RAG.
  */
 function vllmBaseUrl(): string {
@@ -138,7 +138,7 @@ const ISSUE_SYSTEM = `당신은 양극재 LOT 이슈 제목/요약을 짧게 쓰
 4. LOT ID를 앞머리에 넣어도 됩니다.`
 
 /**
- * Summarize analysis risk_reason into issues.issue_content via local vLLM.
+ * Summarize analysis risk_reason into ISSUES.issue_content via local vLLM.
  * On failure the caller should fall back to buildIssueTitle.
  */
 export async function composeIssueContentViaVllm(input: {

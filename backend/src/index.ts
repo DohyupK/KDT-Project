@@ -42,7 +42,7 @@ const server = app.listen(port, () => {
   console.log(
     `[backend] DB_HOST=${dbOpts.host} DB_NAME=${dbOpts.database}${process.env.DB_NAME ? '' : ` (default ${DEFAULT_DB_NAME})`}`,
   )
-  // Documents OCR / text_match watchdog — lifecycle owned by backend
+  // Documents OCR / TEXT_MATCH watchdog — lifecycle owned by backend
   startDocumentWatcherSupervisor()
   void (async () => {
     const aiOk = await startAiServiceSupervisor()

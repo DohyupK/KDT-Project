@@ -646,7 +646,7 @@ def knowledge_analyze_endpoint(body: KnowledgeAnalyzeRequest) -> KnowledgeAnalyz
 
 @app.post("/lot-risk-reason", response_model=LotRiskReasonResponse)
 def lot_risk_reason_endpoint(body: LotRiskReasonRequest) -> LotRiskReasonResponse:
-    """analysis_lots.risk_reason via local vLLM only — no RAG / SYSTEM_COMPOSE."""
+    """ANALYSIS_LOTS.risk_reason via local vLLM only — no RAG / SYSTEM_COMPOSE."""
     from agent.api_llm.lot_risk_reason import compose_lot_risk_reason
 
     facts = {

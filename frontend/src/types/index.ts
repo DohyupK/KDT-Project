@@ -62,7 +62,7 @@ export interface MessageResponse {
   message: string
 }
 
-/** Per-user Setting page prefs stored in MariaDB `user_settings`. */
+/** Per-user Setting page prefs stored in MariaDB `USER_SETTINGS`. */
 export interface UserSettingsDto {
   userId: string
   fontSize: number
@@ -71,7 +71,7 @@ export interface UserSettingsDto {
   autoRefreshEnabled: boolean
   refreshInterval: number
   n8nAlert: boolean
-  /** user_settings.email_check — O=수신, X=거부. n8nAlert is the boolean view. */
+  /** USER_SETTINGS.email_check — O=수신, X=거부. n8nAlert is the boolean view. */
   emailCheck: 'O' | 'X'
   updatedAt: string
 }

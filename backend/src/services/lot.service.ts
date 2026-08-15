@@ -116,7 +116,7 @@ function rowToFeatures(row: LotRow): ProcessFeatures {
   }
 }
 
-/** Process on `lots` + scores on `analysis_lots` + residual on `judgment_lots`. */
+/** Process on `LOTS` + scores on `ANALYSIS_LOTS` + residual on `JUDGMENT_LOTS`. */
 const LOT_SELECT = `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at,
   l.d50, l.d90, l.metal_impurity, l.lithium_input,
   l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
@@ -144,7 +144,7 @@ export type DailyProbabilityKpi = {
   defectRate: number | null
 }
 
-/** Today 00:00~ · analysis_lots.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
+/** Today 00:00~ · ANALYSIS_LOTS.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
 export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
   const thr = DEFECT_JUDGE_THRESHOLD
   const rows = await query<
@@ -214,8 +214,8 @@ function toDateOnlyIso(d: Date): string {
 /**
  * Period Q-Cost counts + costs.
  * Default window: current calendar month (prevention is monthly fixed).
- * - Appraisal tiers: analysis_lots.risk_level
- * - Internal defects: judgment_lots.quality_defect = 1
+ * - Appraisal tiers: ANALYSIS_LOTS.risk_level
+ * - Internal defects: JUDGMENT_LOTS.quality_defect = 1
  * - External leaks: 0 (no column yet)
  */
 export async function getQCostSummary(opts: {
@@ -571,7 +571,7 @@ async function upsertLotResultsNullFill(
 
 
 /**
- * Prefer lot_results residual/qd for judgment write inputs.
+ * Prefer LOT_RESULTS residual/qd for judgment write inputs.
  */
 function judgmentInputsFromLotResults(
   voted: LotScoreResult,
@@ -615,7 +615,7 @@ async function getJudgment(lotId: string): Promise<JudgmentRow | null> {
 }
 
 /**
- * 2nd pass: analysis_lots from judgment_lots (+ SPC label already on judgment.spc).
+ * 2nd pass: ANALYSIS_LOTS from JUDGMENT_LOTS (+ SPC label already on judgment.spc).
  */
 async function mergeScoreFromJudgment(
   j: JudgmentRow,
@@ -653,7 +653,7 @@ async function mergeScoreFromJudgment(
   return merged
 }
 
-/** When judgment is already filled, rebuild analysis_lots only (2nd pass). */
+/** When judgment is already filled, rebuild ANALYSIS_LOTS only (2nd pass). */
 export async function scoreAnalysisFromJudgment(lotId: string): Promise<boolean> {
   const j = await getJudgment(lotId)
   if (!j || j.probability == null || j.residual_li == null) return false
@@ -708,23 +708,23 @@ async function updateLotScore(
     )
   }
 
-  // Stage 1: lot_results NULL-fill (feeder measurements never overwritten)
+  // Stage 1: LOT_RESULTS NULL-fill (feeder measurements never overwritten)
   const lr = await upsertLotResultsNullFill(
     lotId,
     scored.quality_defect,
     scored.residual_lithium,
   )
 
-  // Stage 2: judgment_lots from lot_results (+ voting capacity/probability)
+  // Stage 2: JUDGMENT_LOTS from LOT_RESULTS (+ voting capacity/probability)
   const jIn = judgmentInputsFromLotResults(scored, lr)
   await query(
     `INSERT INTO JUDGMENT_LOTS (lot_id, quality_defect, capacity, residual_li, probability, spc)
      VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       quality_defect = COALESCE(judgment_lots.quality_defect, VALUES(quality_defect)),
-       capacity = COALESCE(judgment_lots.capacity, VALUES(capacity)),
-       residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li)),
-       probability = COALESCE(judgment_lots.probability, VALUES(probability)),
+       quality_defect = COALESCE(JUDGMENT_LOTS.quality_defect, VALUES(quality_defect)),
+       capacity = COALESCE(JUDGMENT_LOTS.capacity, VALUES(capacity)),
+       residual_li = COALESCE(JUDGMENT_LOTS.residual_li, VALUES(residual_li)),
+       probability = COALESCE(JUDGMENT_LOTS.probability, VALUES(probability)),
        spc = VALUES(spc)`,
     [
       lotId,
@@ -736,7 +736,7 @@ async function updateLotScore(
     ],
   )
 
-  // Stage 3: analysis_lots from judgment (2nd pass) + scored_at (+ optional chart)
+  // Stage 3: ANALYSIS_LOTS from judgment (2nd pass) + scored_at (+ optional chart)
   const j = await getJudgment(lotId)
   const analysisScore = j
     ? await mergeScoreFromJudgment(j, scored.spc_status)
@@ -803,10 +803,10 @@ const LOT_SCORE_FEATURE_SELECT = `id AS lot_id, \`timestamp\` AS recorded_at, d5
   0 AS quality_defect`
 
 /**
- * Re-score using operational `lots` SSOT (3-stage):
- * 1) /predict-voting → lot_results NULL-fill (qd/residual)
- * 2) judgment_lots from lot_results + voting capacity/prob
- * 3) analysis_lots from judgment (combineLotScore + SPC / scored_at)
+ * Re-score using operational `LOTS` SSOT (3-stage):
+ * 1) /predict-voting → LOT_RESULTS NULL-fill (qd/residual)
+ * 2) JUDGMENT_LOTS from LOT_RESULTS + voting capacity/prob
+ * 3) ANALYSIS_LOTS from judgment (combineLotScore + SPC / scored_at)
  */
 export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   scored: number
@@ -858,7 +858,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
 
     const inFilter = idFilter == null || idFilter.has(row.lot_id)
     if (!inFilter) continue
-    // Handover placeholder lot — not process data; never write analysis_lots.
+    // Handover placeholder lot — not process data; never write ANALYSIS_LOTS.
     if (row.lot_id === 'LOT-SYS-HANDOVER') continue
     if (considered < offset) {
       considered++
@@ -926,7 +926,7 @@ export type RefreshSpcRiskOptions = {
 
 /**
  * Recompute SPC + risk_level from existing AI probability/residual (no ai-service call).
- * Also writes analysis_lots.spc_chart_json (dashboard I-chart snapshot).
+ * Also writes ANALYSIS_LOTS.spc_chart_json (dashboard I-chart snapshot).
  */
 export async function refreshSpcAndRiskScores(
   options: RefreshSpcRiskOptions = {},
@@ -1086,7 +1086,7 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
 /**
- * Create open issues when analysis_lots is 심각.
+ * Create open issues when ANALYSIS_LOTS is 심각.
  * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
  */
 export async function ensureIssuesForRiskLots(): Promise<number> {

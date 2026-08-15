@@ -2,7 +2,7 @@ import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
 
-/** Open issues: not completed. risk_level comes from analysis_lots. */
+/** Open issues: not completed. risk_level comes from ANALYSIS_LOTS. */
 const OPEN_ISSUES = `i.completed_at IS NULL`
 const RISK_LEVELS = new Set(['심각', '주의', '안정', '높음', '중간', '낮음', 'A', 'B', 'C'])
 
@@ -11,14 +11,14 @@ export type IssueListItem = {
   createdAt: string
   lotId: string
   riskLevel: RiskLevel
-  /** analysis_lots.spc_status (목록 SPC 필터용) */
+  /** ANALYSIS_LOTS.spc_status (목록 SPC 필터용) */
   spcStatus: string | null
   issueContent: string
   /** 이슈 처리 관리에 조치 내용이 입력되었는지 */
   hasAction: boolean
 }
 
-/** analysis_lots 스냅샷 (이슈 상세 분석 UI) */
+/** ANALYSIS_LOTS 스냅샷 (이슈 상세 분석 UI) */
 export type IssueAnalysis = {
   lotId: string
   probability: number | null
@@ -264,7 +264,7 @@ export async function updateIssue(
   const actionContent =
     body.actionContent !== undefined ? body.actionContent : current.actionContent
 
-  // 완료 → 과거 자료 (completed_at). handover_history는 독립 — 여기서 갱신하지 않음.
+  // 완료 → 과거 자료 (completed_at). HANDOVER_HISTORY는 독립 — 여기서 갱신하지 않음.
   await query(
     `UPDATE ISSUES SET
        action_content = ?, assignee_user_id = ?,

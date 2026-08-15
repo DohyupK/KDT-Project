@@ -1,5 +1,5 @@
 /**
- * Periodic score for lots missing analysis / judgment / lot_results / scored_at.
+ * Periodic score for lots missing ANALYSIS / JUDGMENT / LOT_RESULTS / scored_at.
  * Complements per-insert syncSpcLots. Started after ai-service health (index.ts).
  */
 import * as lotService from './lot.service.js'

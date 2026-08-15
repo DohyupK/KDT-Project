@@ -146,7 +146,7 @@ export type AiVotingResult = {
   member_scores?: Record<string, number>
 }
 
-/** Cascade multi-model voting (judgment_lots 4 fields). */
+/** Cascade multi-model voting (JUDGMENT_LOTS 4 fields). */
 export async function predictVoting(features: PredictFeatureBody): Promise<AiVotingResult> {
   return postAiJson<AiVotingResult>('/predict-voting', sanitizePredictBody(features))
 }

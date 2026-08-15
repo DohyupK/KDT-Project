@@ -1,5 +1,5 @@
 """
-MariaDB text_match: link Documents source (image/scan PDF) ↔ OCR Markdown sidecar.
+MariaDB TEXT_MATCH: link Documents source (image/scan PDF) ↔ OCR Markdown sidecar.
 
 Soft-fails when DATABASE_URL / DB_* is missing (same engine as chat_history_store).
 """

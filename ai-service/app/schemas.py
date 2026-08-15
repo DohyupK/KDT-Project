@@ -72,7 +72,7 @@ class HealthResponse(BaseModel):
     )
     chat_history_db_ok: bool = Field(
         default=False,
-        description="MariaDB user_chat_* store reachable (SQLAlchemy + PyMySQL)",
+        description="MariaDB USER_CHAT_* store reachable (SQLAlchemy + PyMySQL)",
     )
     chat_history_db_error: str | None = Field(
         default=None,
@@ -112,11 +112,11 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User chat text")
     thread_id: str | None = Field(
         default=None,
-        description="user_chat_threads.id — FE sends this; history loaded server-side",
+        description="USER_CHAT_THREADS.id — FE sends this; history loaded server-side",
     )
     user_id: str | None = Field(
         default=None,
-        description="users.user_id — required to persist multi-turn history",
+        description="USERS.user_id — required to persist multi-turn history",
     )
     features: ChatFeatures | None = Field(
         default=None,
@@ -197,7 +197,7 @@ class ChatResponse(BaseModel):
     )
     thread_id: str | None = Field(
         default=None,
-        description="Persisted user_chat_threads.id when multi-turn store is used",
+        description="Persisted USER_CHAT_THREADS.id when multi-turn store is used",
     )
     predict: PredictResponse | None = None
     capacity: CapacityResponse | None = None
@@ -293,11 +293,11 @@ class SecurityChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Security-tab user text")
     thread_id: str | None = Field(
         default=None,
-        description="user_chat_threads.id — history loaded server-side from MariaDB",
+        description="USER_CHAT_THREADS.id — history loaded server-side from MariaDB",
     )
     user_id: str | None = Field(
         default=None,
-        description="users.user_id for per-user thread ownership",
+        description="USERS.user_id for per-user thread ownership",
     )
 
 
@@ -322,7 +322,7 @@ class SecurityChatResponse(BaseModel):
     )
     thread_id: str | None = Field(
         default=None,
-        description="Persisted user_chat_threads.id",
+        description="Persisted USER_CHAT_THREADS.id",
     )
     error: str | None = None
     sources: list[SecurityChatSource] = Field(default_factory=list)

@@ -31,7 +31,7 @@ function isLotProcessComplete(row: Record<string, unknown>): boolean {
   return isProcessComplete(bag)
 }
 
-/** Production-detail table columns (daily aggregate from lots + analysis_lots). */
+/** Production-detail table columns (daily aggregate from LOTS + ANALYSIS_LOTS). */
 export const PRODUCTION_DAILY_COLUMNS = [
   { key: 'metalImpurity', label: '금속 불순물' },
   { key: 'sinteringTemp', label: '소성 온도' },
@@ -230,7 +230,7 @@ export async function listLotRisks(q: LotRiskListQuery) {
     params.push(q.riskLevel)
   }
   if (q.spc && q.spc !== 'all') {
-    // analysis_lots is SPC/risk SSOT; judgment.spc is a mirror
+    // ANALYSIS_LOTS is SPC/risk SSOT; judgment.spc is a mirror
     where.push(
       `(COALESCE(a.spc_status, j.spc) = ? OR ( ? = '이탈' AND COALESCE(a.spc_status, j.spc) LIKE '%이탈%' ))`,
     )
@@ -458,7 +458,7 @@ async function getAllProductionPoints() {
 
 /**
  * Production volume trend for dashboard pink-box chart.
- * Aggregates judgment_lots (COUNT lot_id + quality_defect) by lots.timestamp.
+ * Aggregates JUDGMENT_LOTS (COUNT lot_id + quality_defect) by LOTS.timestamp.
  * Default window: last 7 calendar days ending on latest judgment lot date.
  */
 export async function getProductionTrend(params: {
@@ -570,8 +570,8 @@ type DayBucket = {
 
 /**
  * Daily production detail for dashboard tab.
- * Date from lot_id YYYYMMDD; good/defect from analysis_lots.probability vs 0.8;
- * process metrics = day averages from lots. Window = last 7 days by lot_id date.
+ * Date from lot_id YYYYMMDD; good/defect from ANALYSIS_LOTS.probability vs 0.8;
+ * process metrics = day averages from LOTS. Window = last 7 days by lot_id date.
  */
 export async function getProductionDaily(q: ProductionDailyQuery = {}) {
   const size = Math.min(Math.max(Number(q.pageSize) || 7, 1), 50)
