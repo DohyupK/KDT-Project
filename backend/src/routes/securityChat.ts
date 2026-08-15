@@ -7,8 +7,8 @@ import {
 
 /**
  * Security-tab proxy only.
- * FE SecurityChatbot → POST /api/security-chat → ai-service POST /security-chat
- * → secure RAG + vLLM :8001. Never uses general /api/chat or Groq/Gemini.
+ * FE SecurityChatbot → POST /api/security-chat → ai-service enqueue USER_SECURITY_MESSAGES
+ * → PC worker (RAG + vLLM). Never uses general /api/chat or Groq/Gemini.
  *
  * Multi-turn (B): FE sends message + thread_id + user_id only (no history array).
  * Express pass-through to ai-service; MariaDB history is loaded there.

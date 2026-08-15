@@ -161,9 +161,10 @@ def ensure_thread(
     engine = get_engine()
     if engine is None or not user_id:
         return thread_id
-    channel = (channel or "security").strip().lower()
-    if channel not in ("security", "general"):
-        channel = "security"
+    channel = (channel or "general").strip().lower()
+    if channel != "general":
+        logger.error("[chat_history] ensure_thread refused channel=%s (use USER_SECURITY_*)", channel)
+        return None
     tid = (thread_id or "").strip() or str(uuid.uuid4())
     try:
         from sqlalchemy import text
@@ -214,9 +215,9 @@ def list_threads(
     engine = get_engine()
     if engine is None or not user_id:
         return []
-    channel = (channel or "security").strip().lower()
-    if channel not in ("security", "general"):
-        channel = "security"
+    channel = (channel or "general").strip().lower()
+    if channel != "general":
+        return []
     lim = max(1, min(200, int(limit)))
     try:
         from sqlalchemy import text

@@ -42,7 +42,7 @@
 | [`2026-08-10.md`](./work-log/2026-08-10.md) | N_FOLDS 6 · 학습 SSOT |
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
-| [`2026-08-15.md`](./work-log/2026-08-15.md) | ingest 상시 아님 SSOT · 보안 챗 모드 URL |
+| [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 기동 명령 분리 · 운영 매뉴얼 |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 
@@ -50,7 +50,8 @@
 |------|------|
 | [`login-ubuntu-mariadb.md`](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 연동 |
 | [`aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
-| [`aws-lightsail-gpu-tunnel.md`](./guides/aws-lightsail-gpu-tunnel.md) | 앱은 Lightsail CPU, vLLM은 이 PC GPU (`ssh -R`) |
+| [`aws-lightsail-gpu-tunnel.md`](./guides/aws-lightsail-gpu-tunnel.md) | 앱은 Lightsail CPU, 보안 검색+vLLM은 이 PC (DB 큐) |
+| [`aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md) | 보안 챗 운영: AWS `npm run dev` / 이 PC `npm run security-pc` |
 
 ### 참조 (`references/`) — 구현된 동작 명세
 

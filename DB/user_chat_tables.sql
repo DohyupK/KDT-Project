@@ -1,9 +1,9 @@
--- Unified per-user chat threads (general + security). Do not alter `USERS` DDL.
+-- General-chat threads only. Security chat uses USER_SECURITY_*.
 CREATE TABLE IF NOT EXISTS USER_CHAT_THREADS (
   id         CHAR(36)     NOT NULL PRIMARY KEY,
   user_id    VARCHAR(50)  NOT NULL,
-  channel    VARCHAR(32)  NOT NULL DEFAULT 'security'
-             COMMENT 'security | general',
+  channel    VARCHAR(32)  NOT NULL DEFAULT 'general'
+             COMMENT 'general',
   title      VARCHAR(255) NULL,
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

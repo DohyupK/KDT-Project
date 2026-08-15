@@ -206,13 +206,18 @@ def list_chat_threads(
     channel: str = "general",
     limit: int = 50,
 ) -> ChatThreadListResponse:
-    """List persisted threads for general|security chatbot restore UI."""
-    from agent import chat_history_store as store
-
+    """List persisted threads. security → USER_SECURITY_*; general → USER_CHAT_*."""
     ch = (channel or "general").strip().lower()
     if ch not in ("general", "security"):
         raise HTTPException(status_code=400, detail="channel must be general|security")
-    threads = store.list_threads(user_id=user_id, channel=ch, limit=limit)
+    if ch == "security":
+        from agent import security_queue_store as qstore
+
+        threads = qstore.list_threads(user_id=user_id, limit=limit)
+    else:
+        from agent import chat_history_store as store
+
+        threads = store.list_threads(user_id=user_id, channel="general", limit=limit)
     return ChatThreadListResponse(threads=threads)
 
 
@@ -224,7 +229,24 @@ def get_chat_thread_messages(
 ) -> ChatThreadMessagesResponse:
     """Load messages for a thread owned by user_id (UI hydrate)."""
     from agent import chat_history_store as store
+    from agent import security_queue_store as qstore
 
+    sec = qstore.load_messages_for_ui(
+        thread_id, user_id=user_id, limit=limit
+    )
+    if sec is not None:
+        slim = [
+            {
+                "role": m.get("role"),
+                "content": m.get("content"),
+                "mode": m.get("mode"),
+                "provider": m.get("provider"),
+                "sources": m.get("sources"),
+                "created_at": m.get("created_at"),
+            }
+            for m in sec
+        ]
+        return ChatThreadMessagesResponse(thread_id=thread_id, messages=slim)
     msgs = store.load_messages_for_ui(
         thread_id, user_id=user_id, limit=limit
     )
@@ -695,8 +717,8 @@ def security_chat_endpoint(
     background_tasks: BackgroundTasks,
 ) -> SecurityChatResponse | JSONResponse:
     """
-    Security-tab channel: local vLLM only (CHAT_VLLM_BASE_URL).
-    Never routes to Groq/Gemini. Failures return offline template.
+    Security-tab: enqueue USER_SECURITY_MESSAGES (pending). PC worker does RAG+vLLM.
+    Never routes to Groq/Gemini. AWS does not call :8001 for this channel.
     Unhandled exceptions return JSON 500 with stage/trace (not HTML).
     Multi-turn: message + thread_id + user_id; history/sources from MariaDB.
     Layer-2 Qdrant upsert via BackgroundTasks (does not touch SECURE_GENERATE / no_docs).
@@ -769,8 +791,8 @@ async def security_chat_stream_endpoint(
     background_tasks: BackgroundTasks,
 ) -> StreamingResponse:
     """
-    SSE stream: meta/delta/replace/done/error.
-    MariaDB writes only inside compose_secure_stream (not Express).
+    SSE: meta heartbeats while the PC worker runs; replace/done when assistant exists.
+    AWS does not retrieve or call vLLM here.
     """
     from agent import chat_history_vector as vec
 
