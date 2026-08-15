@@ -481,13 +481,13 @@ async function upsertAnalysisScore(
     `INSERT INTO ANALYSIS_LOTS (
       lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
     ) VALUES (?, ?, ?, ?, ?, ?, NOW())
-    ON DUPLICATE KEY UPDATE
-      probability = VALUES(probability),
-      spc_status = VALUES(spc_status),
-      risk_level = VALUES(risk_level),
-      risk_reason = VALUES(risk_reason),
-      spc_chart_json = VALUES(spc_chart_json),
-      scored_at = NOW()`,
+      ON DUPLICATE KEY UPDATE
+        probability = VALUES(probability),
+        spc_status = VALUES(spc_status),
+        risk_level = VALUES(risk_level),
+        risk_reason = VALUES(risk_reason),
+        spc_chart_json = COALESCE(ANALYSIS_LOTS.spc_chart_json, VALUES(spc_chart_json)),
+        scored_at = NOW()`,
     [
       lotId,
       scored.probability,
@@ -741,7 +741,7 @@ async function updateLotScore(
   const analysisScore = j
     ? await mergeScoreFromJudgment(j, scored.spc_status)
     : scored
-  await upsertAnalysisScore(lotId, analysisScore)
+  await upsertAnalysisScore(lotId, analysisScore, spcChart)
 }
 
 /** Latest N lot ids by production time (for targeted rescoring). */

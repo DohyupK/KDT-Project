@@ -23,7 +23,7 @@
 ## 완료 (요약)
 
 - Next.js App Router · Express · FastAPI 모노레포 기동 (`npm run dev`)
-- O/X · 용량 · 잔여 Li 학습 · `/predict-voting` 3단 채점 (`lot_results` → `judgment_lots` → `analysis_lots`)
+- O/X · 용량 · 잔여 Li 학습 · `/predict-voting` 3단 채점 (`LOT_RESULTS` → `JUDGMENT_LOTS` → `ANALYSIS_LOTS`)
 - 일반 챗 페이지 컨텍스트 · 보안 RAG(SSE · analytics · BM25 핫리로드)
 - 이슈/LOT API · 위험 Top 메일(n8n→Gmail) · Documents 워처·Qdrant
 - 로그인·프로필 모달 · 설정(시스템만) · Grafana SPC 임베드

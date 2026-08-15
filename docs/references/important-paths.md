@@ -44,7 +44,7 @@
 | `backend/src/services/similarity.ts` | 유사 질문 ≥ 3 → guideline |
 | `backend/src/routes/issue.routes.ts` | 이슈 · LOT · Knowledge |
 | `backend/src/routes/dashboard.routes.ts` | 대시보드 API |
-| `DB/schema.sql` | `users` / settings / lots / issues / handover |
+| `DB/schema.sql` | `USERS` / `LOTS` / `ANALYSIS_LOTS` / `JUDGMENT_LOTS` / `ISSUES` 등 (대문자) |
 | `DB/chat_schema.sql` | 레거시 `chat_sessions` / `chat_messages` |
 | `DB/ai-service/` | `user_chat_*` 적용 스크립트 |
 | `DB/data/*.sqlite` | control / llm_keys 런타임 SQLite |
