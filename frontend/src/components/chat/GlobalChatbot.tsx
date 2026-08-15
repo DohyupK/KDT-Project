@@ -1284,6 +1284,7 @@ export default function GlobalChatbot() {
               <SecurityChatbot
                 variant="embedded"
                 hideHeader
+                showSources={isExpanded}
                 newThreadNonce={secureNewThreadNonce}
                 className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none"
               />

@@ -2,7 +2,7 @@
 Dual-engine Documents watcher (FastAPI lifespan background thread).
 
 - TXT / text PDF → native ingest (no matching .md)
-- Scan PDF / images → OCR Markdown + text_match → ingest
+- Scan PDF / images → OCR Markdown + TEXT_MATCH → ingest
 - CSV/XLSX → ai-service/data/csv_lake/ → profile MD under Confidential/Markdown
 - Watches all four clearance roots + csv_lake
 - Debounce + ingest lock/coalesce so burst drops do not stack full rebuilds
@@ -173,7 +173,7 @@ def _handle_path(path: Path, docs_dir: Path, ai_root: Path, lake_dir: Path) -> b
 
 
 def _handle_deleted(path: Path, docs_dir: Path, ai_root: Path) -> bool:
-    """Drop OCR sidecar + text_match when source removed."""
+    """Drop OCR sidecar + TEXT_MATCH when source removed."""
     suffix = path.suffix.lower()
     if suffix not in UNSTRUCTURED_SUFFIXES:
         return False

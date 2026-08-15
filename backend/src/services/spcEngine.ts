@@ -19,7 +19,7 @@ export type SpcParamKey = (typeof SPC_PARAM_KEYS)[number]
 
 export type SpcParamStatus = '이탈' | '주의' | '안정'
 
-/** Lot-level SPC label stored in judgment_lots.spc / analysis_lots.spc_status */
+/** Lot-level SPC label stored in JUDGMENT_LOTS.spc / ANALYSIS_LOTS.spc_status */
 export type SpcLotStatus = '이탈' | '주의' | '안정' | '-'
 
 export type SpcLimit = {

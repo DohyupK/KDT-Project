@@ -295,8 +295,8 @@ async function postN8nWebhook(payload: {
 
 /**
  * After ensureIssuesForRiskLots: mail new 위험 LOT Top lots via n8n.
- * Empty send_email table = baseline (insert X, no webhook).
- * send='X' is final: a row in send_email (O or X) means that lot is never dispatched again.
+ * Empty SEND_EMAIL table = baseline (insert X, no webhook).
+ * send='X' is final: a row in SEND_EMAIL (O or X) means that lot is never dispatched again.
  */
 export async function dispatchNewRiskTopIssueReports(): Promise<DispatchIssueReportsResult> {
   const empty: DispatchIssueReportsResult = {

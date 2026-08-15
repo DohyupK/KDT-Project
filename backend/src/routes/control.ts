@@ -46,7 +46,7 @@ type OutcomeBody = {
 export const controlRouter = Router()
 
 /**
- * Approve → insert optimization_events with status=approved (not deleted on Undo).
+ * Approve → insert OPTIMIZATION_EVENTS with status=approved (not deleted on Undo).
  * FE: GlobalChatbot 「제안 승인」 → 5s Undo snackbar → POST .../revert → status=reverted.
  */
 controlRouter.post('/control/approve', async (req, res) => {

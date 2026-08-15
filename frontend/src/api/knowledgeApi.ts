@@ -10,7 +10,7 @@ export type KnowledgeAnalyzeResponse = {
 }
 
 export const knowledgeApi = {
-  /** Dedicated Knowledge AI analysis — no /chat security gate; answer stored in AI_Library_analysis. */
+  /** Dedicated Knowledge AI analysis — no /chat security gate; answer stored in AI_LIBRARY_ANALYSIS. */
   async analyze(message: string): Promise<KnowledgeAnalyzeResponse> {
     const { data } = await apiClient.post<KnowledgeAnalyzeResponse>('/knowledge/analyze', {
       message,

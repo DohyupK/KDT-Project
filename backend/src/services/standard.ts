@@ -1,5 +1,5 @@
 /**
- * Load scalar risk thresholds + residual USL (spare) from `standard` (1 row).
+ * Load scalar risk thresholds + residual USL (spare) from `STANDARD` (1 row).
  * Falls back to plan defaults when table missing / empty.
  */
 import { query } from '../db/connection.js'

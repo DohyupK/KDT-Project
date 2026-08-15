@@ -3,7 +3,7 @@ Convert Documents/<Clearance>/* → Markdown sidecar only when native text is em
 
 Policy:
 - Native text sufficient (txt / text PDF) → do NOT write matching .md; remove stale converted md.
-- Empty native text (scan PDF / images) → OCR (Tesseract) → Markdown/<stem>.md + text_match.
+- Empty native text (scan PDF / images) → OCR (Tesseract) → Markdown/<stem>.md + TEXT_MATCH.
 - CSV/XLSX are NOT converted here — see agent.csv_profile.
 """
 
@@ -318,7 +318,7 @@ def _remove_stale_converted_md(
     secure_docs_dir: Path,
     repo_root: Path,
 ) -> Path | None:
-    """Delete converted sidecar + text_match when native text makes md unnecessary."""
+    """Delete converted sidecar + TEXT_MATCH when native text makes md unnecessary."""
     md = paired_md_path(path, secure_docs_dir)
     removed = None
     if md is not None and md.is_file():
@@ -483,7 +483,7 @@ def remove_pair_for_deleted_source(
     secure_docs_dir: Path,
     repo_root: Path | None = None,
 ) -> bool:
-    """When source file is deleted: drop OCR md + text_match row."""
+    """When source file is deleted: drop OCR md + TEXT_MATCH row."""
     root = repo_root or secure_docs_dir.parent
     source_rel = _repo_rel(path, root)
     changed = False

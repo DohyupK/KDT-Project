@@ -1,8 +1,8 @@
 """
-MariaDB persistence for unified user_chat_threads / user_chat_messages.
+MariaDB persistence for unified USER_CHAT_THREADS / USER_CHAT_MESSAGES.
 
 Used by ai-service to load/save multi-turn context (history + sources JSON).
-Does not alter the `users` table. Soft-fails when DB env is missing or unreachable.
+Does not alter the `USERS` table. Soft-fails when DB env is missing or unreachable.
 
 Layer-1 short-term memory: sliding window (CHAT_HISTORY_WINDOW) + heuristic_truncate
 (no LLM summarization).
@@ -155,7 +155,7 @@ def ensure_thread(
     channel: str,
 ) -> str | None:
     """
-    Ensure a user_chat_threads row exists. Returns thread_id or None on soft-fail.
+    Ensure a USER_CHAT_THREADS row exists. Returns thread_id or None on soft-fail.
     Creates a new UUID when thread_id is missing and user_id is present.
     """
     engine = get_engine()

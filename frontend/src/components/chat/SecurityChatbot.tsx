@@ -140,6 +140,8 @@ type Props = {
   hideHeader?: boolean
   /** Increment from parent to start a new security thread */
   newThreadNonce?: number
+  /** Fullscreen only: source chips, clickable [출처], and the document panel */
+  showSources?: boolean
 }
 
 function dedupeSourcesByDocId(sources: SecurityChatSource[]): SecurityChatSource[] {
@@ -324,6 +326,7 @@ export default function SecurityChatbot({
   className = '',
   hideHeader = false,
   newThreadNonce = 0,
+  showSources = true,
 }: Props) {
   const { isDark } = useUiSettings()
   const [input, setInput] = useState('')
@@ -338,11 +341,14 @@ export default function SecurityChatbot({
   const idRef = useRef(2)
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const showSourcesRef = useRef(showSources)
+  showSourcesRef.current = showSources
 
   const openDocFromSources = (
     sources: SecurityChatSource[] | undefined,
     docId: string,
   ) => {
+    if (!showSourcesRef.current) return
     if (!sources?.length || !docId) return
     const chunks = chunksForDocId(sources, docId)
     if (chunks.length) setActiveDocChunks(chunks)
@@ -528,6 +534,22 @@ export default function SecurityChatbot({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once
   }, [])
 
+  useEffect(() => {
+    if (!showSources) {
+      setActiveDocChunks(null)
+      return
+    }
+    const lastAi = [...messages].reverse().find(
+      (m) => m.role === 'ai' && Boolean(m.sources?.length),
+    )
+    if (!lastAi?.sources?.length) return
+    if (uniqueDocIdCount(lastAi.sources) !== 1) return
+    const docId = lastAi.sources[0].doc_id || lastAi.sources[0].title
+    const chunks = chunksForDocId(lastAi.sources, docId)
+    if (chunks.length) setActiveDocChunks(chunks)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- expand/collapse only
+  }, [showSources])
+
   const openSourceByTitle = (sources: SecurityChatSource[] | undefined, title: string) => {
     if (!sources?.length) return
     const hit =
@@ -539,7 +561,7 @@ export default function SecurityChatbot({
   }
 
   const renderReplyText = (m: ChatMessage) => {
-    if (m.role !== 'ai' || !m.sources?.length) {
+    if (m.role !== 'ai' || !m.sources?.length || !showSources) {
       return m.text
     }
     // Split on [출처: ...] markers so titles become clickable.
@@ -647,7 +669,7 @@ export default function SecurityChatbot({
       if (!opts.errorText && uniqueDocIdCount(sources) === 1) {
         const docId = sources[0].doc_id || sources[0].title
         openDocFromSources(sources, docId)
-      } else {
+      } else if (showSourcesRef.current) {
         setActiveDocChunks(null)
       }
     }
@@ -846,7 +868,7 @@ export default function SecurityChatbot({
 
       <div
         className={`flex min-h-0 flex-1 ${
-          activeDocChunks ? 'flex-col md:flex-row' : 'flex-col'
+          showSources && activeDocChunks ? 'flex-col md:flex-row' : 'flex-col'
         }`}
       >
         {hideHeader ? (
@@ -1034,7 +1056,7 @@ export default function SecurityChatbot({
                 }`}
               >
                 <div>{renderReplyText(m)}</div>
-                {m.role === 'ai' && m.sources && m.sources.length > 0 ? (
+                {m.role === 'ai' && showSources && m.sources && m.sources.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {dedupeSourcesByDocId(m.sources).map((s) => {
                       const docId = s.doc_id || s.title
@@ -1109,7 +1131,7 @@ export default function SecurityChatbot({
           </form>
         </div>
 
-        {activeDocChunks ? (
+        {showSources && activeDocChunks ? (
           <div
             className={`h-[40%] min-h-[180px] border-t md:h-auto md:min-h-0 md:w-[min(42%,400px)] md:shrink-0 md:border-t-0 ${
               isDark ? 'border-slate-700' : 'border-slate-200'
