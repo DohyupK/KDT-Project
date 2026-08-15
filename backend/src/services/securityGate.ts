@@ -24,7 +24,7 @@ const DEFAULT_KEYWORDS = [
 
 export const SECURITY_REDIRECT_REPLY =
   '보안·기밀이 관련된 내용은 일반 챗봇에서 다룰 수 없습니다. ' +
-  '보안 탭(/security)을 이용해 주세요. (로컬 vLLM 전용 채널)'
+  '같은 창에서 「보안 상담」을 이용해 주세요. (이 PC vLLM 전용 채널)'
 
 function keywordList(): string[] {
   const extra = (process.env.SECURITY_KEYWORDS || '')

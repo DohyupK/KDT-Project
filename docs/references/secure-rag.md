@@ -5,8 +5,7 @@
 일반 Knowledge / 일반 `/chat` 과 **완전 분리**.  
 이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · 기본값·env: [`LLM 튜닝.md`](./LLM%20튜닝.md) §0 · §4
 
-경로: `SecurityChatbot` → `POST /api/security-chat/stream` → `compose_secure[_stream]` → analytics|retrieve → vLLM `:8001`.  
-RAG 미초기화면 vLLM을 안 친다. 안내 상수: [`security-chatbot-guide.md`](./security-chatbot-guide.md).
+경로: `SecurityChatbot` → `POST /api/security-chat/stream` → AWS는 `USER_SECURITY_MESSAGES`에 질문만 → 이 PC 워커가 retrieve + vLLM.
 
 ## 라우팅 정책 (2026-08-01)
 

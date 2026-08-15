@@ -20,9 +20,9 @@
 | 경로 | 설명 |
 |------|------|
 | `frontend/src/app/(shell)/main/page.tsx` | Main 모니터링 (챗봇은 AppShell 전역) |
-| `frontend/src/app/(shell)/security/page.tsx` | 보안 탭 |
+| `frontend/src/app/(shell)/security/page.tsx` | `/security` → 오버레이 보안 상담 후 `/main` |
 | `frontend/src/components/chat/GlobalChatbot.tsx` | Shell 전역 AI 챗봇 (`POST /api/chat`) |
-| `frontend/src/components/chat/SecurityChatbot.tsx` | 보안 챗봇 (SSE · vLLM) |
+| `frontend/src/components/chat/SecurityChatbot.tsx` | 보안 챗봇 (SSE · PC 워커 큐) |
 | `frontend/src/api/aiApi.ts` | `POST /api/chat` + `session_id`; `/ai` health |
 | `frontend/src/api/securityChatApi.ts` | `POST /api/security-chat` · `/stream` |
 | `frontend/src/types/index.ts` | `AppData.fillThreshold` — 이름 변경 금지 |
@@ -64,5 +64,8 @@
 | `ai-service/models/` | `voting/` · `legacy/` · `registry.json` |
 | `ai-service/app/` | FastAPI (`/health`, `/predict*`, `/chat`, `/security-chat`) |
 | `ai-service/agent/` | LangGraph · `model_registry` · tools · LLM |
+| `ai-service/agent/security_queue_store.py` | `USER_SECURITY_*` |
+| `ai-service/scripts/run_security_worker.py` | PC 보안 워커 |
+| `scripts/security-pc.ps1` | `npm run security-pc` (vLLM 확인 · 선택 `-L 3306`/`6333` · 워커) |
 | `ai-service/agent/model_registry.py` | registry ready 헤드 일괄 실행 |
 | 루트 `.env` (gitignore) | CHAT_USE_LLM · vLLM · DB_* · JWT 등 (시크릿 미커밋) |

@@ -58,8 +58,8 @@ Docker로만 뜨는 것(레포 밖): **Qdrant** `kdt-qdrant` :6333 · **n8n** `k
 
 ## 로컬 실행 (권장)
 
-**실행 진입점은 저장소 루트 `npm run dev` 하나입니다.**  
-바로 켜지는 것은 **frontend(:3000) + backend(:3001) + ai-service(:8800)** 뿐입니다.  
+**앱 기동은 저장소 루트 `npm run dev` 하나입니다** (frontend + backend + ai-service).  
+보안 워커는 **켜지 않습니다.** 이 PC에서만 `npm run security-pc`. 상세: [`docs/references/security-chatbot-guide.md`](./docs/references/security-chatbot-guide.md).  
 Qdrant는 ai-service가 Docker로 **같이 올리려고** 하고, **n8n · 로컬 LLM · MariaDB는 `npm run dev`가 켜지 않습니다.**
 
 상세·다이어그램: [`docs/references/documents-watcher-qdrant.md`](./docs/references/documents-watcher-qdrant.md)
@@ -148,7 +148,8 @@ npm run dev
 
 | 루트 명령 | 설명 |
 |-----------|------|
-| `npm run dev` | ai + backend + frontend 동시 (**이걸 쓰세요**) |
+| `npm run dev` | AWS·로컬 앱: ai + backend + frontend (**워커 안 켬**) |
+| `npm run security-pc` | 이 PC만: vLLM 확인 · 선택 ssh -L 3306/6333 · 워커 |
 | `npm run dev:ai` | ai-service만 (`python -m uvicorn` · CWD=`ai-service/`) |
 | `npm run dev:backend` | backend만 |
 | `npm run dev:frontend` | frontend만 (디버그용 · 단독 사용 금지) |

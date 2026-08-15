@@ -3,8 +3,10 @@ Security-tab LLM: local vLLM OpenAI-compatible only + secure RAG graph.
 
 Wiring:
   SecurityChatbot → Express /api/security-chat → FastAPI /security-chat
-  → agent.secure_llm.graph.run_secure_chat → rag_engine + ChatOpenAI(vLLM)
+  → USER_SECURITY_MESSAGES (user pending) → PC worker (RAG + vLLM)
+  → assistant row → SSE/JSON to UI
 
+AWS does not call vLLM or Secure RAG for this channel.
 NEVER import or call Groq / Gemini / compose_with_failover here.
 Do NOT load HuggingFace chat LLMs in-process — chat via external vLLM.
 Embed/rerank models run on CPU only (see rag_engine).
@@ -95,77 +97,97 @@ def compose_secure(
     schedule_upsert: ScheduleUpsert | None = None,
 ) -> dict[str, Any]:
     """
-    Secure RAG + local vLLM via LangGraph.
-    No cloud fallback. Empty retrieval (and no prior sources) → fixed no-docs reply.
-    Loads/saves MariaDB user_chat_* when thread_id + user_id are provided.
-    Layer-2: semantic hits merged into history_text; Qdrant upsert via schedule_upsert.
+    Enqueue a security user message and wait for the PC worker assistant row.
+    Does not run retrieve/generate on this process.
     """
-    from agent import chat_history_store as store
-    from agent import chat_history_vector as vec
-    from agent.secure_llm.graph import run_secure_chat
+    from agent import security_queue_store as qstore
 
-    tid = store.ensure_thread(
-        thread_id=thread_id,
-        user_id=user_id,
-        channel="security",
-    )
-    history = store.load_messages(tid) if tid else []
-    prior = store.last_assistant_sources(history)
-    window_text = store.format_history_text_compact(history)
-    semantic = vec.search_similar(thread_id=tid, query=message) if tid else []
-    history_text = vec.merge_history_with_semantic(
-        window_text,
-        semantic,
-        heuristic_truncate_fn=store.heuristic_truncate,
-        format_compact_fn=store.format_history_text_compact,
-    )
+    text = (message or "").strip()
+    if not text:
+        return {
+            "reply": "메시지가 비어 있습니다.",
+            "mode": "template",
+            "provider": "offline",
+            "error": "empty_message",
+            "sources": [],
+            "trace": [],
+            "thread_id": thread_id,
+        }
+    if not user_id:
+        return {
+            "reply": "로그인한 사용자만 보안 상담을 사용할 수 있습니다.",
+            "mode": "template",
+            "provider": "offline",
+            "error": "user_id_required",
+            "sources": [],
+            "trace": [],
+            "thread_id": thread_id,
+        }
 
-    if tid and user_id:
-        mid = store.insert_message(
+    tid = qstore.ensure_thread(thread_id=thread_id, user_id=user_id)
+    if not tid:
+        return {
+            "reply": "보안 채팅 테이블에 쓰지 못했습니다. USER_SECURITY_* DDL을 적용하세요.",
+            "mode": "template",
+            "provider": "offline",
+            "error": "security_queue_unavailable",
+            "sources": [],
+            "trace": [],
+            "thread_id": thread_id,
+        }
+
+    mid = qstore.insert_user_pending(thread_id=tid, content=text)
+    if mid is None:
+        return {
+            "reply": "보안 질문을 큐에 넣지 못했습니다.",
+            "mode": "template",
+            "provider": "offline",
+            "error": "enqueue_failed",
+            "sources": [],
+            "trace": [],
+            "thread_id": tid,
+        }
+    if schedule_upsert is not None:
+        schedule_upsert(
             thread_id=tid,
+            user_id=user_id,
+            channel="security",
             role="user",
-            content=message,
-            mode="security_user",
-            provider="security",
+            text=text,
+            message_id=mid,
         )
-        if schedule_upsert is not None:
-            schedule_upsert(
-                thread_id=tid,
-                user_id=user_id,
-                channel="security",
-                role="user",
-                text=message,
-                message_id=mid,
-            )
 
-    out = run_secure_chat(
-        message,
-        prior_sources=prior,
-        history_text=history_text,
-    )
+    row = qstore.wait_for_assistant(thread_id=tid, user_message_id=mid)
+    if not row:
+        return {
+            "reply": qstore.WORKER_UNAVAILABLE_REPLY,
+            "mode": "template",
+            "provider": "offline",
+            "error": "worker_timeout",
+            "sources": [],
+            "trace": [{"stage": "queue_wait", "ok": False, "detail": "timeout"}],
+            "thread_id": tid,
+        }
 
-    if tid and user_id:
-        reply = out.get("reply") or ""
-        mid_a = store.insert_message(
+    reply = str(row.get("content") or "")
+    if schedule_upsert is not None:
+        schedule_upsert(
             thread_id=tid,
+            user_id=user_id,
+            channel="security",
             role="assistant",
-            content=reply,
-            mode=out.get("mode"),
-            provider=out.get("provider"),
-            sources=out.get("sources") or [],
+            text=reply,
+            message_id=row.get("id"),
         )
-        if schedule_upsert is not None:
-            schedule_upsert(
-                thread_id=tid,
-                user_id=user_id,
-                channel="security",
-                role="assistant",
-                text=reply,
-                message_id=mid_a,
-            )
-
-    out["thread_id"] = tid
-    return out
+    return {
+        "reply": reply,
+        "mode": row.get("mode") or "security_rag",
+        "provider": row.get("provider") or "vllm",
+        "error": None if row.get("status") != "error" else "worker_error",
+        "sources": row.get("sources") or [],
+        "trace": [{"stage": "queue_wait", "ok": True, "detail": "pc_worker"}],
+        "thread_id": tid,
+    }
 
 
 async def compose_secure_stream(
@@ -176,110 +198,149 @@ async def compose_secure_stream(
     schedule_upsert: ScheduleUpsert | None = None,
     is_disconnected: DisconnectCheck | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """
-    Stream compose: MariaDB user insert once before stream;
-    assistant insert once only after done/replace (skip on disconnect).
-    Does not write Express legacy chat_store.
-    """
-    from agent import chat_history_store as store
-    from agent import chat_history_vector as vec
-    from agent.secure_llm.graph import stream_secure_chat
+    """Enqueue + SSE heartbeat until the PC worker writes the assistant row."""
+    import asyncio
 
-    tid = store.ensure_thread(
-        thread_id=thread_id,
-        user_id=user_id,
-        channel="security",
-    )
-    history = store.load_messages(tid) if tid else []
-    prior = store.last_assistant_sources(history)
-    window_text = store.format_history_text_compact(history)
-    semantic = vec.search_similar(thread_id=tid, query=message) if tid else []
-    history_text = vec.merge_history_with_semantic(
-        window_text,
-        semantic,
-        heuristic_truncate_fn=store.heuristic_truncate,
-        format_compact_fn=store.format_history_text_compact,
-    )
+    from agent import security_queue_store as qstore
 
-    if tid and user_id:
-        mid = store.insert_message(
-            thread_id=tid,
-            role="user",
-            content=message,
-            mode="security_user",
-            provider="security",
-        )
-        if schedule_upsert is not None:
-            schedule_upsert(
-                thread_id=tid,
-                user_id=user_id,
-                channel="security",
-                role="user",
-                text=message,
-                message_id=mid,
-            )
+    text = (message or "").strip()
 
-    final_reply: str | None = None
-    final_mode: str | None = None
-    final_provider: str | None = None
-    final_sources: list[dict[str, Any]] = []
-    finalized = False
-    client_gone = False
-
-    async def _disc() -> bool:
-        nonlocal client_gone
+    async def _gone() -> bool:
         if is_disconnected is None:
             return False
-        gone = bool(await is_disconnected())
-        if gone:
-            client_gone = True
-        return gone
+        try:
+            return bool(await is_disconnected())
+        except Exception:  # noqa: BLE001
+            return False
 
-    async for item in stream_secure_chat(
-        message,
-        prior_sources=prior,
-        history_text=history_text,
-        is_disconnected=_disc,
-    ):
-        ev = item.get("event")
-        data = dict(item.get("data") or {})
-        if tid:
-            data["thread_id"] = tid
-        yield {"event": ev, "data": data}
-
-        if ev == "replace":
-            final_reply = data.get("reply") if data.get("reply") is not None else final_reply
-            final_sources = list(data.get("sources") or [])
-            final_mode = data.get("mode") or final_mode or "security_rag"
-            final_provider = data.get("provider") or final_provider or "vllm"
-            finalized = True
-        elif ev == "done":
-            final_reply = (
-                data.get("reply") if data.get("reply") is not None else final_reply
-            )
-            final_sources = list(data.get("sources") or final_sources)
-            final_mode = data.get("mode") or final_mode
-            final_provider = data.get("provider") or final_provider
-            finalized = True
-
-    if client_gone:
+    if not text:
+        yield {
+            "event": "done",
+            "data": {
+                "reply": "메시지가 비어 있습니다.",
+                "mode": "template",
+                "provider": "offline",
+                "error": "empty_message",
+                "sources": [],
+                "thread_id": thread_id,
+            },
+        }
         return
 
-    if finalized and tid and user_id and final_reply is not None:
-        mid_a = store.insert_message(
+    if not user_id:
+        yield {
+            "event": "done",
+            "data": {
+                "reply": "로그인한 사용자만 보안 상담을 사용할 수 있습니다.",
+                "mode": "template",
+                "provider": "offline",
+                "error": "user_id_required",
+                "sources": [],
+                "thread_id": thread_id,
+            },
+        }
+        return
+
+    tid = qstore.ensure_thread(thread_id=thread_id, user_id=user_id)
+    if not tid:
+        yield {
+            "event": "done",
+            "data": {
+                "reply": "보안 채팅 테이블에 쓰지 못했습니다. USER_SECURITY_* DDL을 적용하세요.",
+                "mode": "template",
+                "provider": "offline",
+                "error": "security_queue_unavailable",
+                "sources": [],
+                "thread_id": thread_id,
+            },
+        }
+        return
+
+    mid = qstore.insert_user_pending(thread_id=tid, content=text)
+    if mid is None:
+        yield {
+            "event": "done",
+            "data": {
+                "reply": "보안 질문을 큐에 넣지 못했습니다.",
+                "mode": "template",
+                "provider": "offline",
+                "error": "enqueue_failed",
+                "sources": [],
+                "thread_id": tid,
+            },
+        }
+        return
+
+    if schedule_upsert is not None:
+        schedule_upsert(
             thread_id=tid,
-            role="assistant",
-            content=final_reply,
-            mode=final_mode,
-            provider=final_provider,
-            sources=final_sources or [],
+            user_id=user_id,
+            channel="security",
+            role="user",
+            text=text,
+            message_id=mid,
         )
-        if schedule_upsert is not None:
-            schedule_upsert(
-                thread_id=tid,
-                user_id=user_id,
-                channel="security",
-                role="assistant",
-                text=final_reply,
-                message_id=mid_a,
-            )
+
+    yield {
+        "event": "meta",
+        "data": {
+            "stage": "queued",
+            "mode": "security_rag",
+            "provider": "pc_worker",
+            "thread_id": tid,
+        },
+    }
+
+    timeout_s = qstore.queue_wait_sec()
+    poll_s = qstore.queue_poll_sec()
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    while asyncio.get_event_loop().time() < deadline:
+        if await _gone():
+            return
+        row = qstore.peek_assistant_after(thread_id=tid, user_message_id=mid)
+        if row:
+            reply = str(row.get("content") or "")
+            sources = list(row.get("sources") or [])
+            mode = row.get("mode") or "security_rag"
+            provider = row.get("provider") or "vllm"
+            if schedule_upsert is not None:
+                schedule_upsert(
+                    thread_id=tid,
+                    user_id=user_id,
+                    channel="security",
+                    role="assistant",
+                    text=reply,
+                    message_id=row.get("id"),
+                )
+            payload = {
+                "reply": reply,
+                "mode": mode,
+                "provider": provider,
+                "error": None if row.get("status") != "error" else "worker_error",
+                "sources": sources,
+                "thread_id": tid,
+            }
+            yield {"event": "replace", "data": payload}
+            yield {"event": "done", "data": payload}
+            return
+        yield {
+            "event": "meta",
+            "data": {
+                "stage": "queued",
+                "mode": "security_rag",
+                "provider": "pc_worker",
+                "thread_id": tid,
+            },
+        }
+        await asyncio.sleep(poll_s)
+
+    payload = {
+        "reply": qstore.WORKER_UNAVAILABLE_REPLY,
+        "mode": "template",
+        "provider": "offline",
+        "error": "worker_timeout",
+        "sources": [],
+        "thread_id": tid,
+    }
+    yield {"event": "replace", "data": payload}
+    yield {"event": "done", "data": payload}

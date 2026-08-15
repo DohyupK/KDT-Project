@@ -217,7 +217,7 @@ python ingest_secure.py
    - backend → document watcher 자식 → Express :3001  
    - frontend :3000  
 3. (최초·컬렉션 없음·전체 재색인) `cd ai-service && python ingest_secure.py` — **상시 프로세스가 아니다.** 아래 표.
-4. 보안 챗 LLM이 필요하면 :8001 수동 + (Lightsail이면) 이 PC에서 터널. [`vllm-setup.md`](./vllm-setup.md)
+4. 보안 챗: 이 PC에서 vLLM `:8001`을 켠 뒤 `npm run security-pc`. AWS는 큐만. [`security-chatbot-guide.md`](./security-chatbot-guide.md)
 
 `ingest_secure.py` 는 Qdrant `secure_docs` 를 **한 번 채우는 작업**이다. 컬렉션은 Qdrant 볼륨에 남는다. `npm run dev` / 터널처럼 창을 열어 두지 않는다.
 
@@ -226,7 +226,7 @@ python ingest_secure.py
 | `python ingest_secure.py` | **아니오** | 컬렉션 없음 · 전체 재빌드 |
 | Qdrant (`kdt-qdrant`) | 예 | `docker compose up -d` |
 | document watcher | 예 | backend가 자식으로 기동. 이후 파일 변경분 |
-| vLLM `:8001` + `vllm-tunnel.ps1` | 보안 챗 LLM을 쓸 때 | 이 PC. AWS `npm run dev`가 터널을 켜지 않음 |
+| vLLM `:8001` + `npm run security-pc` | 보안 챗 LLM | 이 PC. AWS `npm run dev`가 워커를 켜지 않음 |
 
 컬렉션이 없으면 보안 챗은 vLLM을 호출하지 않고 RAG 미초기화로 끝난다. AWS 로그 `Qdrant collection 'secure_docs' missing` 이 그 경우다.
 

@@ -20,10 +20,10 @@
 | 기능 | 경로 / 모듈 |
 |------|-------------|
 | JSON | `POST /security-chat` |
-| SSE | `POST /security-chat/stream` |
-| Secure RAG | `secure_graph` · Qdrant `secure_docs` |
+| SSE | `POST /security-chat/stream` (AWS enqueue · PC 워커 답) |
+| Secure RAG | PC 워커 `run_secure_chat` · Qdrant `secure_docs` |
 | Analytics | `node_analytics` · Polars `csv_lake` (실패 시 RAG) |
-| 멀티턴 | MariaDB `user_chat_*` (Express 레거시 store는 done/replace만) |
+| 멀티턴 | 일반 `USER_CHAT_*` · 보안 `USER_SECURITY_*` |
 
 ## 문서
 

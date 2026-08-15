@@ -25,7 +25,7 @@
 - App Router: `src/app/(shell)/` + 공통 `AppShell`. `/` → `/main`.
 - rewrite: `/api/*` → `:3001`, `/ai/*` → `:8800`
 - `AppData.fillThreshold` 필드명 변경 금지
-- 권장 기동: 루트 `npm run dev`. UI만: `cd frontend && npm run dev` → http://localhost:3000
+- 권장 기동: AWS 루트 `npm run dev`. 이 PC 보안 워커: `npm run security-pc`. 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md).
 - AI 규칙: [`frontend/AGENTS.md`](../frontend/AGENTS.md)
 
 ---
@@ -82,7 +82,7 @@ python scripts/evaluate_models.py
 지표: `models/metadata.json` · `models/reg/metadata.json` · `models/residual/metadata.json`.
 
 단독 기동: `pip install -r requirements.txt` 후 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8800`.  
-일반 챗 API 키는 `.env`가 아니라 `/security` → `DB/data/llm_keys.sqlite`.  
+일반 챗 API 키는 `.env`가 아니라 `/setting` → `DB/data/llm_keys.sqlite`.  
 OCR: OS Tesseract (`kor`+`eng`). 최초 ingest는 [`documents-watcher-qdrant.md`](./references/documents-watcher-qdrant.md) §6 (`python ingest_secure.py` 는 상시 아님). AI 규칙: [`ai-service/AGENTS.md`](../ai-service/AGENTS.md).
 
 ---
@@ -91,5 +91,5 @@ OCR: OS Tesseract (`kor`+`eng`). 최초 ingest는 [`documents-watcher-qdrant.md`
 
 산출물은 루트 [`DB/`](../DB/)만. DDL `schema.sql` · `chat_schema.sql` · `send_email.sql` · `text_match.sql` 등. 런타임 SQLite `DB/data/*.sqlite`.
 
-멀티턴 채팅 테이블: `python DB/ai-service/apply_user_chat_tables.py` (루트 `.env` `DB_*`).  
+멀티턴 채팅 테이블: `python DB/ai-service/apply_user_chat_tables.py` (일반). 보안 큐: `python DB/ai-service/apply_user_security_tables.py`. 루트 `.env` `DB_*`.  
 챗 장기기억 Qdrant: [`references/chat-history-qdrant.md`](./references/chat-history-qdrant.md).

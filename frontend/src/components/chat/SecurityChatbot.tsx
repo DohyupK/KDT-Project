@@ -13,6 +13,7 @@ import {
   postSecurityChatStream,
   setSecurityChatThreadId,
   type ChatThreadItem,
+  type ChatThreadMessageItem,
   type SecurityChatErrorBody,
   type SecurityChatSource,
 } from '@/api/securityChatApi'
@@ -164,6 +165,28 @@ function uniqueDocIdCount(sources: SecurityChatSource[]): number {
   return dedupeSourcesByDocId(sources).length
 }
 
+/** Latest assistant row after the matching user message (PC worker wrote it). */
+function latestAssistantAfterUser(
+  rows: ChatThreadMessageItem[],
+  userText: string,
+): ChatThreadMessageItem | null {
+  const want = userText.trim()
+  let lastUser = -1
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].role === 'user' && (rows[i].content || '').trim() === want) {
+      lastUser = i
+    }
+  }
+  if (lastUser < 0) return null
+  for (let i = lastUser + 1; i < rows.length; i++) {
+    const r = rows[i]
+    const role = (r.role || '').toLowerCase()
+    if (role !== 'assistant' && role !== 'ai') continue
+    if ((r.content || '').trim()) return r
+  }
+  return null
+}
+
 function SourcePanel({
   chunks,
   onClose,
@@ -292,7 +315,8 @@ function SourcePanel({
 }
 
 /**
- * Security-tab chatbot: local vLLM (+ secure RAG) via /api/security-chat/stream (SSE).
+ * Security-tab chatbot: AWS enqueues USER_SECURITY_MESSAGES; PC worker answers.
+ * Display: SSE /security-chat/stream plus GET thread messages while pending.
  * Do not wire Groq / Gemini / general GlobalChatbot providers here.
  */
 export default function SecurityChatbot({
@@ -578,13 +602,92 @@ export default function SecurityChatbot({
     ])
 
     let sawTerminal = false
+    let streamFailText: string | null = null
+    let streamEndedAt: number | null = null
+    const takeTerminal = (): boolean => {
+      if (sawTerminal) return false
+      sawTerminal = true
+      return true
+    }
+
+    const fillAiBubble = (opts: {
+      reply: string
+      sources?: SecurityChatSource[] | null
+      mode?: string | null
+      provider?: string | null
+      errorText?: string
+    }) => {
+      if (!takeTerminal()) return
+      const sources = Array.isArray(opts.sources) ? opts.sources : []
+      const elapsedMs = Math.round(performance.now() - t0)
+      setMessages((prev) => {
+        const next = prev.map((m) =>
+          m.id === aiId && m.role === 'ai'
+            ? {
+                ...m,
+                text:
+                  opts.errorText ||
+                  opts.reply ||
+                  m.text ||
+                  '응답이 비어 있습니다.',
+                sources: opts.errorText ? [] : sources,
+                mode: opts.errorText ? 'template' : (opts.mode ?? m.mode),
+                provider: opts.errorText
+                  ? 'offline'
+                  : (opts.provider ?? m.provider),
+                elapsedMs,
+              }
+            : m,
+        )
+        queueMicrotask(() =>
+          persistCurrentThread(next, getSecurityChatThreadId() ?? tid),
+        )
+        return next
+      })
+      if (!opts.errorText && uniqueDocIdCount(sources) === 1) {
+        const docId = sources[0].doc_id || sources[0].title
+        openDocFromSources(sources, docId)
+      } else {
+        setActiveDocChunks(null)
+      }
+    }
+
+    const pollDb = async () => {
+      const deadline = t0 + 180_000
+      while (!ac.signal.aborted && !sawTerminal && performance.now() < deadline) {
+        if (streamEndedAt != null && performance.now() - streamEndedAt > 20_000) {
+          return
+        }
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 400)
+        })
+        if (ac.signal.aborted || sawTerminal) return
+        try {
+          const rows = await loadChatThreadMessages({ thread_id: tid })
+          const hit = latestAssistantAfterUser(rows, text)
+          if (!hit) continue
+          fillAiBubble({
+            reply: hit.content || '',
+            sources: hit.sources,
+            mode: hit.mode,
+            provider: hit.provider,
+          })
+          ac.abort()
+          return
+        } catch {
+          /* display poll only; SSE may still complete */
+        }
+      }
+    }
+
+    const pollPromise = pollDb()
 
     try {
       await postSecurityChatStream(
         { message: text },
         {
           onDelta: (piece) => {
-            if (ac.signal.aborted) return
+            if (ac.signal.aborted || sawTerminal) return
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiId && m.role === 'ai'
@@ -594,151 +697,81 @@ export default function SecurityChatbot({
             )
           },
           onReplace: ({ reply, sources, mode, provider }) => {
-            if (ac.signal.aborted) return
-            sawTerminal = true
-            setMessages((prev) => {
-              const next = prev.map((m) =>
-                m.id === aiId && m.role === 'ai'
-                  ? {
-                      ...m,
-                      text: reply,
-                      sources: sources ?? [],
-                      mode: mode ?? m.mode,
-                      provider: provider ?? m.provider,
-                      elapsedMs: Math.round(performance.now() - t0),
-                    }
-                  : m,
-              )
-              queueMicrotask(() =>
-                persistCurrentThread(next, getSecurityChatThreadId() ?? tid),
-              )
-              return next
-            })
-            setActiveDocChunks(null)
+            if (ac.signal.aborted && !sawTerminal) return
+            fillAiBubble({ reply, sources, mode, provider })
           },
           onDone: (res) => {
-            if (ac.signal.aborted) return
-            sawTerminal = true
-            const sources = res.sources ?? []
-            const elapsedMs = Math.round(performance.now() - t0)
-            setMessages((prev) => {
-              const next = prev.map((m) =>
-                m.id === aiId && m.role === 'ai'
-                  ? {
-                      ...m,
-                      text:
-                        res.reply ||
-                        m.text ||
-                        (res.error
-                          ? `오류: ${res.error}`
-                          : '응답이 비어 있습니다.'),
-                      mode: res.mode ?? m.mode,
-                      provider: res.provider ?? m.provider,
-                      elapsedMs,
-                      sources,
-                    }
-                  : m,
-              )
-              queueMicrotask(() =>
-                persistCurrentThread(next, getSecurityChatThreadId() ?? tid),
-              )
-              return next
+            if (ac.signal.aborted && !sawTerminal) return
+            fillAiBubble({
+              reply: res.reply || '',
+              sources: res.sources,
+              mode: res.mode,
+              provider: res.provider,
+              errorText: res.error ? `오류: ${res.error}` : undefined,
             })
-            if (uniqueDocIdCount(sources) === 1) {
-              const docId = sources[0].doc_id || sources[0].title
-              openDocFromSources(sources, docId)
-            }
           },
           onError: (data) => {
-            if (ac.signal.aborted) return
-            sawTerminal = true
-            const elapsedMs = Math.round(performance.now() - t0)
-            const failText = formatSecurityChatFailure({
-              data,
-              message: data.error,
-            })
-            setMessages((prev) => {
-              const next = prev.map((m) =>
-                m.id === aiId && m.role === 'ai'
-                  ? {
-                      ...m,
-                      text: failText,
-                      mode: 'template',
-                      provider: 'offline',
-                      elapsedMs,
-                      sources: [],
-                    }
-                  : m,
-              )
-              queueMicrotask(() => persistCurrentThread(next, tid))
-              return next
+            if (ac.signal.aborted && !sawTerminal) return
+            fillAiBubble({
+              reply: '',
+              errorText: formatSecurityChatFailure({
+                data,
+                message: data.error,
+              }),
             })
           },
         },
         ac.signal,
       )
       if (!sawTerminal && !ac.signal.aborted) {
-        setMessages((prev) => {
-          const next = prev.map((m) =>
-            m.id === aiId && m.role === 'ai' && !m.text
-              ? {
-                  ...m,
-                  text: '응답이 비어 있습니다.',
-                  mode: 'template',
-                  provider: 'offline',
-                  elapsedMs: Math.round(performance.now() - t0),
-                }
-              : m,
-          )
-          queueMicrotask(() => persistCurrentThread(next, tid))
-          return next
+        fillAiBubble({
+          reply: '',
+          errorText: '응답이 비어 있습니다.',
         })
       }
     } catch (err) {
-      if (ac.signal.aborted) return
-      const elapsedMs = Math.round(performance.now() - t0)
-      let status: number | undefined
-      let data: SecurityChatErrorBody | null = null
-      let message = '요청에 실패했습니다.'
-      let code: string | undefined
-      if (axios.isAxiosError(err)) {
-        status = err.response?.status
-        const rawBody = err.response?.data
-        if (rawBody && typeof rawBody === 'object') {
-          data = rawBody as SecurityChatErrorBody
+      if (!ac.signal.aborted) {
+        let status: number | undefined
+        let data: SecurityChatErrorBody | null = null
+        let message = '요청에 실패했습니다.'
+        let code: string | undefined
+        if (axios.isAxiosError(err)) {
+          status = err.response?.status
+          const rawBody = err.response?.data
+          if (rawBody && typeof rawBody === 'object') {
+            data = rawBody as SecurityChatErrorBody
+          }
+          message = err.message || message
+          code = err.code
+        } else if (err && typeof err === 'object') {
+          const e = err as {
+            message?: string
+            status?: number
+            data?: SecurityChatErrorBody
+          }
+          message = e.message || message
+          status = e.status
+          data = e.data ?? null
         }
-        message = err.message || message
-        code = err.code
-      } else if (err && typeof err === 'object') {
-        const e = err as {
-          message?: string
-          status?: number
-          data?: SecurityChatErrorBody
-        }
-        message = e.message || message
-        status = e.status
-        data = e.data ?? null
+        console.warn('[security-chat] stream fail', { status, data, message, code })
+        streamFailText = formatSecurityChatFailure({
+          status,
+          data,
+          message,
+          code,
+        })
+        streamEndedAt = performance.now()
       }
-      console.warn('[security-chat] stream fail', { status, data, message, code })
-      const failText = formatSecurityChatFailure({ status, data, message, code })
-      setMessages((prev) => {
-        const next = prev.map((m) =>
-          m.id === aiId && m.role === 'ai'
-            ? {
-                ...m,
-                text: failText,
-                mode: 'template',
-                provider: 'offline',
-                elapsedMs,
-                sources: [],
-              }
-            : m,
-        )
-        queueMicrotask(() => persistCurrentThread(next, tid))
-        return next
-      })
     } finally {
-      if (!ac.signal.aborted) setPending(false)
+      try {
+        await pollPromise
+      } catch {
+        /* ignore */
+      }
+      if (!sawTerminal && streamFailText) {
+        fillAiBubble({ reply: '', errorText: streamFailText })
+      }
+      if (abortRef.current === ac) setPending(false)
     }
   }
 
