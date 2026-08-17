@@ -1,2 +1,2 @@
--- Drop handover_history.snapshot_json (shift times no longer persisted).
-ALTER TABLE handover_history DROP COLUMN IF EXISTS snapshot_json;
+-- Drop HANDOVER_HISTORY.snapshot_json (shift times no longer persisted).
+ALTER TABLE HANDOVER_HISTORY DROP COLUMN IF EXISTS snapshot_json;

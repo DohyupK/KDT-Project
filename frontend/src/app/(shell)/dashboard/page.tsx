@@ -244,7 +244,7 @@ function productionDailyApiFilters(f: ProductionDailyFilterState) {
   };
 }
 
-type LiveConnectionStatus = 'connected' | 'updating' | 'error';
+type LiveConnectionStatus = 'idle' | 'connected' | 'updating' | 'error';
 
 const LIVE_POLL_INTERVAL_MS = 30_000;
 
@@ -1522,7 +1522,7 @@ export default function DashBoardPage() {
 
   /** 생산 원천 — KPI / 차트 / 상세 테이블 공유 */
   const [liveLots] = useState<CathodeLot[]>([]);
-  const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('connected');
+  const [liveStatus, setLiveStatus] = useState<LiveConnectionStatus>('idle');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -1531,6 +1531,7 @@ export default function DashBoardPage() {
   const chartsFetchingRef = useRef(false);
   const dailyFetchingRef = useRef(false);
   const [lotRiskRows, setLotRiskRows] = useState<LotRiskRow[]>([]);
+  const [lotRiskFetchError, setLotRiskFetchError] = useState<string | null>(null);
   const [lotRiskTotal, setLotRiskTotal] = useState(0);
   const [lotRiskTotalPages, setLotRiskTotalPages] = useState(1);
   const [selectedLotRiskDetail, setSelectedLotRiskDetail] = useState<LotRiskApiDetail | null>(null);
@@ -2043,14 +2044,18 @@ export default function DashBoardPage() {
     lotFetchingRef.current = true;
     markFetchStart();
     try {
+      console.info('[dashboard] fetching GET /api/dashboard/lot-risks');
       const lotResponse = await dashboardApi.listLotRisks(
         lotRiskListParams(lotRiskFilterApplied, lotRiskPage, LOT_RISK_PAGE_SIZE),
       );
+      setLotRiskFetchError(null);
       setLotRiskRows(lotResponse.data.items.map(mapDashboardLotRiskItem));
       setLotRiskTotal(lotResponse.data.total);
       setLotRiskTotalPages(lotResponse.data.totalPages);
       markFetchEnd(true);
-    } catch {
+    } catch (err) {
+      console.error('[dashboard] GET /api/dashboard/lot-risks failed', err);
+      setLotRiskFetchError('LOT 위험 데이터를 불러오지 못했습니다.');
       markFetchEnd(false);
     } finally {
       lotFetchingRef.current = false;
@@ -2159,7 +2164,10 @@ export default function DashBoardPage() {
   }, [dataPanelTab, fetchLotRisks, fetchProductionDaily, fetchTrendAndFi]);
 
   useEffect(() => {
-    void fetchLotRisks();
+    void fetchLotRisks({ force: true });
+    return () => {
+      lotFetchingRef.current = false;
+    };
   }, [fetchLotRisks]);
 
   useEffect(() => {
@@ -2332,7 +2340,9 @@ export default function DashBoardPage() {
       ? '업데이트 중'
       : liveStatus === 'error'
         ? '업데이트 지연'
-        : 'API 연결됨';
+        : liveStatus === 'idle'
+          ? 'API 대기'
+          : 'API 연결됨';
 
   return (
     <div
@@ -2379,7 +2389,9 @@ export default function DashBoardPage() {
                       ? 'bg-amber-500'
                       : liveStatus === 'updating'
                         ? 'bg-blue-500'
-                        : 'bg-emerald-500'
+                        : liveStatus === 'idle'
+                          ? 'bg-slate-400'
+                          : 'bg-emerald-500'
                   }`}
                   aria-hidden="true"
                 />
@@ -2925,7 +2937,11 @@ export default function DashBoardPage() {
                             isDark ? 'text-slate-400' : 'text-slate-500'
                           }`}
                         >
-                          {lotRiskFilterActive
+                          {lotRiskFetchError
+                            ? lotRiskFetchError
+                            : liveStatus === 'idle' || liveStatus === 'updating'
+                            ? 'LOT 위험 데이터를 불러오는 중입니다.'
+                            : lotRiskFilterActive
                             ? '검색 조건에 해당하는 LOT가 없습니다. 조건을 바꾼 뒤 검색을 눌러 주세요.'
                             : '표시할 LOT 위험등급 데이터가 없습니다.'}
                         </td>

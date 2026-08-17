@@ -178,7 +178,15 @@ export function formatSecurityChatFailure(opts: {
       : '') ||
     opts.message ||
     '요청에 실패했습니다.'
-  lines.push(`error: ${errText}`)
+  const isFetchFail =
+    /fetch failed/i.test(errText) || data.stage === 'proxy_stream_error'
+  if (isFetchFail) {
+    lines.push(
+      'error: AWS가 ai-service(:8800)에 연결하지 못했습니다. 보안 답은 이 PC 워커가 USER_SECURITY_MESSAGES에 씁니다.',
+    )
+  } else {
+    lines.push(`error: ${errText}`)
+  }
 
   const msg = `${opts.message || ''} ${errText}`.toLowerCase()
   const noBody = !opts.data || (Object.keys(data).length === 0 && !data.error)

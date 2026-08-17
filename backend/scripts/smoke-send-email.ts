@@ -57,15 +57,15 @@ async function main() {
     warn.push('Gmail service-account JSON path empty')
   }
 
-  const tables = await query<{ Tables_in?: string }[]>(`SHOW TABLES LIKE 'send_email'`)
+  const tables = await query<{ Tables_in?: string }[]>(`SHOW TABLES LIKE 'SEND_EMAIL'`)
   if (!tables.length) fail('send_email table missing — run npm run migrate:send-email')
   checks.push('send_email table exists')
 
-  const usCols = await query<{ Field: string }[]>(`SHOW COLUMNS FROM user_settings LIKE 'email_check'`)
+  const usCols = await query<{ Field: string }[]>(`SHOW COLUMNS FROM USER_SETTINGS LIKE 'email_check'`)
   if (!usCols.length) fail('user_settings.email_check missing')
   checks.push('user_settings.email_check exists')
 
-  const usersCols = await query<{ Field: string }[]>(`SHOW COLUMNS FROM users`)
+  const usersCols = await query<{ Field: string }[]>(`SHOW COLUMNS FROM USERS`)
   const userFields = usersCols.map((c) => c.Field)
   if (!userFields.includes('user_id') || !userFields.includes('email')) {
     fail('users.user_id / email missing')
@@ -74,10 +74,10 @@ async function main() {
 
   const user = (
     await query<{ user_id: string; email: string }[]>(
-      `SELECT user_id, email FROM users WHERE email IS NOT NULL AND TRIM(email) <> '' LIMIT 1`,
+      `SELECT user_id, email FROM USERS WHERE email IS NOT NULL AND TRIM(email) <> '' LIMIT 1`,
     )
   )[0]
-  const lot = (await query<{ id: string }[]>(`SELECT id FROM lots LIMIT 1`))[0]
+  const lot = (await query<{ id: string }[]>(`SELECT id FROM LOTS LIMIT 1`))[0]
   if (!user) fail('no users.email to test FK snapshot')
   if (!lot) fail('no lots.id to test FK')
 
@@ -95,9 +95,9 @@ async function main() {
     checks.push('mail_contents is HTML, not JSON')
   }
 
-  await query(`DELETE FROM send_email WHERE lot_id = ? AND user_id = ?`, [lot.id, user.user_id])
+  await query(`DELETE FROM SEND_EMAIL WHERE lot_id = ? AND user_id = ?`, [lot.id, user.user_id])
   const inserted = (await query(
-    `INSERT INTO send_email (lot_id, user_id, email, mail_contents, send, error)
+    `INSERT INTO SEND_EMAIL (lot_id, user_id, email, mail_contents, send, error)
      VALUES (?, ?, ?, ?, 'X', 'smoke_test')`,
     [lot.id, user.user_id, user.email, html],
   )) as Ok
@@ -106,7 +106,7 @@ async function main() {
 
   const row = (
     await query<{ mail_contents: string; send: string; email: string; user_id: string }[]>(
-      `SELECT mail_contents, send, email, user_id FROM send_email WHERE id = ?`,
+      `SELECT mail_contents, send, email, user_id FROM SEND_EMAIL WHERE id = ?`,
       [id],
     )
   )[0]
@@ -121,7 +121,7 @@ async function main() {
   if (!updated) fail('applySendEmailResult O failed')
   const after = (
     await query<{ send: string; sent_at: Date | string | null }[]>(
-      `SELECT send, sent_at FROM send_email WHERE id = ?`,
+      `SELECT send, sent_at FROM SEND_EMAIL WHERE id = ?`,
       [id],
     )
   )[0]
@@ -173,7 +173,7 @@ async function main() {
     else process.env.N8N_WEBHOOK_SECRET = prevSecret
   }
 
-  await query(`DELETE FROM send_email WHERE id = ?`, [id])
+  await query(`DELETE FROM SEND_EMAIL WHERE id = ?`, [id])
   checks.push('smoke row deleted')
 
   const dispatched = await dispatchNewRiskTopIssueReports()

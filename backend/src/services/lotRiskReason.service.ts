@@ -21,7 +21,7 @@ export async function updateAnalysisRiskReason(
   lotId: string,
   riskReason: string,
 ): Promise<void> {
-  await query(`UPDATE analysis_lots SET risk_reason = ? WHERE lot_id = ?`, [
+  await query(`UPDATE ANALYSIS_LOTS SET risk_reason = ? WHERE lot_id = ?`, [
     riskReason.slice(0, 255),
     lotId,
   ])
@@ -37,8 +37,8 @@ export async function loadRiskReasonFacts(
     return query<RiskReasonLotRow[]>(
       `SELECT a.lot_id, a.probability, a.spc_status, a.risk_level,
               j.residual_li, j.capacity, j.quality_defect
-       FROM analysis_lots a
-       LEFT JOIN judgment_lots j ON j.lot_id = a.lot_id
+       FROM ANALYSIS_LOTS a
+       LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = a.lot_id
        WHERE a.lot_id IN (${placeholders}) AND a.lot_id <> ?`,
       [...lotIds, SYS_HANDOVER],
     )
@@ -46,8 +46,8 @@ export async function loadRiskReasonFacts(
   return query<RiskReasonLotRow[]>(
     `SELECT a.lot_id, a.probability, a.spc_status, a.risk_level,
             j.residual_li, j.capacity, j.quality_defect
-     FROM analysis_lots a
-     LEFT JOIN judgment_lots j ON j.lot_id = a.lot_id
+     FROM ANALYSIS_LOTS a
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = a.lot_id
      WHERE a.lot_id <> ?
      ORDER BY a.lot_id ASC`,
     [SYS_HANDOVER],

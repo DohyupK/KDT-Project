@@ -180,7 +180,7 @@ async function getGmailAccessToken(subjectOverride?: string): Promise<string | n
 }
 
 async function countSendEmailRows(): Promise<number> {
-  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM send_email`)
+  const rows = await query<{ c: number }[]>(`SELECT COUNT(*) AS c FROM SEND_EMAIL`)
   return Number(rows[0]?.c ?? 0)
 }
 
@@ -189,7 +189,7 @@ async function listKnownLotIds(lotIds: string[]): Promise<Set<string>> {
   if (lotIds.length === 0) return new Set()
   const placeholders = lotIds.map(() => '?').join(', ')
   const rows = await query<{ lot_id: string }[]>(
-    `SELECT DISTINCT lot_id FROM send_email WHERE lot_id IN (${placeholders})`,
+    `SELECT DISTINCT lot_id FROM SEND_EMAIL WHERE lot_id IN (${placeholders})`,
     lotIds,
   )
   return new Set(rows.map((r) => r.lot_id))
@@ -198,9 +198,9 @@ async function listKnownLotIds(lotIds: string[]): Promise<Set<string>> {
 async function listRiskTopLotIdsWithOpenIssues(): Promise<string[]> {
   const rows = await query<{ lot_id: string }[]>(
     `SELECT DISTINCT l.id AS lot_id
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
-     INNER JOIN issues i ON i.lot_id = l.id AND i.completed_at IS NULL
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     INNER JOIN ISSUES i ON i.lot_id = l.id AND i.completed_at IS NULL
      WHERE ${RISK_TOP_WHERE}
      ORDER BY l.\`timestamp\` DESC`,
   )
@@ -213,8 +213,8 @@ async function listMailUsers(optInOnly: boolean): Promise<MailUser[]> {
     : `u.email IS NOT NULL AND TRIM(u.email) <> ''`
   const rows = await query<MailUser[]>(
     `SELECT u.user_id, u.email
-     FROM users u
-     LEFT JOIN user_settings s ON s.user_id = u.user_id
+     FROM USERS u
+     LEFT JOIN USER_SETTINGS s ON s.user_id = u.user_id
      WHERE ${where}`,
   )
   return rows
@@ -229,7 +229,7 @@ async function insertSendEmailRow(input: {
 }): Promise<number | null> {
   try {
     const result = (await query(
-      `INSERT INTO send_email (lot_id, user_id, email, mail_contents, send, error)
+      `INSERT INTO SEND_EMAIL (lot_id, user_id, email, mail_contents, send, error)
        VALUES (?, ?, ?, ?, 'X', ?)`,
       [input.lotId, input.userId, input.email, input.html, input.error],
     )) as InsertResult
@@ -250,8 +250,8 @@ export async function applySendEmailResult(input: {
   const error = input.send === 'O' ? null : (input.error ?? 'n8n_failed').slice(0, 255)
   const result = (await query(
     input.send === 'O'
-      ? `UPDATE send_email SET send = 'O', sent_at = NOW(), error = NULL WHERE id = ?`
-      : `UPDATE send_email SET send = 'X', error = ? WHERE id = ?`,
+      ? `UPDATE SEND_EMAIL SET send = 'O', sent_at = NOW(), error = NULL WHERE id = ?`
+      : `UPDATE SEND_EMAIL SET send = 'X', error = ? WHERE id = ?`,
     input.send === 'O' ? [input.id] : [error, input.id],
   )) as InsertResult
   return Number(result?.affectedRows ?? 0) > 0
@@ -295,8 +295,8 @@ async function postN8nWebhook(payload: {
 
 /**
  * After ensureIssuesForRiskLots: mail new 위험 LOT Top lots via n8n.
- * Empty send_email table = baseline (insert X, no webhook).
- * send='X' is final: a row in send_email (O or X) means that lot is never dispatched again.
+ * Empty SEND_EMAIL table = baseline (insert X, no webhook).
+ * send='X' is final: a row in SEND_EMAIL (O or X) means that lot is never dispatched again.
  */
 export async function dispatchNewRiskTopIssueReports(): Promise<DispatchIssueReportsResult> {
   const empty: DispatchIssueReportsResult = {
@@ -461,7 +461,7 @@ async function sendViaGmailApi(input: {
 
 async function existingSendEmailId(lotId: string, userId: string): Promise<number | null> {
   const rows = await query<{ id: number | bigint }[]>(
-    `SELECT id FROM send_email WHERE lot_id = ? AND user_id = ? LIMIT 1`,
+    `SELECT id FROM SEND_EMAIL WHERE lot_id = ? AND user_id = ? LIMIT 1`,
     [lotId, userId],
   )
   const id = rows[0]?.id

@@ -1,6 +1,6 @@
 # cathode_qc_reg 데이터 계약 (리튬 잔여량 회귀)
 
-최종 갱신: 2026-07-28  
+최종 갱신: 2026-08-14  
 적용: `ai-service` residual_li 회귀 (`train_residual_pipeline.py`)  
 관련: [`cathode-clf-schema.md`](./cathode-clf-schema.md) · [`cathode-reg-schema.md`](./cathode-reg-schema.md)
 
@@ -34,7 +34,7 @@
 |------|------|------|
 | `id` / `timestamp` | LOT·시각 | Feature 제외 |
 | `operator_id` | 범주 | Feature |
-| `residual_li` | 리튬 잔여량 | **타깃** (단위: ppm 예시, 추후 변경 가능) |
+| `residual_li` | 리튬 잔여량 | **타깃** (단위: ppm) |
 
 수치 Feature: `d50`, `d90`, `metal_impurity`, `lithium_input`, `additive_ratio`, `process_time`, `sintering_temp`, `humidity`, `tank_pressure`
 

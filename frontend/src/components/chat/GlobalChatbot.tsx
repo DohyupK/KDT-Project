@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
-import Link from 'next/link'
 import { Maximize2, MessageCircle, Minimize2, Shield, X } from 'lucide-react'
 import { useUiSettings } from '@/components/layout/AppShell'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
@@ -29,6 +28,7 @@ import {
   readLlmProvidersCache,
   type LlmKeyPublic,
 } from '@/api/llmKeysApi'
+import { OPEN_SECURE_CHAT_EVENT } from '@/lib/secureChatEvents'
 
 type ChatRole = 'user' | 'ai'
 
@@ -62,9 +62,9 @@ const USAGE_GUIDE_TEXT =
   '사용 안내입니다.\n\n' +
   '1. 지금 보고 있는 화면(Main·Dashboard·Issue·Knowledge·SPC) 데이터를 기준으로 질문하세요.\n' +
   '2. 목록·카드·버튼을 누른 뒤 질문하면 그 항목을 우선 참조합니다.\n' +
-  '3. 공개·대외비 문서는 RAG로 검색됩니다. 기밀은 보안 탭을 이용하세요.\n' +
+  '3. 공개·대외비 문서는 RAG로 검색됩니다. 기밀은 「보안 상담」을 이용하세요.\n' +
   '4. 추가 질문으로 모델 진단·What-if를 요청할 수 있습니다.\n' +
-  '5. 보안·기밀은 /security 탭을 이용해 주세요.'
+  '5. 보안·기밀은 이 챗봇의 보안 상담 탭을 이용해 주세요.'
 
 const WELCOME_GENERAL: ChatMessage = {
   id: 1,
@@ -360,6 +360,15 @@ export default function GlobalChatbot() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isExpanded])
+
+  useEffect(() => {
+    const onOpenSecure = () => {
+      setChatMode('secure')
+      setChatOpen(true)
+    }
+    window.addEventListener(OPEN_SECURE_CHAT_EVENT, onOpenSecure)
+    return () => window.removeEventListener(OPEN_SECURE_CHAT_EVENT, onOpenSecure)
+  }, [])
 
   const clearUndoTimer = () => {
     if (undoTimerRef.current) {
@@ -863,7 +872,9 @@ export default function GlobalChatbot() {
                 <button
                   type="button"
                   aria-pressed={chatMode === 'general'}
-                  onClick={() => setChatMode('general')}
+                  onClick={() => {
+                    setChatMode('general')
+                  }}
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'general'
                       ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
@@ -878,7 +889,9 @@ export default function GlobalChatbot() {
                 <button
                   type="button"
                   aria-pressed={chatMode === 'secure'}
-                  onClick={() => setChatMode('secure')}
+                  onClick={() => {
+                    setChatMode('secure')
+                  }}
                   className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                     chatMode === 'secure'
                       ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500'
@@ -1023,15 +1036,15 @@ export default function GlobalChatbot() {
                     {m.text}
                     {m.mode === 'security_redirect' ? (
                       <div className="mt-2">
-                        <Link
-                          href="/security"
+                        <button
+                          type="button"
                           className={`text-xs font-semibold underline ${
                             isDark ? 'text-amber-300' : 'text-amber-700'
                           }`}
-                          onClick={() => setChatOpen(false)}
+                          onClick={() => setChatMode('secure')}
                         >
-                          보안 탭(/security)으로 이동
-                        </Link>
+                          챗봇에서 보안 상담 열기
+                        </button>
                       </div>
                     ) : null}
                     {m.recommendation?.suggestion && m.role === 'ai' ? (
@@ -1199,7 +1212,7 @@ export default function GlobalChatbot() {
                 </div>
                 {llmOptions.length === 0 ? (
                   <p className="mb-2 text-xs text-slate-400">
-                    등록된 API 없음 · /security 에서 키를 저장하세요
+                    등록된 API 없음 · 설정에서 키를 저장하세요
                   </p>
                 ) : null}
                 <div className="mb-2 flex flex-wrap gap-1.5">
@@ -1271,6 +1284,7 @@ export default function GlobalChatbot() {
               <SecurityChatbot
                 variant="embedded"
                 hideHeader
+                showSources={isExpanded}
                 newThreadNonce={secureNewThreadNonce}
                 className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none"
               />

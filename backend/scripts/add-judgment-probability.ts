@@ -6,14 +6,14 @@ import { query } from '../src/db/connection.js'
 
 async function main() {
   await query(
-    `ALTER TABLE judgment_lots
+    `ALTER TABLE JUDGMENT_LOTS
      ADD COLUMN IF NOT EXISTS probability DOUBLE NULL`,
   )
   console.log('COLUMN_OK probability')
 
   const res = await query<unknown>(
-    `UPDATE judgment_lots j
-     INNER JOIN analysis_lots a ON a.lot_id = j.lot_id
+    `UPDATE JUDGMENT_LOTS j
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = j.lot_id
      SET j.probability = a.probability
      WHERE j.probability IS NULL AND a.probability IS NOT NULL`,
   )
@@ -26,7 +26,7 @@ async function main() {
   const sample = await query<
     { lot_id: string; probability: number | null; residual_li: number | null }[]
   >(
-    `SELECT lot_id, probability, residual_li FROM judgment_lots
+    `SELECT lot_id, probability, residual_li FROM JUDGMENT_LOTS
      WHERE probability IS NOT NULL
      ORDER BY lot_id DESC LIMIT 3`,
   )

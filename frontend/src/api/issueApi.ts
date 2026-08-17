@@ -15,14 +15,14 @@ export type IssueListItem = {
   createdAt: string
   lotId: string
   riskLevel: IssueRiskLevel
-  /** analysis_lots.spc_status */
+  /** ANALYSIS_LOTS.spc_status */
   spcStatus: string | null
   issueContent: string
   /** 이슈 처리 관리에 조치 내용이 입력되었는지 */
   hasAction: boolean
 }
 
-/** analysis_lots snapshot for 이슈 상세 분석 visualization */
+/** ANALYSIS_LOTS snapshot for 이슈 상세 분석 visualization */
 export type IssueAnalysis = {
   lotId: string
   probability: number | null

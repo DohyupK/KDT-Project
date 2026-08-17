@@ -1,8 +1,0 @@
----
-description: Rules for the authentication API module
-globs: frontend/src/api/authApi.ts
-alwaysApply: false
----
-# Auth API
-
-API-specific rules will be defined here.

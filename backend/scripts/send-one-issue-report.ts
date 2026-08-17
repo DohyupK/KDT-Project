@@ -13,8 +13,8 @@ import { sendIssueReportOnce } from '../src/services/issueReportN8n.js'
 async function main() {
   const recipients = await query<{ user_id: string; email: string }[]>(
     `SELECT u.user_id, u.email
-     FROM users u
-     INNER JOIN user_settings s ON s.user_id = u.user_id
+     FROM USERS u
+     INNER JOIN USER_SETTINGS s ON s.user_id = u.user_id
      WHERE s.email_check = 'O' AND u.email IS NOT NULL AND TRIM(u.email) <> ''`,
   )
   if (!recipients.length) {
@@ -23,9 +23,9 @@ async function main() {
 
   const top = await query<{ lot_id: string }[]>(
     `SELECT DISTINCT l.id AS lot_id
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
-     INNER JOIN issues i ON i.lot_id = l.id AND i.completed_at IS NULL
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     INNER JOIN ISSUES i ON i.lot_id = l.id AND i.completed_at IS NULL
      WHERE ${RISK_TOP_WHERE}
      ORDER BY l.\`timestamp\` DESC
      LIMIT 1`,
@@ -33,14 +33,14 @@ async function main() {
   let lotId = top[0]?.lot_id
   if (!lotId) {
     const any = await query<{ lot_id: string }[]>(
-      `SELECT i.lot_id FROM issues i
+      `SELECT i.lot_id FROM ISSUES i
        WHERE i.completed_at IS NULL
        ORDER BY i.created_at DESC LIMIT 1`,
     )
     lotId = any[0]?.lot_id
   }
   if (!lotId) {
-    const lots = await query<{ id: string }[]>(`SELECT id FROM lots ORDER BY \`timestamp\` DESC LIMIT 1`)
+    const lots = await query<{ id: string }[]>(`SELECT id FROM LOTS ORDER BY \`timestamp\` DESC LIMIT 1`)
     lotId = lots[0]?.id
   }
   if (!lotId) throw new Error('보낼 LOT이 없습니다.')

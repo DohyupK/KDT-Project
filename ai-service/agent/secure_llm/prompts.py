@@ -62,10 +62,16 @@ ANALYTICS_GROUNDING_SUFFIX = (
 
 OFFLINE_REPLY = (
     "로컬 vLLM 서버에 연결할 수 없습니다. "
-    "보안 채널은 외부 API(Groq/Gemini 등)로 폴백하지 않습니다.\n\n"
+    "보안 채널은 외부 API로 폴백하지 않습니다.\n\n"
     "작업자 안내: CHAT_VLLM_BASE_URL(기본 http://127.0.0.1:8001/v1)에서 "
     "OpenAI 호환 서버를 기동한 뒤 다시 시도하세요. "
     "자세한 수동 절차는 docs/references/vllm-setup.md 를 참고하세요."
+)
+
+RAG_NOT_READY_REPLY = (
+    "보안 RAG를 초기화할 수 없어 로컬 LLM을 호출하지 않았습니다.\n\n"
+    "작업자 안내: Qdrant 컬렉션 secure_docs 가 없거나 RAG 엔진이 실패한 상태입니다. "
+    "ai-service에서 python ingest_secure.py 실행 후 재시작하세요."
 )
 
 HIT_BUT_LLM_TIMEOUT_REPLY = (

@@ -16,7 +16,8 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parent.parent
+# this file is ai-service/agent/api_llm/ — registry lives at ai-service/models/registry.json
+ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = ROOT / "models" / "registry.json"
 
 # Built-in runners for known heads (stable). Unknown heads use entrypoint import.
@@ -136,6 +137,27 @@ def run_all_ready_heads(
         elif hid == "residual":
             if packed.get("ok"):
                 residual = packed.get("result")
+        elif hid == "voting":
+            if packed.get("ok"):
+                voted = packed.get("result") or {}
+                predict = {
+                    "defect_status": voted.get("quality_defect"),
+                    "probability": voted.get("probability"),
+                    "applied_threshold": voted.get("applied_threshold"),
+                    "top_risk_factors": voted.get("top_risk_factors") or [],
+                }
+                capacity = {
+                    "capacity": voted.get("capacity"),
+                    "unit": "mAh/g",
+                    "top_factors": [],
+                }
+                residual = {
+                    "residual_li": voted.get("residual_li"),
+                    "unit": "ppm",
+                    "top_factors": [],
+                }
+            else:
+                error = packed.get("error")
 
     return {
         "heads": heads_out,

@@ -1,9 +1,10 @@
-# 보안·일반 챗봇 가이드 (스택 · 기법 · ai-service 이용)
+# 보안·일반 챗봇 가이드 (이용 · 라우팅)
 
-최종 갱신: 2026-08-02
+최종 갱신: 2026-08-15
 
-양극재 품질 AI 모노레포의 **챗봇 두 계열**과 **ai-service** 이용법을 한곳에 정리한다.  
-일지: [`docs/work-log/2026-08-02.md`](../work-log/2026-08-02.md) · [`2026-08-01`](../work-log/2026-08-01.md) · RAG 상세: [`secure-rag.md`](./secure-rag.md) · 기법 총정리: [`LLM 튜닝.md`](./LLM%20튜닝.md)
+챗봇 **두 계열**의 UI·API·라우팅.  
+**운영(누가 무엇을 켜나):** [`aws-pc-security-worker.md`](../guides/aws-pc-security-worker.md)  
+RAG 동작·가드레일: [`secure-rag.md`](./secure-rag.md) · 기본값·env·모듈: [`LLM 튜닝.md`](./LLM%20튜닝.md) · vLLM 기동: [`vllm-setup.md`](./vllm-setup.md) · 포트: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md)
 
 ---
 
@@ -11,173 +12,93 @@
 
 | | 일반 챗 | 보안 챗 |
 |--|---------|---------|
-| UI | `GlobalChatbot` (셸 플로팅) | `/security` · Maximize → `SecurityChatbot` |
-| API | `POST /api/chat` → ai-service `/chat` | `POST /api/security-chat/stream` (SSE) · JSON `/api/security-chat` 병행 |
-| LLM | 보안 탭 등록 키 (Groq/Gemini 등) · Auto/수동 | **로컬만** `CHAT_VLLM_*` (:8001) · **클라우드 폴백 없음** |
-| 지식 | 일반 Knowledge / 도구(predict·whatif) | **Secure RAG** (`Documents/` → Qdrant `secure_docs`) |
-| 멀티턴 | MariaDB 스레드 (채널 구분) | 동일 DB · `channel=security` |
+| UI | `GlobalChatbot` 플로팅 · 「일반 상담」 | 같은 챗봇 · 「보안 상담」 (`SecurityChatbot` 임베드). `/security` 는 페이지가 아님 |
+| API | `POST /api/chat` → ai-service `/chat` | `POST /api/security-chat/stream` → AWS는 **질문만 DB에 넣음** |
+| LLM | 설정에 등록한 키 (Groq/Gemini 등) | **이 PC 워커** + vLLM `:8001`. AWS는 `:8001`을 안 침. 클라우드 폴백 없음 |
+| 지식 | 일반 Knowledge / 도구(predict·whatif) | PC 워커가 Qdrant `secure_docs` 검색. ingest 최초만 → [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6 |
+| 멀티턴 | `USER_CHAT_*` (`channel=general`) | `USER_SECURITY_THREADS` · `USER_SECURITY_MESSAGES` |
+
+엔드포인트 목록: [`ai-service-feature-catalog.md`](./ai-service-feature-catalog.md)
 
 ---
 
-## 2. 기술 스택 (현재 동작 기준)
-
-### 프론트
-
-- Next.js (App Router) · TypeScript · React
-- `SecurityChatbot` / `GlobalChatbot`
-- axios · 출처 칩(`doc_id` dedupe) · 청크 패널
-
-### 백엔드 (Express)
-
-- 세션 · LLM 키 DB(암호화) · `/api/chat` · `/api/security-chat` · `/api/security-chat/stream` 프록시
-- 스트림: `\n\n` 누적 파싱 후 `done`/`replace`에서 레거시 `chat_store`만 1회 저장 (MariaDB는 ai-service)
-- 채팅 스레드 목록/복원 패스스루
-
-### ai-service (FastAPI :8800)
-
-| 영역 | 스택 |
-|------|------|
-| API | FastAPI · Uvicorn · Pydantic |
-| 일반 Agent | LangGraph · LangChain · registry ready 헤드(clf/reg/residual) · whatif |
-| Secure RAG | LangGraph `secure_graph` · Qdrant · BM25 · RRF · bge-m3 / bge-reranker-v2-m3 (**CPU**) · soft fallback |
-| Analytics | Polars `scan_csv` · `data/csv_lake` · Smart Fallback→RAG |
-| 문서 | LlamaIndex SentenceSplitter · pypdf · openpyxl · watchdog · 듀얼 엔진(convert / csv profile) |
-| 멀티턴 | SQLAlchemy · PyMySQL · MariaDB |
-| ML | Polars · XGBoost · CatBoost · Optuna · SHAP · `fillThreshold` 유지 |
-
-### 외부 프로세스
-
-- Qdrant `:6333`
-- LM Studio / vLLM OpenAI 호환 `:8001` (보안 생성 시)
-
----
-
-## 3. 적용한 기법 · 방법 (보안 RAG)
+## 2. 라우팅
 
 ```text
-analytics? → retrieve (쿼리 확장) → gate → generate | no_docs
-                                    ↓
-                          finalize_reply_sources
-                          ([SYS_RAG_EMPTY_RESULT] hard override)
+일반 메시지
+  → POST /api/chat
+  → (비보안) ai-service /chat → predict → Groq/Gemini
+
+보안 키워드 포함 (일반 챗)
+  → POST /api/chat
+  → mode=security_redirect, ai-service 미호출
+  → 「챗봇에서 보안 상담」안내
+
+보안 상담 메시지
+  → POST /api/security-chat/stream
+  → AWS: USER_SECURITY_MESSAGES INSERT user status=pending
+  → 이 PC 워커: 검색 + vLLM → INSERT assistant
+  → AWS UI: SSE replace/done 또는 GET messages 폴링 (먼저 오는 쪽)
 ```
 
-| 기법 | 방법 |
-|------|------|
-| Hybrid 검색 | Dense(Qdrant+bge-m3) + Sparse(BM25) + RRF |
-| 메타 필터 | Self-Query(LI) 또는 `SECURE_SELF_QUERY=0` heuristic · 과도 필터 시 unfiltered 1회 |
-| 다문서 다양성 | rerank 후 `doc_id`당 최대 2청크 · 점수 내림차순 |
-| Rerank soft fallback | `min_score`(기본 0.15)로 0건이면 fused(RRF) 상위 1–2 · 로그 `max_score` |
-| 검색량 | `node_retrieve`: `top_k=12` · `rerank_top_n=6` (`SecureRagEngine.retrieve` 기본값과 동일) |
-| 청크 | ingest `SentenceSplitter` chunk_size=400 · overlap=50 |
-| 자연 흐름 | 요약이어도 retrieve 스킵 없음 · 0건+짧은 follow-up/요약어 → prior |
-| 쿼리 확장 | `FOLLOWUP_RE`만(그게/왜/자세히 등) · `그럼|그래서|…` 제외 · 도메인 명사 하드코딩 없음 |
-| 출처 강제 | LLM `[출처:]` 제거 후 실제 sources title만 부착 |
-| 빈 근거 통제 | 모델이 `[SYS_RAG_EMPTY_RESULT]` 포함 시 고정 문구 + `sources=[]` |
-| 요약 | 발췌 컨텍스트 + 단답형 suffix (`SECURE_GENERATE=1`) |
-| 짧은 설명 | `EXPLAIN_INSTRUCTION_SUFFIX` (≤24자 · not summary · hits≥1) |
-| SSE | `meta`/`delta`/`replace`/`done`/`error` · SYS 토큰 partial-hold · disconnect 방어 |
-| 발췌 모드 | `SECURE_GENERATE=0` → LLM 생략 · extractive |
-| **정형 분석 (2단계)** | `is_analytics_intent` → Polars `csv_lake` · 실패 시 RAG smart fallback · mock 칩 `사내 CSV 데이터` |
-| 듀얼 엔진 | PDF/TXT→MD · CSV/XLSX→lake+profile MD · debounce ingest · **ingest 후 BM25 핫리로드** |
-| 서버 로그 | `RotatingFileHandler` 10MB×5 · `logs/ai-service.log` (`AI_SERVICE_LOG_FILE`) |
-| FE 칩 | `doc_id` dedupe · 패널에 해당 문서 청크 전부 |
+`/security` URL은 오버레이를 열고 `/main`으로 보낸다. 「보안 상담」은 `setChatMode('secure')`만 (pushState 없음).
+
+앱 코드는 HuggingFace `transformers`로 채팅 모델을 로드하지 않는다.
+
+## 2.1 기동 명령 (AWS / 이 PC)
+
+절차 전체: [`aws-pc-security-worker.md`](../guides/aws-pc-security-worker.md).
+
+| 어디서 | 명령 | 하는 일 |
+|--------|------|---------|
+| AWS Lightsail | `npm run dev` | ai + backend + frontend. **보안 워커 안 켬** |
+| 이 PC | `npm run security-pc` | vLLM `:8001` 확인 · `ssh -L 3306`+`6333` · 워커. **프론트 안 켬** |
+
+vLLM `:8001`은 이미 켜 둘 것. 키·호스트:
+
+```powershell
+npm run security-pc -- -KeyPath "키.pem" -PublicHost "<Lightsail공인IP>"
+```
+
+또는 `.env` `SECURITY_PC_KEY_PATH` · `SECURITY_PC_PUBLIC_HOST`. 이 PC `.env`는 터널이 열린 동안 `DB_HOST=127.0.0.1`, `QDRANT_URL=http://127.0.0.1:6333`. AWS `.env`와 섞지 말 것.
+
+Qdrant·MariaDB가 이 PC면 `-KeyPath` 생략. DDL: `python DB/ai-service/apply_user_security_tables.py` (승인 후).
+
+| 조건 | 상수 (`prompts.py`) / 큐 | 의미 |
+|------|-------------------------|------|
+| Qdrant `secure_docs` 없음 | `RAG_NOT_READY_REPLY` | 워커가 검색 실패. ingest 한 번 → §6 |
+| `:8001` 연결 실패 | `OFFLINE_REPLY` | 이 PC vLLM |
+| 워커 미기동 · 대기 초과 | `WORKER_UNAVAILABLE_REPLY` | `run_security_worker.py` |
+| RAG 히트 후 LLM 타임아웃 | `HIT_BUT_LLM_TIMEOUT_REPLY` | `SECURE_VLLM_TIMEOUT` |
 
 ---
 
-## 4. ai-service 이용 방법
+## 3. 디렉터리
 
-### 4.1 기동 (챗봇 풀스택)
-
-루트 README [로컬 실행 — 챗봇](../../README.md#로컬-실행--챗봇-터미널-3개) 참고.
-
-```bash
-# 1) Qdrant
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-
-# 2) ai-service
-cd ai-service
-# .env: CHAT_USE_LLM, CHAT_VLLM_*, SECURE_*, DB_* (비밀은 커밋 금지)
-uvicorn app.main:app --host 127.0.0.1 --port 8800
-
-# 3) backend :3001 · frontend :3000
-# 4) 보안 LLM 요약 시 LM Studio :8001
-```
-
-- Health: `GET http://127.0.0.1:8800/health`
-- OpenAPI: `http://127.0.0.1:8800/docs`
-- **CWD는 항상 `ai-service/`**
-
-### 4.2 주요 엔드포인트
-
-| 경로 | 용도 |
+| 경로 | 역할 |
 |------|------|
-| `POST /predict` | clf O/X (`fillThreshold`) |
-| `POST /predict-capacity` | reg 용량 |
-| `POST /predict-residual` | residual |
-| `POST /chat` | 일반 챗 · ready 헤드 자동 |
-| `POST /security-chat` | 보안 RAG + 로컬 vLLM (JSON) |
-| `POST /security-chat/stream` | 보안 SSE (+ analytics 의도 시 Polars 우회·RAG 폴백) |
-| 스레드 API | 목록/메시지 복원 (Express 경유) |
-
-### 4.3 보안 문서 ingest
-
-```bash
-cd ai-service
-python ingest_secure.py
-# 또는 옛 CSV 풀 MD 정리 후 재구축:
-python scripts/rebuild_secure_rag_clean.py
-```
-
-- 문서 루트: 모노레포 `Documents/` (`SECURE_DOCS_DIR`)
-- Watch: `SECURE_DOCS_WATCH=1` (수초 debounce 후 ingest)
-- ingest 후 **ai-service 재시작** 권장 (BM25 캐시)
-
-### 4.4 권장 env (보안)
-
-```text
-SECURE_SELF_QUERY=0
-SECURE_GENERATE=1          # 요약 LLM 사용 시 (작은 양자화면 0 권장)
-SECURE_VLLM_TIMEOUT=90
-SECURE_RERANK_MIN_SCORE=0.15
-CHAT_VLLM_BASE_URL=http://127.0.0.1:8001/v1
-CHAT_VLLM_MODEL=<served-name>
-```
-
-### 4.5 스모크
-
-```bash
-cd ai-service
-python scripts/smoke_secure_rag_e2e.py
-```
-
-### 4.6 학습 (승인 후)
-
-```bash
-python train_pipeline.py
-python train_reg_pipeline.py
-python train_residual_pipeline.py
-```
-
----
-
-## 5. 코드 맵
-
-| 파일 | 역할 |
-|------|------|
-| `ai-service/agent/rag_engine.py` | hybrid · diversify rerank |
-| `ai-service/agent/secure_llm/graph.py` | LangGraph retrieve/gate/generate |
-| `ai-service/agent/secure_llm/prompts.py` | 시스템 프롬프트 · `[SYS_RAG_EMPTY_RESULT]` · 출처 |
+| `frontend/src/app/(shell)/security/page.tsx` | 오버레이 열고 `/main`으로 보냄 |
+| `frontend/src/components/chat/SecurityChatbot.tsx` | 보안 챗 UI (SSE + GET messages 폴링) |
+| `frontend/src/api/securityChatApi.ts` | `POST /api/security-chat` · `/stream` |
+| `frontend/src/components/chat/GlobalChatbot.tsx` | 플로팅 · 일반/보안 탭 |
+| `backend/src/services/securityGate.ts` | 키워드 게이트 |
+| `backend/src/routes/securityChat.ts` | 보안 프록시 |
+| `ai-service/agent/security_queue_store.py` | `USER_SECURITY_*` |
+| `ai-service/scripts/run_security_worker.py` | PC 워커 |
+| `scripts/security-pc.ps1` | `npm run security-pc` (`:8001` 확인 · 선택 `-L 3306`/`6333` · 워커) |
+| `ai-service/agent/secure_llm/` | 워커가 쓰는 LangGraph · vLLM |
 | `ai-service/agent/api_llm/` | 일반 챗 · Public/Confidential RAG |
-| `ai-service/ingest_secure.py` | Qdrant + BM25 재구축 |
-| `frontend/.../SecurityChatbot.tsx` | 보안 UI · 칩 · 패널 |
-| `frontend/.../GlobalChatbot.tsx` | 일반 챗 · Maximize→보안 |
+
+코드 경로 표: [`important-paths.md`](./important-paths.md)
 
 ---
 
-## 6. 관련 문서
+## 4. 기동
 
-- [`secure-rag.md`](./secure-rag.md) — RAG 스키마·가드레일·스모크  
-- [`vllm-setup.md`](./vllm-setup.md) — 로컬 LLM 기동  
-- [`security-chat-skeleton.md`](./security-chat-skeleton.md) — 보안 채널 골격  
-- [`ai-service/README.md`](../../ai-service/README.md) — ML·스택·실행  
-- [`docs/work-log/2026-08-01.md`](../work-log/2026-08-01.md) — 당일 패치 일지  
+루트 README [로컬 실행](../../README.md#로컬-실행--챗봇-터미널-3개) · 포트·Qdrant: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md)
+
+- CWD는 항상 `ai-service/` (워커 스크립트는 루트 `.env`를 읽음)
+- Health: `GET http://127.0.0.1:8800/health` · OpenAPI: `:8800/docs`
+- ingest·스모크: [`secure-rag.md`](./secure-rag.md)
+- env 표: [`LLM 튜닝.md`](./LLM%20튜닝.md) §4
+- 학습(승인 후): `train_pipeline.py` · `train_reg_pipeline.py` · `train_residual_pipeline.py`

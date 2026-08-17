@@ -1,0 +1,91 @@
+---
+description: KDT-Project 전체 룰 (구조·문서·실행 승인·DB·프로필)
+alwaysApply: true
+---
+# 전체 룰 (모노레포)
+
+적용: `frontend` / `backend` / `ai-service` 및 루트 `docs/` · 에이전트 설정.
+
+사람용 목록: [`docs/references/agent-rules-and-skills.md`](docs/references/agent-rules-and-skills.md)  
+방향: [`docs/direction.md`](docs/direction.md) · 문서 목록: [`docs/catalog.md`](docs/catalog.md)
+
+프론트 UI(반응형·SPC Grafana)는 [`frontend-ui.mdc`](frontend-ui.mdc) (해당 파일 glob).
+
+---
+
+## 구조 · 범위
+
+- Preserve the existing project structure and TypeScript compatibility.
+- Keep page, component, and API responsibilities clearly separated.
+- Do not add, remove, or refactor features outside the requested scope.
+- Never store API keys, credentials, or other secrets in the repository.
+- 모노레포 루트 `.env`만 사용 · 시크릿 커밋 금지.
+
+---
+
+## 문서 워크플로
+
+- 작업 시작 전 `docs/direction.md`를 읽는다.
+- README(루트)에는 상세 변경을 쓰지 않는다. 날짜별 상세는 `docs/work-log/YYYY-MM-DD.md`.
+- 사람용 마크다운(설명·일지·명세)은 **`docs/`만**. 패키지 README는 `docs/packages.md` 포인터만 둔다.
+- 규약·프롬프트·로직 제어는 원래 자리: `AGENTS.md` · `.cursor/rules` · `docs/prompts/`.
+- **새 할 일 계획은 쓰지 않는다** (`docs/plans/` 사용 종료). 구현 기록은 `docs/work-log/`, 동작 명세는 `docs/references/`, 재사용 문장은 `docs/prompts/`.
+- 사용자가 「정리해줘 / work-log / direction 갱신」이라고 하면 위 위치에 세부 기록한다.
+- 문서 목록 SSOT: `docs/catalog.md`.
+
+---
+
+## 실행 전 승인
+
+설치·학습·테스트·장시간 명령은 **사용자 승인 후에만** 실행한다.
+
+반드시 묻기:
+
+- 패키지 설치 (`pip`, `npm`, `pnpm`, `yarn` 등)
+- 모델 학습·Optuna·재학습 (`train_pipeline.py` 등)
+- 테스트 실행 (단위·통합·스모크·`predict` 검증 포함)
+- 장시간·비용이 큰 명령 (프로덕션 빌드, 대규모 다운로드 등)
+
+절차: 무엇을/왜/예상 시간을 짧게 보고 → 승인 대기 → 승인된 범위만 실행.
+
+승인 없이 해도 되는 것: 코드·문서·룰 작성·수정, 읽기 전용 조사.
+
+타입체크·lint·프로덕션 빌드는 **사용자가 실행을 승인한 뒤에만**.
+
+### 설치 후 기술 스택 갱신 (필수)
+
+| 설치 위치 | 갱신할 문서 |
+|-----------|----------------|
+| `frontend/` | 루트 `README.md` 「기술 스택 · frontend」 |
+| `backend/` | 루트 `README.md` 「기술 스택 · backend」 |
+| `ai-service/` | 루트 `README.md` 「기술 스택 · ai-service」 |
+
+패키지 역할·단독 기동은 `docs/packages.md`. `package.json` / `requirements.txt`의 **직접 의존성**은 루트 README 기술 스택에 이름 단위로 적는다. 상세 설치 일화는 `docs/work-log/`.
+
+---
+
+## DB 위치
+
+1. **모든 DB 관련 산출물**은 저장소 루트 `DB/` 아래. MariaDB DDL: `DB/schema.sql` 등. 런타임 SQLite: `DB/data/*.sqlite`.
+2. 새로 만드는 스키마/SQLite도 `DB/` 또는 `DB/data/`. `backend/data`, `ai-service/DB` 등에 **새로** 두지 않는다.
+3. 예외가 필요하면 루트 `NEW DB/` 또는 사용자 승인.
+4. 시각 ERD 기준 DDL은 `DB/schema.sql`. `ai-service/DB/` 잔여 파일은 레거시.
+
+백엔드·DB·API 문서를 `docs/references/`에 쓸 때:
+
+- mermaid `erDiagram`을 **반드시** 포함하고, `DB/schema.sql` **전체** 테이블을 그린다 (관련 테이블만 그리지 않음).
+- 별도 `*-erd.md`는 사용자가 요청하기 전에는 만들지 않는다.
+- FE 수정은 사용자가 명시하지 않으면 범위에 넣지 않는다.
+
+---
+
+## 내 정보(개인정보) UX
+
+1. 헤더 「내 정보」는 `/setting#personal`로 가지 않는다.
+2. 모달: `frontend/src/components/layout/PersonalInfoModal.tsx`, 진입점 `UserAuthMenu.tsx`.
+3. `/setting`은 시스템 환경만 (폰트·테마·새로고침·알림·제어 한계치). 개인정보 섹션을 다시 넣지 않는다.
+4. API: `GET/PUT /api/auth/profile`.
+5. 편집 가능: 이메일·연락처·비밀번호. 아이디·성명은 읽기 전용.
+6. 저장 후 `saveAuthSession` + `AUTH_CHANGED_EVENT`.
+
+기록: `docs/references/login-auth-tech-stack.md`.

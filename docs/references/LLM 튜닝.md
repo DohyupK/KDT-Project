@@ -1,10 +1,8 @@
 # LLM · Secure RAG 튜닝 총정리
 
-최종 갱신: 2026-08-03  
-**코드 SSOT:** `ai-service/agent/*` · `ai-service/app/main.py` · `ai-service/ingest_secure.py`  
-본 문서는 **현재 코드와 일치**하는 세팅·설정·기법·적용 코드를 한곳에 둔다.
-
-연관: [`secure-rag.md`](./secure-rag.md) · [`security-chatbot-guide.md`](./security-chatbot-guide.md) · [`ai-service-feature-catalog.md`](./ai-service-feature-catalog.md) · [`direction.md`](../direction.md) · [`work-log/2026-08-02.md`](../work-log/2026-08-02.md)
+최종 갱신: 2026-08-15  
+**숫자·env·모듈 SSOT.** 코드: `ai-service/agent/*` · `app/main.py` · `ingest_secure.py`  
+이용·라우팅: [`security-chatbot-guide.md`](./security-chatbot-guide.md) · ingest·가드레일·스모크: [`secure-rag.md`](./secure-rag.md)
 
 ---
 
@@ -46,25 +44,9 @@
 
 ---
 
-## 2. 엔드투엔드 경로
+## 2. 경로
 
-```text
-FE SecurityChatbot
-  → Express /api/security-chat/stream  (± JSON /api/security-chat)
-    → ai-service /security-chat/stream
-      → compose_secure[_stream]
-           · MariaDB 단기 히스토리 · prior_sources · semantic prune
-      → analytics? → Polars csv_lake (실패 시 RAG)
-      → node_retrieve (Hybrid)
-      → gate → generate | no_docs
-      → finalize_reply_sources ([SYS_RAG_EMPTY_RESULT])
-```
-
-| API | 역할 |
-|-----|------|
-| `POST /security-chat` | JSON · 스모크 |
-| `POST /security-chat/stream` | SSE · UI 기본 |
-| Express 프록시 | disconnect abort · 레거시 store는 done/replace만 |
+라우팅·API: [`security-chatbot-guide.md`](./security-chatbot-guide.md). 그래프 노드는 §6.
 
 ---
 
@@ -158,7 +140,7 @@ FE SecurityChatbot
 | 메타 기본 | `category=SOP`, `security_level=internal` |
 | 클린 재빌드 | `python scripts/rebuild_secure_rag_clean.py` |
 
-**BM25 반영:** 워처 자동 ingest → `reload_bm25()` (재시작 불필요). CLI `ingest_secure.py` → **ai-service 재시작**.
+**BM25 반영:** 워처 자동 ingest → `reload_bm25()` (재시작 불필요). CLI `ingest_secure.py` → **ai-service 재시작**. CLI는 상시 실행이 아님 · 기동 구분 [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) §6.
 
 ---
 
@@ -257,14 +239,7 @@ SSE는 동일 노드를 **수동 호출** (컴파일 그래프와 계약 동일)
 
 ## 7. 운영 체크리스트
 
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-cd ai-service
-python scripts/rebuild_secure_rag_clean.py   # CLI → 이후 서버 재시작
-uvicorn app.main:app --host 127.0.0.1 --port 8800
-# 로그: logs/ai-service.log
-# 워처 ingest 시: [secure-rag] bm25 reloaded n=...
-```
+Qdrant·포트: [`documents-watcher-qdrant.md`](./documents-watcher-qdrant.md) · ingest·스모크: [`secure-rag.md`](./secure-rag.md)
 
 검증: 슬러리 SOP · `그럼 EDA…`(확장 오탐 없음) · 통계→analytics/RAG · SYS→replace · soft_fallback `max_score` · 핫리로드 로그.
 
@@ -287,27 +262,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8800
 
 ---
 
-## 9. 다음 할 일 (제안)
+## 9. 제약
 
-보안 RAG·SSE·analytics·운영 보완까지 로드맵 핵심은 **완료**. 아래는 [`direction.md`](../direction.md) + 제품 관점 우선순위.
-
-### P0 — 품질·운영 검증 (바로 가능)
-
-1. **E2E 스모크:** Maximize / 보안 챗에서 SSE · soft_fallback `max_score` · 워처 핫리로드 로그 확인  
-2. **`csv_lake`에 실 CSV** 올려 analytics 집계 경로 실측 (빈 lake면 항상 RAG fallback)  
-3. **Login/`user_id`:** 멀티턴 MariaDB가 로그인 유저와 맞는지 점검  
-
-### P1 — 모델·데이터
-
-4. **TS 불량률 모델** — 기상 CSV 확보 후 학습·registry 헤드  
-5. **analytics ↔ clf registry** (선택) — 집계 결과를 `fillThreshold` 없이 안내만, 또는 별도 predict 도구 연동 설계  
-
-### P2 — 제품·UX
-
-6. outcome/control 수동 입력 UX · MES 연동은 이후  
-7. 일반 챗 Auto 티어·단가 카탈로그 정리 (보안과 분리 유지)
-
-### 하지 말 것 (당분간)
-
-- `fillThreshold` 개명 · 보안 채널 클라우드 폴백 · 가짜 CSV/outcome  
-- Guardrail C/D · Soft Fallback · SSE 버퍼 축소/삭제  
+- `fillThreshold` 개명 · 보안 채널 클라우드 폴백 · 가짜 CSV/outcome 금지  
+- Guardrail C/D · Soft Fallback · SSE 버퍼 축소/삭제 금지  

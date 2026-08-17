@@ -19,7 +19,7 @@ const EXPECTED = [
 async function colsOrdered(): Promise<string[]> {
   const rows = await query<{ COLUMN_NAME: string }[]>(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
      ORDER BY ORDINAL_POSITION`,
   )
   return rows.map((r) => r.COLUMN_NAME)
@@ -30,27 +30,27 @@ async function main() {
 
   const fks = await query<{ CONSTRAINT_NAME: string }[]>(
     `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
        AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = 'fk_handover_issue'`,
   )
   if (fks.length) {
-    await query('ALTER TABLE handover_history DROP FOREIGN KEY fk_handover_issue')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP FOREIGN KEY fk_handover_issue')
     console.log('DROPPED_FK fk_handover_issue')
   }
 
   const idx = await query<{ INDEX_NAME: string }[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'handover_history'
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'HANDOVER_HISTORY'
        AND INDEX_NAME = 'idx_handover_issue' LIMIT 1`,
   )
   if (idx.length) {
-    await query('ALTER TABLE handover_history DROP INDEX idx_handover_issue')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP INDEX idx_handover_issue')
     console.log('DROPPED_INDEX idx_handover_issue')
   }
 
   const set = new Set(await colsOrdered())
   if (set.has('issue_id')) {
-    await query('ALTER TABLE handover_history DROP COLUMN issue_id')
+    await query('ALTER TABLE HANDOVER_HISTORY DROP COLUMN issue_id')
     console.log('DROPPED issue_id')
   }
 

@@ -16,9 +16,9 @@ const rows = await query<
 >(
   `SELECT a.lot_id, a.probability, a.spc_status, a.risk_level, j.residual_li,
           r.summary, r.drivers_json
-   FROM analysis_lots a
-   LEFT JOIN judgment_lots j ON j.lot_id = a.lot_id
-   LEFT JOIN lot_recommended_actions r ON r.lot_id = a.lot_id
+   FROM ANALYSIS_LOTS a
+   LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = a.lot_id
+   LEFT JOIN LOT_RECOMMENDED_ACTIONS r ON r.lot_id = a.lot_id
    WHERE a.lot_id = ? LIMIT 1`,
   [lotId],
 )
@@ -34,7 +34,7 @@ const lot = await query<
   }[]
 >(
   `SELECT d50, d90, metal_impurity, humidity, sintering_temp, lithium_input
-   FROM lots WHERE id = ? LIMIT 1`,
+   FROM LOTS WHERE id = ? LIMIT 1`,
   [lotId],
 )
 

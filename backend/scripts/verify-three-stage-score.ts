@@ -10,8 +10,8 @@ async function pickLotId(explicit?: string): Promise<string> {
   if (explicit) return explicit
   const rows = await query<Array<{ id: string }>>(
     `SELECT l.id
-     FROM lots l
-     LEFT JOIN lot_results lr ON lr.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN LOT_RESULTS lr ON lr.lot_id = l.id
      WHERE l.id <> 'LOT-SYS-HANDOVER'
        AND (
          lr.lot_id IS NULL
@@ -33,7 +33,7 @@ async function snapshot(lotId: string) {
   const lr = await query<
     Array<{ quality_defect: number | null; residual_li: number | null }>
   >(
-    `SELECT quality_defect, residual_li FROM lot_results WHERE lot_id = ? LIMIT 1`,
+    `SELECT quality_defect, residual_li FROM LOT_RESULTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   const j = await query<
@@ -45,7 +45,7 @@ async function snapshot(lotId: string) {
     }>
   >(
     `SELECT quality_defect, residual_li, capacity, probability
-     FROM judgment_lots WHERE lot_id = ? LIMIT 1`,
+     FROM JUDGMENT_LOTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   const a = await query<
@@ -55,7 +55,7 @@ async function snapshot(lotId: string) {
       scored_at: Date | string | null
     }>
   >(
-    `SELECT probability, risk_level, scored_at FROM analysis_lots WHERE lot_id = ? LIMIT 1`,
+    `SELECT probability, risk_level, scored_at FROM ANALYSIS_LOTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   return { lr: lr[0] ?? null, j: j[0] ?? null, a: a[0] ?? null }

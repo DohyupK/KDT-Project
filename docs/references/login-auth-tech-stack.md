@@ -45,7 +45,7 @@
 | UI | 모달 팝업 (`PersonalInfoModal`). `/setting`으로 이동하지 않음 |
 | API | `GET/PUT /api/auth/profile` |
 | 편집 | 이메일·연락처·비밀번호 / 아이디·성명 읽기 전용 |
-| 설정 페이지 | 폰트·테마·새로고침·알림·제어 한계치만 |
+| 설정 페이지 | 폰트·테마·새로고침·알림·LLM 키. 공정 한계치는 API만 (`/api/settings/control-bounds`) |
 
 ## 백엔드 패키지 (`backend/package.json`)
 
@@ -127,7 +127,7 @@
 `package.json`에만 있고 `npm install`을 안 한 경우(예: auth 커밋 pull 직후) 위 오류가 납니다.
 
 ```powershell
-cd C:\Projects\KDT-Project\backend
+cd backend
 npm install
 npm run dev
 ```
@@ -149,6 +149,6 @@ npm run dev
 | 2026-07-28 | AWS Lightsail MariaDB 연동: 로컬 루트 `.env`의 `DB_HOST` 등 (Git 제외). 절차는 `docs/guides/login-ubuntu-mariadb.md`. |
 | 2026-07-28 | `backend/src/db/connection.ts` 커넥션 풀을 lazy 초기화로 변경 — `dotenv` 로드 후 `DB_*` 반영 (ESM import 순서 이슈 방지). |
 | 2026-07-29 | Setting 개인 설정: 테이블 `user_settings` · API `GET\|PUT /api/auth/settings`, `POST /api/auth/settings/reset` (JWT). 공정 한계치는 기존 `GET\|PUT /api/settings/control-bounds` + `control_bounds.json` 유지. |
-| 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/profile-personal-info-modal.mdc`. |
+| 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/kdt-project.mdc`. |
 | 2026-08-13 | 헤더 알림 팝오버 「이메일 자동 발신」 토글. `GET\|PUT /api/auth/settings`의 `emailCheck` ↔ `user_settings.email_check` (`O`/`X`, 로그인 계정만 UPDATE). |
 | 2026-08-14 | 16GB 앱 서버 + 로컬 GPU 터널. `DB_HOST`는 같은 기계면 127.0.0.1. Grafana는 `NEXT_PUBLIC_GRAFANA_HOST`. 절차 [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md). |

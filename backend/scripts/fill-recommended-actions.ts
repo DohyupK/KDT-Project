@@ -22,9 +22,9 @@ async function rewriteSummariesFromStoredDrivers(): Promise<number> {
     }[]
   >(
     `SELECT r.lot_id, r.drivers_json, a.probability, a.risk_level, j.residual_li
-     FROM lot_recommended_actions r
-     LEFT JOIN analysis_lots a ON a.lot_id = r.lot_id
-     LEFT JOIN judgment_lots j ON j.lot_id = r.lot_id
+     FROM LOT_RECOMMENDED_ACTIONS r
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = r.lot_id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = r.lot_id
      WHERE r.lot_id <> 'LOT-SYS-HANDOVER'`,
   )
   let updated = 0
@@ -37,7 +37,7 @@ async function rewriteSummariesFromStoredDrivers(): Promise<number> {
         riskLevel: row.risk_level,
       },
     )
-    await query(`UPDATE lot_recommended_actions SET summary = ? WHERE lot_id = ?`, [
+    await query(`UPDATE LOT_RECOMMENDED_ACTIONS SET summary = ? WHERE lot_id = ?`, [
       summary.slice(0, 1024),
       row.lot_id,
     ])
@@ -63,7 +63,7 @@ async function main() {
   let ids = lotIds.length > 0 ? lotIds : undefined
   if (ids == null && limit != null && Number.isFinite(limit) && limit > 0) {
     const rows = await query<{ lot_id: string }[]>(
-      `SELECT lot_id FROM analysis_lots
+      `SELECT lot_id FROM ANALYSIS_LOTS
        WHERE lot_id <> 'LOT-SYS-HANDOVER'
        ORDER BY lot_id DESC
        LIMIT ?`,

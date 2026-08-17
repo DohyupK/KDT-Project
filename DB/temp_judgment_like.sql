@@ -1,6 +1,6 @@
--- Scratch table mirroring judgment_lots columns (no FK).
+-- Scratch table mirroring JUDGMENT_LOTS columns (no FK).
 -- Used for voting reconnect verification / batch score dry-run.
--- Does NOT modify judgment_lots.
+-- Does NOT modify JUDGMENT_LOTS.
 
 CREATE TABLE IF NOT EXISTS `temp` (
   lot_id          VARCHAR(64)  NOT NULL PRIMARY KEY,

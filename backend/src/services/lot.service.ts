@@ -116,16 +116,16 @@ function rowToFeatures(row: LotRow): ProcessFeatures {
   }
 }
 
-/** Process on `lots` + scores on `analysis_lots` + residual on `judgment_lots`. */
+/** Process on `LOTS` + scores on `ANALYSIS_LOTS` + residual on `JUDGMENT_LOTS`. */
 const LOT_SELECT = `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at,
   l.d50, l.d90, l.metal_impurity, l.lithium_input,
   l.additive_ratio, l.process_time, l.sintering_temp, l.humidity, l.tank_pressure, l.operator_id,
   0 AS quality_defect, j.residual_li AS residual_lithium,
   COALESCE(j.probability, a.probability) AS probability,
   a.spc_status, a.risk_level, a.risk_reason
-  FROM lots l
-  LEFT JOIN analysis_lots a ON a.lot_id = l.id
-  LEFT JOIN judgment_lots j ON j.lot_id = l.id`
+  FROM LOTS l
+  LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+  LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id`
 
 export async function getLotById(lotId: string): Promise<LotDto> {
   const rows = await query<LotRow[]>(`${LOT_SELECT} WHERE l.id = ? LIMIT 1`, [lotId])
@@ -144,7 +144,7 @@ export type DailyProbabilityKpi = {
   defectRate: number | null
 }
 
-/** Today 00:00~ · analysis_lots.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
+/** Today 00:00~ · ANALYSIS_LOTS.probability vs DEFECT_JUDGE_THRESHOLD (Main KPI). */
 export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
   const thr = DEFECT_JUDGE_THRESHOLD
   const rows = await query<
@@ -153,8 +153,8 @@ export async function getDailyProbabilityKpi(): Promise<DailyProbabilityKpi> {
     `SELECT COUNT(*) AS total,
        SUM(CASE WHEN a.probability >= ? THEN 1 ELSE 0 END) AS defect_count,
        SUM(CASE WHEN a.probability <  ? THEN 1 ELSE 0 END) AS good_count
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE l.\`timestamp\` >= CURDATE()
        AND a.probability IS NOT NULL`,
     [thr, thr],
@@ -214,8 +214,8 @@ function toDateOnlyIso(d: Date): string {
 /**
  * Period Q-Cost counts + costs.
  * Default window: current calendar month (prevention is monthly fixed).
- * - Appraisal tiers: analysis_lots.risk_level
- * - Internal defects: judgment_lots.quality_defect = 1
+ * - Appraisal tiers: ANALYSIS_LOTS.risk_level
+ * - Internal defects: JUDGMENT_LOTS.quality_defect = 1
  * - External leaks: 0 (no column yet)
  */
 export async function getQCostSummary(opts: {
@@ -246,8 +246,8 @@ export async function getQCostSummary(opts: {
        SUM(CASE WHEN a.risk_level = '안정' THEN 1 ELSE 0 END) AS stable_count,
        SUM(CASE WHEN a.risk_level = '주의' THEN 1 ELSE 0 END) AS warning_count,
        SUM(CASE WHEN a.risk_level = '심각' THEN 1 ELSE 0 END) AS critical_count
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE l.\`timestamp\` >= ?
        AND l.\`timestamp\` < ?`,
     [fromStr, toExclusiveStr],
@@ -255,8 +255,8 @@ export async function getQCostSummary(opts: {
 
   const defectRows = await query<{ c: number | null }[]>(
     `SELECT COUNT(*) AS c
-     FROM judgment_lots j
-     INNER JOIN lots l ON l.id = j.lot_id
+     FROM JUDGMENT_LOTS j
+     INNER JOIN LOTS l ON l.id = j.lot_id
      WHERE j.quality_defect = 1
        AND l.\`timestamp\` >= ?
        AND l.\`timestamp\` < ?`,
@@ -320,8 +320,8 @@ export async function getRiskTop(opts: {
 
   const countRows = await query<{ c: number }[]>(
     `SELECT COUNT(*) AS c
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE ${RISK_TOP_WHERE}`,
   )
   const total = Number(countRows[0]?.c ?? 0)
@@ -417,7 +417,7 @@ export async function importLotsFromCsv(csvPath?: string): Promise<{ imported: n
     const recordedAt = recordedRaw.replace('T', ' ').slice(0, 19)
 
     await query(
-      `INSERT INTO lots (
+      `INSERT INTO LOTS (
         id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
         process_time, sintering_temp, humidity, tank_pressure, operator_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -458,7 +458,7 @@ async function upsertAnalysisScore(
     spcChart === undefined ? undefined : JSON.stringify(spcChart ?? { metrics: [] })
   if (chartJson === undefined) {
     await query(
-      `INSERT INTO analysis_lots (
+      `INSERT INTO ANALYSIS_LOTS (
         lot_id, probability, spc_status, risk_level, risk_reason, scored_at
       ) VALUES (?, ?, ?, ?, ?, NOW())
       ON DUPLICATE KEY UPDATE
@@ -478,16 +478,16 @@ async function upsertAnalysisScore(
     return
   }
   await query(
-    `INSERT INTO analysis_lots (
+    `INSERT INTO ANALYSIS_LOTS (
       lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
     ) VALUES (?, ?, ?, ?, ?, ?, NOW())
-    ON DUPLICATE KEY UPDATE
-      probability = VALUES(probability),
-      spc_status = VALUES(spc_status),
-      risk_level = VALUES(risk_level),
-      risk_reason = VALUES(risk_reason),
-      spc_chart_json = VALUES(spc_chart_json),
-      scored_at = NOW()`,
+      ON DUPLICATE KEY UPDATE
+        probability = VALUES(probability),
+        spc_status = VALUES(spc_status),
+        risk_level = VALUES(risk_level),
+        risk_reason = VALUES(risk_reason),
+        spc_chart_json = COALESCE(ANALYSIS_LOTS.spc_chart_json, VALUES(spc_chart_json)),
+        scored_at = NOW()`,
     [
       lotId,
       scored.probability,
@@ -510,7 +510,7 @@ type LotResultsRow = {
 async function getLotResults(lotId: string): Promise<LotResultsRow | null> {
   const rows = await query<LotResultsRow[]>(
     `SELECT seq, lot_id, quality_defect, residual_li, measured_at
-     FROM lot_results WHERE lot_id = ? LIMIT 1`,
+     FROM LOT_RESULTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   return rows[0] ?? null
@@ -527,7 +527,7 @@ async function upsertLotResultsNullFill(
 
   const applyCoalesceUpdate = async () => {
     await query(
-      `UPDATE lot_results
+      `UPDATE LOT_RESULTS
        SET quality_defect = COALESCE(quality_defect, ?),
            residual_li = COALESCE(residual_li, ?),
            measured_at = COALESCE(measured_at, NOW())
@@ -550,12 +550,12 @@ async function upsertLotResultsNullFill(
       return getLotResults(lotId)
     }
     const maxRows = await query<{ m: number | null }[]>(
-      `SELECT MAX(seq) AS m FROM lot_results`,
+      `SELECT MAX(seq) AS m FROM LOT_RESULTS`,
     )
     const seq = Number(maxRows[0]?.m ?? 0) + 1 + attempt
     try {
       await query(
-        `INSERT INTO lot_results (seq, lot_id, quality_defect, residual_li, measured_at)
+        `INSERT INTO LOT_RESULTS (seq, lot_id, quality_defect, residual_li, measured_at)
          VALUES (?, ?, ?, ?, NOW())`,
         [seq, lotId, qd, res],
       )
@@ -571,7 +571,7 @@ async function upsertLotResultsNullFill(
 
 
 /**
- * Prefer lot_results residual/qd for judgment write inputs.
+ * Prefer LOT_RESULTS residual/qd for judgment write inputs.
  */
 function judgmentInputsFromLotResults(
   voted: LotScoreResult,
@@ -608,14 +608,14 @@ type JudgmentRow = {
 async function getJudgment(lotId: string): Promise<JudgmentRow | null> {
   const rows = await query<JudgmentRow[]>(
     `SELECT lot_id, quality_defect, capacity, residual_li, probability, spc
-     FROM judgment_lots WHERE lot_id = ? LIMIT 1`,
+     FROM JUDGMENT_LOTS WHERE lot_id = ? LIMIT 1`,
     [lotId],
   )
   return rows[0] ?? null
 }
 
 /**
- * 2nd pass: analysis_lots from judgment_lots (+ SPC label already on judgment.spc).
+ * 2nd pass: ANALYSIS_LOTS from JUDGMENT_LOTS (+ SPC label already on judgment.spc).
  */
 async function mergeScoreFromJudgment(
   j: JudgmentRow,
@@ -653,7 +653,7 @@ async function mergeScoreFromJudgment(
   return merged
 }
 
-/** When judgment is already filled, rebuild analysis_lots only (2nd pass). */
+/** When judgment is already filled, rebuild ANALYSIS_LOTS only (2nd pass). */
 export async function scoreAnalysisFromJudgment(lotId: string): Promise<boolean> {
   const j = await getJudgment(lotId)
   if (!j || j.probability == null || j.residual_li == null) return false
@@ -675,7 +675,7 @@ async function updateLotScore(
   if (seed) {
     const f = seed.features
     await query(
-      `INSERT INTO lots (
+      `INSERT INTO LOTS (
         id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
         process_time, sintering_temp, humidity, tank_pressure, operator_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -708,23 +708,23 @@ async function updateLotScore(
     )
   }
 
-  // Stage 1: lot_results NULL-fill (feeder measurements never overwritten)
+  // Stage 1: LOT_RESULTS NULL-fill (feeder measurements never overwritten)
   const lr = await upsertLotResultsNullFill(
     lotId,
     scored.quality_defect,
     scored.residual_lithium,
   )
 
-  // Stage 2: judgment_lots from lot_results (+ voting capacity/probability)
+  // Stage 2: JUDGMENT_LOTS from LOT_RESULTS (+ voting capacity/probability)
   const jIn = judgmentInputsFromLotResults(scored, lr)
   await query(
-    `INSERT INTO judgment_lots (lot_id, quality_defect, capacity, residual_li, probability, spc)
+    `INSERT INTO JUDGMENT_LOTS (lot_id, quality_defect, capacity, residual_li, probability, spc)
      VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       quality_defect = COALESCE(judgment_lots.quality_defect, VALUES(quality_defect)),
-       capacity = COALESCE(judgment_lots.capacity, VALUES(capacity)),
-       residual_li = COALESCE(judgment_lots.residual_li, VALUES(residual_li)),
-       probability = COALESCE(judgment_lots.probability, VALUES(probability)),
+       quality_defect = COALESCE(JUDGMENT_LOTS.quality_defect, VALUES(quality_defect)),
+       capacity = COALESCE(JUDGMENT_LOTS.capacity, VALUES(capacity)),
+       residual_li = COALESCE(JUDGMENT_LOTS.residual_li, VALUES(residual_li)),
+       probability = COALESCE(JUDGMENT_LOTS.probability, VALUES(probability)),
        spc = VALUES(spc)`,
     [
       lotId,
@@ -736,19 +736,19 @@ async function updateLotScore(
     ],
   )
 
-  // Stage 3: analysis_lots from judgment (2nd pass) + scored_at (+ optional chart)
+  // Stage 3: ANALYSIS_LOTS from judgment (2nd pass) + scored_at (+ optional chart)
   const j = await getJudgment(lotId)
   const analysisScore = j
     ? await mergeScoreFromJudgment(j, scored.spc_status)
     : scored
-  await upsertAnalysisScore(lotId, analysisScore)
+  await upsertAnalysisScore(lotId, analysisScore, spcChart)
 }
 
 /** Latest N lot ids by production time (for targeted rescoring). */
 export async function getLatestLotIds(limit: number): Promise<string[]> {
   const n = Math.max(1, Math.floor(limit))
   const rows = await query<Array<{ id: string }>>(
-    `SELECT id FROM lots ORDER BY \`timestamp\` DESC, id DESC LIMIT ?`,
+    `SELECT id FROM LOTS ORDER BY \`timestamp\` DESC, id DESC LIMIT ?`,
     [n],
   )
   return rows.map((r) => String(r.id))
@@ -803,10 +803,10 @@ const LOT_SCORE_FEATURE_SELECT = `id AS lot_id, \`timestamp\` AS recorded_at, d5
   0 AS quality_defect`
 
 /**
- * Re-score using operational `lots` SSOT (3-stage):
- * 1) /predict-voting → lot_results NULL-fill (qd/residual)
- * 2) judgment_lots from lot_results + voting capacity/prob
- * 3) analysis_lots from judgment (combineLotScore + SPC / scored_at)
+ * Re-score using operational `LOTS` SSOT (3-stage):
+ * 1) /predict-voting → LOT_RESULTS NULL-fill (qd/residual)
+ * 2) JUDGMENT_LOTS from LOT_RESULTS + voting capacity/prob
+ * 3) ANALYSIS_LOTS from judgment (combineLotScore + SPC / scored_at)
  */
 export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
   scored: number
@@ -825,7 +825,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
 
   const lotRows = await query<LotScoreSourceRow[]>(
     `SELECT ${LOT_SCORE_FEATURE_SELECT}
-     FROM lots
+     FROM LOTS
      ORDER BY \`timestamp\` ASC, id ASC`,
   )
 
@@ -858,7 +858,7 @@ export async function scoreAllLots(options: ScoreLotsOptions = {}): Promise<{
 
     const inFilter = idFilter == null || idFilter.has(row.lot_id)
     if (!inFilter) continue
-    // Handover placeholder lot — not process data; never write analysis_lots.
+    // Handover placeholder lot — not process data; never write ANALYSIS_LOTS.
     if (row.lot_id === 'LOT-SYS-HANDOVER') continue
     if (considered < offset) {
       considered++
@@ -926,7 +926,7 @@ export type RefreshSpcRiskOptions = {
 
 /**
  * Recompute SPC + risk_level from existing AI probability/residual (no ai-service call).
- * Also writes analysis_lots.spc_chart_json (dashboard I-chart snapshot).
+ * Also writes ANALYSIS_LOTS.spc_chart_json (dashboard I-chart snapshot).
  */
 export async function refreshSpcAndRiskScores(
   options: RefreshSpcRiskOptions = {},
@@ -963,9 +963,9 @@ export async function refreshSpcAndRiskScores(
             l.tank_pressure, l.operator_id, 0 AS quality_defect,
             a.probability AS a_probability, a.spc_status AS a_spc, a.risk_level AS a_risk,
             j.residual_li AS j_residual, j.spc AS j_spc
-     FROM lots l
-     LEFT JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN judgment_lots j ON j.lot_id = l.id
+     FROM LOTS l
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
      ORDER BY l.\`timestamp\` ASC, l.id ASC`,
   )
 
@@ -1006,7 +1006,7 @@ export async function refreshSpcAndRiskScores(
 
     const prob = row.a_probability != null ? Number(row.a_probability) : null
     if (prob == null || !Number.isFinite(prob)) {
-      await query(`UPDATE analysis_lots SET spc_chart_json = ? WHERE lot_id = ?`, [
+      await query(`UPDATE ANALYSIS_LOTS SET spc_chart_json = ? WHERE lot_id = ?`, [
         chartJson,
         row.lot_id,
       ])
@@ -1037,7 +1037,7 @@ export async function refreshSpcAndRiskScores(
 
     if (spcChanged || riskChanged) {
       await query(
-        `INSERT INTO analysis_lots (
+        `INSERT INTO ANALYSIS_LOTS (
            lot_id, probability, spc_status, risk_level, risk_reason, spc_chart_json, scored_at
          ) VALUES (?, ?, ?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE
@@ -1058,7 +1058,7 @@ export async function refreshSpcAndRiskScores(
       updated++
       chartsWritten++
     } else {
-      await query(`UPDATE analysis_lots SET spc_chart_json = ? WHERE lot_id = ?`, [
+      await query(`UPDATE ANALYSIS_LOTS SET spc_chart_json = ? WHERE lot_id = ?`, [
         chartJson,
         row.lot_id,
       ])
@@ -1067,7 +1067,7 @@ export async function refreshSpcAndRiskScores(
     }
 
     if (row.j_spc !== scored.spc_status) {
-      await query(`UPDATE judgment_lots SET spc = ? WHERE lot_id = ?`, [
+      await query(`UPDATE JUDGMENT_LOTS SET spc = ? WHERE lot_id = ?`, [
         scored.spc_status,
         row.lot_id,
       ])
@@ -1086,7 +1086,7 @@ const COMPLETE_PROCESS_SQL_L = `l.d50 IS NOT NULL AND l.d90 IS NOT NULL AND l.me
   AND l.sintering_temp IS NOT NULL AND l.humidity IS NOT NULL AND l.tank_pressure IS NOT NULL`
 
 /**
- * Create open issues when analysis_lots is 심각.
+ * Create open issues when ANALYSIS_LOTS is 심각.
  * issue_content: temporary from risk_reason (2차 API_LLM 요약은 후속).
  */
 export async function ensureIssuesForRiskLots(): Promise<number> {
@@ -1094,9 +1094,9 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     { lot_id: string; recorded_at: Date | string; risk_level: string; risk_reason: string | null }[]
   >(
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.risk_reason
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
-     LEFT JOIN issues i ON i.lot_id = l.id AND i.completed_at IS NULL
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
+     LEFT JOIN ISSUES i ON i.lot_id = l.id AND i.completed_at IS NULL
      WHERE a.risk_level = '심각'
        AND i.issue_id IS NULL`,
   )
@@ -1104,7 +1104,7 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
   let created = 0
   for (const lot of lots) {
     const existing = await query<{ c: number }[]>(
-      `SELECT COUNT(*) AS c FROM issues
+      `SELECT COUNT(*) AS c FROM ISSUES
        WHERE lot_id = ? AND completed_at IS NULL`,
       [lot.lot_id],
     )
@@ -1113,7 +1113,7 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     const createdAt = formatDateTime(lot.recorded_at)
     const day = createdAt.slice(2, 10).replace(/-/g, '')
     const last = await query<{ issue_id: string }[]>(
-      `SELECT issue_id FROM issues
+      `SELECT issue_id FROM ISSUES
        WHERE issue_id REGEXP ?
        ORDER BY issue_id DESC
        LIMIT 1`,
@@ -1138,7 +1138,7 @@ export async function ensureIssuesForRiskLots(): Promise<number> {
     }
 
     await query(
-      `INSERT INTO issues (issue_id, lot_id, issue_content, created_at)
+      `INSERT INTO ISSUES (issue_id, lot_id, issue_content, created_at)
        VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE lot_id = lot_id`,
       [issueId, lot.lot_id, issueContent.slice(0, 255), createdAt],

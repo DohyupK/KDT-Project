@@ -29,9 +29,9 @@ const DEFAULT_SQLITE = path.resolve(__dirname, '../../../DB/data/chat.sqlite')
 let sqliteDb: DatabaseSync | null = null
 
 function storeMode(): ChatStoreMode {
-  const raw = (process.env.CHAT_STORE || 'sqlite').trim().toLowerCase()
+  const raw = (process.env.CHAT_STORE || 'mariadb').trim().toLowerCase()
   if (raw === 'memory' || raw === 'mariadb' || raw === 'sqlite') return raw
-  return 'sqlite'
+  return 'mariadb'
 }
 
 export function getChatStoreMode(): ChatStoreMode {
@@ -44,11 +44,11 @@ function getSqlite(): DatabaseSync {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   sqliteDb = new DatabaseSync(dbPath)
   sqliteDb.exec(`
-    CREATE TABLE IF NOT EXISTS chat_sessions (
+    CREATE TABLE IF NOT EXISTS CHAT_SESSIONS (
       id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE TABLE IF NOT EXISTS chat_messages (
+    CREATE TABLE IF NOT EXISTS CHAT_MESSAGES (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
       role TEXT NOT NULL,
@@ -56,10 +56,10 @@ function getSqlite(): DatabaseSync {
       mode TEXT,
       provider TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      FOREIGN KEY (session_id) REFERENCES CHAT_SESSIONS(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session
-      ON chat_messages(session_id, created_at);
+      ON CHAT_MESSAGES(session_id, created_at);
   `)
   return sqliteDb
 }
@@ -77,18 +77,18 @@ export async function ensureSession(sessionId: string | undefined | null): Promi
   if (mode === 'sqlite') {
     const db = getSqlite()
     if (sessionId) {
-      const row = db.prepare('SELECT id FROM chat_sessions WHERE id = ? LIMIT 1').get(sessionId)
+      const row = db.prepare('SELECT id FROM CHAT_SESSIONS WHERE id = ? LIMIT 1').get(sessionId)
       if (row) return sessionId
     }
     const id = randomUUID()
-    db.prepare('INSERT INTO chat_sessions (id) VALUES (?)').run(id)
+    db.prepare('INSERT INTO CHAT_SESSIONS (id) VALUES (?)').run(id)
     return id
   }
 
   return withConn(async (conn) => {
     if (sessionId) {
       const rows = await conn.query(
-        'SELECT id FROM chat_sessions WHERE id = ? LIMIT 1',
+        'SELECT id FROM CHAT_SESSIONS WHERE id = ? LIMIT 1',
         [sessionId],
       )
       if (Array.isArray(rows) && rows.length > 0) {
@@ -96,7 +96,7 @@ export async function ensureSession(sessionId: string | undefined | null): Promi
       }
     }
     const id = randomUUID()
-    await conn.query('INSERT INTO chat_sessions (id) VALUES (?)', [id])
+    await conn.query('INSERT INTO CHAT_SESSIONS (id) VALUES (?)', [id])
     return id
   })
 }
@@ -117,7 +117,7 @@ export async function loadRecentUserMessages(sessionId: string): Promise<string[
     const db = getSqlite()
     const rows = db
       .prepare(
-        `SELECT content FROM chat_messages
+        `SELECT content FROM CHAT_MESSAGES
          WHERE session_id = ? AND role = 'user'
          ORDER BY created_at DESC, id DESC
          LIMIT 20`,
@@ -128,7 +128,7 @@ export async function loadRecentUserMessages(sessionId: string): Promise<string[
 
   return withConn(async (conn) => {
     const rows = await conn.query(
-      `SELECT content FROM chat_messages
+      `SELECT content FROM CHAT_MESSAGES
        WHERE session_id = ? AND role = 'user'
        ORDER BY created_at DESC, id DESC
        LIMIT 20`,
@@ -167,7 +167,7 @@ export async function insertMessage(
   if (store === 'sqlite') {
     const db = getSqlite()
     db.prepare(
-      `INSERT INTO chat_messages (session_id, role, content, mode, provider)
+      `INSERT INTO CHAT_MESSAGES (session_id, role, content, mode, provider)
        VALUES (?, ?, ?, ?, ?)`,
     ).run(sessionId, role, content, mode ?? null, provider ?? null)
     return
@@ -175,7 +175,7 @@ export async function insertMessage(
 
   await withConn(async (conn) => {
     await conn.query(
-      `INSERT INTO chat_messages (session_id, role, content, mode, provider)
+      `INSERT INTO CHAT_MESSAGES (session_id, role, content, mode, provider)
        VALUES (?, ?, ?, ?, ?)`,
       [sessionId, role, content, mode ?? null, provider ?? null],
     )

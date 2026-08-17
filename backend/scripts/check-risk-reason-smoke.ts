@@ -5,7 +5,7 @@ const rows = await query<
   { lot_id: string; risk_level: string; spc_status: string | null; risk_reason: string | null }[]
 >(
   `SELECT lot_id, risk_level, spc_status, risk_reason
-   FROM analysis_lots
+   FROM ANALYSIS_LOTS
    WHERE lot_id <> ?
    ORDER BY lot_id ASC
    LIMIT 50`,

@@ -51,7 +51,7 @@ function formatDateTime(value: Date | string): string {
 
 async function nextIssueId(day: string): Promise<string> {
   const last = await query<{ issue_id: string }[]>(
-    `SELECT issue_id FROM issues
+    `SELECT issue_id FROM ISSUES
      WHERE issue_id REGEXP ?
      ORDER BY issue_id DESC LIMIT 1`,
     [`^ISS-${day}-[0-9]{3}$`],
@@ -71,13 +71,13 @@ async function main() {
     }[]
   >(
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.spc_status, a.risk_reason
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE a.risk_level = '심각'
        AND a.spc_status IN ('주의', '이탈')
        AND a.risk_reason IS NOT NULL AND TRIM(a.risk_reason) <> ''
        AND NOT EXISTS (
-         SELECT 1 FROM issues i WHERE i.lot_id = l.id AND i.completed_at IS NULL
+         SELECT 1 FROM ISSUES i WHERE i.lot_id = l.id AND i.completed_at IS NULL
        )
      ORDER BY l.\`timestamp\` DESC
      LIMIT 5`,
@@ -96,8 +96,8 @@ async function main() {
       }[]
     >(
       `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.spc_status, a.risk_reason
-       FROM lots l
-       INNER JOIN analysis_lots a ON a.lot_id = l.id
+       FROM LOTS l
+       INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
        WHERE a.risk_level = '심각'
          AND a.spc_status IN ('주의', '이탈')
        ORDER BY l.\`timestamp\` DESC
@@ -120,8 +120,8 @@ async function main() {
     }[]
   >(
     `SELECT l.id AS lot_id, l.\`timestamp\` AS recorded_at, a.risk_level, a.spc_status, a.risk_reason
-     FROM lots l
-     INNER JOIN analysis_lots a ON a.lot_id = l.id
+     FROM LOTS l
+     INNER JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
      WHERE a.risk_level = '심각'
        AND a.spc_status IN ('주의', '이탈')
      ORDER BY l.\`timestamp\` DESC
@@ -138,7 +138,7 @@ async function main() {
     const issueId = await nextIssueId(day)
 
     await query(
-      `INSERT INTO issues (issue_id, lot_id, issue_content, created_at)
+      `INSERT INTO ISSUES (issue_id, lot_id, issue_content, created_at)
        VALUES (?, ?, ?, ?)`,
       [issueId, lot.lot_id, text, createdAt],
     )

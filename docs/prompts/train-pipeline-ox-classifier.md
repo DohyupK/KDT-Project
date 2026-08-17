@@ -2,7 +2,7 @@
 
 아래를 Cursor / 코드 생성기에 붙여 사용한다.  
 데이터 계약: [cathode-clf-schema.md](../references/cathode-clf-schema.md)  
-확정 요약: [2026-07-22-ox-classifier-prompt.md](../plans/2026-07-22-ox-classifier-prompt.md)
+학습 방법: [model-training-methods.md](../references/model-training-methods.md)
 
 ---
 
@@ -21,7 +21,7 @@
 
 `predict()`에서는 파라미터 조절 제안 등 가상 환각(Hallucination) 데이터를 절대 생성하지 마십시오.
 본 모듈은 모노레포 `ai-service/` 에 둡니다. 실행 CWD는 `ai-service/` 입니다.
-CSV는 1단계 오프라인용이며, 추후 DB 로드로 교체합니다. 지금은 파일만 사용합니다.
+CSV는 오프라인 학습용이다. 파일만 사용한다.
 
 # =====================================================================
 # [1] 핵심 작업 (Core Mission)

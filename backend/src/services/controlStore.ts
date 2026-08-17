@@ -61,12 +61,12 @@ function storeMode(): ControlStoreMode {
   const raw = (
     process.env.CONTROL_STORE ||
     process.env.CHAT_STORE ||
-    'sqlite'
+    'mariadb'
   )
     .trim()
     .toLowerCase()
   if (raw === 'memory' || raw === 'mariadb' || raw === 'sqlite') return raw
-  return 'sqlite'
+  return 'mariadb'
 }
 
 export function getControlStoreMode(): ControlStoreMode {
@@ -75,12 +75,12 @@ export function getControlStoreMode(): ControlStoreMode {
 
 function ensureSqliteColumns(db: DatabaseSync): void {
   const cols = db
-    .prepare(`PRAGMA table_info(optimization_events)`)
+    .prepare(`PRAGMA table_info(OPTIMIZATION_EVENTS)`)
     .all() as { name: string }[]
   const names = new Set(cols.map((c) => c.name))
   const alter = (name: string, ddl: string) => {
     if (!names.has(name)) {
-      db.exec(`ALTER TABLE optimization_events ADD COLUMN ${ddl}`)
+      db.exec(`ALTER TABLE OPTIMIZATION_EVENTS ADD COLUMN ${ddl}`)
       names.add(name)
     }
   }
@@ -98,7 +98,7 @@ function getSqlite(): DatabaseSync {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   sqliteDb = new DatabaseSync(dbPath)
   sqliteDb.exec(`
-    CREATE TABLE IF NOT EXISTS optimization_events (
+    CREATE TABLE IF NOT EXISTS OPTIMIZATION_EVENTS (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT,
       lot_id TEXT,
@@ -119,7 +119,7 @@ function getSqlite(): DatabaseSync {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_optimization_events_created
-      ON optimization_events(created_at);
+      ON OPTIMIZATION_EVENTS(created_at);
   `)
   ensureSqliteColumns(sqliteDb)
   return sqliteDb
@@ -128,7 +128,7 @@ function getSqlite(): DatabaseSync {
 async function ensureMariaTable(): Promise<void> {
   await withConn(async (conn) => {
     await conn.query(`
-      CREATE TABLE IF NOT EXISTS optimization_events (
+      CREATE TABLE IF NOT EXISTS OPTIMIZATION_EVENTS (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         session_id VARCHAR(64) NULL,
         lot_id VARCHAR(128) NULL,
@@ -159,7 +159,7 @@ async function ensureMariaTable(): Promise<void> {
       'ADD COLUMN outcome_residual_li DOUBLE NULL',
     ]) {
       try {
-        await conn.query(`ALTER TABLE optimization_events ${ddl}`)
+        await conn.query(`ALTER TABLE OPTIMIZATION_EVENTS ${ddl}`)
       } catch {
         // column may already exist
       }
@@ -203,7 +203,7 @@ export async function insertOptimizationEvent(
     const db = getSqlite()
     const result = db
       .prepare(
-        `INSERT INTO optimization_events (
+        `INSERT INTO OPTIMIZATION_EVENTS (
           session_id, lot_id, before_features, proposed_deltas, after_features,
           prob_before, prob_after, method, status, outcome_quality_defect,
           capacity_before, capacity_after, outcome_capacity,
@@ -231,7 +231,7 @@ export async function insertOptimizationEvent(
   await ensureMariaTable()
   return withConn(async (conn) => {
     const result = await conn.query(
-      `INSERT INTO optimization_events (
+      `INSERT INTO OPTIMIZATION_EVENTS (
         session_id, lot_id, before_features, proposed_deltas, after_features,
         prob_before, prob_after, method, status, outcome_quality_defect,
         capacity_before, capacity_after, outcome_capacity,
@@ -281,13 +281,13 @@ export async function revertOptimizationEvent(
   if (mode === 'sqlite') {
     const db = getSqlite()
     const existing = db
-      .prepare('SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1')
+      .prepare('SELECT id, status FROM OPTIMIZATION_EVENTS WHERE id = ? LIMIT 1')
       .get(Number(eventId) || eventId) as { id: number; status: string } | undefined
     if (!existing) return null
     if (existing.status === 'reverted') {
       return { id: existing.id, status: 'reverted' }
     }
-    db.prepare(`UPDATE optimization_events SET status = 'reverted' WHERE id = ?`).run(
+    db.prepare(`UPDATE OPTIMIZATION_EVENTS SET status = 'reverted' WHERE id = ?`).run(
       existing.id,
     )
     return { id: existing.id, status: 'reverted' }
@@ -296,7 +296,7 @@ export async function revertOptimizationEvent(
   await ensureMariaTable()
   return withConn(async (conn) => {
     const rows = await conn.query(
-      'SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1',
+      'SELECT id, status FROM OPTIMIZATION_EVENTS WHERE id = ? LIMIT 1',
       [eventId],
     )
     if (!Array.isArray(rows) || rows.length === 0) return null
@@ -304,7 +304,7 @@ export async function revertOptimizationEvent(
     if (existing.status === 'reverted') {
       return { id: existing.id, status: 'reverted' }
     }
-    await conn.query(`UPDATE optimization_events SET status = 'reverted' WHERE id = ?`, [
+    await conn.query(`UPDATE OPTIMIZATION_EVENTS SET status = 'reverted' WHERE id = ?`, [
       existing.id,
     ])
     return { id: existing.id, status: 'reverted' }
@@ -354,14 +354,14 @@ export async function updateOptimizationOutcome(
   if (mode === 'sqlite') {
     const db = getSqlite()
     const existing = db
-      .prepare('SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1')
+      .prepare('SELECT id, status FROM OPTIMIZATION_EVENTS WHERE id = ? LIMIT 1')
       .get(Number(eventId) || eventId) as { id: number; status: string } | undefined
     if (!existing) return null
     if (existing.status === 'reverted') {
       throw new Error('reverted events cannot record outcome')
     }
     db.prepare(
-      `UPDATE optimization_events
+      `UPDATE OPTIMIZATION_EVENTS
        SET outcome_quality_defect = ?, outcome_capacity = ?, outcome_residual_li = ?
        WHERE id = ?`,
     ).run(defect, capacity, residualLi, existing.id)
@@ -377,7 +377,7 @@ export async function updateOptimizationOutcome(
   await ensureMariaTable()
   return withConn(async (conn) => {
     const rows = await conn.query(
-      'SELECT id, status FROM optimization_events WHERE id = ? LIMIT 1',
+      'SELECT id, status FROM OPTIMIZATION_EVENTS WHERE id = ? LIMIT 1',
       [eventId],
     )
     if (!Array.isArray(rows) || rows.length === 0) return null
@@ -386,7 +386,7 @@ export async function updateOptimizationOutcome(
       throw new Error('reverted events cannot record outcome')
     }
     await conn.query(
-      `UPDATE optimization_events
+      `UPDATE OPTIMIZATION_EVENTS
        SET outcome_quality_defect = ?, outcome_capacity = ?, outcome_residual_li = ?
        WHERE id = ?`,
       [defect, capacity, residualLi, existing.id],

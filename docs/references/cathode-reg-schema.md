@@ -1,7 +1,7 @@
 # cathode_reg 데이터 계약 (전지 용량 회귀)
 
-최종 갱신: 2026-07-28  
-적용: `ai-service` capacity 회귀 (예정 `train_reg_pipeline.py`)  
+최종 갱신: 2026-08-14  
+적용: `ai-service` capacity 회귀 (`train_reg_pipeline.py`)  
 관련 clf: [`cathode-clf-schema.md`](./cathode-clf-schema.md)
 
 실데이터만 사용한다. **가짜 `reg.csv` 대량 생성 금지.**
@@ -11,7 +11,7 @@
 | 항목 | 값 |
 |------|------|
 | 학습 CSV | `ai-service/data/cathode_reg_data.csv` |
-| 산출물 (예정) | `ai-service/models/reg/` |
+| 산출물 | `ai-service/models/reg/` |
 | 작업 디렉터리 | `ai-service/` |
 
 ## clf와의 관계
@@ -74,7 +74,7 @@
 - study 예: `xgb_cap_reg` / `cat_cap_reg`
 - 산출물은 `models/reg/` 등으로 **이름 구분**, runtime은 registry로 clf+reg **전부 로드**
 
-## 검증 규칙 (로드 직후, 예정 스크립트)
+## 검증 규칙 (로드 직후)
 
 1. 필수 컬럼: `id`, `timestamp`, `operator_id`, `capacity` + 수치 Feature 9개  
 2. `capacity`가 수치이고 null이 과도하지 않을 것 (현재 실데이터: 타깃 null 0)  

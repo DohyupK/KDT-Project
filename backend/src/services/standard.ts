@@ -1,5 +1,5 @@
 /**
- * Load scalar risk thresholds + residual USL (spare) from `standard` (1 row).
+ * Load scalar risk thresholds + residual USL (spare) from `STANDARD` (1 row).
  * Falls back to plan defaults when table missing / empty.
  */
 import { query } from '../db/connection.js'
@@ -42,7 +42,7 @@ export async function loadStandard(): Promise<StandardRow> {
         spare: number
       }[]
     >(`SELECT defect_prob_caution, defect_prob_severe, residual_caution, residual_severe, spare
-       FROM standard WHERE id = 1 LIMIT 1`)
+       FROM STANDARD WHERE id = 1 LIMIT 1`)
     const r = rows[0]
     if (!r) {
       cached = { ...DEFAULTS }

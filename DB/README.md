@@ -1,7 +1,3 @@
-# Local / schema DB artifacts (not application source)
+# DB
 
-- **MariaDB DDL** for multi-turn chat: [`ai-service/user_chat_tables.sql`](./ai-service/user_chat_tables.sql)
-- Apply: `python DB/ai-service/apply_user_chat_tables.py` (uses monorepo root `.env` `DB_*`)
-- Existing ai-service SQLite keys remain at `ai-service/DB/llm_keys.sqlite` (legacy path; new local DBs prefer this tree)
-
-Remote MariaDB (`DB_HOST` / `kdt_project`) holds `users`, `user_chat_*`, etc.
+DDL·SQLite는 이 폴더. 사람용 설명: [`docs/packages.md`](../docs/packages.md) · 챗 히스토리 Qdrant: [`docs/references/chat-history-qdrant.md`](../docs/references/chat-history-qdrant.md)

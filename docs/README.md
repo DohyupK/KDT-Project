@@ -1,33 +1,28 @@
 # docs (프로젝트 전체)
 
 모노레포(`frontend` / `backend` / `ai-service`) 공통 문서입니다.  
-프론트만의 실행 방법은 `frontend/README.md`를 보세요.
+패키지 역할·단독 기동: [`packages.md`](./packages.md). 실행은 루트 [`README.md`](../README.md).
+
+**전체 목록(한 줄 요약):** [`catalog.md`](./catalog.md)
 
 | 경로 | 용도 |
 |------|------|
-| [direction.md](./direction.md) | **현재 작업 방향** (전체 기준, 항상 최신 1개) |
+| [direction.md](./direction.md) | **현재 작업 방향** |
+| [packages.md](./packages.md) | frontend · backend · ai-service · DB 안내 (구 패키지 README) |
 | [work-log/](./work-log/) | 날짜별 작업 상세 · 일일업무보고용 |
-| [plans/](./plans/) | 확정된 계획 요약 |
+| [references/](./references/) | 구현된 동작 명세 · [이슈 보고서](./references/issue-report.md) · [룰·스킬](./references/agent-rules-and-skills.md) · [LLM 튜닝](./references/LLM%20튜닝.md) |
+| [guides/](./guides/) | 운영 절차 (MariaDB · Lightsail · AWS앱/PC워커) |
 | [prompts/](./prompts/) | Cursor에 다시 넣을 프롬프트 |
-| [references/](./references/) | 중요 경로 · 참조 · [LLM 튜닝 총정리](./references/LLM%20튜닝.md) |
-| [guides/login-ubuntu-mariadb.md](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 공용 DB 연동 절차 |
-<<<<<<< HEAD
-| [guides/aws-lightsail-gpu-tunnel.md](./guides/aws-lightsail-gpu-tunnel.md) | Lightsail 16GB 앱 + 이 PC GPU SSH 터널 |
-=======
-| [guides/aws-lightsail-docker.md](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
->>>>>>> d2418839cb20b11e55cfa30fbd218aff0de2dd21
-| [references/login-auth-tech-stack.md](./references/login-auth-tech-stack.md) | 로그인 Auth 기술스택·패키지 기록 |
+| [plans/](./plans/) | **사용 종료** (새 할 일 계획 없음) |
 
 ## docs vs 룰·스킬
 
 | 구분 | 역할 |
 |------|------|
-| **docs/** | 사람·팀이 보는 방향·일지·계획 |
-| **전체 룰·스킬** | AI가 **모든 패키지** 작업 시 공통으로 따름 |
-| **개별 룰·스킬** | 특정 중요 페이지·API 파일에만 추가 적용 |
+| **docs/** | 사람용 설명·일지·명세 (한 폴더) |
+| **시스템** | 루트 README · `AGENTS.md` · `.cursor/` · `docs/prompts/` |
+| **룰** | `.cursor/rules/kdt-project.mdc` (항상) · `frontend-ui.mdc` (프론트 TSX) |
+| **스킬** | `.cursor/skills/project-control` |
 
-룰·스킬이 어떻게 돌아가는지: [루트 README — 문서와 AI 규칙](../README.md#문서와-ai-규칙-어떻게-나뉘나)
-
-작업 일지: [work-log/](./work-log/) · [2026-07-31](./work-log/2026-07-31.md) · [2026-07-30](./work-log/2026-07-30.md) · [2026-07-29](./work-log/2026-07-29.md)
-
-관련 계획·참조: [LLM 튜닝](./references/LLM%20튜닝.md) · [보안 RAG](./references/secure-rag.md) · [일반 챗 · 페이지 컨텍스트](./references/general-chatbot-page-context.md) · [Documents 워처 · Qdrant · 포트](./references/documents-watcher-qdrant.md) · [vLLM 기동](./references/vllm-setup.md) · [AWS 앱 + PC vLLM](./plans/2026-08-14-aws-app-pc-vllm.md) · [챗봇·연동 작업서](./plans/2026-07-23-chatbot-integration.md) · [모델 학습 방법 SSOT](./references/model-training-methods.md) · [다중 모델 투표](./references/multi-model-voting.md) · [clf 스키마](./references/cathode-clf-schema.md) · [reg 스키마](./references/cathode-reg-schema.md) · [residual 스키마](./references/cathode-residual-schema.md) · [중요 경로](./references/important-paths.md)
+한곳 정리: [agent-rules-and-skills.md](./references/agent-rules-and-skills.md)  
+룰이 코드에서 어떻게 도는지: [루트 README — 문서와 AI 규칙](../README.md#문서와-ai-규칙-어떻게-나뉘나)

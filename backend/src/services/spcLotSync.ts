@@ -1,6 +1,6 @@
 /**
- * Mirror SPC_LOT → lots (process only), then score new + unscored lots
- * (analysis_lots + judgment_lots + lot_results NULL-fill).
+ * Mirror SPC_LOT → LOTS (process only), then score new + unscored lots
+ * (ANALYSIS_LOTS + JUDGMENT_LOTS + LOT_RESULTS NULL-fill).
  *
  * Priority: judgment/analysis/scored_at/missing LR (newest) then LR field backfill.
  * risk_reason runs after the sync lock is released.
@@ -70,7 +70,7 @@ function log(quiet: boolean | undefined, ...args: unknown[]) {
 }
 
 /**
- * Insert missing SPC_LOT rows into lots, then score inserted + unscored ids.
+ * Insert missing SPC_LOT rows into LOTS, then score inserted + unscored ids.
  * Concurrent calls while one run is in progress return `{ skipped: true }`.
  */
 export async function syncSpcLotsToApp(
@@ -125,12 +125,16 @@ let actionsUpdated = 0
               s.additive_ratio, s.process_time, s.sintering_temp, s.humidity, s.tank_pressure,
               s.operator_id
        FROM \`${table}\` s
-       LEFT JOIN lots l ON l.id = s.lot_id
+       LEFT JOIN LOTS l ON l.id = s.lot_id
        WHERE l.id IS NULL AND s.lot_id IS NOT NULL
        ORDER BY s.produced_at ASC, s.lot_id ASC`,
     )
 
-    log(quiet, '[spc-sync] missing', { table, count: missing.length })
+    if (missing.length === 0) {
+      log(quiet, '[spc-sync] no new feeder rows (already in LOTS)', { table })
+    } else {
+      log(quiet, '[spc-sync] missing', { table, count: missing.length })
+    }
 
     const inserted: string[] = []
     const CHUNK = 200
@@ -156,7 +160,7 @@ let actionsUpdated = 0
         inserted.push(r.lot_id)
       }
       await query(
-        `INSERT INTO lots (
+        `INSERT INTO LOTS (
           id, \`timestamp\`, d50, d90, metal_impurity, lithium_input, additive_ratio,
           process_time, sintering_temp, humidity, tank_pressure, operator_id
         ) VALUES ${placeholders}`,

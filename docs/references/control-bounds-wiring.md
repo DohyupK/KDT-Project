@@ -1,6 +1,6 @@
 # 공정 한계치 · Approve/Undo 연결 지도
 
-최종 갱신: 2026-07-24
+최종 갱신: 2026-08-14
 
 Setting UI · Express · ai-service whatif · 제어 로그가 어떻게 이어지는지 요약한다.
 
@@ -13,7 +13,7 @@ Express GET|PUT /api/settings/control-bounds  (backend/src/routes/settings.ts)
   → agent/whatif.py (격자 clip + boundary_hit / limit_reason)
   → ChatResponse.recommendation → GlobalChatbot
 
-(Note: Setting page UI / settingsApi client 제거됨 — bounds는 API·파일로만 조정.)
+Setting 페이지에 한계치 UI는 없다. `GET|PUT /api/settings/control-bounds`와 `control_bounds.json`만 쓴다. `/setting`은 폰트·테마·새로고침·알림·LLM 키.
 ```
 
 | env | 의미 |

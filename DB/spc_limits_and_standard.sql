@@ -1,7 +1,7 @@
--- SPC limits (I-MR Phase I) + scalar risk thresholds (1-row standard)
+-- SPC limits (I-MR Phase I) + scalar risk thresholds (1-row STANDARD)
 -- Seed values match backend/config/spcPhase1Limits.json
 
-CREATE TABLE IF NOT EXISTS spc_limits (
+CREATE TABLE IF NOT EXISTS SPC_LIMITS (
   param_key   VARCHAR(64)  NOT NULL PRIMARY KEY,
   label       VARCHAR(64)  NOT NULL,
   LCL_I       DOUBLE       NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS spc_limits (
   UCL_MR      DOUBLE       NOT NULL
 );
 
-INSERT INTO spc_limits (param_key, label, LCL_I, CL_I, UCL_I, CL_MR, UCL_MR) VALUES
+INSERT INTO SPC_LIMITS (param_key, label, LCL_I, CL_I, UCL_I, CL_MR, UCL_MR) VALUES
   ('d50', '입도(d50)', 2.688793, 4.493629, 6.298466, 0.678619, 2.217047),
   ('d90', '입도(d90)', 5.858492, 8.972006, 12.085519, 1.170681, 3.824615),
   ('metal_impurity', '금속이물', 0.002334, 0.023958, 0.045581, 0.008131, 0.026562),
@@ -30,7 +30,7 @@ ON DUPLICATE KEY UPDATE
   UCL_MR = VALUES(UCL_MR);
 
 -- Single-row scalar thresholds for risk grade + residual USL (spare)
-CREATE TABLE IF NOT EXISTS standard (
+CREATE TABLE IF NOT EXISTS STANDARD (
   id                    TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
   defect_prob_caution   DOUBLE NOT NULL DEFAULT 0.20,
   defect_prob_severe    DOUBLE NOT NULL DEFAULT 0.40,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS standard (
   spare                 DOUBLE NOT NULL DEFAULT 4000
 );
 
-INSERT INTO standard (id, defect_prob_caution, defect_prob_severe, residual_caution, residual_severe, spare)
+INSERT INTO STANDARD (id, defect_prob_caution, defect_prob_severe, residual_caution, residual_severe, spare)
 VALUES (1, 0.20, 0.40, 3000, 3500, 4000)
 ON DUPLICATE KEY UPDATE
   defect_prob_caution = VALUES(defect_prob_caution),
@@ -48,6 +48,6 @@ ON DUPLICATE KEY UPDATE
   residual_severe = VALUES(residual_severe),
   spare = VALUES(spare);
 
--- Mirror SPC lot label onto judgment_lots (이탈|주의|안정|-)
-ALTER TABLE judgment_lots
+-- Mirror SPC lot label onto JUDGMENT_LOTS (이탈|주의|안정|-)
+ALTER TABLE JUDGMENT_LOTS
   ADD COLUMN IF NOT EXISTS spc VARCHAR(16) NULL;

@@ -19,9 +19,9 @@ async function tableExists(name: string): Promise<boolean> {
 }
 
 async function main() {
-  if (await tableExists('lot_recommended_actions')) {
+  if (await tableExists('LOT_RECOMMENDED_ACTIONS')) {
     await query(
-      `ALTER TABLE lot_recommended_actions MODIFY summary VARCHAR(1024) NOT NULL DEFAULT ''`,
+      `ALTER TABLE LOT_RECOMMENDED_ACTIONS MODIFY summary VARCHAR(1024) NOT NULL DEFAULT ''`,
     )
     console.log('OK widened lot_recommended_actions.summary to VARCHAR(1024)')
     return

@@ -22,8 +22,8 @@ async function main() {
     await conn.query(sql)
     const rows = await conn.query<{ issueCount: number; lotCount: number }[]>(
       `SELECT
-         (SELECT COUNT(*) FROM issues) AS issueCount,
-         (SELECT COUNT(*) FROM lots WHERE id LIKE 'LOT-CA-2607%') AS lotCount`,
+         (SELECT COUNT(*) FROM ISSUES) AS issueCount,
+         (SELECT COUNT(*) FROM LOTS WHERE id LIKE 'LOT-CA-2607%') AS lotCount`,
     )
     console.log(
       `SEED_OK lots ${Number(rows[0]?.lotCount ?? 0)} (issues left empty: ${Number(rows[0]?.issueCount ?? 0)} rows)`,

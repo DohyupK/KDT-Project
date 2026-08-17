@@ -313,7 +313,7 @@ function splitSummaryParagraphs(summary: string): string[] {
 }
 
 function formatActionCopyText(data: RecommendedActionData): string {
-  const lines = [roundDecimalsInText(data.summary.trim())]
+  const lines: string[] = []
   for (const s of data.steps) {
     lines.push(`${s.order}. ${s.text}${s.docId ? ` (${s.docId})` : ''}`)
   }

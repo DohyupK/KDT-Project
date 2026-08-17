@@ -38,7 +38,7 @@ Test 역할:
    운영에서 `fillThreshold` / config로 덮어쓸 수 있음 (예: 운영 0.8)
 
 진짜 미래 LOT에는 라벨이 없으므로 당장 채점 불가.  
-과거 뒤쪽 holdout이 “가상 미래” 검증이다. 실측 outcome이 쌓이면 그때 실전 점수.
+과거 뒤쪽 holdout이 “가상 미래” 검증이다.
 
 ### 2.2 6:2:2 의미 (참고)
 
@@ -121,7 +121,7 @@ reg / residual 목적: Fold 평균 **RMSE minimize**
 - Optuna가 **어떤 하이퍼를 고를지**만 바꿈. 최종은 여전히 Train 전체 refit.
 - 크게(예: 8–10): 시간↑, 튜닝 점수 안정↑ 가능하나 시계열 앞 fold train이 작아질 수 있음.
 - **예측 성능이 눈에 띄게 오른다고 기대하기 어렵다.** 소폭·불확실.
-- 2026-08-10: **5 → 6**. 기존 `optuna*.db`·`models/`는 그대로; **다음 승인 학습**부터 반영.
+- 2026-08-10: **5 → 6**.
 
 ### 앙상블 비율 `w_xgb` / `w_cat`
 
@@ -171,16 +171,11 @@ python train_pipeline.py
 # 투표 멤버: USE_GPU=0 python scripts/train_all_voting_models.py
 ```
 
-재학습·Optuna·스모크는 `.cursor/rules/ask-before-run.mdc`에 따라 **사용자 승인 후**만.
+재학습·Optuna·스모크는 `.cursor/rules/kdt-project.mdc`에 따라 **사용자 승인 후**만.
 
 ---
 
-## 9. 다중 모델 투표 (2026-08-10)
+## 9. 다중 모델 투표
 
-상세 SSOT: [`multi-model-voting.md`](./multi-model-voting.md)
-
-- 기존 `models/` 단일 헤드 → `ai-service/temp/models_backup_2026-08-10/` (활성 `models/`에서는 **삭제·미로드**)
-- Test 미사용 · `N_FOLDS=6` · 가중 capacity/11 · residual/11 · probability/**15** (reg 제외)
-- residual→확률 점수: `standard` 3000/4000
-- 임계 후순위
-- 추론 진입점: `voting_predict` / `POST /predict-voting` (레거시 `/predict*`도 voting으로 프록시)
+상세: [`multi-model-voting.md`](./multi-model-voting.md) · 추론 `POST /predict-voting`.  
+단일 헤드 `POST /predict` · `/predict-capacity` · `/predict-residual` 도 유지한다.

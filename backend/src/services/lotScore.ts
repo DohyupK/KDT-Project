@@ -77,12 +77,12 @@ function loadImputerNumeric(): Record<string, number> {
 }
 
 export type LotScoreResult = {
-  /** 0~1 → analysis_lots.probability (+ judgment_lots.probability NULL-fill) */
+  /** 0~1 → ANALYSIS_LOTS.probability (+ JUDGMENT_LOTS.probability NULL-fill) */
   probability: number
   residual_lithium: number
-  /** /predict defect_status → judgment_lots.quality_defect (NULL-fill only on UPSERT) */
+  /** /predict defect_status → JUDGMENT_LOTS.quality_defect (NULL-fill only on UPSERT) */
   quality_defect: number
-  /** /predict-capacity → judgment_lots.capacity (NULL-fill only on UPSERT) */
+  /** /predict-capacity → JUDGMENT_LOTS.capacity (NULL-fill only on UPSERT) */
   capacity: number | null
   spc_status: string
   risk_level: RiskLevel
@@ -167,7 +167,7 @@ export function combineLotScore(input: {
   residualLi: number
   spcStatus: string | null
   incompleteProcess?: boolean
-  /** Optional thresholds from `standard` table */
+  /** Optional thresholds from `STANDARD` table */
   thresholds?: {
     defect_prob_caution: number
     defect_prob_severe: number
