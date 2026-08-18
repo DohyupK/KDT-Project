@@ -5,6 +5,7 @@ import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.j
 import { fillRiskReasonsForLots } from '../services/lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.service.js'
 import { AppError } from '../middleware/errorHandler.js'
+import { lotScoreOnAws } from '../services/lotScoreRole.js'
 import * as userSettingsService from '../services/userSettings.service.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
