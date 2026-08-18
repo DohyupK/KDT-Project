@@ -12,7 +12,12 @@ import {
   consumeLocalKnowledgeForLlm,
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
-import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
+import {
+  issueApi,
+  normalizeIssueRiskLevel,
+  type HandoverHistoryItem,
+  type PastIssueLot,
+} from '@/api/issueApi';
 import { postChat } from '@/api/aiApi';
 import { knowledgeApi } from '@/api/knowledgeApi';
 import { fetchDocFileBlob } from '@/api/docsApi';
@@ -544,6 +549,262 @@ function asLibraryAnalysisResult(reply: string): ParsedAnalysis {
   };
 }
 
+function formatLotNumber(value: number | null | undefined, digits = 3): string {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return Number(value).toLocaleString('ko-KR', {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: 0,
+  });
+}
+
+function formatLotProbability(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  const n = Number(value);
+  const pct = n <= 1 ? n * 100 : n;
+  return `${pct.toFixed(1)}%`;
+}
+
+function formatSpcStatus(value: string | null | undefined): string {
+  const raw = (value || '').trim();
+  if (!raw || raw === '-') return '미판정';
+  return raw;
+}
+
+function formatResidualMargin(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  const n = Number(value);
+  const amount = Math.round(Math.abs(n)).toLocaleString('ko-KR');
+  return n < 0 ? `${amount} ppm 초과` : `${amount} ppm`;
+}
+
+function toPastIssueLot(lot: PastIssueLot, lotId: string): PastIssueLot {
+  return {
+    lotId: lot.lotId || lotId,
+    recordedAt: lot.recordedAt || '',
+    riskLevel: normalizeIssueRiskLevel(lot.riskLevel),
+    riskReason: lot.riskReason ?? null,
+    defectProb: lot.defectProb ?? null,
+    residualLithium: lot.residualLithium ?? null,
+    residualMargin: lot.residualMargin ?? null,
+    spcStatus: lot.spcStatus ?? null,
+    d50: lot.d50 ?? null,
+    d90: lot.d90 ?? null,
+    metalImpurity: lot.metalImpurity ?? null,
+    lithiumInput: lot.lithiumInput ?? null,
+    additiveRatio: lot.additiveRatio ?? null,
+    processTime: lot.processTime ?? null,
+    sinteringTemp: lot.sinteringTemp ?? null,
+    humidity: lot.humidity ?? null,
+    tankPressure: lot.tankPressure ?? null,
+    operatorId: lot.operatorId ?? null,
+  };
+}
+
+/** Dashboard LOT 상세 분석 조치문 PARAM_PATTERNS와 동일한 파라미터 색. */
+const PROCESS_PARAM_COLORS: Record<string, { light: string; dark: string }> = {
+  d50: { light: 'text-emerald-700', dark: 'text-emerald-400' },
+  d90: { light: 'text-blue-700', dark: 'text-blue-400' },
+  '금속 불순물': { light: 'text-amber-700', dark: 'text-amber-400' },
+  '리튬 투입량': { light: 'text-violet-700', dark: 'text-violet-400' },
+  '첨가제 비율': { light: 'text-teal-700', dark: 'text-teal-400' },
+  '공정 시간': { light: 'text-orange-700', dark: 'text-orange-400' },
+  '소성 온도': { light: 'text-rose-700', dark: 'text-rose-400' },
+  습도: { light: 'text-sky-700', dark: 'text-sky-400' },
+  '탱크 압력': { light: 'text-indigo-700', dark: 'text-indigo-400' },
+  작업자: { light: 'text-slate-600', dark: 'text-slate-300' },
+};
+
+function processParamLabelClass(label: string, isDark: boolean): string {
+  const tone = PROCESS_PARAM_COLORS[label];
+  if (!tone) return isDark ? 'text-slate-400' : 'text-slate-500';
+  return isDark ? tone.dark : tone.light;
+}
+
+function riskLevelBadgeClass(level: string, isDark: boolean): string {
+  const base = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold';
+  if (level === '심각') {
+    return isDark
+      ? `${base} bg-rose-950/50 text-rose-300`
+      : `${base} bg-rose-100 text-rose-700`;
+  }
+  if (level === '주의') {
+    return isDark
+      ? `${base} bg-amber-950/50 text-amber-300`
+      : `${base} bg-amber-100 text-amber-700`;
+  }
+  return isDark
+    ? `${base} bg-emerald-950/50 text-emerald-300`
+    : `${base} bg-emerald-100 text-emerald-700`;
+}
+
+function LotSnapshotPanel({
+  lot,
+  loading,
+  isDark,
+}: {
+  lot: PastIssueLot | null;
+  loading: boolean;
+  isDark: boolean;
+}) {
+  const cardClass = isDark
+    ? 'rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2.5'
+    : 'rounded-xl border border-slate-200 bg-white px-3 py-2.5';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const strong = isDark ? 'text-slate-100' : 'text-slate-900';
+
+  const processRows: Array<{ label: string; value: string }> = lot
+    ? [
+        { label: 'd50', value: formatLotNumber(lot.d50) },
+        { label: 'd90', value: formatLotNumber(lot.d90) },
+        { label: '금속 불순물', value: formatLotNumber(lot.metalImpurity) },
+        { label: '리튬 투입량', value: formatLotNumber(lot.lithiumInput) },
+        { label: '첨가제 비율', value: formatLotNumber(lot.additiveRatio) },
+        { label: '공정 시간', value: formatLotNumber(lot.processTime) },
+        { label: '소성 온도', value: formatLotNumber(lot.sinteringTemp) },
+        { label: '습도', value: formatLotNumber(lot.humidity) },
+        { label: '탱크 압력', value: formatLotNumber(lot.tankPressure) },
+        { label: '작업자', value: lot.operatorId?.trim() || '—' },
+      ]
+    : [];
+
+  return (
+    <div className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h5 className={`m-0 text-sm font-bold ${strong}`}>LOT 분석 데이터</h5>
+        {lot?.recordedAt ? (
+          <span className={`text-[11px] ${muted}`}>{lot.recordedAt}</span>
+        ) : null}
+      </div>
+      {loading && !lot ? (
+        <p className={`m-0 text-sm ${muted}`}>LOT 데이터를 불러오는 중입니다...</p>
+      ) : !lot ? (
+        <p className={`m-0 text-sm ${muted}`}>해당 LOT의 분석 데이터가 없습니다.</p>
+      ) : (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>잔류리튬</div>
+              <div
+                className={`mt-0.5 text-sm font-bold tabular-nums ${
+                  lot.residualLithium == null
+                    ? strong
+                    : isDark
+                      ? 'text-purple-400'
+                      : 'text-purple-700'
+                }`}
+              >
+                {lot.residualLithium == null
+                  ? '—'
+                  : `${formatLotNumber(lot.residualLithium)} ppm`}
+              </div>
+            </div>
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>불량확률</div>
+              <div
+                className={`mt-0.5 text-sm font-bold tabular-nums ${
+                  lot.defectProb == null
+                    ? strong
+                    : isDark
+                      ? 'text-red-400'
+                      : 'text-red-600'
+                }`}
+              >
+                {formatLotProbability(lot.defectProb)}
+              </div>
+            </div>
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>SPC</div>
+              <div
+                className={`mt-0.5 text-sm font-bold ${
+                  formatSpcStatus(lot.spcStatus) === '미판정'
+                    ? strong
+                    : isDark
+                      ? 'text-cyan-400'
+                      : 'text-cyan-700'
+                }`}
+              >
+                {formatSpcStatus(lot.spcStatus)}
+              </div>
+            </div>
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>위험등급</div>
+              <div className="mt-1">
+                <span className={riskLevelBadgeClass(lot.riskLevel, isDark)}>
+                  {lot.riskLevel}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>여유량</div>
+              <div
+                className={`mt-0.5 text-sm font-bold tabular-nums ${
+                  lot.residualMargin == null
+                    ? strong
+                    : isDark
+                      ? 'text-lime-400'
+                      : 'text-lime-700'
+                }`}
+              >
+                {formatResidualMargin(lot.residualMargin)}
+              </div>
+            </div>
+            <div className={cardClass}>
+              <div className={`text-[11px] font-semibold ${muted}`}>위험 원인</div>
+              <div className={`mt-0.5 text-xs leading-relaxed ${strong}`}>
+                {lot.riskReason?.trim() || '—'}
+              </div>
+            </div>
+          </div>
+          <div
+            className={`overflow-hidden rounded-xl border ${
+              isDark ? 'border-slate-700' : 'border-slate-200'
+            }`}
+          >
+            <div
+              className={`border-b px-3 py-2 text-xs font-semibold ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900/70 text-slate-200'
+                  : 'border-slate-200 bg-slate-50 text-slate-800'
+              }`}
+            >
+              공정 파라미터
+            </div>
+            <dl className="m-0 grid grid-cols-1 sm:grid-cols-2">
+              {processRows.map((row, index) => (
+                <div
+                  key={row.label}
+                  className={`grid grid-cols-[110px_minmax(0,1fr)] gap-2 px-3 py-2 text-sm ${
+                    index > 0
+                      ? isDark
+                        ? 'border-t border-slate-700 sm:[&:nth-child(2)]:border-t-0'
+                        : 'border-t border-slate-200 sm:[&:nth-child(2)]:border-t-0'
+                      : ''
+                  } ${
+                    index % 2 === 1
+                      ? isDark
+                        ? 'sm:border-l sm:border-slate-700'
+                        : 'sm:border-l sm:border-slate-200'
+                      : ''
+                  }`}
+                >
+                  <dt
+                    className={`text-xs font-semibold ${processParamLabelClass(row.label, isDark)}`}
+                  >
+                    {row.label}
+                  </dt>
+                  <dd className={`m-0 tabular-nums ${strong}`}>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CategoryBadge({ label }: { label: string }) {
   const { isDark } = useUiSettings();
   const toneClass = (() => {
@@ -744,6 +1005,8 @@ export default function KnowledgePage() {
   const [diagnosisReply, setDiagnosisReply] = useState('');
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState('');
+  const [detailLot, setDetailLot] = useState<PastIssueLot | null>(null);
+  const [lotLoading, setLotLoading] = useState(false);
   const [isSelectionListExpanded, setIsSelectionListExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   /** analyzing UX: reading docs vs waiting on LLM */
@@ -1150,6 +1413,8 @@ export default function KnowledgePage() {
     setDiagnosisReply('');
     setDiagnosisError('');
     setDiagnosisLoading(true);
+    setDetailLot(null);
+    setLotLoading(true);
     try {
       const { data } = await issueApi.getPastIssueById(doc.id);
       const item = data.item;
@@ -1162,6 +1427,20 @@ export default function KnowledgePage() {
         detail: item.actionContent || undefined,
       };
       setDetailTarget({ kind: 'document', item: detailedDoc });
+      const lotId = (item.lotId || doc.lot || '').trim();
+      let lotSnapshot = item.lot ? toPastIssueLot(item.lot, lotId) : null;
+      if (lotId) {
+        try {
+          const lotRes = await issueApi.getLotById(lotId);
+          if (lotRes.data.lot) {
+            lotSnapshot = toPastIssueLot(lotRes.data.lot, lotId);
+          }
+        } catch (err) {
+          console.error('[knowledge-lot] getLotById', err);
+        }
+      }
+      setDetailLot(lotSnapshot);
+      setLotLoading(false);
       try {
         const response = await postChat({
           message: `완료 이슈 "${item.issueContent}"(이슈 ID: ${item.issueId}, LOT: ${item.lotId})를 검토해 주세요. 다른 완료 이슈와의 유사 가능성과 대안 조치 방안을 한국어로 간결하게 설명하세요. 이슈 상세: ${item.actionContent || '기록 없음'}`,
@@ -1197,6 +1476,7 @@ export default function KnowledgePage() {
       console.error('[knowledge-diagnose] getPastIssueById', msg, err);
       setDiagnosisError(msg);
     } finally {
+      setLotLoading(false);
       setDiagnosisLoading(false);
     }
   };
@@ -1221,8 +1501,11 @@ export default function KnowledgePage() {
 
   const closeDetailModal = () => {
     setDetailTarget(null);
+    setDetailLot(null);
+    setLotLoading(false);
     setDiagnosisReply('');
     setDiagnosisError('');
+    setDiagnosisLoading(false);
   };
 
   const handleActionSubmit = () => {
@@ -2779,6 +3062,7 @@ ${
             >
               {detailTarget.item.detail || '등록된 상세 조치 내용이 없습니다.'}
             </div>
+            <LotSnapshotPanel lot={detailLot} loading={lotLoading} isDark={isDark} />
             <div
               className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
             >

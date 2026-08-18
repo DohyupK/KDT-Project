@@ -1,6 +1,7 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
+import { getLotById } from './lot.service.js'
 import { isManageUser } from './userSettings.service.js'
 
 /** Open issues: not completed. risk_level comes from ANALYSIS_LOTS. */
@@ -332,16 +333,31 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   return { items, total: items.length }
 }
 
-/** 과거 자료 상세: 조치내용 + LOT 보조 (양식 TBD). issue_analyses 없음. */
+/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치. */
+export type PastIssueLot = {
+  lotId: string
+  recordedAt: string
+  riskLevel: RiskLevel
+  riskReason: string | null
+  defectProb: number | null
+  residualLithium: number | null
+  residualMargin: number | null
+  spcStatus: string | null
+  d50: number | null
+  d90: number | null
+  metalImpurity: number | null
+  lithiumInput: number | null
+  additiveRatio: number | null
+  processTime: number | null
+  sinteringTemp: number | null
+  humidity: number | null
+  tankPressure: number | null
+  operatorId: string | null
+}
+
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
-  lot: {
-    lotId: string
-    riskReason: string | null
-    defectProb: number | null
-    residualLithium: number | null
-    spcStatus: string | null
-  } | null
+  lot: PastIssueLot | null
 }
 
 export async function getPastIssueById(issueId: string): Promise<PastIssueDetail> {
@@ -350,25 +366,32 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
   }
 
-  const lotRows = await query<
-    {
-      lot_id: string
-      risk_reason: string | null
-      probability: number | null
-      residual_lithium: number | null
-      spc_status: string | null
-    }[]
-  >(
-    `SELECT l.id AS lot_id, a.risk_reason,
-            COALESCE(j.probability, a.probability) AS probability,
-            j.residual_li AS residual_lithium, a.spc_status
-     FROM LOTS l
-     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
-     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
-     WHERE l.id = ? LIMIT 1`,
-    [issue.lotId],
-  )
-  const lot = lotRows[0]
+  let lot: PastIssueLot | null = null
+  try {
+    const dto = await getLotById(issue.lotId)
+    lot = {
+      lotId: dto.lotId,
+      recordedAt: dto.recordedAt,
+      riskLevel: dto.riskLevel,
+      riskReason: dto.riskReason,
+      defectProb: dto.defectProb,
+      residualLithium: dto.residualLithium,
+      residualMargin: dto.residualMargin,
+      spcStatus: dto.spcStatus,
+      d50: dto.d50,
+      d90: dto.d90,
+      metalImpurity: dto.metalImpurity,
+      lithiumInput: dto.lithiumInput,
+      additiveRatio: dto.additiveRatio,
+      processTime: dto.processTime,
+      sinteringTemp: dto.sinteringTemp,
+      humidity: dto.humidity,
+      tankPressure: dto.tankPressure,
+      operatorId: dto.operatorId,
+    }
+  } catch {
+    lot = null
+  }
 
   return {
     issueId: issue.issueId,
@@ -378,15 +401,7 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     assigneeName: issue.assigneeName,
     completedAt: issue.completedAt,
     actionContent: issue.actionContent,
-    lot: lot
-      ? {
-          lotId: lot.lot_id,
-          riskReason: lot.risk_reason,
-          defectProb: lot.probability,
-          residualLithium: lot.residual_lithium,
-          spcStatus: lot.spc_status,
-        }
-      : null,
+    lot,
   }
 }
 

@@ -88,15 +88,30 @@ export type PastIssueListItem = {
   completedAt: string | null
 }
 
+export type PastIssueLot = {
+  lotId: string
+  recordedAt: string
+  riskLevel: IssueRiskLevel
+  riskReason: string | null
+  defectProb: number | null
+  residualLithium: number | null
+  residualMargin: number | null
+  spcStatus: string | null
+  d50: number | null
+  d90: number | null
+  metalImpurity: number | null
+  lithiumInput: number | null
+  additiveRatio: number | null
+  processTime: number | null
+  sinteringTemp: number | null
+  humidity: number | null
+  tankPressure: number | null
+  operatorId: string | null
+}
+
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
-  lot: {
-    lotId: string
-    riskReason: string | null
-    defectProb: number | null
-    residualLithium: number | null
-    spcStatus: string | null
-  } | null
+  lot: PastIssueLot | null
 }
 
 export const issueApi = {
@@ -138,4 +153,7 @@ export const issueApi = {
     apiClient.get<{ item: PastIssueDetail }>(
       `/knowledge/past-issues/${encodeURIComponent(issueId)}`,
     ),
+
+  getLotById: (lotId: string) =>
+    apiClient.get<{ lot: PastIssueLot }>(`/lots/${encodeURIComponent(lotId)}`),
 }
