@@ -1,10 +1,8 @@
 /**
- * One-shot: mock ISSUES complete → background lot diagnosis → print analysis_content.
- * Cleans up the mock ISSUES row and the test AI_LIBRARY_ANALYSIS row.
+ * One-shot: mock ISSUES complete → ISSUES.analysis_content → print head → delete mock issue.
  */
 import '../src/loadRootEnv.js'
 import { query } from '../src/db/connection.js'
-import { getLibraryAnalysisByLotId } from '../src/services/knowledgeAnalyze.service.js'
 import { updateIssue } from '../src/services/issue.service.js'
 
 const POLL_MS = 2000
@@ -16,25 +14,16 @@ function sleep(ms: number) {
 
 async function main() {
   const lots = await query<{ id: string }[]>(
-    `SELECT l.id
-     FROM LOTS l
-     LEFT JOIN AI_LIBRARY_ANALYSIS a ON a.lot_id = l.id
-     WHERE a.id IS NULL
-     ORDER BY l.\`timestamp\` DESC
-     LIMIT 1`,
+    `SELECT id FROM LOTS ORDER BY \`timestamp\` DESC LIMIT 1`,
   )
   const lotId = lots[0]?.id
-  if (!lotId) {
-    throw new Error('No LOT without AI_LIBRARY_ANALYSIS.lot_id')
-  }
+  if (!lotId) throw new Error('No LOTS row')
 
   const users = await query<{ user_id: string; name: string }[]>(
     `SELECT user_id, name FROM USERS ORDER BY created_at DESC LIMIT 1`,
   )
   const actor = users[0]
-  if (!actor) {
-    throw new Error('No USERS row for updateIssue actor')
-  }
+  if (!actor) throw new Error('No USERS row')
 
   const issueId = `ISS-MOCK-${Date.now()}`.slice(0, 32)
   await query(
@@ -55,23 +44,26 @@ async function main() {
     const started = Date.now()
     let content = ''
     while (Date.now() - started < MAX_WAIT_MS) {
-      const snap = await getLibraryAnalysisByLotId(lotId)
-      if (snap?.analysisContent?.trim()) {
-        content = snap.analysisContent.trim()
+      const rows = await query<{ analysis_content: string | null }[]>(
+        `SELECT analysis_content FROM ISSUES WHERE issue_id = ? LIMIT 1`,
+        [issueId],
+      )
+      const raw = rows[0]?.analysis_content?.trim() || ''
+      if (raw) {
+        content = raw
         break
       }
       await sleep(POLL_MS)
     }
 
     if (!content) {
-      throw new Error(`no analysis_content for lot_id=${lotId} after ${MAX_WAIT_MS}ms`)
+      throw new Error(`no ISSUES.analysis_content for ${issueId} after ${MAX_WAIT_MS}ms`)
     }
     console.log('ANALYSIS_LEN', content.length)
     console.log('ANALYSIS_HEAD', content.slice(0, 400))
   } finally {
-    await query(`DELETE FROM AI_LIBRARY_ANALYSIS WHERE lot_id = ?`, [lotId])
     await query(`DELETE FROM ISSUES WHERE issue_id = ?`, [issueId])
-    console.log('CLEANED', issueId, lotId)
+    console.log('CLEANED', issueId)
   }
 }
 

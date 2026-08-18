@@ -43,7 +43,7 @@
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 | [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 채점/이슈 지연 · spc_chart_json · 페이지×API 명세 |
-| [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage · 화면 안내 문구 · 라이브러리 lot_id 캐시 · 챗 프롬프트 톤 |
+| [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage · 화면 안내 문구 · ISSUES.analysis_content · 챗 프롬프트 톤 |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 

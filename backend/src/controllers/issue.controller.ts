@@ -220,9 +220,9 @@ export const getPastIssue = asyncHandler(async (req, res) => {
 export const analyzeKnowledge = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
 
-  const lotId = typeof req.body?.lotId === 'string' ? req.body.lotId.trim() : ''
-  const result = lotId
-    ? await knowledgeAnalyzeService.runLotDiagnosisAnalyze(lotId)
+  const issueId = typeof req.body?.issueId === 'string' ? req.body.issueId.trim() : ''
+  const result = issueId
+    ? await knowledgeAnalyzeService.runIssueDiagnosisAnalyze(issueId)
     : await knowledgeAnalyzeService.runKnowledgeAnalyze({
         message: typeof req.body?.message === 'string' ? req.body.message : '',
         userId: req.auth.userId,
