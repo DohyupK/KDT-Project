@@ -1,6 +1,6 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { getLibraryAnalysisByLotId, type LibraryAnalysisSnapshot } from './knowledgeAnalyze.service.js'
+import { getLibraryAnalysisByLotId, runLotDiagnosisAnalyze, type LibraryAnalysisSnapshot } from './knowledgeAnalyze.service.js'
 import { getLotById, type LotDto } from './lot.service.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
 import { isManageUser } from './userSettings.service.js'
@@ -289,6 +289,17 @@ export async function updateIssue(
      WHERE issue_id = ?`,
     [actionContent, assigneeUserId, completed ? 1 : 0, issueId],
   )
+
+  if (!current.completed && completed) {
+    const lotId = current.lotId
+    void runLotDiagnosisAnalyze(lotId).catch((err) => {
+      console.error(
+        '[updateIssue] lot diagnosis background failed:',
+        lotId,
+        err instanceof Error ? err.message : err,
+      )
+    })
+  }
 
   return getIssueById(issueId)
 }

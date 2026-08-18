@@ -22,7 +22,7 @@ Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. �
 - **완료 → Knowledge 「과거 자료」** (`completed_at IS NOT NULL`). 인수인계 이력으로 넣지 않음
 - **이슈 저장(FE):** 「조치 완료 여부」체크 필수 · `completed: true`만 PUT
 - 인수인계(`HANDOVER_HISTORY`): `ISSUES`와 **독립** · Knowledge는 `archivedAt||createdAt`
-- **라이브러리 분석 행:** `AI_LIBRARY_ANALYSIS`는 XOR. `user_id`(선택 항목 분석) 또는 `lot_id`(과거 자료 진단 캐시). LOT당 진단 1행. ALTER [`DB/alter_ai_library_analysis_lot_id.sql`](../../DB/alter_ai_library_analysis_lot_id.sql).
+- **라이브러리 분석 행:** `AI_LIBRARY_ANALYSIS`는 XOR. `user_id`(선택 항목 분석) 또는 `lot_id`(과거 자료 진단 캐시). LOT당 진단 1행. **이슈 완료(`completed_at`) 직후 백그라운드 API_LLM.** ALTER [`DB/alter_ai_library_analysis_lot_id.sql`](../../DB/alter_ai_library_analysis_lot_id.sql).
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번은 **ISSUES** 전용
 - **이슈 자동 생성:** `ANALYSIS_LOTS.risk_level = '심각'` 이고 그 LOT에 미완료 이슈가 없을 때 (`ensureIssuesForRiskLots`). 「주의」만으로는 안 만듦. 「심각」은 불량확률·잔류 Li·SPC 이탈 중 **최악 축** (`STANDARD` 임계, 기본 확률≥0.4 / 잔류≥3500 / SPC 라벨에 「이탈」)
 - **`issue_content`:** `risk_reason` → 로컬 vLLM 한 문장. 실패 시 `buildIssueTitle`
@@ -331,7 +331,7 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 | 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + `LOTS`/`ANALYSIS_LOTS` + `AI_LIBRARY_ANALYSIS.lot_id`(있으면). **`USER_SETTINGS.manage='O'`** |
 | 인수인계(완료) | `GET /api/knowledge/handover-history?status=completed` | `HANDOVER_HISTORY` |
 | 선택 항목 분석 | `POST /api/knowledge/analyze` `{ message }` | `AI_LIBRARY_ANALYSIS.user_id`. **manage='O'** |
-| 과거 자료 진단 | `POST /api/knowledge/analyze` `{ lotId }` | `AI_LIBRARY_ANALYSIS.lot_id` 멱등 캐시. 없으면 API_LLM 1회 |
+| 과거 자료 진단 | 이슈 완료 시 백그라운드 / 모달은 GET 캐시 (없으면 1회 백필 `POST … { lotId }`) | `AI_LIBRARY_ANALYSIS.lot_id` |
 | 문서 미리보기 | `GET /api/docs/file` | 파일시스템 + `TEXT_MATCH` (OCR 경로) |
 
 ### 문의 `/inquiry`
