@@ -1224,6 +1224,7 @@ export default function KnowledgePage() {
         setDiagnosisReply(cached);
         return;
       }
+      setDiagnosisReply('');
       try {
         const response = await knowledgeApi.analyze({ lotId: item.lotId });
         if (response.error) {
@@ -1234,14 +1235,14 @@ export default function KnowledgePage() {
         if (!reply.trim()) {
           console.error('[knowledge-diagnose] empty reply', response);
           setDiagnosisError((prev) =>
-            [prev, 'LLM 응답이 비어 있습니다.'].filter(Boolean).join('\n'),
+            [prev, '이슈 완료 후 진단이 아직 없습니다. 잠시 후 다시 열어 주세요.'].filter(Boolean).join('\n'),
           );
         }
         setDiagnosisReply(reply);
       } catch (err) {
-        const msg = getAnalyzeErrorMessage(err, 'AI 진단을 불러오지 못했습니다.');
+        const msg = getAnalyzeErrorMessage(err, '진단을 아직 불러오지 못했습니다.');
         console.error('[knowledge-diagnose] analyze lotId', msg, err);
-        setDiagnosisError(`LLM 요청 실패: ${msg}`);
+        setDiagnosisError(`진단 준비 중: ${msg}`);
       }
     } catch (err) {
       const msg = getAnalyzeErrorMessage(err, '상세 이슈를 불러오지 못했습니다.');
@@ -2897,7 +2898,7 @@ ${
               </h5>
               {diagnosisLoading ? (
                 <p className={`m-0 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  AI 진단을 불러오는 중입니다...
+                  진단 준비 중입니다...
                 </p>
               ) : (
                 <>
@@ -2912,7 +2913,9 @@ ${
                     }`}
                   >
                     {diagnosisReply ||
-                      (diagnosisError ? '진단 원문이 없습니다.' : '진단 결과가 없습니다.')}
+                      (diagnosisError
+                        ? '진단 원문이 없습니다.'
+                        : '진단 준비 중입니다. 이슈 완료 직후 백그라운드로 저장됩니다.')}
                   </p>
                 </>
               )}
