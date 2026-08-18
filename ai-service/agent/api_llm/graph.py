@@ -339,18 +339,10 @@ def _template_reply(
                         )
                     )
             elif page_payload is not None:
-                if isinstance(page_payload, dict) and page_payload.get("primary_table") == "offscreen":
-                    vu = page_payload.get("visible_ui")
-                    if vu:
-                        parts.append(
-                            join_spaced_parts(
-                                [
-                                    "화면에서 보이는 항목:",
-                                    ", ".join(str(x) for x in vu),
-                                ]
-                            )
-                        )
-                else:
+                if not (
+                    isinstance(page_payload, dict)
+                    and page_payload.get("primary_table") == "offscreen"
+                ):
                     parts.append(
                         join_spaced_parts(
                             [

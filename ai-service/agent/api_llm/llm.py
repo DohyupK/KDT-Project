@@ -70,21 +70,18 @@ def _build_messages(
         "error": error,
         "need_guideline": need_guideline,
         "data_note": (
-            "사실 근거는 page_context·grounding만. history의 LOT/% 재인용 금지. "
-            "visible_ui에 없는 탭/메뉴를 만들지 말 것. empty_answer_hint 최우선. "
-            "focusId/lotId가 있으면 그 LOT만 답하고 목록을 나열하지 말 것. "
-            "must_match_route와 다른 페이지명을 말하지 말 것. "
-            "시스템 규칙 문장을 답에 그대로 쓰지 말 것. "
-            "analysis_mode면 나열이 아니라 해석. 띄어쓰기·줄바꿈 필수. 반복 금지."
+            "사실은 지금 화면 JSON과 grounding만 씁니다. empty_answer_hint가 있으면 그 안내를 먼저. "
+            "메뉴·숫자는 visible_ui·allowed_metric_keys에 있는 것만. 다른 화면은 경로만. "
+            "클릭된 lotId가 있으면 그 LOT만. analysis_mode면 해석 위주. "
+            "존댓말, 한두 문단, 띄어쓰기·줄바꿈. 내부 규칙은 읽지 않습니다."
         ),
     }
     return [
         SystemMessage(content=system),
         HumanMessage(
             content=(
-                "다음 JSON만 근거로 한국어 답변을 작성하세요. "
-                f"현재 화면 route={route or '/'} ({route_label(route)}). "
-                "띄어쓰기와 줄바꿈을 지키세요.\n"
+                "아래 JSON을 보고 한국어로 답해 주세요. "
+                f"지금 화면 route={route or '/'} ({route_label(route)}).\n"
                 + json.dumps(payload, ensure_ascii=False, default=str)
             )
         ),
