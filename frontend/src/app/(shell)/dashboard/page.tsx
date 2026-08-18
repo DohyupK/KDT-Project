@@ -102,6 +102,7 @@ type LotRiskApiDetail = {
   residualMargin: number | null;
   residualUsl: number;
   spcStatus: string | null;
+  missingSpcParams?: Array<{ key: string; label: string }>;
   riskLevel: '심각' | '주의' | '안정' | null;
   riskReason: string | null;
   actionContent: string | null;
@@ -337,6 +338,19 @@ function isAbnormalSpcMetric(metric: SpcMetric): boolean {
 function formatSpcStatusLabel(spc: string | null | undefined): string {
   if (isSpcUnjudged(spc)) return '미판정';
   return (spc ?? '').trim();
+}
+
+function spcUnjudgedNoteParagraphs(
+  missingSpcParams?: Array<{ key: string; label: string }> | null,
+): string[] {
+  const labels = (missingSpcParams ?? [])
+    .map((p) => (p.label || p.key || '').trim())
+    .filter(Boolean);
+  return [
+    '해당 LOT의 필수 공정 파라미터에 결측치가 있어 SPC를 판정하지 않습니다.',
+    ...(labels.length > 0 ? [`결측 파라미터: ${labels.join(' · ')}`] : []),
+    '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
+  ];
 }
 
 function SpcStatusNoteBlock({
@@ -3403,10 +3417,9 @@ export default function DashBoardPage() {
                           selectedSpcDetailLoading
                             ? ['SPC 관리도를 불러오는 중…']
                             : selectedSpcUnjudged
-                              ? [
-                                  '필수 공정값 일부가 비어 SPC를 판정하지 않습니다.',
-                                  '위험등급은 불량확률·잔류리튬만으로 산정합니다.',
-                                ]
+                              ? spcUnjudgedNoteParagraphs(
+                                  selectedLotRiskDetail?.missingSpcParams,
+                                )
                               : (selectedLotRiskDetail?.spcStatus ?? selectedLotRisk.spc) ===
                                   '안정'
                                 ? [
