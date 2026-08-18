@@ -1,6 +1,6 @@
 # 다중 모델 투표 앙상블 — 결정 기록
 
-최종 갱신: 2026-08-12  
+최종 갱신: 2026-08-18  
 관련: [`model-training-methods.md`](./model-training-methods.md) · [`ai-service/models/voting_config.json`](../../ai-service/models/voting_config.json) · [`ai-service/models/recipe.json`](../../ai-service/models/recipe.json)
 
 활성 경로: cascade voting (`POST /predict-voting`).  
@@ -29,6 +29,8 @@
 | capacity | **15** | legacy_reg:4 · d50/d90:3 · feature/feat_cap:2 · special_cap:1 |
 | residual_li | **13** | legacy_res:4 · d50/d90:3 · feature:2 · feat_res:1 |
 | 불량 | OR | `p_blend=(7·clf_d90+3·legacy)/10` ≥ **0.55** **또는** symbolic ≥ ≈**0.0809** |
+
+`probability` 컬럼에는 **`p_blend` 연속값**을 저장한다 (`store_probability.mode` = `blend`). 예전 `hard_ox`(불량 0.9 / 정상 0.1)는 쓰지 않는다. O/X(`quality_defect`)는 위 OR 규칙 그대로.
 
 상세 상수: `models/recipe.json` · `voting_config.json` (`probability.mode` = `blend_or_symbolic`).
 
