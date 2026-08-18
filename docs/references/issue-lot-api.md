@@ -1,6 +1,6 @@
 # Issue / LOT API · DB · 화면 연동
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-18
 
 Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. 런타임 SQL의 `FROM`/`JOIN`/`INTO`와 `ON DUPLICATE` 한정자(`JUDGMENT_LOTS.col`)도 대문자여야 한다.
 
@@ -32,21 +32,19 @@ Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. �
   1. `/predict-voting` → **`LOT_RESULTS`** NULL-fill (피더 실측은 COALESCE로 불변)
   2. **`JUDGMENT_LOTS`** — qd/residual ← `LOT_RESULTS`, capacity/probability ← voting, `spc` ← SPC
   3. **`ANALYSIS_LOTS`** — judgment 2차 추론 (`combineLotScore` + SPC → risk/`scored_at`/`spc_chart_json`)
-- **폴러:** 기동 즉시 SPC sync + analysis 틱 + `SCORE_ON_BOOT` **채점만**. 이후 SPC ~60s · analysis ~10m. `running` 락 중 다른 틱은 스킵(이슈 시드 포함).
-- **피더:** `frontend/plant_feeder_live.py` → `SPC_LOT` / `SPC_LOT_results`. 앱 `LOTS`는 피더가 직접 쓰지 않음. `spcLotSync`가 미러 후 채점.
+- **폴러:** AWS는 SPC 미러(~60s) + 이슈/메일. `LOT_SCORE_ON_AWS=0`이면 `/predict-voting` 안 함. 채점·사유·권고조치는 이 PC `npm run score-pc`. 가이드: [`aws-pc-score-worker.md`](../guides/aws-pc-score-worker.md).
+- **피더:** `frontend/plant_feeder_live.py` → `SPC_LOT` / `SPC_LOT_results`. 앱 `LOTS`는 피더가 직접 쓰지 않음. `spcLotSync`가 미러. 채점은 PC 워커.
 
 ```mermaid
 flowchart TD
   feeder["plant_feeder_live.py"] --> spcLot["SPC_LOT / SPC_LOT_results"]
-  spcLot --> sync["spcLotSync ~60s"]
+  spcLot --> sync["AWS spcLotSync 미러만"]
   sync --> lots["LOTS"]
-  lots --> score["scoreAllLots /predict-voting"]
+  lots --> score["이 PC score-pc /predict-voting"]
   score --> lr["LOT_RESULTS"]
   lr --> j["JUDGMENT_LOTS"]
-  j --> a["ANALYSIS_LOTS"]
-  a --> bootSkip["부트: skipIssues"]
-  a --> poller["폴러: vLLM risk_reason / 권고조치"]
-  poller --> issues["ISSUES if risk_level=심각"]
+  j --> a["ANALYSIS_LOTS + risk_reason / 권고조치"]
+  a --> issues["AWS: ISSUES if risk_level=심각 + n8n"]
 ```
 
 ---
@@ -228,8 +226,8 @@ DDL: [`DB/schema.sql`](../../DB/schema.sql)
 | GET | `/api/lots/daily-kpi` | 선택 | 당일 probability KPI |
 | GET | `/api/lots/q-cost` | 선택 | 품질 비용 KPI |
 | GET | `/api/lots/:lotId` | 선택 | LOT 상세 (공정+채점 JOIN) |
-| POST | `/api/lots/import` | JWT | CSV→`LOTS` + 채점 + 이슈 시드 |
-| POST | `/api/lots/score` | JWT | 미채점 LOT 채점 |
+| POST | `/api/lots/import` | JWT | CSV→`LOTS`. `?score=1`은 `LOT_SCORE_ON_AWS=0`이면 채점 안 함(이슈만) |
+| POST | `/api/lots/score` | JWT | 미채점 LOT 채점. AWS `LOT_SCORE_ON_AWS=0`이면 안내 JSON만 |
 | GET | `/api/issues` | 선택 | 미완료; `riskLevel`은 ANALYSIS_LOTS |
 | GET | `/api/issues/:issueId` | 선택 | 상세+`analysis` |
 | PUT | `/api/issues/:issueId` | JWT | `actionContent`, `completed: true` |

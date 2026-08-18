@@ -149,7 +149,8 @@ npm run dev
 | 루트 명령 | 설명 |
 |-----------|------|
 | `npm run dev` | AWS·로컬 앱: ai + backend + frontend (**워커 안 켬**) |
-| `npm run security-pc` | 이 PC만: vLLM 확인 · 선택 ssh -L 3306/6333 · 워커 |
+| `npm run security-pc` | 이 PC만: vLLM 확인 · 선택 ssh -L 3306/6333 · 보안 워커 |
+| `npm run score-pc` | 이 PC만: 로컬 `:8800` voting · ssh -L 3306 · LOT 채점 워커 |
 | `npm run dev:ai` | ai-service만 (`python -m uvicorn` · CWD=`ai-service/`) |
 | `npm run dev:backend` | backend만 |
 | `npm run dev:frontend` | frontend만 (디버그용 · 단독 사용 금지) |

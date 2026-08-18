@@ -4,11 +4,9 @@
  */
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
-import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
 import { dispatchNewRiskTopIssueReports } from './issueReportN8n.js'
-
-const SYS_HANDOVER = 'LOT-SYS-HANDOVER'
+import { lotScoreOnAws } from './lotScoreRole.js'
 
 let timer: ReturnType<typeof setInterval> | null = null
 let running = false
@@ -33,32 +31,36 @@ async function tick() {
 
   let lotIds: string[] = []
   try {
-    const picked = await pickUnscoredLotIds(200)
-    lotIds = picked.lotIds
-    const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
-    if (lotIds.length === 0) {
-      console.log('[analysis-sync] nothing to score')
+    if (!lotScoreOnAws()) {
+      console.log('[analysis-sync] skip score (LOT_SCORE_ON_AWS=0) — issues/mail only')
     } else {
-      console.log('[analysis-sync] score_start', {
-        count: lotIds.length,
-        queue_a: picked.reason.queue_a,
-        queue_b: picked.reason.queue_b,
-        analysis_only: analysisOnlyIds.length,
-        full: fullScoreIds.length,
-      })
-if (analysisOnlyIds.length > 0) {
-        let rebuilt = 0
-        for (const id of analysisOnlyIds) {
-          if (await lotService.scoreAnalysisFromJudgment(id)) rebuilt++
-        }
-        console.log('[analysis-sync] analysis_only_done', { rebuilt })
-      }
-      if (fullScoreIds.length > 0) {
-        const scored = await lotService.scoreAllLots({
-          lotIds: fullScoreIds,
-          concurrency: 4,
+      const picked = await pickUnscoredLotIds(200)
+      lotIds = picked.lotIds
+      const { analysisOnlyIds, fullScoreIds } = splitAnalysisOnly(picked.rows)
+      if (lotIds.length === 0) {
+        console.log('[analysis-sync] nothing to score')
+      } else {
+        console.log('[analysis-sync] score_start', {
+          count: lotIds.length,
+          queue_a: picked.reason.queue_a,
+          queue_b: picked.reason.queue_b,
+          analysis_only: analysisOnlyIds.length,
+          full: fullScoreIds.length,
         })
-        console.log('[analysis-sync] score_done', scored)
+        if (analysisOnlyIds.length > 0) {
+          let rebuilt = 0
+          for (const id of analysisOnlyIds) {
+            if (await lotService.scoreAnalysisFromJudgment(id)) rebuilt++
+          }
+          console.log('[analysis-sync] analysis_only_done', { rebuilt })
+        }
+        if (fullScoreIds.length > 0) {
+          const scored = await lotService.scoreAllLots({
+            lotIds: fullScoreIds,
+            concurrency: 4,
+          })
+          console.log('[analysis-sync] score_done', scored)
+        }
       }
     }
   } catch (err) {
@@ -67,7 +69,7 @@ if (analysisOnlyIds.length > 0) {
     running = false
   }
 
-  if (lotIds.length > 0) {
+  if (lotScoreOnAws() && lotIds.length > 0) {
     try {
       const reasons = await fillRiskReasonsForLots(lotIds, { concurrency: 2 })
       console.log('[analysis-sync] risk_reasons', reasons)

@@ -6,6 +6,7 @@
 import { syncSpcLotsToApp } from './spcLotSync.js'
 import * as lotService from './lot.service.js'
 import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
+import { lotScoreOnAws } from './lotScoreRole.js'
 
 function bootScoreEnabled(): boolean {
   const v = (process.env.SCORE_ON_BOOT ?? '1').trim().toLowerCase()
@@ -17,8 +18,10 @@ function bootScoreEnabled(): boolean {
  * Path: SPC_LOT→lots + /predict-voting 3-stage score (risk_reason/issues via pollers).
  */
 export async function runBootScoreOnce(): Promise<void> {
-  if (!bootScoreEnabled()) {
-    console.log('[boot-score] disabled (SCORE_ON_BOOT=0)')
+  if (!bootScoreEnabled() || !lotScoreOnAws()) {
+    console.log(
+      `[boot-score] disabled (${!bootScoreEnabled() ? 'SCORE_ON_BOOT=0' : 'LOT_SCORE_ON_AWS=0'})`,
+    )
     return
   }
 

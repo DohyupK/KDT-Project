@@ -67,5 +67,6 @@
 | `ai-service/agent/security_queue_store.py` | `USER_SECURITY_*` |
 | `ai-service/scripts/run_security_worker.py` | PC 보안 워커 |
 | `scripts/security-pc.ps1` | `npm run security-pc` (vLLM 확인 · 선택 `-L 3306`/`6333` · 워커) |
+| `scripts/score-pc.ps1` | `npm run score-pc` (로컬 `:8800` · 선택 `-L 3306` · LOT 채점 워커) |
 | `ai-service/agent/model_registry.py` | registry ready 헤드 일괄 실행 |
 | 루트 `.env` (gitignore) | CHAT_USE_LLM · vLLM · DB_* · JWT 등 (시크릿 미커밋) |

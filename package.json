@@ -6,7 +6,8 @@
     "dev:ai": "node ai-service/scripts/dev-ai.cjs",
     "dev:backend": "node scripts/dev-backend.cjs",
     "dev:frontend": "npm --prefix frontend run dev",
-    "security-pc": "powershell -ExecutionPolicy Bypass -File ./scripts/security-pc.ps1"
+    "security-pc": "powershell -ExecutionPolicy Bypass -File ./scripts/security-pc.ps1",
+    "score-pc": "powershell -ExecutionPolicy Bypass -File ./scripts/score-pc.ps1"
   },
   "devDependencies": {
     "concurrently": "^9"

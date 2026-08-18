@@ -42,6 +42,7 @@ const server = app.listen(port, () => {
   console.log(
     `[backend] DB_HOST=${dbOpts.host} DB_NAME=${dbOpts.database}${process.env.DB_NAME ? '' : ` (default ${DEFAULT_DB_NAME})`}`,
   )
+  console.log(`[backend] LOT_SCORE_ON_AWS=${process.env.LOT_SCORE_ON_AWS ?? '1'}`)
   // Documents OCR / TEXT_MATCH watchdog — lifecycle owned by backend
   startDocumentWatcherSupervisor()
   void (async () => {
