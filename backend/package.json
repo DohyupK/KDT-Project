@@ -33,6 +33,7 @@
     "migrate:handover-decouple-issues": "tsx scripts/migrate-handover-decouple-issues.ts",
     "migrate:ai-library-analysis": "tsx scripts/migrate-ai-library-analysis.ts",
     "migrate:ai-library-lot-id": "tsx scripts/migrate-ai-library-analysis-lot-id.ts",
+    "migrate:issues-analysis-content": "tsx scripts/migrate-issues-analysis-content.ts",
     "migrate:spc-standard": "tsx scripts/migrate-spc-standard.ts",
     "migrate:lot-recommended-actions": "tsx scripts/migrate-lot-recommended-actions.ts",
     "migrate:uppercase-tables": "tsx scripts/migrate-uppercase-tables.ts",
