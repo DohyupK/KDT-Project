@@ -100,6 +100,19 @@ def _is_decrease(direction: str) -> bool:
     return direction in ("감소", "하락", "단축")
 
 
+# Same as voting_config.defect_rule.blend_threshold — below this, not judged defect.
+DEFECT_ACTION_PROB_THRESHOLD = 0.55
+
+
+def _is_defect_judged(probability: float | None) -> bool:
+    if probability is None:
+        return False
+    try:
+        return float(probability) >= DEFECT_ACTION_PROB_THRESHOLD
+    except (TypeError, ValueError):
+        return False
+
+
 def _item_text(c: dict[str, Any]) -> str:
     label = str(c.get("labelKo") or c.get("feature") or "")
     value_text = str(c.get("valueText") or c.get("value") or "")
@@ -132,19 +145,23 @@ def _rule_summary(
     probability: float | None,
     residual_li: float | None,
     risk_level: str | None,
+    spc_status: str | None = None,
 ) -> str:
-    defect = (drivers.get("defect_causes") or [])[:3]
+    include_defect = _is_defect_judged(probability)
+    defect = (drivers.get("defect_causes") or [])[:3] if include_defect else []
     residual = (drivers.get("residual_causes") or [])[:3]
 
-    prob_pct = f"{probability * 100:.2f}%" if probability is not None else "높은"
+    prob_pct = f"{float(probability) * 100:.2f}%" if probability is not None else "높은"
     res_txt = f"{residual_li:.2f} ppm" if residual_li is not None else "상향"
 
-    phrase = _grouped_cause_phrase(defect)
-    para1 = (
-        f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다."
-        if phrase
-        else f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct})"
-    )
+    para1 = ""
+    if include_defect:
+        phrase = _grouped_cause_phrase(defect)
+        para1 = (
+            f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다."
+            if phrase
+            else f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct})"
+        )
     res_phrase = _grouped_cause_phrase(residual)
     para2 = (
         f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다."
@@ -152,15 +169,31 @@ def _rule_summary(
         else ""
     )
 
-    out = f"{para1}\n\n{para2}".strip()[:1024]
-    return out
+    if para1 and para2:
+        return f"{para1}\n\n{para2}".strip()[:1024]
+    if para1:
+        return para1[:1024]
+    if para2:
+        return para2[:1024]
+    spc = (spc_status or "").strip()
+    if spc and spc not in ("안정", "-"):
+        return f"SPC {spc}가 확인되어 운영 기준을 재확인합니다."[:1024]
+    return STABLE_SUMMARY
 
 
-def _rule_steps(drivers: dict[str, Any], spc_status: str | None) -> list[dict[str, Any]]:
+def _rule_steps(
+    drivers: dict[str, Any],
+    spc_status: str | None,
+    probability: float | None = None,
+) -> list[dict[str, Any]]:
     seen: set[str] = set()
     steps: list[dict[str, Any]] = []
     order = 1
-    for bucket in (drivers.get("defect_causes") or [], drivers.get("residual_causes") or []):
+    buckets: list[Any] = []
+    if _is_defect_judged(probability):
+        buckets.append(drivers.get("defect_causes") or [])
+    buckets.append(drivers.get("residual_causes") or [])
+    for bucket in buckets:
         for c in bucket:
             feat = str(c.get("feature") or "")
             for doc in FEATURE_QMS.get(feat, []):
@@ -308,13 +341,14 @@ def compose_lot_recommended_action(body: dict[str, Any]) -> dict[str, Any]:
         query_parts.append(f"SPC {spc_status}")
     # 안정적인 UI 규격(문장/소수점/단락) 때문에 요약은 규칙 기반으로만 생성합니다.
     # steps는 QMS doc mapping 기반으로 규칙 생성합니다.
-    steps = _rule_steps(drivers, spc_status)
+    steps = _rule_steps(drivers, spc_status, probability)
     return {
         "summary": _rule_summary(
             drivers,
             probability=probability,
             residual_li=residual_li,
             risk_level=risk_level,
+            spc_status=spc_status,
         ),
         "steps": steps,
         "sources": _sources_from_steps(steps),

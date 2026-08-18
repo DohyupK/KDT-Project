@@ -106,9 +106,17 @@ export function clearLimitsCache() {
 export function isProcessComplete(
   values: Partial<Record<SpcParamKey, number | null | undefined>>,
 ): boolean {
-  return SPC_PARAM_KEYS.every((k) => {
+  return listMissingProcessKeys(values).length === 0
+}
+
+/** Keys among SPC_PARAM_KEYS that are null, empty, or non-finite. */
+export function listMissingProcessKeys(
+  values: Partial<Record<SpcParamKey, number | null | undefined | string>>,
+): SpcParamKey[] {
+  return SPC_PARAM_KEYS.filter((k) => {
     const v = values[k]
-    return v != null && Number.isFinite(Number(v))
+    if (v == null || v === '') return true
+    return !Number.isFinite(typeof v === 'number' ? v : Number(v))
   })
 }
 

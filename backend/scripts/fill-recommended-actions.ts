@@ -7,44 +7,9 @@
 import '../src/loadRootEnv.js'
 import { query } from '../src/db/connection.js'
 import {
-  buildRuleSummary,
   fillRecommendedActionsForLots,
+  rewriteStoredRecommendedActions,
 } from '../src/services/lotRecommendedAction.service.js'
-
-async function rewriteSummariesFromStoredDrivers(): Promise<number> {
-  const rows = await query<
-    {
-      lot_id: string
-      drivers_json: Record<string, unknown> | null
-      probability: number | null
-      residual_li: number | null
-      risk_level: string | null
-    }[]
-  >(
-    `SELECT r.lot_id, r.drivers_json, a.probability, a.risk_level, j.residual_li
-     FROM LOT_RECOMMENDED_ACTIONS r
-     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = r.lot_id
-     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = r.lot_id
-     WHERE r.lot_id <> 'LOT-SYS-HANDOVER'`,
-  )
-  let updated = 0
-  for (const row of rows) {
-    const summary = buildRuleSummary(
-      row.drivers_json && typeof row.drivers_json === 'object' ? row.drivers_json : {},
-      {
-        probability: row.probability,
-        residualLi: row.residual_li,
-        riskLevel: row.risk_level,
-      },
-    )
-    await query(`UPDATE LOT_RECOMMENDED_ACTIONS SET summary = ? WHERE lot_id = ?`, [
-      summary.slice(0, 1024),
-      row.lot_id,
-    ])
-    updated++
-  }
-  return updated
-}
 
 async function main() {
   const limitArg = process.argv.find((a) => a.startsWith('--limit='))
@@ -55,7 +20,7 @@ async function main() {
 
   if (summaryOnly) {
     const started = Date.now()
-    const updated = await rewriteSummariesFromStoredDrivers()
+    const updated = await rewriteStoredRecommendedActions()
     console.log('DONE', JSON.stringify({ updated, mode: 'summary-only' }), `elapsed_ms=${Date.now() - started}`)
     process.exit(0)
   }

@@ -13,6 +13,27 @@ export type DashboardLotRiskItem = {
   riskReason: string | null
 }
 
+export type DashboardMissingSpcParam = {
+  key: string
+  label: string
+}
+
+export type DashboardLotRiskDetail = {
+  lotId: string
+  recordedAt: string
+  defectProb: number | null
+  residualLithium: number | null
+  residualMargin: number | null
+  residualUsl: number
+  spcStatus: string | null
+  missingSpcParams?: DashboardMissingSpcParam[]
+  riskLevel: '심각' | '주의' | '안정' | null
+  riskReason: string | null
+  actionContent: string | null
+  recommendedAction?: unknown
+  spc?: { metrics?: unknown[] } | null
+}
+
 export const dashboardApi = {
   listLotRisks(params: {
     page?: number
@@ -36,7 +57,7 @@ export const dashboardApi = {
   },
 
   getLotRiskDetail(lotId: string) {
-    return apiClient.get<{ item: Record<string, unknown> }>(
+    return apiClient.get<{ item: DashboardLotRiskDetail }>(
       `/dashboard/lot-risks/${encodeURIComponent(lotId)}`,
     )
   },

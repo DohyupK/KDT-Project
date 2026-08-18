@@ -76,6 +76,12 @@ async function tick() {
     } catch (err) {
       console.error('[analysis-sync] risk_reason_failed', err)
     }
+    try {
+      const actions = await fillRecommendedActionsForLots(lotIds, { concurrency: 2 })
+      console.log('[analysis-sync] recommended_actions', actions)
+    } catch (err) {
+      console.error('[analysis-sync] recommended_actions_failed', err)
+    }
   }
 
   try {

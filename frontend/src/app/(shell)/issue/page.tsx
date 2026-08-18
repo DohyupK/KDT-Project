@@ -16,7 +16,7 @@ import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
 import { usePageChat } from '@/context/PageChatContext';
-import { getAuthUser } from '@/lib/authStorage';
+import { getAuthToken, getAuthUser } from '@/lib/authStorage';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import {
   clearIssueActionDraft,
@@ -33,9 +33,11 @@ interface Issue {
   risk: '심각' | '주의' | '안정';
   issueContent: string;
   assignee: string;
-  assigneeUserId: string | null;
+  assignedAt: string | null;
+  processStatus: IssueProcessStatus;
   action: string;
   completed: boolean;
+  assignmentDirty: boolean;
   /** analysis_lots (상세 API). 목록만이면 null */
   analysis: {
     lotId: string;
@@ -57,15 +59,39 @@ interface FilterState {
   risk: '' | Issue['risk'];
   /** 대표 SPC 상태 필터. 안정은 목록 제외 대상이라 옵션에 없음 */
   spc: '' | '이상' | '주의';
+  assignment: '' | 'assigned' | 'unassigned';
 }
 
+type IssueProcessStatus = '미배정' | '접수' | '처리 중' | '처리 완료' | '종결';
+
 interface ManagementForm {
-  assigneeUserId: string;
+  assignee: string;
+  processStatus: IssueProcessStatus;
   action: string;
   completed: boolean;
 }
 
 type ReportType = 'lot' | 'weekly' | 'monthly';
+
+type IssueGroupKey =
+  | 'spc'
+  | 'residualLithium'
+  | 'defectRisk'
+  | 'calcination'
+  | 'inspection'
+  | 'other';
+
+interface IssueGroupSummary {
+  key: IssueGroupKey;
+  title: string;
+  count: number;
+  highestSeverity: Issue['risk'];
+  representativeMessage: string;
+  lotCount: number;
+  assignedCount: number;
+  unassignedCount: number;
+  items: Issue[];
+}
 
 interface ReportKpi {
   issueCount: number;
@@ -128,6 +154,8 @@ interface ManagementSectionProps {
   canSave: boolean;
   isSaving?: boolean;
   onChange: <K extends keyof ManagementForm>(key: K, value: ManagementForm[K]) => void;
+  onAssign: () => void;
+  onRequestUnassign: () => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }
 
@@ -323,6 +351,8 @@ function formatAnalysisProbability(probability: number | null | undefined): {
 
 /** 목록 API → UI. 담당자·조치·analysis는 상세 API에서 채움. */
 function mapIssueListItem(item: IssueApiListItem): Issue {
+  const assignee = '';
+  const action = '';
   return {
     id: item.issueId,
     createdAt: item.createdAt,
@@ -330,10 +360,12 @@ function mapIssueListItem(item: IssueApiListItem): Issue {
     lot: item.lotId,
     risk: normalizeIssueRiskLevel(item.riskLevel),
     issueContent: item.issueContent,
-    assignee: '미배정',
-    assigneeUserId: null,
-    action: '',
+    assignee,
+    assignedAt: null,
+    processStatus: deriveProcessStatus(assignee, false, action),
+    action,
     completed: false,
+    assignmentDirty: false,
     analysis: null,
     listSpcStatus: item.spcStatus ?? null,
   };
@@ -352,7 +384,16 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
       }
     : null;
 
-  return {
+  const serverAssignee = detail.assigneeName?.trim() || '';
+  const serverAction = detail.actionContent ?? '';
+  const nextAssignee = issue.assignmentDirty ? issue.assignee : serverAssignee;
+  const nextAssignedAt =
+    issue.assignmentDirty ? issue.assignedAt : hasAssigneeName(serverAssignee) ? detail.createdAt : null;
+  const nextProcessStatus = issue.assignmentDirty
+    ? issue.processStatus
+    : deriveProcessStatus(serverAssignee, detail.completed, serverAction);
+
+  return withLoginAutoAssignee({
     ...issue,
     id: detail.issueId,
     createdAt: detail.createdAt,
@@ -360,13 +401,15 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
     lot: detail.lotId,
     risk: normalizeIssueRiskLevel(detail.riskLevel),
     issueContent: detail.issueContent,
-    assignee: detail.assigneeName?.trim() || '미배정',
-    assigneeUserId: detail.assigneeUserId ?? null,
-    action: detail.actionContent ?? '',
+    assignee: nextAssignee,
+    assignedAt: nextAssignedAt,
+    processStatus: nextProcessStatus,
+    action: serverAction,
     completed: detail.completed,
+    assignmentDirty: issue.assignmentDirty,
     analysis,
     listSpcStatus: detail.analysis?.spcStatus ?? detail.spcStatus ?? issue.listSpcStatus,
-  };
+  });
 }
 
 function getApiErrorMessage(error: unknown, fallback: string) {
@@ -394,6 +437,217 @@ function reportTypeLabel(type: ReportType, language: 'ko' | 'en' = 'ko'): string
   if (type === 'lot') return 'LOT 보고서';
   if (type === 'weekly') return '주간 보고서';
   return '월간 보고서';
+}
+
+const ISSUE_GROUP_KEYS: IssueGroupKey[] = [
+  'spc',
+  'residualLithium',
+  'defectRisk',
+  'calcination',
+  'inspection',
+  'other',
+];
+
+const ISSUE_GROUP_TITLE: Record<IssueGroupKey, string> = {
+  spc: 'SPC 이상',
+  residualLithium: '잔류 리튬 고위험',
+  defectRisk: '불량확률 고위험',
+  calcination: '소성 공정 관련',
+  inspection: '검사 / 품질 판정 관련',
+  other: '기타',
+};
+
+const ISSUE_GROUP_MESSAGE: Record<IssueGroupKey, string> = {
+  spc: 'SPC 패턴 이상 및 관리선 이탈이 감지되었습니다.',
+  residualLithium: '잔류 리튬 기준 초과 이슈가 반복 발생했습니다.',
+  defectRisk: '불량확률 0.85 이상 이슈가 집중되었습니다.',
+  calcination: '소성 온도 및 공정 편차 관련 이슈가 확인되었습니다.',
+  inspection: '검사 결과 및 품질 판정 관련 이상이 발생했습니다.',
+  other: '기타 유형의 이슈가 감지되었습니다.',
+};
+
+const ISSUE_GROUP_VISIBLE_STEP = 5;
+const PRACTITIONER_NAMES = ['김실무', '이공정', '박설비', '최생산'] as const;
+const ASSIGNEE_UNASSIGNED = '미배정';
+const ASSIGNEE_NAME_MIN_LENGTH = 2;
+const ASSIGNEE_NAME_MAX_LENGTH = 20;
+
+function normalizeAssigneeName(value: string | null | undefined): string {
+  return (value ?? '').trim();
+}
+
+function hasAssigneeName(value: string | null | undefined): boolean {
+  return normalizeAssigneeName(value).length > 0;
+}
+
+function displayAssigneeName(value: string | null | undefined): string {
+  return hasAssigneeName(value) ? normalizeAssigneeName(value) : ASSIGNEE_UNASSIGNED;
+}
+
+function deriveProcessStatus(
+  assignee: string | null | undefined,
+  completed: boolean,
+  action: string | null | undefined,
+): IssueProcessStatus {
+  if (!hasAssigneeName(assignee)) return '미배정';
+  if (completed) return '종결';
+  if ((action ?? '').trim()) return '처리 중';
+  return '접수';
+}
+
+function formatCurrentDateTime(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function getLoginAssigneeName(): string | null {
+  if (!getAuthToken()) return null;
+  const name = getAuthUser()?.name?.trim();
+  return name || null;
+}
+
+function withLoginAutoAssignee(issue: Issue): Issue {
+  if (issue.assignmentDirty || hasAssigneeName(issue.assignee)) return issue;
+  const loginName = getLoginAssigneeName();
+  if (!loginName) return issue;
+  return {
+    ...issue,
+    assignee: loginName,
+    assignedAt: formatCurrentDateTime(),
+    processStatus: issue.processStatus === '미배정' ? '접수' : issue.processStatus,
+    assignmentDirty: true,
+  };
+}
+
+function validateAssigneeName(name: string): string | null {
+  const normalized = normalizeAssigneeName(name);
+  if (!normalized) return '담당 실무자를 먼저 지정해 주세요.';
+  if (normalized.length < ASSIGNEE_NAME_MIN_LENGTH) {
+    return `담당자 이름은 ${ASSIGNEE_NAME_MIN_LENGTH}자 이상 입력해 주세요.`;
+  }
+  if (normalized.length > ASSIGNEE_NAME_MAX_LENGTH) {
+    return `담당자 이름은 ${ASSIGNEE_NAME_MAX_LENGTH}자 이하로 입력해 주세요.`;
+  }
+  return null;
+}
+
+function issueClassifyText(issue: Issue): string {
+  return [
+    issue.issueContent,
+    issue.analysis?.riskReason ?? '',
+    issue.analysis?.spcStatus ?? '',
+    issue.listSpcStatus ?? '',
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+function classifyIssueGroup(issue: Issue): IssueGroupKey {
+  const text = issueClassifyText(issue);
+  const spc = `${issue.analysis?.spcStatus ?? ''} ${issue.listSpcStatus ?? ''}`;
+  const probability = issue.analysis?.probability;
+
+  if (
+    spc.includes('이탈') ||
+    spc.includes('이상') ||
+    (text.includes('spc') && (text.includes('이탈') || text.includes('이상')))
+  ) {
+    return 'spc';
+  }
+  if (text.includes('잔류') || text.includes('리튬') || text.includes('residual')) {
+    return 'residualLithium';
+  }
+  if (
+    (typeof probability === 'number' && probability >= 0.85) ||
+    text.includes('불량확률') ||
+    text.includes('불량 확률')
+  ) {
+    return 'defectRisk';
+  }
+  if (text.includes('소성') || text.includes('sinter')) {
+    return 'calcination';
+  }
+  if (text.includes('검사') || text.includes('품질') || text.includes('판정')) {
+    return 'inspection';
+  }
+  return 'other';
+}
+
+function issueRiskRank(risk: Issue['risk']): number {
+  if (risk === '심각') return 3;
+  if (risk === '주의') return 2;
+  return 1;
+}
+
+function highestIssueRisk(items: Issue[]): Issue['risk'] {
+  return items.reduce<Issue['risk']>((acc, item) => {
+    return issueRiskRank(item.risk) > issueRiskRank(acc) ? item.risk : acc;
+  }, '안정');
+}
+
+function issueTimeMs(issue: Issue): number {
+  const parsed = Date.parse(issue.createdAt) || Date.parse(issue.date);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function summarizeIssueLine(issue: Issue): string {
+  const raw = (issue.analysis?.riskReason?.trim() || issue.issueContent || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '요약 없음';
+  return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
+}
+
+function buildIssueGroups(issues: Issue[]): IssueGroupSummary[] {
+  const buckets: Record<IssueGroupKey, Issue[]> = {
+    spc: [],
+    residualLithium: [],
+    defectRisk: [],
+    calcination: [],
+    inspection: [],
+    other: [],
+  };
+  for (const issue of issues) {
+    buckets[classifyIssueGroup(issue)].push(issue);
+  }
+
+  const groups: IssueGroupSummary[] = ISSUE_GROUP_KEYS.filter(
+    (key) => buckets[key].length > 0,
+  ).map((key) => {
+    const items = [...buckets[key]].sort((a, b) => {
+      const byRisk = issueRiskRank(b.risk) - issueRiskRank(a.risk);
+      if (byRisk !== 0) return byRisk;
+      const byTime = issueTimeMs(b) - issueTimeMs(a);
+      if (byTime !== 0) return byTime;
+      const byId = a.id.localeCompare(b.id, 'ko');
+      if (byId !== 0) return byId;
+      return a.lot.localeCompare(b.lot, 'ko');
+    });
+    return {
+      key,
+      title: ISSUE_GROUP_TITLE[key],
+      count: items.length,
+      highestSeverity: highestIssueRisk(items),
+      representativeMessage: ISSUE_GROUP_MESSAGE[key],
+      lotCount: new Set(items.map((item) => item.lot)).size,
+      assignedCount: items.filter((item) => hasAssigneeName(item.assignee)).length,
+      unassignedCount: items.filter((item) => !hasAssigneeName(item.assignee)).length,
+      items,
+    };
+  });
+
+  groups.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    const byRisk = issueRiskRank(b.highestSeverity) - issueRiskRank(a.highestSeverity);
+    if (byRisk !== 0) return byRisk;
+    return a.title.localeCompare(b.title, 'ko');
+  });
+  return groups;
 }
 
 function pad2(n: number) {
@@ -506,37 +760,53 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
   const riskColor = (risk: Issue['risk']) =>
     risk === '심각' ? colors.red : risk === '주의' ? colors.amber : colors.green;
   const { kpi } = payload;
-  const diagnosisRows = payload.issues
-    .map((issue) => {
-      const analysis = issue.analysis;
-      const spc = analysis?.spcStatus ?? issue.listSpcStatus ?? '—';
-      const prob = formatAnalysisProbability(analysis?.probability).label;
-      const reason = analysis?.riskReason?.trim() || issue.issueContent || '—';
-      const level = analysis?.riskLevel ?? issue.risk;
-      return `<tr>
+  const issueGroups = buildIssueGroups(payload.issues);
+  const groupOverview = {
+    groupCount: issueGroups.length,
+    largestGroupName: issueGroups[0]?.title ?? '—',
+    criticalGroupCount: issueGroups.filter((group) => group.highestSeverity === '심각').length,
+  };
+  const groupSummaryRows = issueGroups
+    .map(
+      (group) => `<tr>
+        <td>${escapeHtml(group.title)}</td>
+        <td>${group.count}</td>
+        <td style="color:${riskColor(group.highestSeverity)};font-weight:800;">${escapeHtml(group.highestSeverity)}</td>
+        <td>${group.lotCount}</td>
+        <td>${group.assignedCount}</td>
+        <td>${group.unassignedCount}</td>
+        <td>${escapeHtml(group.representativeMessage)}</td>
+      </tr>`,
+    )
+    .join('');
+  const groupedIssueSections = issueGroups
+    .map((group) => {
+      const rows = group.items
+        .map((issue) => {
+          const analysis = issue.analysis;
+          const spc = analysis?.spcStatus ?? issue.listSpcStatus ?? '—';
+          const prob = formatAnalysisProbability(analysis?.probability).label;
+          const reason = summarizeIssueLine(issue);
+          const level = analysis?.riskLevel ?? issue.risk;
+          return `<tr>
         <td>${escapeHtml(issue.id)}</td>
+        <td>${escapeHtml(issue.createdAt)}</td>
         <td>${escapeHtml(issue.lot)}</td>
         <td style="color:${riskColor(level)};font-weight:800;">${escapeHtml(level)}</td>
+        <td>${escapeHtml(displayAssigneeName(issue.assignee))}</td>
+        <td>${escapeHtml(issue.processStatus)}</td>
         <td>${escapeHtml(spc)}</td>
         <td>${escapeHtml(prob)}</td>
         <td>${escapeHtml(reason)}</td>
       </tr>`;
+        })
+        .join('');
+      return `<h3>${escapeHtml(group.title)} (${group.count}건)</h3>
+<table>
+  <tr><th>이슈 ID</th><th>등록일시</th><th>LOT</th><th>위험도</th><th>담당 실무자</th><th>처리 상태</th><th>SPC</th><th>불량 확률</th><th>핵심 요약</th></tr>
+  ${rows}
+</table>`;
     })
-    .join('');
-
-  const issueRows = payload.issues
-    .map(
-      (issue) => `<tr>
-        <td>${escapeHtml(issue.id)}</td>
-        <td>${escapeHtml(issue.createdAt)}</td>
-        <td>${escapeHtml(issue.lot)}</td>
-        <td style="color:${riskColor(issue.risk)};font-weight:800;">${escapeHtml(issue.risk)}</td>
-        <td>${escapeHtml(issue.issueContent)}</td>
-        <td>${escapeHtml(issue.assignee)}</td>
-        <td>${escapeHtml(issue.action || '—')}</td>
-        <td>${issue.completed ? '완료' : '미완료'}</td>
-      </tr>`,
-    )
     .join('');
 
   const lotAnalysisSection =
@@ -575,6 +845,7 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
   h1 { font-size: 22px; text-align: center; margin: 0 0 6px; }
   .meta { text-align: center; color: ${colors.slate}; font-size: 13px; margin-bottom: 8px; }
   h2 { font-size: 15px; margin: 24px 0 10px; }
+  h3 { font-size: 13px; margin: 18px 0 8px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
   th, td { border: 1px solid ${colors.line}; padding: 8px 10px; font-size: 12px; text-align: left; vertical-align: top; }
   th { background: #f8fafc; color: ${colors.slate}; white-space: nowrap; }
@@ -596,27 +867,29 @@ function buildIssueReportPdfHtml(payload: IssueReportPayload): string {
   <tr>
     <th>SPC 이상</th><td>${kpi.spcAbnormal}</td>
     <th>SPC 주의</th><td>${kpi.spcCaution}</td>
+    <th>그룹 수</th><td>${groupOverview.groupCount}</td>
+  </tr>
+  <tr>
+    <th>최다 그룹</th><td>${escapeHtml(groupOverview.largestGroupName)}</td>
+    <th>심각 포함 그룹</th><td>${groupOverview.criticalGroupCount}</td>
     <th colspan="2"></th><td colspan="2"></td>
   </tr>
 </table>
-<h2>2. AI·SPC 진단</h2>
+<h2>2. 이슈 유형별 요약</h2>
 <table>
-  <tr><th>이슈 ID</th><th>LOT</th><th>위험도</th><th>SPC</th><th>불량 확률</th><th>위험 원인 / 진단</th></tr>
+  <tr><th>그룹명</th><th>건수</th><th>최고 심각도</th><th>영향 LOT 수</th><th>배정 완료</th><th>미배정</th><th>대표 설명</th></tr>
   ${
-    payload.issues.length === 0
-      ? '<tr><td colspan="6" style="text-align:center;">대상 이슈가 없습니다.</td></tr>'
-      : diagnosisRows
+    issueGroups.length === 0
+      ? '<tr><td colspan="7" style="text-align:center;">대상 이슈가 없습니다.</td></tr>'
+      : groupSummaryRows
   }
 </table>
-<h2>3. 이슈 목록</h2>
-<table>
-  <tr><th>이슈 ID</th><th>등록일시</th><th>LOT</th><th>위험도</th><th>이슈 내용</th><th>담당자</th><th>조치 내용</th><th>완료</th></tr>
+<h2>3. 그룹별 상세 이슈</h2>
   ${
-    payload.issues.length === 0
-      ? '<tr><td colspan="8" style="text-align:center;">대상 이슈가 없습니다.</td></tr>'
-      : issueRows
+    issueGroups.length === 0
+      ? '<table><tr><td style="text-align:center;">대상 이슈가 없습니다.</td></tr></table>'
+      : groupedIssueSections
   }
-</table>
 ${lotAnalysisSection}
 <script>window.onload = function () { window.print(); };</script>
 </body>
@@ -635,6 +908,12 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
     return padded.map(escapeCsv).join(',');
   };
   const { kpi } = payload;
+  const issueGroups = buildIssueGroups(payload.issues);
+  const groupOverview = {
+    groupCount: issueGroups.length,
+    largestGroupName: issueGroups[0]?.title ?? '—',
+    criticalGroupCount: issueGroups.filter((group) => group.highestSeverity === '심각').length,
+  };
   const lines: string[] = [
     toRow([payload.typeLabel]),
     toRow(['대상', payload.scopeLabel]),
@@ -652,36 +931,63 @@ function buildIssueReportCsv(payload: IssueReportPayload): string {
       kpi.spcCaution,
     ]),
     toRow([]),
-    toRow(['2. AI·SPC 진단']),
-    toRow(['이슈 ID', 'LOT', '위험도', 'SPC', '불량 확률', '위험 원인 / 진단']),
-    ...(payload.issues.length === 0
+    toRow(['그룹 수', groupOverview.groupCount, '최다 그룹', groupOverview.largestGroupName, '심각 포함 그룹', groupOverview.criticalGroupCount]),
+    toRow([]),
+    toRow(['2. 이슈 유형별 요약']),
+    toRow(['그룹명', '건수', '최고 심각도', '영향 LOT 수', '배정 완료', '미배정', '대표 설명']),
+    ...(issueGroups.length === 0
       ? [toRow(['대상 이슈가 없습니다.'])]
-      : payload.issues.map((issue) =>
+      : issueGroups.map((group) =>
           toRow([
-            issue.id,
-            issue.lot,
-            issue.analysis?.riskLevel ?? issue.risk,
-            issue.analysis?.spcStatus ?? issue.listSpcStatus ?? '',
-            formatAnalysisProbability(issue.analysis?.probability).label,
-            issue.analysis?.riskReason?.trim() || issue.issueContent,
+            group.title,
+            group.count,
+            group.highestSeverity,
+            group.lotCount,
+            group.assignedCount,
+            group.unassignedCount,
+            group.representativeMessage,
           ]),
         )),
     toRow([]),
-    toRow(['3. 이슈 목록']),
-    toRow(['이슈 ID', '등록일시', 'LOT', '위험도', '담당자', '이슈 내용', '조치 내용', '완료 여부']),
-    ...payload.issues.map((issue) =>
-      toRow([
-        issue.id,
-        issue.createdAt,
-        issue.lot,
-        issue.risk,
-        issue.assignee,
-        issue.issueContent,
-        issue.action,
-        issue.completed ? '완료' : '미완료',
-      ]),
-    ),
+    toRow(['3. 그룹별 상세 이슈']),
   ];
+
+  if (issueGroups.length === 0) {
+    lines.push(toRow(['대상 이슈가 없습니다.']));
+  } else {
+    for (const group of issueGroups) {
+      lines.push(toRow([group.title, `${group.count}건`]));
+      lines.push(
+        toRow([
+          '이슈 ID',
+          '등록일시',
+          'LOT',
+          '위험도',
+          '담당 실무자',
+          '처리 상태',
+          'SPC',
+          '불량 확률',
+          '핵심 요약',
+        ]),
+      );
+      for (const issue of group.items) {
+        lines.push(
+          toRow([
+            issue.id,
+            issue.createdAt,
+            issue.lot,
+            issue.analysis?.riskLevel ?? issue.risk,
+            displayAssigneeName(issue.assignee),
+            issue.processStatus,
+            issue.analysis?.spcStatus ?? issue.listSpcStatus ?? '',
+            formatAnalysisProbability(issue.analysis?.probability).label,
+            summarizeIssueLine(issue),
+          ]),
+        );
+      }
+      lines.push(toRow([]));
+    }
+  }
 
   if (payload.type === 'lot') {
     lines.push(toRow([]));
@@ -815,6 +1121,9 @@ const IssueReportModal = ({
   const [scopeLabel, setScopeLabel] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [openGroups, setOpenGroups] = useState<Partial<Record<IssueGroupKey, boolean>>>({});
+  const [visibleCounts, setVisibleCounts] = useState<Partial<Record<IssueGroupKey, number>>>({});
+  const [detailIssueId, setDetailIssueId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedLot && lots.length > 0) setSelectedLot(lots[0]);
@@ -855,6 +1164,21 @@ const IssueReportModal = ({
   }, [issues, reportType, selectedLot, weekAnchor, yearMonth, onEnrichIssues]);
 
   const kpi = useMemo(() => computeReportKpi(previewIssues), [previewIssues]);
+  const issueGroups = useMemo(() => buildIssueGroups(previewIssues), [previewIssues]);
+  const groupOverview = useMemo(() => {
+    const largest = issueGroups[0];
+    return {
+      groupCount: issueGroups.length,
+      largestGroupName: largest?.title ?? '—',
+      criticalGroupCount: issueGroups.filter((group) => group.highestSeverity === '심각').length,
+    };
+  }, [issueGroups]);
+
+  useEffect(() => {
+    setOpenGroups({});
+    setVisibleCounts({});
+    setDetailIssueId(null);
+  }, [previewIssues]);
 
   const buildPayload = (): IssueReportPayload => ({
     type: reportType,
@@ -1107,62 +1431,16 @@ const IssueReportModal = ({
                 </div>
               ))}
             </div>
-          </section>
-
-          <section className="mb-5">
-            <h3
-              className={`mb-2.5 mt-0 text-sm font-bold ${
-                isDark ? 'text-slate-100' : 'text-slate-900'
+            <div
+              className={`mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
               }`}
             >
-              AI·SPC 진단
-            </h3>
-            {previewIssues.length === 0 ? (
-              <div
-                className={`rounded-xl border px-4 py-3 text-center text-sm ${
-                  isDark
-                    ? 'border-slate-700 bg-slate-900/70 text-slate-400'
-                    : 'border-slate-200 bg-slate-50 text-slate-500'
-                }`}
-              >
-                대상 이슈가 없습니다.
-              </div>
-            ) : (
-              <ul className="m-0 list-none space-y-2 p-0">
-                {previewIssues.map((issue) => {
-                  const reason =
-                    issue.analysis?.riskReason?.trim() || issue.issueContent || '진단 정보 없음';
-                  const spc = issue.analysis?.spcStatus ?? issue.listSpcStatus ?? '—';
-                  const prob = formatAnalysisProbability(issue.analysis?.probability).label;
-                  return (
-                    <li
-                      key={issue.id}
-                      className={`rounded-lg border px-3.5 py-2.5 text-sm ${
-                        isDark
-                          ? 'border-slate-700 bg-slate-800 text-slate-200'
-                          : 'border-slate-200 bg-white text-slate-800'
-                      }`}
-                    >
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <span
-                          className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}
-                        >
-                          {issue.id}
-                        </span>
-                        <span className="text-xs text-slate-400">{issue.lot}</span>
-                        <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>
-                          {issue.analysis?.riskLevel ?? issue.risk}
-                        </span>
-                        <span className="text-xs text-slate-400">
-                          SPC {spc} · 확률 {prob}
-                        </span>
-                      </div>
-                      <p className="m-0 break-keep text-sm leading-relaxed">{reason}</p>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+              <span>전체 이슈 {kpi.issueCount}건</span>
+              <span>그룹 {groupOverview.groupCount}개</span>
+              <span>최다 그룹 {groupOverview.largestGroupName}</span>
+              <span>심각 포함 그룹 {groupOverview.criticalGroupCount}개</span>
+            </div>
           </section>
 
           <section>
@@ -1171,56 +1449,224 @@ const IssueReportModal = ({
                 isDark ? 'text-slate-100' : 'text-slate-900'
               }`}
             >
-              이슈 목록 ({previewIssues.length}건)
+              이슈 유형별 요약
             </h3>
             {previewIssues.length === 0 ? (
               <div
-                className={`rounded-xl border px-4 py-3 text-center text-sm ${
+                className={`rounded-xl border px-4 py-5 text-center ${
                   isDark
                     ? 'border-slate-700 bg-slate-900/70 text-slate-400'
                     : 'border-slate-200 bg-slate-50 text-slate-500'
                 }`}
               >
-                대상 이슈가 없습니다.
+                <p className={`m-0 text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  표시할 이슈가 없습니다.
+                </p>
+                <p className="mt-1.5 mb-0 text-xs">
+                  현재 조건에 해당하는 이슈가 생성되지 않았습니다.
+                </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] border-collapse text-left text-xs">
-                  <thead>
-                    <tr
-                      className={
-                        isDark
-                          ? 'border-b border-slate-700 text-slate-400'
-                          : 'border-b border-slate-200 text-slate-500'
-                      }
+              <ul className="m-0 list-none space-y-2.5 p-0">
+                {issueGroups.map((group) => {
+                  const isOpen = Boolean(openGroups[group.key]);
+                  const visibleCount = visibleCounts[group.key] ?? ISSUE_GROUP_VISIBLE_STEP;
+                  const visibleItems = isOpen ? group.items.slice(0, visibleCount) : [];
+                  const canShowMore = isOpen && visibleCount < group.count;
+                  return (
+                    <li
+                      key={group.key}
+                      className={`rounded-xl border ${
+                        isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+                      }`}
                     >
-                      <th className="px-2 py-2 font-semibold">이슈 ID</th>
-                      <th className="px-2 py-2 font-semibold">LOT</th>
-                      <th className="px-2 py-2 font-semibold">위험도</th>
-                      <th className="px-2 py-2 font-semibold">이슈 내용</th>
-                      <th className="px-2 py-2 font-semibold">담당자</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewIssues.map((issue) => (
-                      <tr
-                        key={issue.id}
-                        className={
-                          isDark
-                            ? 'border-b border-slate-700/70'
-                            : 'border-b border-slate-100'
-                        }
-                      >
-                        <td className="px-2 py-2 font-semibold">{issue.id}</td>
-                        <td className="px-2 py-2">{issue.lot}</td>
-                        <td className="px-2 py-2">{issue.risk}</td>
-                        <td className="max-w-[240px] px-2 py-2 break-keep">{issue.issueContent}</td>
-                        <td className="px-2 py-2">{issue.assignee}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                      <div className="flex items-start justify-between gap-3 px-3.5 py-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenGroups((prev) => ({
+                              ...prev,
+                              [group.key]: !prev[group.key],
+                            }))
+                          }
+                          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-sm font-bold ${
+                                isDark ? 'text-slate-100' : 'text-slate-900'
+                              }`}
+                            >
+                              {group.title}
+                            </span>
+                            <span
+                              className={`text-xs font-semibold tabular-nums ${
+                                isDark ? 'text-blue-300' : 'text-blue-700'
+                              }`}
+                            >
+                              {group.count}건
+                            </span>
+                            <span style={{ ...badgeBase, ...riskStyle(group.highestSeverity, isDark) }}>
+                              최고 심각도: {group.highestSeverity}
+                            </span>
+                            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              영향 LOT {group.lotCount}개
+                            </span>
+                            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              배정 완료 {group.assignedCount}건 · 미배정 {group.unassignedCount}건
+                            </span>
+                          </div>
+                          <p
+                            className={`mt-1.5 mb-0 truncate text-xs leading-relaxed ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}
+                          >
+                            대표: {group.representativeMessage}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenGroups((prev) => ({
+                              ...prev,
+                              [group.key]: !prev[group.key],
+                            }))
+                          }
+                          className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
+                            isDark
+                              ? 'border-slate-600 bg-slate-900/60 text-slate-200 hover:bg-slate-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {isOpen ? '접기' : '펼치기'}
+                        </button>
+                      </div>
+                      {isOpen ? (
+                        <div
+                          className={`border-t px-3.5 py-2.5 ${
+                            isDark ? 'border-slate-700' : 'border-slate-100'
+                          }`}
+                        >
+                          <ul className="m-0 list-none space-y-1.5 p-0">
+                            {visibleItems.map((issue) => {
+                              const isDetailOpen = detailIssueId === issue.id;
+                              const reason =
+                                issue.analysis?.riskReason?.trim() ||
+                                issue.issueContent ||
+                                '진단 정보 없음';
+                              const spc = issue.analysis?.spcStatus ?? issue.listSpcStatus ?? '—';
+                              const prob = formatAnalysisProbability(issue.analysis?.probability).label;
+                              return (
+                                <li
+                                  key={issue.id}
+                                  className={`rounded-lg px-2.5 py-2 ${
+                                    isDark ? 'bg-slate-900/50' : 'bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                                    <span
+                                      className={`font-semibold ${
+                                        isDark ? 'text-blue-300' : 'text-blue-700'
+                                      }`}
+                                    >
+                                      {issue.id}
+                                    </span>
+                                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                      {issue.lot}
+                                    </span>
+                                    <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>
+                                      {issue.analysis?.riskLevel ?? issue.risk}
+                                    </span>
+                                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                      {displayAssigneeName(issue.assignee)}
+                                    </span>
+                                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                      {issue.processStatus}
+                                    </span>
+                                    <span
+                                      className={`min-w-0 flex-1 truncate ${
+                                        isDark ? 'text-slate-300' : 'text-slate-700'
+                                      }`}
+                                    >
+                                      {summarizeIssueLine(issue)}
+                                    </span>
+                                    <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>
+                                      {issue.createdAt}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDetailIssueId((prev) => (prev === issue.id ? null : issue.id))
+                                      }
+                                      className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${
+                                        isDark
+                                          ? 'border-slate-600 text-slate-200 hover:bg-slate-800'
+                                          : 'border-slate-200 text-slate-600 hover:bg-white'
+                                      }`}
+                                    >
+                                      {isDetailOpen ? '닫기' : '상세 보기'}
+                                    </button>
+                                  </div>
+                                  {isDetailOpen ? (
+                                    <p
+                                      className={`mt-1.5 mb-0 break-keep text-xs leading-relaxed ${
+                                        isDark ? 'text-slate-400' : 'text-slate-600'
+                                      }`}
+                                    >
+                                      SPC {spc} · 확률 {prob}
+                                      <br />
+                                      {reason}
+                                    </p>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <div className="mt-2.5 flex flex-wrap gap-2">
+                            {canShowMore ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setVisibleCounts((prev) => ({
+                                    ...prev,
+                                    [group.key]:
+                                      (prev[group.key] ?? ISSUE_GROUP_VISIBLE_STEP) +
+                                      ISSUE_GROUP_VISIBLE_STEP,
+                                  }))
+                                }
+                                className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
+                                  isDark
+                                    ? 'border-slate-600 bg-slate-900/60 text-slate-200 hover:bg-slate-700'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                더 보기 (+{ISSUE_GROUP_VISIBLE_STEP})
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVisibleCounts((prev) => ({
+                                  ...prev,
+                                  [group.key]: ISSUE_GROUP_VISIBLE_STEP,
+                                }));
+                                setOpenGroups((prev) => ({ ...prev, [group.key]: false }));
+                              }}
+                              className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
+                                isDark
+                                  ? 'border-slate-600 bg-transparent text-slate-300 hover:bg-slate-700'
+                                  : 'border-slate-200 bg-transparent text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              접기
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
         </div>
@@ -1352,6 +1798,21 @@ const IssueListSection = ({
           <option value="주의">주의</option>
         </select>
       </div>
+      <div className="w-[140px]">
+        <label htmlFor="issue-assignment" style={getLabelStyle(c)}>
+          담당 상태
+        </label>
+        <select
+          id="issue-assignment"
+          value={filters.assignment}
+          onChange={(event) => onFilterChange('assignment', event.target.value)}
+          style={getFilterControlStyle(c)}
+        >
+          <option value="">전체</option>
+          <option value="assigned">배정 완료</option>
+          <option value="unassigned">미배정</option>
+        </select>
+      </div>
       <div className="flex shrink-0 items-center gap-2">
         <button
           type="submit"
@@ -1391,7 +1852,7 @@ const IssueListSection = ({
     ) : (
       <>
       <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-[820px] border-collapse text-left">
+        <table className="w-full min-w-[1040px] border-collapse text-left">
           <thead>
             <tr
               className={`border-y text-xs font-semibold ${
@@ -1404,6 +1865,8 @@ const IssueListSection = ({
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">일시</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">관련 LOT</th>
               <th className="whitespace-nowrap px-4 py-2.5 font-semibold">위험도</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">담당 실무자</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-semibold">처리 상태</th>
               <th className="min-w-[280px] px-4 py-2.5 font-semibold">이슈 내용</th>
             </tr>
           </thead>
@@ -1483,6 +1946,46 @@ const IssueListSection = ({
                     </span>
                   </td>
                   <td
+                    className={`whitespace-nowrap px-4 py-3 text-xs font-semibold ${
+                      hasAssigneeName(issue.assignee)
+                        ? isDark
+                          ? 'text-slate-200'
+                          : 'text-slate-800'
+                        : isDark
+                          ? 'text-slate-500'
+                          : 'text-slate-400'
+                    }`}
+                  >
+                    {displayAssigneeName(issue.assignee)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                        issue.processStatus === '미배정'
+                          ? isDark
+                            ? 'bg-slate-700 text-slate-300'
+                            : 'bg-slate-100 text-slate-600'
+                          : issue.processStatus === '접수'
+                            ? isDark
+                              ? 'bg-blue-950/50 text-blue-300'
+                              : 'bg-blue-50 text-blue-700'
+                            : issue.processStatus === '처리 중'
+                              ? isDark
+                                ? 'bg-amber-950/40 text-amber-300'
+                                : 'bg-amber-50 text-amber-700'
+                              : issue.processStatus === '처리 완료'
+                                ? isDark
+                                  ? 'bg-emerald-950/40 text-emerald-300'
+                                  : 'bg-emerald-50 text-emerald-700'
+                                : isDark
+                                  ? 'bg-violet-950/40 text-violet-300'
+                                  : 'bg-violet-50 text-violet-700'
+                      }`}
+                    >
+                      {issue.processStatus}
+                    </span>
+                  </td>
+                  <td
                     className={`max-w-[420px] px-4 py-3 text-sm font-semibold ${
                       isDark ? 'text-slate-100' : 'text-slate-900'
                     }`}
@@ -1498,7 +2001,7 @@ const IssueListSection = ({
                 aria-hidden="true"
                 className={isDark ? 'border-b border-slate-700' : 'border-b border-slate-100'}
               >
-                <td colSpan={5} className="h-[57px] px-4 py-3">
+                <td colSpan={7} className="h-[57px] px-4 py-3">
                   &nbsp;
                 </td>
               </tr>
@@ -1631,11 +2134,14 @@ const ManagementSection = ({
   canSave,
   isSaving = false,
   onChange,
+  onAssign,
+  onRequestUnassign,
   onSave,
 }: ManagementSectionProps) => {
   const { isDark } = useUiSettings();
   const c = getUiColors(isDark);
   const saveDisabled = !issue || !canSave || isSaving;
+  const hasAssignee = hasAssigneeName(issue?.assignee);
 
   return (
   <section
@@ -1700,29 +2206,80 @@ const ManagementSection = ({
           }}
         >
           <div>
-            <label htmlFor="manager-assignee" style={getLabelStyle(c)}>담당자</label>
-            <select
+            <label htmlFor="manager-assignee" style={getLabelStyle(c)}>담당 실무자</label>
+            <input
               id="manager-assignee"
-              value={form.assigneeUserId}
-              disabled={!issue}
-              onChange={(event) => onChange('assigneeUserId', event.target.value)}
-              style={{ ...getInputStyle(c), cursor: issue ? 'pointer' : 'default' }}
-            >
-              <option value="">미배정</option>
-              {managers.map((manager) => (
-                <option key={manager.userId} value={manager.userId}>
-                  {manager.name}
-                </option>
+              value={form.assignee}
+              maxLength={ASSIGNEE_NAME_MAX_LENGTH}
+              onChange={(event) => onChange('assignee', event.target.value)}
+              placeholder="담당자 이름 입력"
+              list="issue-practitioner-name-options"
+              style={getInputStyle(c)}
+            />
+            <datalist id="issue-practitioner-name-options">
+              {PRACTITIONER_NAMES.map((name) => (
+                <option key={name} value={name} />
               ))}
-              {form.assigneeUserId &&
-              !managers.some((manager) => manager.userId === form.assigneeUserId) ? (
-                <option value={form.assigneeUserId}>
-                  {issue?.assignee && issue.assignee !== '미배정'
-                    ? issue.assignee
-                    : form.assigneeUserId}
-                </option>
-              ) : null}
+            </datalist>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginTop: 10,
+              }}
+            >
+              <button
+                type="button"
+                onClick={onAssign}
+                disabled={!issue || isSaving}
+                className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                담당자 지정
+              </button>
+              <button
+                type="button"
+                onClick={onRequestUnassign}
+                disabled={!issue || !hasAssignee || isSaving}
+                className={`inline-flex h-9 items-center rounded-lg border px-3 text-xs font-bold ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800 disabled:opacity-50'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50'
+                }`}
+              >
+                담당자 지정 해제
+              </button>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="manager-status" style={getLabelStyle(c)}>처리 상태</label>
+            <select
+              id="manager-status"
+              value={form.processStatus}
+              onChange={(event) =>
+                onChange('processStatus', event.target.value as IssueProcessStatus)
+              }
+              style={getInputStyle(c)}
+            >
+              <option value="미배정">미배정</option>
+              <option value="접수">접수</option>
+              <option value="처리 중">처리 중</option>
+              <option value="처리 완료">처리 완료</option>
+              <option value="종결">종결</option>
             </select>
+          </div>
+          <div>
+            <label style={getLabelStyle(c)}>배정 시각</label>
+            <div
+              style={{
+                ...getInputStyle(c),
+                minHeight: 42,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              {issue?.assignedAt ?? '—'}
+            </div>
           </div>
         </div>
         <div
@@ -1773,7 +2330,8 @@ const ManagementSection = ({
 };
 
 const EMPTY_FORM: ManagementForm = {
-  assigneeUserId: '',
+  assignee: '',
+  processStatus: '미배정',
   action: '',
   completed: false,
 };
@@ -1784,6 +2342,7 @@ const EMPTY_FILTERS: FilterState = {
   lot: '',
   risk: '',
   spc: '',
+  assignment: '',
 };
 
 const ISSUE_PAGE_SIZE = 5;
@@ -1817,6 +2376,7 @@ export default function IssuePage() {
   const [toastMessage, setToastMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [showUnassignConfirm, setShowUnassignConfirm] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const prevSelectedIdRef = useRef<string | null>(null);
   const detailRequestRef = useRef(0);
@@ -1825,7 +2385,24 @@ export default function IssuePage() {
     setIsListRefreshing(true);
     try {
       const { data } = await issueApi.list();
-      setIssues(data.issues.map(mapIssueListItem));
+      setIssues((current) =>
+        data.issues.map((item) => {
+          const mapped = mapIssueListItem(item);
+          const previous = current.find((issue) => issue.id === mapped.id);
+          if (previous) {
+            return {
+              ...mapped,
+              assignee: previous.assignee,
+              assignedAt: previous.assignedAt,
+              processStatus: previous.processStatus,
+              assignmentDirty: previous.assignmentDirty,
+              action: previous.action || mapped.action,
+              analysis: previous.analysis ?? mapped.analysis,
+            };
+          }
+          return withLoginAutoAssignee(mapped);
+        }),
+      );
     } catch (error) {
       setIssues([]);
       setToastMessage(getApiErrorMessage(error, '이슈 목록을 불러오지 못했습니다.'));
@@ -1915,12 +2492,18 @@ export default function IssuePage() {
       const matchesLot = !appliedFilters.lot || issue.lot === appliedFilters.lot;
       const matchesRisk = !appliedFilters.risk || issue.risk === appliedFilters.risk;
       const matchesSpc = !appliedFilters.spc || overallSpc === appliedFilters.spc;
+      const matchesAssignment =
+        !appliedFilters.assignment ||
+        (appliedFilters.assignment === 'assigned'
+          ? hasAssigneeName(issue.assignee)
+          : !hasAssigneeName(issue.assignee));
       return (
         matchesSearch &&
         matchesDate &&
         matchesLot &&
         matchesRisk &&
-        matchesSpc
+        matchesSpc &&
+        matchesAssignment
       );
     });
   }, [appliedFilters, issues]);
@@ -1953,7 +2536,8 @@ export default function IssuePage() {
           risk: issue.risk,
           date: issue.date,
           issueContent: issue.issueContent.slice(0, 200),
-          assignee: issue.assignee,
+          assignee: displayAssigneeName(issue.assignee),
+          processStatus: issue.processStatus,
           completed: issue.completed,
           spc: issue.analysis?.spcStatus ?? issue.listSpcStatus,
         })),
@@ -1963,7 +2547,8 @@ export default function IssuePage() {
               lotId: selectedIssue.lot,
               risk: selectedIssue.risk,
               issueContent: selectedIssue.issueContent.slice(0, 400),
-              assignee: selectedIssue.assignee,
+              assignee: displayAssigneeName(selectedIssue.assignee),
+              processStatus: selectedIssue.processStatus,
               action: selectedIssue.action.slice(0, 400),
               completed: selectedIssue.completed,
               analysis: selectedIssue.analysis,
@@ -1991,13 +2576,13 @@ export default function IssuePage() {
     }
   }, [filteredIssues, selectedId, trackPageChatEvent]);
 
-  /** 저장 = 완료 처리. 선택 이슈가 미완료이거나 조치 내용이 변경된 경우 저장 가능. */
+  /** 저장 = 완료 처리. 기존 완료 API는 유지하되 담당자/조치 검증을 선행한다. */
   const canSave = useMemo(() => {
-    if (!selectedIssue) return false;
-    return (
-      !selectedIssue.completed || managementForm.action !== selectedIssue.action
-    );
-  }, [managementForm.action, selectedIssue]);
+    if (!selectedIssue || isSaving) return false;
+    if (!hasAssigneeName(selectedIssue.assignee)) return false;
+    if (!managementForm.action.trim()) return false;
+    return !selectedIssue.completed || managementForm.action !== selectedIssue.action;
+  }, [isSaving, managementForm.action, selectedIssue]);
 
   // 행 선택이 바뀔 때만 폼을 채움
   useEffect(() => {
@@ -2025,7 +2610,8 @@ export default function IssuePage() {
         Boolean(managementForm.action) &&
         managementForm.action !== issue.action);
     const newForm = {
-      assigneeUserId: issue.assigneeUserId ?? '',
+      assignee: issue.assignee,
+      processStatus: issue.processStatus,
       completed: issue.completed,
       action: copied || (preserveAction ? managementForm.action : issue.action),
     };
@@ -2076,8 +2662,13 @@ export default function IssuePage() {
     try {
       const { data } = await issueApi.getById(id);
       if (requestId !== detailRequestRef.current) return;
+      let mergedIssue: Issue | null = null;
       setIssues((current) =>
-        current.map((issue) => (issue.id === id ? mergeIssueDetail(issue, data.issue) : issue)),
+        current.map((issue) => {
+          if (issue.id !== id) return issue;
+          mergedIssue = withLoginAutoAssignee(mergeIssueDetail(issue, data.issue));
+          return mergedIssue;
+        }),
       );
       trackPageChatEvent({
         type: 'row_select',
@@ -2106,10 +2697,34 @@ export default function IssuePage() {
         },
       });
       const copied = options?.actionOverride?.trim() || '';
+      const resolvedIssue =
+        mergedIssue ??
+        withLoginAutoAssignee(
+          mergeIssueDetail(
+            {
+              id: data.issue.issueId,
+              createdAt: data.issue.createdAt,
+              date: data.issue.createdAt.slice(0, 10),
+              lot: data.issue.lotId,
+              risk: normalizeIssueRiskLevel(data.issue.riskLevel),
+              issueContent: data.issue.issueContent,
+              assignee: '',
+              assignedAt: null,
+              processStatus: '미배정',
+              action: data.issue.actionContent ?? '',
+              completed: data.issue.completed,
+              assignmentDirty: false,
+              analysis: null,
+              listSpcStatus: data.issue.spcStatus ?? null,
+            },
+            data.issue,
+          ),
+        );
       setManagementForm({
-        assigneeUserId: data.issue.assigneeUserId ?? '',
-        action: copied || data.issue.actionContent || '',
-        completed: data.issue.completed,
+        assignee: resolvedIssue.assignee,
+        processStatus: resolvedIssue.processStatus,
+        action: copied || resolvedIssue.action,
+        completed: resolvedIssue.completed,
       });
       setSaveMessage('');
       if (copied) {
@@ -2160,8 +2775,102 @@ export default function IssuePage() {
     key: K,
     value: ManagementForm[K],
   ) => {
+    if (key === 'processStatus') {
+      const nextStatus = value as IssueProcessStatus;
+      if (!selectedIssue) return;
+      if (hasAssigneeName(selectedIssue.assignee) && nextStatus === '미배정') {
+        setToastMessage('담당자 지정 해제를 사용해 주세요.');
+        setShowToast(true);
+        return;
+      }
+      if (!hasAssigneeName(selectedIssue.assignee) && nextStatus !== '미배정') {
+        setToastMessage('담당 실무자를 먼저 지정해 주세요.');
+        setShowToast(true);
+        return;
+      }
+      if ((nextStatus === '처리 완료' || nextStatus === '종결') && !managementForm.action.trim()) {
+        setToastMessage('처리 완료로 변경하려면 조치 내용을 입력해 주세요.');
+        setShowToast(true);
+        return;
+      }
+      setIssues((current) =>
+        current.map((issue) =>
+          issue.id === selectedIssue.id
+            ? {
+                ...issue,
+                processStatus: hasAssigneeName(issue.assignee) ? nextStatus : '미배정',
+                assignmentDirty: true,
+              }
+            : issue,
+        ),
+      );
+    }
     setManagementForm((current) => ({ ...current, [key]: value }));
     setSaveMessage('');
+  };
+
+  const handleAssignPractitioner = () => {
+    if (!selectedIssue) return;
+    const normalized = normalizeAssigneeName(managementForm.assignee);
+    const validation = validateAssigneeName(normalized);
+    if (validation) {
+      setToastMessage(validation);
+      setShowToast(true);
+      return;
+    }
+    const assignedAt = formatCurrentDateTime();
+    setIssues((current) =>
+      current.map((issue) =>
+        issue.id === selectedIssue.id
+          ? {
+              ...issue,
+              assignee: normalized,
+              assignedAt,
+              processStatus: issue.processStatus === '미배정' ? '접수' : issue.processStatus,
+              assignmentDirty: true,
+            }
+          : issue,
+      ),
+    );
+    setManagementForm((current) => ({
+      ...current,
+      assignee: normalized,
+      processStatus: current.processStatus === '미배정' ? '접수' : current.processStatus,
+    }));
+    setSaveMessage(
+      hasAssigneeName(selectedIssue.assignee)
+        ? '담당 실무자가 변경되었습니다.'
+        : '담당 실무자가 지정되었습니다.',
+    );
+  };
+
+  const handleRequestUnassign = () => {
+    if (!selectedIssue || !hasAssigneeName(selectedIssue.assignee)) return;
+    setShowUnassignConfirm(true);
+  };
+
+  const handleConfirmUnassign = () => {
+    if (!selectedIssue) return;
+    setShowUnassignConfirm(false);
+    setIssues((current) =>
+      current.map((issue) =>
+        issue.id === selectedIssue.id
+          ? {
+              ...issue,
+              assignee: '',
+              assignedAt: null,
+              processStatus: '미배정',
+              assignmentDirty: true,
+            }
+          : issue,
+      ),
+    );
+    setManagementForm((current) => ({
+      ...current,
+      assignee: '',
+      processStatus: '미배정',
+    }));
+    setSaveMessage('담당자 지정이 해제되었습니다.');
   };
 
 
@@ -2219,7 +2928,18 @@ export default function IssuePage() {
 
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedIssue || !canSave || isSaving) return;
+    if (!selectedIssue || isSaving) return;
+    if (!hasAssigneeName(selectedIssue.assignee)) {
+      setToastMessage('담당 실무자를 먼저 지정해 주세요.');
+      setShowToast(true);
+      return;
+    }
+    if (!managementForm.action.trim()) {
+      setToastMessage('처리 완료로 변경하려면 조치 내용을 입력해 주세요.');
+      setShowToast(true);
+      return;
+    }
+    if (!canSave) return;
     setShowSaveConfirm(true);
   };
 
@@ -2298,6 +3018,8 @@ export default function IssuePage() {
                 canSave={canSave}
                 isSaving={isSaving}
                 onChange={handleFormChange}
+                onAssign={handleAssignPractitioner}
+                onRequestUnassign={handleRequestUnassign}
                 onSave={handleSave}
               />
             </div>
@@ -2373,6 +3095,64 @@ export default function IssuePage() {
                 className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? '저장 중...' : '예'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showUnassignConfirm ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="issue-unassign-confirm-title"
+          className="fixed inset-0 z-[111] flex items-center justify-center bg-slate-900/55 p-4"
+          onClick={() => setShowUnassignConfirm(false)}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className={`w-[min(100%,420px)] rounded-xl border shadow-2xl ${
+              isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
+            }`}
+          >
+            <div className="break-keep px-6 pb-5 pt-6 text-center">
+              <p
+                id="issue-unassign-confirm-title"
+                className={`m-0 text-lg font-bold ${
+                  isDark ? 'text-slate-100' : 'text-slate-900'
+                }`}
+              >
+                담당자 지정 해제
+              </p>
+              <p
+                className={`mt-3 m-0 text-sm leading-relaxed ${
+                  isDark ? 'text-slate-300' : 'text-slate-600'
+                }`}
+              >
+                담당자 지정을 해제하시겠습니까?
+              </p>
+            </div>
+            <div
+              className={`grid grid-cols-2 gap-3 border-t px-6 py-4 ${
+                isDark ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setShowUnassignConfirm(false)}
+                className={`rounded-lg border px-4 py-2.5 text-sm font-semibold ${
+                  isDark
+                    ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                아니오
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUnassign}
+                className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-500"
+              >
+                예
               </button>
             </div>
           </div>
