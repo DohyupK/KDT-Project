@@ -1,5 +1,7 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
+import { getLibraryAnalysisByLotId, type LibraryAnalysisSnapshot } from './knowledgeAnalyze.service.js'
+import { getLotById, type LotDto } from './lot.service.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
 import { isManageUser } from './userSettings.service.js'
 
@@ -332,16 +334,12 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   return { items, total: items.length }
 }
 
-/** 과거 자료 상세: 조치내용 + LOT 보조 (양식 TBD). issue_analyses 없음. */
+/** 과거 자료 상세: LOT 공정 + ANALYSIS_LOTS 스냅샷 + lot_id 진단 캐시(있으면). LLM 없음. */
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
-  lot: {
-    lotId: string
-    riskReason: string | null
-    defectProb: number | null
-    residualLithium: number | null
-    spcStatus: string | null
-  } | null
+  analysis: IssueAnalysis | null
+  lot: LotDto | null
+  libraryAnalysis: LibraryAnalysisSnapshot | null
 }
 
 export async function getPastIssueById(issueId: string): Promise<PastIssueDetail> {
@@ -350,25 +348,14 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
   }
 
-  const lotRows = await query<
-    {
-      lot_id: string
-      risk_reason: string | null
-      probability: number | null
-      residual_lithium: number | null
-      spc_status: string | null
-    }[]
-  >(
-    `SELECT l.id AS lot_id, a.risk_reason,
-            COALESCE(j.probability, a.probability) AS probability,
-            j.residual_li AS residual_lithium, a.spc_status
-     FROM LOTS l
-     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = l.id
-     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = l.id
-     WHERE l.id = ? LIMIT 1`,
-    [issue.lotId],
-  )
-  const lot = lotRows[0]
+  let lot: LotDto | null = null
+  try {
+    lot = await getLotById(issue.lotId)
+  } catch (err) {
+    if (!(err instanceof AppError) || err.statusCode !== 404) throw err
+  }
+
+  const libraryAnalysis = await getLibraryAnalysisByLotId(issue.lotId)
 
   return {
     issueId: issue.issueId,
@@ -378,15 +365,9 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     assigneeName: issue.assigneeName,
     completedAt: issue.completedAt,
     actionContent: issue.actionContent,
-    lot: lot
-      ? {
-          lotId: lot.lot_id,
-          riskReason: lot.risk_reason,
-          defectProb: lot.probability,
-          residualLithium: lot.residual_lithium,
-          spcStatus: lot.spc_status,
-        }
-      : null,
+    analysis: issue.analysis,
+    lot,
+    libraryAnalysis,
   }
 }
 

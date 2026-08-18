@@ -48,7 +48,8 @@ export function createApp() {
       issues: 'GET /api/issues · GET|PUT /api/issues/:issueId · GET /api/issues/managers',
       past_issues:
         'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId (auth + manage=O)',
-      knowledge_analyze: 'POST /api/knowledge/analyze (auth) → AI_LIBRARY_ANALYSIS',
+      knowledge_analyze:
+        'POST /api/knowledge/analyze (auth) {message} user row | {lotId} LOT cache → AI_LIBRARY_ANALYSIS',
       handover_history:
         'GET /api/knowledge/handover-history?status=pending|completed · POST /api/knowledge/handover (auth)',
       docs: 'GET /api/docs/tree · GET /api/docs/file?path= (READ-ONLY, auth)',

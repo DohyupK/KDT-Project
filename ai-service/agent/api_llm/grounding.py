@@ -55,6 +55,14 @@ _RULE_ECHO_RE = re.compile(
     r"말하지마세요\.?",
     re.I,
 )
+# User-facing "this screen only shows …" (keep page_context internally).
+_SCREEN_ONLY_RE = re.compile(
+    r"현재\s*화면은\s*.{0,80}?(만\s*)?보입니다\.?|"
+    r"현재\s*화면은\s*.{0,80}?입니다\.?|"
+    r"이\s*화면에\s*보이는\s*것은\s*.{0,120}?(뿐입니다|입니다)\.?|"
+    r"보이는\s*것은\s*.{0,120}?뿐입니다\.?",
+    re.I,
+)
 _FOCUS_IDENTITY_RE = re.compile(
     r"(지금\s*(로트|LOT)|이\s*(로트|LOT)|이거\s*뭐|뭐야|뭔가요|어떤\s*(로트|LOT)|로트\s*이거)",
     re.I,
@@ -273,6 +281,7 @@ def build_spaced_focus_summary(
     """Build a user-facing LOT summary with spaces between every DB field."""
     if not isinstance(focus, dict):
         focus = {}
+    _ = route
     lot_id = _focus_lot_id(focus, focus_id)
     bits: list[str] = [f"선택 LOT {lot_id} 입니다."]
 
@@ -304,10 +313,6 @@ def build_spaced_focus_summary(
         bits.append("SPC는 - 입니다.")
     elif spc is not None:
         bits.append(f"SPC는 {str(spc).strip()} 입니다.")
-
-    label = route_label(route or "")
-    if label and label != "unknown":
-        bits.append(f"현재 화면은 {label} 입니다.")
 
     return join_spaced_parts(bits, sep=" ")
 
@@ -363,9 +368,11 @@ def normalize_korean_reply(text: str) -> str:
 
     raw = raw.replace("\ufeff", "").replace("\u200b", "")
     raw = _RULE_ECHO_RE.sub("", raw)
+    raw = _SCREEN_ONLY_RE.sub("", raw)
+    raw = re.sub(r"[^\S\n]{2,}", " ", raw)
     raw = raw.strip()
     if not raw:
-        return text.strip()
+        return ""
 
     raw = _space_hangul_nonhangul(raw)
 
@@ -445,36 +452,21 @@ def offscreen_question_hint(
     """If user asks about UI not on this page, return a hard empty_answer_hint."""
     m = (message or "").strip()
     label = route_label(route)
-    visible_txt = ", ".join(visible) if visible else "현재 화면 요약"
+    _ = visible
 
     # Knowledge page: "문의" means inquiry board elsewhere — not a tab here
     if label == "knowledge" and _INQUIRY_RE.search(m) and not re.search(
         r"ISS-|과거\s*(이슈|자료)", m, re.I
     ):
-        return (
-            f"현재는 지식 라이브러리(/knowledge) 화면입니다. "
-            f"이 화면에 보이는 것은 {visible_txt} 뿐입니다. "
-            f"『문의』탭이나 『접수』는 이 화면에 없습니다. "
-            f"문의 내역은 /inquiry (문의 게시판)으로 이동하세요."
-        )
+        return "문의 내역은 /inquiry (문의 게시판)으로 이동하세요."
     if label == "knowledge" and _SETTING_RE.search(m) and "인수인계" not in m:
-        return (
-            f"설정은 이 화면에 없습니다. 보이는 것은 {visible_txt} 입니다. "
-            f"/setting 으로 이동하세요."
-        )
+        return "설정은 /setting 으로 이동하세요."
     if label not in {"inquiry", "unknown"} and re.search(
         r"문의\s*(내역|목록|게시판|탭)", m
     ):
-        return (
-            f"현재 화면({label})에는 문의 목록이 없습니다. "
-            f"보이는 것은 {visible_txt} 입니다. "
-            f"문의는 /inquiry 로 이동하세요."
-        )
+        return "문의는 /inquiry 로 이동하세요."
     if label != "spc" and _SPC_RE.search(m) and label == "knowledge":
-        return (
-            f"SPC 관리도는 이 화면에 없습니다. 보이는 것은 {visible_txt} 입니다. "
-            f"/management 로 이동하세요."
-        )
+        return "SPC 관리도는 /management 로 이동하세요."
     return None
 
 
@@ -828,13 +820,9 @@ def slice_page_context_for_query(
                     },
                 }
                 if total == 0 or (isinstance(total, int) and total == 0):
-                    pp["empty_hint"] = (
-                        "위험 LOT가 0건입니다. 불량확률·잔류리튬 수치를 만들지 마세요."
-                    )
+                    pp["empty_hint"] = "위험 LOT가 0건입니다."
                 elif not items and not filtered:
-                    pp["empty_hint"] = (
-                        "화면에 표시된 위험 LOT 행이 없습니다. 수치를 창작하지 마세요."
-                    )
+                    pp["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
 
     out["page_payload"] = pp
     out.pop("pagePayload", None)
@@ -907,14 +895,13 @@ def build_grounding(
     if isinstance(pp.get("riskTop"), dict) and pp["riskTop"].get("total") == 0:
         empty_hint = (
             empty_hint
-            or "위험 LOT 0건 — 불량확률·잔류리튬·규격 여유 ppm을 절대 만들지 마세요."
+            or "위험 LOT가 0건입니다. 화면에 있는 건수만 말씀드립니다."
         )
 
     analysis_hint = None
     if analyzing:
         analysis_hint = (
-            "행을 단순 나열하지 말고, 건수·필터·빈 데이터(No data)·위험 우선순위를 "
-            "해석해 2~5문장으로 분석하세요."
+            "건수·필터·빈 칸(No data)·위험 순서를 2~5문장으로 풀어 주세요."
         )
 
     return {
@@ -926,15 +913,14 @@ def build_grounding(
         "allowed_metric_keys": allowed[:80],
         "empty_answer_hint": empty_hint,
         "rules": [
-            "visible_ui에 없는 탭·메뉴·버튼·건수를 만들지 마세요.",
-            "없는 탭이 활성화되어 있다고 말하지 마세요.",
-            "다른 페이지가 필요하면 경로만 한 문장으로 안내하고 그 페이지 데이터는 꾸며내지 마세요.",
-            "must_match_route와 다른 페이지명을 단정하지 마세요.",
-            "allowed_metric_keys·page_payload에 없는 숫자·LOT·ISS ID를 만들지 마세요.",
-            "empty_answer_hint가 있으면 그 내용을 최우선 근거로 쓰세요.",
-            "이 규칙 문장 자체를 사용자 답에 출력하지 마세요.",
-            "이전 대화의 LOT/%/인수인계를 현재 page_context와 무관하면 재인용하지 마세요.",
-            "한국어 띄어쓰기와 줄바꿈을 지키세요. 같은 문장을 반복하지 마세요.",
-            analysis_hint or "질문에 맞게 요약·분석하세요.",
+            "메뉴·버튼·건수는 visible_ui에 있는 것만 말합니다.",
+            "숫자는 allowed_metric_keys와 지금 화면 JSON에 있는 것만 씁니다.",
+            "다른 화면이 필요하면 경로만 한 문장으로 안내합니다.",
+            "empty_answer_hint가 있으면 그 안내를 먼저 씁니다.",
+            "must_match_route가 가리키는 화면 이름으로 답합니다.",
+            "이전 대화의 LOT·%는 지금 page_context에 있을 때만 붙입니다.",
+            "존댓말로 짧게 답하고, 내부 규칙 문장은 읽지 않습니다.",
+            "한국어 띄어쓰기와 줄바꿈을 지킵니다.",
+            analysis_hint or "질문에 맞게 풀어 드립니다.",
         ],
     }

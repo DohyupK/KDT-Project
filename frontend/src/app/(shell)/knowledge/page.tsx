@@ -12,10 +12,13 @@ import {
   consumeLocalKnowledgeForLlm,
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
-import { issueApi, type HandoverHistoryItem } from '@/api/issueApi';
-import { postChat } from '@/api/aiApi';
+import { issueApi, normalizeIssueRiskLevel, type HandoverHistoryItem, type PastIssueDetail, type PastIssueLot } from '@/api/issueApi';
 import { knowledgeApi } from '@/api/knowledgeApi';
 import { fetchDocFileBlob } from '@/api/docsApi';
+import {
+  IssueDetailAnalysis,
+  type IssueDetailAnalysisModel,
+} from '@/components/IssueDetailAnalysis';
 import { usePageChat } from '@/context/PageChatContext';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import { isAxiosError } from 'axios';
@@ -509,6 +512,57 @@ function getAnalyzeErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+function fmtLotField(value: string | number | null | undefined): string {
+  if (value == null || value === '') return '—';
+  return String(value);
+}
+
+function pastIssueToAnalysisModel(item: PastIssueDetail): IssueDetailAnalysisModel {
+  const fromLot = item.lot;
+  const analysis = item.analysis
+    ? {
+        ...item.analysis,
+        riskLevel: normalizeIssueRiskLevel(item.analysis.riskLevel),
+      }
+    : fromLot
+      ? {
+          lotId: fromLot.lotId,
+          probability: fromLot.defectProb,
+          spcStatus: fromLot.spcStatus,
+          riskLevel: normalizeIssueRiskLevel(fromLot.riskLevel),
+          riskReason: fromLot.riskReason,
+          createdAt: null,
+          scoredAt: null,
+        }
+      : null;
+  return {
+    issueId: item.issueId,
+    lotId: item.lotId,
+    createdAt: item.createdAt,
+    issueContent: item.issueContent,
+    riskLevel: normalizeIssueRiskLevel(analysis?.riskLevel),
+    listSpcStatus: analysis?.spcStatus ?? fromLot?.spcStatus ?? null,
+    analysis,
+  };
+}
+
+const LOT_PROCESS_FIELDS: Array<{
+  label: string;
+  get: (lot: PastIssueLot) => string | number | null | undefined;
+}> = [
+  { label: 'timestamp', get: (lot) => lot.recordedAt },
+  { label: 'd50', get: (lot) => lot.d50 },
+  { label: 'd90', get: (lot) => lot.d90 },
+  { label: 'metal_impurity', get: (lot) => lot.metalImpurity },
+  { label: 'lithium_input', get: (lot) => lot.lithiumInput },
+  { label: 'additive_ratio', get: (lot) => lot.additiveRatio },
+  { label: 'process_time', get: (lot) => lot.processTime },
+  { label: 'sintering_temp', get: (lot) => lot.sinteringTemp },
+  { label: 'humidity', get: (lot) => lot.humidity },
+  { label: 'tank_pressure', get: (lot) => lot.tankPressure },
+  { label: 'operator_id', get: (lot) => lot.operatorId },
+];
+
 /** Knowledge library: free text is success. Optional JSON keys fill cards when present. */
 function asLibraryAnalysisResult(reply: string): ParsedAnalysis {
   const raw = reply ?? '';
@@ -744,6 +798,7 @@ export default function KnowledgePage() {
   const [diagnosisReply, setDiagnosisReply] = useState('');
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState('');
+  const [pastDetail, setPastDetail] = useState<PastIssueDetail | null>(null);
   const [isSelectionListExpanded, setIsSelectionListExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   /** analyzing UX: reading docs vs waiting on LLM */
@@ -1135,6 +1190,7 @@ export default function KnowledgePage() {
   const openDocumentDetail = async (doc: DocumentItem) => {
     setSelectedDocId(doc.id);
     setDetailTarget({ kind: 'document', item: doc });
+    setPastDetail(null);
     trackPageChatEvent({
       type: 'row_click',
       route: '/knowledge',
@@ -1162,22 +1218,17 @@ export default function KnowledgePage() {
         detail: item.actionContent || undefined,
       };
       setDetailTarget({ kind: 'document', item: detailedDoc });
+      setPastDetail(item);
+      const cached = item.libraryAnalysis?.analysisContent?.trim() || '';
+      if (cached) {
+        setDiagnosisReply(cached);
+        return;
+      }
       try {
-        const response = await postChat({
-          message: `완료 이슈 "${item.issueContent}"(이슈 ID: ${item.issueId}, LOT: ${item.lotId})를 검토해 주세요. 다른 완료 이슈와의 유사 가능성과 대안 조치 방안을 한국어로 간결하게 설명하세요. 이슈 상세: ${item.actionContent || '기록 없음'}`,
-        });
+        const response = await knowledgeApi.analyze({ lotId: item.lotId });
         if (response.error) {
           console.error('[knowledge-diagnose] ai.error', response.error);
           setDiagnosisError(`AI error: ${response.error}`);
-        }
-        if (response.mode === 'security_redirect') {
-          console.error('[knowledge-diagnose] security_redirect', response.security_matched);
-          setDiagnosisError(
-            (prev) =>
-              [prev, `보안 키워드 감지(${response.security_matched || 'unknown'}) — 일반 채널 답변 대신 안내가 반환되었습니다.`]
-                .filter(Boolean)
-                .join('\n'),
-          );
         }
         const reply = response.reply ?? '';
         if (!reply.trim()) {
@@ -1189,7 +1240,7 @@ export default function KnowledgePage() {
         setDiagnosisReply(reply);
       } catch (err) {
         const msg = getAnalyzeErrorMessage(err, 'AI 진단을 불러오지 못했습니다.');
-        console.error('[knowledge-diagnose] postChat', msg, err);
+        console.error('[knowledge-diagnose] analyze lotId', msg, err);
         setDiagnosisError(`LLM 요청 실패: ${msg}`);
       }
     } catch (err) {
@@ -1202,6 +1253,7 @@ export default function KnowledgePage() {
   };
 
   const openActionDetail = (item: ActionHistoryItem) => {
+    setPastDetail(null);
     setDetailTarget({ kind: 'action', item });
     trackPageChatEvent({
       type: 'row_click',
@@ -1221,6 +1273,7 @@ export default function KnowledgePage() {
 
   const closeDetailModal = () => {
     setDetailTarget(null);
+    setPastDetail(null);
     setDiagnosisReply('');
     setDiagnosisError('');
   };
@@ -1396,7 +1449,7 @@ ${
       setAnalyzePhase('llm');
       let response;
       try {
-        response = await knowledgeApi.analyze(prompt);
+        response = await knowledgeApi.analyze({ message: prompt });
       } catch (err) {
         const msg = getAnalyzeErrorMessage(err, '알 수 없는 네트워크 오류');
         console.error('[knowledge-analyze] api', msg, err);
@@ -2754,22 +2807,10 @@ ${
       >
         {detailTarget?.kind === 'document' && (
           <div className="space-y-4 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`font-semibold ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>
-                {detailTarget.item.id}
-              </span>
-              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                LOT {detailTarget.item.lot || '-'}
-              </span>
-            </div>
-            <h4
-              className={`m-0 text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}
-            >
-              {detailTarget.item.title}
-            </h4>
-            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {detailTarget.item.occurredAt || detailTarget.item.date}
-            </div>
+            <IssueDetailAnalysis
+              issue={pastDetail ? pastIssueToAnalysisModel(pastDetail) : null}
+              emptyMessage="과거 자료 상세를 불러오는 중입니다."
+            />
             <div
               className={`rounded-xl p-4 leading-relaxed whitespace-pre-wrap ${
                 isDark
@@ -2777,7 +2818,72 @@ ${
                   : 'bg-slate-50 text-slate-800'
               }`}
             >
+              <div
+                className={`mb-2 text-xs font-semibold ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}
+              >
+                조치 내용
+              </div>
               {detailTarget.item.detail || '등록된 상세 조치 내용이 없습니다.'}
+            </div>
+            <div
+              className={`overflow-hidden rounded-xl border ${
+                isDark ? 'border-slate-700' : 'border-slate-200'
+              }`}
+            >
+              <div
+                className={`border-b px-4 py-2.5 text-sm font-semibold ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/70 text-slate-200'
+                    : 'border-slate-200 bg-slate-50 text-slate-800'
+                }`}
+              >
+                LOTS 공정 데이터
+              </div>
+              {pastDetail?.lot ? (
+                <dl className="m-0">
+                  {LOT_PROCESS_FIELDS.map((row, index) => {
+                    const lot = pastDetail.lot
+                    if (!lot) return null
+                    return (
+                    <div
+                      key={row.label}
+                      className={`grid grid-cols-1 gap-1 px-4 py-2.5 text-sm sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:gap-3 ${
+                        index > 0
+                          ? isDark
+                            ? 'border-t border-slate-700'
+                            : 'border-t border-slate-200'
+                          : ''
+                      }`}
+                    >
+                      <dt
+                        className={`font-mono text-xs font-semibold ${
+                          isDark ? 'text-slate-400' : 'text-slate-500'
+                        }`}
+                      >
+                        {row.label}
+                      </dt>
+                      <dd
+                        className={`m-0 break-words ${
+                          isDark ? 'text-slate-100' : 'text-slate-900'
+                        }`}
+                      >
+                        {fmtLotField(row.get(lot))}
+                      </dd>
+                    </div>
+                    )
+                  })}
+                </dl>
+              ) : (
+                <p
+                  className={`m-0 px-4 py-6 text-center text-sm ${
+                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}
+                >
+                  LOT 공정 행이 없습니다.
+                </p>
+              )}
             </div>
             <div
               className={`border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
