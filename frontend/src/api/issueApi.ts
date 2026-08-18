@@ -52,6 +52,12 @@ export type IssueListParams = {
 export type UpdateIssueBody = {
   actionContent: string | null
   completed: boolean
+  assigneeUserId?: string | null
+}
+
+export type IssueManager = {
+  userId: string
+  name: string
 }
 
 export type HandoverHistoryItem = {
@@ -99,6 +105,8 @@ export const issueApi = {
 
   getById: (issueId: string) =>
     apiClient.get<{ issue: IssueDetail }>(`/issues/${encodeURIComponent(issueId)}`),
+
+  listManagers: () => apiClient.get<{ managers: IssueManager[] }>('/issues/managers'),
 
   update: (issueId: string, body: UpdateIssueBody) =>
     apiClient.put<{ issue: IssueDetail; message: string }>(

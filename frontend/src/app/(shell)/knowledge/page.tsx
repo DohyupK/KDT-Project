@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type React from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { authApi } from '@/api/authApi';
 import { useUiSettings } from '@/components/layout/AppShell';
 import { SHELL_CONTENT_CLASS } from '@/components/layout/shellContent';
 import DateInput from '@/components/DateInput';
@@ -63,7 +64,7 @@ interface AnalysisResult {
   references: string;
 }
 
-type TabKey = 'knowledge' | 'report';
+type ViewMode = 'list' | 'analysis';
 
 interface ActionFormState {
   situation: string;
@@ -450,45 +451,6 @@ const EMPTY_ACTION_FORM: ActionFormState = {
   date: '',
 };
 
-const TABS: { key: TabKey; labelKo: string; labelEn: string }[] = [
-  { key: 'knowledge', labelKo: '라이브러리 & 대처 이력', labelEn: 'Library & Action History' },
-  { key: 'report', labelKo: 'AI 맞춤 분석', labelEn: 'AI Custom Analysis' },
-];
-
-function KnowledgeTabIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      className="shrink-0"
-    >
-      <path
-        d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 7h8M8 11h6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 function ReportTabIcon() {
   return (
     <svg
@@ -737,6 +699,7 @@ function useMasterCheckbox(
 
 export default function KnowledgePage() {
   const pathname = usePathname();
+  const router = useRouter();
   const { isDark, language } = useUiSettings();
   const { setPagePayload, trackPageChatEvent } = usePageChat();
   const uiColors = getUiColors(isDark);
@@ -748,7 +711,8 @@ export default function KnowledgePage() {
   const headCellStyle = getHeadCellStyle(uiColors);
   void cellStyle;
   void headCellStyle;
-  const [activeTab, setActiveTab] = useState<TabKey>('knowledge');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [allowed, setAllowed] = useState<boolean | null>(null);
   const [toast, setToast] = useState('');
 
   const [filters, setFilters] = useState<FilterState>({ date: '', keyword: '' });
@@ -818,9 +782,33 @@ export default function KnowledgePage() {
   };
 
   useEffect(() => {
+    if (allowed !== true) return
     void refreshPastIssues();
     void refreshHandoverActions();
-  }, []);
+  }, [allowed]);
+
+  useEffect(() => {
+    let cancelled = false
+    void authApi
+      .getSettings()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data.settings.manage === 'O') {
+          setAllowed(true)
+          return
+        }
+        setAllowed(false)
+        router.replace('/main')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAllowed(false)
+        router.replace('/main')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
   useShellRefresh(() => {
     void refreshPastIssues();
@@ -835,11 +823,11 @@ export default function KnowledgePage() {
   }, [pathname]);
 
   useEffect(() => {
-    if (activeTab === 'knowledge') {
+    if (viewMode === 'list') {
       void refreshPastIssues();
       void refreshHandoverActions();
     }
-  }, [activeTab]);
+  }, [viewMode]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -905,7 +893,7 @@ export default function KnowledgePage() {
       '/knowledge',
       {
         page: 'knowledge',
-        activeTab,
+        viewMode,
         visibleTables: ['pastIssues', 'handover', 'documents'],
         filters: {
           pastIssues: appliedFilters,
@@ -964,7 +952,7 @@ export default function KnowledgePage() {
     );
   }, [
     setPagePayload,
-    activeTab,
+    viewMode,
     allDocuments.length,
     allActions.length,
     filteredDocuments,
@@ -1325,11 +1313,11 @@ export default function KnowledgePage() {
     setSelectedDocPaths((current) => current.filter((p) => p !== path));
   };
 
-  /** 지식 탭 액션바: 분석 탭으로 이동 (분석은 아직 실행하지 않음) */
+  /** 목록 액션바: 분석 화면으로 이동 (분석은 아직 실행하지 않음) */
   const runSelectedAnalysis = () => {
     if (selectedCount === 0) return;
     setIsSelectionListExpanded(false);
-    setActiveTab('report');
+    setViewMode('analysis');
   };
 
   const MAX_DOC_FILES = 3;
@@ -1482,6 +1470,10 @@ ${
   void handleActionSubmit;
   void handleDelete;
 
+  if (allowed !== true) {
+    return null;
+  }
+
   return (
     <div
       className={
@@ -1544,40 +1536,7 @@ ${
           </p>
         </div>
 
-        <div
-          role="tablist"
-          aria-label="라이브러리 섹션"
-          className={`mb-5 flex w-fit max-w-full flex-wrap gap-1.5 rounded-xl p-1.5 ${
-            isDark ? 'bg-slate-950/80' : 'bg-slate-200/80'
-          }`}
-        >
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveTab(tab.key)}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm transition-colors ${
-                  isActive
-                    ? isDark
-                      ? 'bg-slate-800 font-semibold text-blue-300 shadow-sm'
-                      : 'bg-white font-semibold text-blue-600 shadow-sm'
-                    : isDark
-                      ? 'bg-transparent font-medium text-slate-400 hover:text-slate-200'
-                      : 'bg-transparent font-medium text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {tab.key === 'knowledge' ? <KnowledgeTabIcon /> : <ReportTabIcon />}
-                {language === 'en' ? tab.labelEn : tab.labelKo}
-              </button>
-            );
-          })}
-        </div>
-
-        {activeTab === 'knowledge' && (
+        {viewMode === 'list' && (
           <section style={panelStyle}>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -2176,7 +2135,7 @@ ${
           </section>
         )}
 
-        {activeTab === 'report' && (
+        {viewMode === 'analysis' && (
           <section style={panelStyle}>
             {selectedCount === 0 ? (
               <div
@@ -2203,11 +2162,11 @@ ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  라이브러리 & 대처 이력 탭에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
+                  라이브러리 목록에서 원하는 항목을 체크한 후 AI 분석을 실행하세요.
                 </p>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('knowledge')}
+                  onClick={() => setViewMode('list')}
                   style={primaryButtonStyle}
                   className="mt-5"
                 >
@@ -2759,7 +2718,7 @@ ${
         )}
       </div>
 
-      {selectedCount > 0 && activeTab === 'knowledge' && (
+      {selectedCount > 0 && viewMode === 'list' && (
         <div
           className={`fixed bottom-4 left-1/2 z-[90] w-[min(920px,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur ${
             isDark

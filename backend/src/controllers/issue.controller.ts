@@ -5,7 +5,7 @@ import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.j
 import { fillRiskReasonsForLots } from '../services/lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.service.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { lotScoreOnAws } from '../services/lotScoreRole.js'
+import * as userSettingsService from '../services/userSettings.service.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -141,6 +141,11 @@ export const scoreLots = asyncHandler(async (req, res) => {
   })
 })
 
+export const listIssueManagers = asyncHandler(async (_req, res) => {
+  const managers = await userSettingsService.listManageUsers()
+  res.status(200).json({ managers })
+})
+
 export const listIssues = asyncHandler(async (req, res) => {
   const result = await issueService.listOpenIssues({
     search: req.query.search != null ? String(req.query.search) : undefined,
@@ -164,6 +169,7 @@ export const updateIssue = asyncHandler(async (req, res) => {
     {
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
+      assigneeUserId: req.body?.assigneeUserId,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )

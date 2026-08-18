@@ -13,6 +13,7 @@ import {
   MAX_INQUIRY_FILES,
   sanitizeOriginalName,
 } from './inquiryFiles.js'
+import { isManageUser } from './userSettings.service.js'
 
 const CATEGORIES = [
   '시스템 오류 제보',
@@ -87,23 +88,14 @@ export type InquiryDto = {
   attachments: InquiryAttachmentDto[]
 }
 
-function isAdmin(userId: string | undefined): boolean {
-  if (!userId) return false
-  const raw = (process.env.ADMIN_USER_IDS || '').trim()
-  if (!raw) return false
-  const set = new Set(
-    raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  )
-  return set.has(userId)
-}
-
-function canViewFull(row: InquiryRow, viewerUserId: string | undefined): boolean {
+function canViewFull(
+  row: InquiryRow,
+  viewerUserId: string | undefined,
+  viewerIsManage: boolean,
+): boolean {
   if (row.visibility !== '비공개') return true
   if (!viewerUserId) return false
-  if (isAdmin(viewerUserId)) return true
+  if (viewerIsManage) return true
   return row.author_user_id === viewerUserId
 }
 
@@ -139,8 +131,9 @@ function toDto(
   row: InquiryRow,
   viewerUserId: string | undefined,
   attachments: AttachmentRow[] = [],
+  viewerIsManage = false,
 ): InquiryDto {
-  const full = canViewFull(row, viewerUserId)
+  const full = canViewFull(row, viewerUserId, viewerIsManage)
   if (!full) {
     return {
       id: row.inquiry_code,
@@ -243,6 +236,7 @@ export async function listInquiries(
   const page = Math.max(1, Number(filters.page) || 1)
   const pageSize = Math.min(50, Math.max(1, Number(filters.pageSize) || 5))
   const offset = (page - 1) * pageSize
+  const viewerIsManage = await isManageUser(viewerUserId)
 
   const where: string[] = ['1=1']
   const params: unknown[] = []
@@ -271,7 +265,7 @@ export async function listInquiries(
       (visibility = '공개' OR author_user_id = ? OR ?)
       AND (title LIKE ? OR content LIKE ? OR inquiry_code LIKE ?)
     )`)
-    const admin = isAdmin(viewerUserId) ? 1 : 0
+    const admin = viewerIsManage ? 1 : 0
     const like = `%${q}%`
     params.push(viewerUserId, admin, like, like, like)
   }
@@ -295,7 +289,9 @@ export async function listInquiries(
   const attachmentMap = await loadAttachmentsByInquiryIds(rows.map((row) => row.id))
 
   return {
-    items: rows.map((row) => toDto(row, viewerUserId, attachmentMap.get(row.id) ?? [])),
+    items: rows.map((row) =>
+      toDto(row, viewerUserId, attachmentMap.get(row.id) ?? [], viewerIsManage),
+    ),
     total,
     page,
     pageSize,
@@ -310,12 +306,13 @@ export async function getInquiryByCode(inquiryCode: string, viewerUserId: string
   const row = rows[0]
   if (!row) throw new AppError(404, '문의를 찾을 수 없습니다.')
 
-  if (!canViewFull(row, viewerUserId)) {
+  const viewerIsManage = await isManageUser(viewerUserId)
+  if (!canViewFull(row, viewerUserId, viewerIsManage)) {
     throw new AppError(403, '비공개 문의는 작성자 또는 관리자만 열람할 수 있습니다.')
   }
 
   const attachmentMap = await loadAttachmentsByInquiryIds([row.id])
-  return { item: toDto(row, viewerUserId, attachmentMap.get(row.id) ?? []) }
+  return { item: toDto(row, viewerUserId, attachmentMap.get(row.id) ?? [], viewerIsManage) }
 }
 
 export async function createInquiry(
@@ -419,7 +416,7 @@ export async function openInquiryAttachment(
   const row = rows[0]
   if (!row) throw new AppError(404, '문의를 찾을 수 없습니다.')
 
-  if (!canViewFull(row, viewerUserId)) {
+  if (!canViewFull(row, viewerUserId, await isManageUser(viewerUserId))) {
     throw new AppError(403, '비공개 문의는 작성자 또는 관리자만 열람할 수 있습니다.')
   }
 
@@ -456,7 +453,7 @@ export async function upsertAnswer(
   content: string | undefined,
   adminUserId: string,
 ) {
-  if (!isAdmin(adminUserId)) {
+  if (!(await isManageUser(adminUserId))) {
     throw new AppError(403, '관리자만 답변할 수 있습니다.')
   }
 
@@ -482,6 +479,6 @@ export async function upsertAnswer(
   return getInquiryByCode(inquiryCode, adminUserId)
 }
 
-export function viewerIsAdmin(userId: string) {
-  return isAdmin(userId)
+export async function viewerIsAdmin(userId: string) {
+  return isManageUser(userId)
 }

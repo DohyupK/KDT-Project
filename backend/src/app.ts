@@ -45,8 +45,9 @@ export function createApp() {
       lots: 'GET /api/lots/risk-top · GET /api/lots/daily-kpi · GET /api/lots/q-cost · GET /api/lots/:lotId · POST /api/lots/import · POST /api/lots/score',
       dashboard:
         'GET /api/dashboard/lot-risks · /lot-risks/:lotId · /production-trend · /production-daily · /lots.csv · /feature-importance',
-      issues: 'GET /api/issues · GET|PUT /api/issues/:issueId',
-      past_issues: 'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId',
+      issues: 'GET /api/issues · GET|PUT /api/issues/:issueId · GET /api/issues/managers',
+      past_issues:
+        'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId (auth + manage=O)',
       knowledge_analyze: 'POST /api/knowledge/analyze (auth) → AI_LIBRARY_ANALYSIS',
       handover_history:
         'GET /api/knowledge/handover-history?status=pending|completed · POST /api/knowledge/handover (auth)',

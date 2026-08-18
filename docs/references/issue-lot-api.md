@@ -88,6 +88,7 @@ erDiagram
     tinyint theme_mode
     int refresh_interval
     char email_check
+    char manage
   }
   USER_HEADER_NOTIF_STATE {
     varchar user_id PK
@@ -314,16 +315,17 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 |------|-----|-----|
 | 미완료 목록 | `GET /api/issues` | `ISSUES` + `ANALYSIS_LOTS` (위험·SPC 필터) |
 | 행 선택 상세 | `GET /api/issues/:issueId` | 조치·담당자(`USERS.name`)·`analysis` |
+| 담당자 목록 | `GET /api/issues/managers` | `USER_SETTINGS.manage='O'` 의 `USERS.name` |
 | 분석 시각화 | 상세의 `analysis` | `ANALYSIS_LOTS` |
-| 저장(완료) | `PUT /api/issues/:id` `{ completed: true, actionContent }` | `completed_at`, `action_content` → 목록에서 사라지고 Knowledge 과거 자료 |
+| 저장(완료) | `PUT /api/issues/:id` `{ completed: true, actionContent, assigneeUserId }` | `completed_at`, `action_content`, `assignee_user_id` → 목록에서 사라지고 Knowledge 과거 자료 |
 
 ### Knowledge `/knowledge`
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + LOT JOIN |
+| 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + LOT JOIN. **`USER_SETTINGS.manage='O'`** |
 | 인수인계(완료) | `GET /api/knowledge/handover-history?status=completed` | `HANDOVER_HISTORY` |
-| 맞춤 분석 | `POST /api/knowledge/analyze` | `AI_LIBRARY_ANALYSIS` |
+| 선택 항목 분석 | `POST /api/knowledge/analyze` | `AI_LIBRARY_ANALYSIS`. **manage='O'** |
 | 문서 미리보기 | `GET /api/docs/file` | 파일시스템 + `TEXT_MATCH` (OCR 경로) |
 | 진단 챗(일부) | `POST /api/chat` | `USER_CHAT_*` |
 
@@ -331,9 +333,9 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES` |
+| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES`. 비공개 본문은 작성자 또는 `USER_SETTINGS.manage='O'` |
 | 첨부 | 목록 첨부 URL | `INQUIRY_ATTACHMENTS` |
-| 답변 | `POST\|PATCH /api/inquiries/:id/answer` | `INQUIRIES.answer` |
+| 답변 | `POST\|PATCH /api/inquiries/:id/answer` | `INQUIRIES.answer`. 답변은 manage='O' |
 
 ### 설정 `/setting`
 
@@ -341,7 +343,7 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 환경 저장 | `GET\|PUT /api/auth/settings` · `POST .../reset` | `USER_SETTINGS` |
+| 환경 저장 | `GET\|PUT /api/auth/settings` · `POST .../reset` | `USER_SETTINGS` (`manage`는 GET만, PUT으로 바꾸지 않음) |
 | 제어 한계치 | `GET\|PUT /api/settings/control-bounds` | JSON 파일 (테이블 아님) |
 
 ### 관리 `/management`
@@ -366,7 +368,8 @@ Grafana SPC iframe. MariaDB LOT 테이블을 직접 읽지 않음 (`NEXT_PUBLIC_
 
 - 목록 = `GET /api/issues` 미완료.
 - 행 선택 = `GET /api/issues/:issueId` → `assigneeName`, `actionContent`, `analysis`.
-- 저장 = 완료만. JWT PUT 후 Knowledge 「과거 자료」.
+- 담당자 select = `GET /api/issues/managers` (`USER_SETTINGS.manage='O'`).
+- 저장 = 완료만. JWT PUT `assigneeUserId`(관리자 user_id 또는 빈 값) 후 Knowledge 「과거 자료」.
 - 처리 상태(`status`) 필터 없음.
 
 시드: [`DB/issues_seed.sql`](../../DB/issues_seed.sql) — mock LOT만, issues INSERT 없음.

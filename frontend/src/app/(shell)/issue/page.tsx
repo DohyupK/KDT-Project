@@ -9,6 +9,7 @@ import {
   normalizeIssueRiskLevel,
   type IssueDetail as IssueApiDetail,
   type IssueListItem as IssueApiListItem,
+  type IssueManager,
 } from '@/api/issueApi';
 import { IssueDetailAnalysis } from '@/components/IssueDetailAnalysis';
 import { useUiSettings } from '@/components/layout/AppShell';
@@ -32,6 +33,7 @@ interface Issue {
   risk: '심각' | '주의' | '안정';
   issueContent: string;
   assignee: string;
+  assigneeUserId: string | null;
   action: string;
   completed: boolean;
   /** analysis_lots (상세 API). 목록만이면 null */
@@ -58,7 +60,7 @@ interface FilterState {
 }
 
 interface ManagementForm {
-  assignee: string;
+  assigneeUserId: string;
   action: string;
   completed: boolean;
 }
@@ -121,6 +123,7 @@ interface IssueListSectionProps {
 interface ManagementSectionProps {
   issue: Issue | null;
   form: ManagementForm;
+  managers: IssueManager[];
   message: string;
   canSave: boolean;
   isSaving?: boolean;
@@ -328,6 +331,7 @@ function mapIssueListItem(item: IssueApiListItem): Issue {
     risk: normalizeIssueRiskLevel(item.riskLevel),
     issueContent: item.issueContent,
     assignee: '미배정',
+    assigneeUserId: null,
     action: '',
     completed: false,
     analysis: null,
@@ -357,6 +361,7 @@ function mergeIssueDetail(issue: Issue, detail: IssueApiDetail): Issue {
     risk: normalizeIssueRiskLevel(detail.riskLevel),
     issueContent: detail.issueContent,
     assignee: detail.assigneeName?.trim() || '미배정',
+    assigneeUserId: detail.assigneeUserId ?? null,
     action: detail.actionContent ?? '',
     completed: detail.completed,
     analysis,
@@ -1621,6 +1626,7 @@ const IssueListSection = ({
 const ManagementSection = ({
   issue,
   form,
+  managers,
   message,
   canSave,
   isSaving = false,
@@ -1695,14 +1701,28 @@ const ManagementSection = ({
         >
           <div>
             <label htmlFor="manager-assignee" style={getLabelStyle(c)}>담당자</label>
-            <input
+            <select
               id="manager-assignee"
-              value={form.assignee}
-              readOnly
-              title="users.name (저장 시 로그인 사용자가 담당자로 지정됩니다)"
-              placeholder="상세 조회 시 표시 · 저장 시 자동 지정"
-              style={{ ...getInputStyle(c), cursor: 'default' }}
-            />
+              value={form.assigneeUserId}
+              disabled={!issue}
+              onChange={(event) => onChange('assigneeUserId', event.target.value)}
+              style={{ ...getInputStyle(c), cursor: issue ? 'pointer' : 'default' }}
+            >
+              <option value="">미배정</option>
+              {managers.map((manager) => (
+                <option key={manager.userId} value={manager.userId}>
+                  {manager.name}
+                </option>
+              ))}
+              {form.assigneeUserId &&
+              !managers.some((manager) => manager.userId === form.assigneeUserId) ? (
+                <option value={form.assigneeUserId}>
+                  {issue?.assignee && issue.assignee !== '미배정'
+                    ? issue.assignee
+                    : form.assigneeUserId}
+                </option>
+              ) : null}
+            </select>
           </div>
         </div>
         <div
@@ -1753,7 +1773,7 @@ const ManagementSection = ({
 };
 
 const EMPTY_FORM: ManagementForm = {
-  assignee: '',
+  assigneeUserId: '',
   action: '',
   completed: false,
 };
@@ -1790,6 +1810,7 @@ export default function IssuePage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState('1');
   const [managementForm, setManagementForm] = useState<ManagementForm>(EMPTY_FORM);
+  const [managers, setManagers] = useState<IssueManager[]>([]);
   const [reportNotice, setReportNotice] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -1816,6 +1837,13 @@ export default function IssuePage() {
 
   useEffect(() => {
     void loadIssues();
+  }, []);
+
+  useEffect(() => {
+    void issueApi
+      .listManagers()
+      .then(({ data }) => setManagers(data.managers ?? []))
+      .catch(() => setManagers([]));
   }, []);
 
   useShellRefresh(() => {
@@ -1997,7 +2025,7 @@ export default function IssuePage() {
         Boolean(managementForm.action) &&
         managementForm.action !== issue.action);
     const newForm = {
-      assignee: issue.assignee,
+      assigneeUserId: issue.assigneeUserId ?? '',
       completed: issue.completed,
       action: copied || (preserveAction ? managementForm.action : issue.action),
     };
@@ -2079,7 +2107,7 @@ export default function IssuePage() {
       });
       const copied = options?.actionOverride?.trim() || '';
       setManagementForm({
-        assignee: data.issue.assigneeName?.trim() || '미배정',
+        assigneeUserId: data.issue.assigneeUserId ?? '',
         action: copied || data.issue.actionContent || '',
         completed: data.issue.completed,
       });
@@ -2167,6 +2195,7 @@ export default function IssuePage() {
       await issueApi.update(issueId, {
         actionContent: managementForm.action.trim() || null,
         completed: true,
+        assigneeUserId: managementForm.assigneeUserId.trim() || null,
       });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(
@@ -2264,6 +2293,7 @@ export default function IssuePage() {
               <ManagementSection
                 issue={selectedIssue}
                 form={managementForm}
+                managers={managers}
                 message={saveMessage}
                 canSave={canSave}
                 isSaving={isSaving}
