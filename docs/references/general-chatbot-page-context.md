@@ -1,6 +1,6 @@
 # 일반 챗봇 — 응답 방식 · 페이지 참조 로직 (SSOT)
 
-최종 갱신: 2026-08-13
+최종 갱신: 2026-08-18
 
 **범위:** 셸 `GlobalChatbot` → `POST /api/chat` · `/api/chat/stream` → ai-service `/chat` · `/chat/stream`  
 **제외:** 보안 오버레이(`SecurityChatbot`, `/security-chat`) — 별도 [`security-chatbot-guide.md`](./security-chatbot-guide.md)
@@ -230,11 +230,12 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 - slice 이후 `focus_payload` / `page_payload` / `supplement`
 - `visible_ui`, `empty_answer_hint`, `allowed_metric_keys`
 - predict / capacity / residual / recommendation (있을 때만)
-- `rag_sources` (검색됐을 때만)
+- `rag_sources` (검색됐을 때만). 일반 챗 RAG는 `Documents/` **Public · Confidential**만. Secret·TopSecret은 보안 챗.
 
 **금지**
 
 - `visible_ui`에 없는 탭·메뉴·버튼·건수 창작  
+- 사용자 답에 「현재 화면은 ○○만 보입니다」 / 「보이는 것은 …뿐입니다」  
 - 없는 탭이 「활성」이라고 단정  
 - allowlist에 없는 LOT/%/ppm 창작  
 - 이전 턴 LOT/%를 현재 화면과 무관하게 재인용  
@@ -257,6 +258,8 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 
 **오프스크린 예시**
 
+사용자에게 화면 목록을 읽혀 주지 않는다. 경로만 안내.
+
 - knowledge + 「문의」→ `/inquiry` 안내 (문의 탭 없음)  
 - knowledge + 「설정」→ `/setting`  
 - knowledge + 「SPC」→ `/management`  
@@ -267,9 +270,10 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 전면 교체 규칙 (2026-08-13):
 
 1. 규칙 에코 문구 제거  
-2. **한글 ↔ 영문·숫자·괄호·특수문자** 경계에 공백 1칸 (숫자↔영문 예: `3071 ppm`)  
-3. **줄바꿈은 `다.` / `요.` 뒤에만** (일반 `.`·`8.3`은 개행 없음)  
-4. 거의 동일 문장 dedupe  
+2. 「현재 화면은 …만 보입니다」 / 「보이는 것은 …뿐입니다」 제거  
+3. **한글 ↔ 영문·숫자·괄호·특수문자** 경계에 공백 1칸 (숫자↔영문 예: `3071 ppm`)  
+4. **줄바꿈은 `다.` / `요.` 뒤에만** (일반 `.`·`8.3`은 개행 없음)  
+5. 거의 동일 문장 dedupe  
 
 청크·DB 필드 조립은 `join_spaced_parts`로 조각마다 공백.
 

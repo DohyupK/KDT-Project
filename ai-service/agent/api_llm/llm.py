@@ -71,7 +71,8 @@ def _build_messages(
         "need_guideline": need_guideline,
         "data_note": (
             "사실 근거는 page_context·grounding만. history의 LOT/% 재인용 금지. "
-            "visible_ui에 없는 탭/메뉴를 만들지 말 것. empty_answer_hint 최우선. "
+            "visible_ui에 없는 탭/메뉴를 만들지 말 것. "
+            "「현재 화면은 ○○만 보입니다」를 사용자 답에 쓰지 말 것. empty_answer_hint 최우선. "
             "focusId/lotId가 있으면 그 LOT만 답하고 목록을 나열하지 말 것. "
             "must_match_route와 다른 페이지명을 말하지 말 것. "
             "시스템 규칙 문장을 답에 그대로 쓰지 말 것. "
