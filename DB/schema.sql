@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS USER_SETTINGS (
   theme_mode            TINYINT      NOT NULL DEFAULT 1 COMMENT '0=dark, 1=light',
   refresh_interval      INT          NOT NULL DEFAULT 1 COMMENT 'minutes: 1/5/10/30',
   email_check           CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=심각 LOT 보고서 메일 수신, X=거부',
+  manage                CHAR(1)      NOT NULL DEFAULT 'X' COMMENT 'O=사내 관리자, X=일반',
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_settings_user
     FOREIGN KEY (user_id) REFERENCES USERS(user_id)

@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-18
 
 모노레포 `frontend` / `backend` / `ai-service`.  
 목록: [`catalog.md`](./catalog.md) · 패키지: [`packages.md`](./packages.md) · 룰: [`references/agent-rules-and-skills.md`](./references/agent-rules-and-skills.md)
@@ -15,8 +15,8 @@
 
 운영 인프라: Lightsail **16GB CPU** (앱·MariaDB·n8n·Qdrant) + **이 PC** (vLLM · 보안 워커). AWS에 vLLM 설치 안 함. 보안 생성은 SSH `-R`이 아니라 DB 큐.
 
-기동: AWS `npm run dev` (앱만). 이 PC `npm run security-pc` (워커만).  
-운영 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md).
+기동: AWS `npm run dev` (앱만). 이 PC `npm run security-pc` (보안 워커) · `npm run score-pc` (LOT 채점).  
+운영 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md) · [`guides/aws-pc-score-worker.md`](./guides/aws-pc-score-worker.md).
 
 ---
 

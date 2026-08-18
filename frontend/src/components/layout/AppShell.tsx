@@ -20,7 +20,7 @@ import GlobalChatbot from '@/components/chat/GlobalChatbot'
 import ShellHeader from '@/components/layout/ShellHeader'
 import { PageChatProvider, usePageChat } from '@/context/PageChatContext'
 import { authApi } from '@/api/authApi'
-import { isLoggedIn } from '@/lib/authStorage'
+import { AUTH_CHANGED_EVENT, isLoggedIn } from '@/lib/authStorage'
 
 export type UiThemeMode = 0 | 1
 export type UiLanguage = 'ko' | 'en'
@@ -439,7 +439,28 @@ function PageChatRouteReset() {
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [canSeeKnowledge, setCanSeeKnowledge] = useState(false)
   const { isDark, copy } = useUiSettings()
+
+  useEffect(() => {
+    const load = () => {
+      if (!isLoggedIn()) {
+        setCanSeeKnowledge(false)
+        return
+      }
+      void authApi
+        .getSettings()
+        .then(({ data }) => {
+          setCanSeeKnowledge(data.settings.manage === 'O')
+        })
+        .catch(() => {
+          setCanSeeKnowledge(false)
+        })
+    }
+    load()
+    window.addEventListener(AUTH_CHANGED_EVENT, load)
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, load)
+  }, [])
 
   return (
     <PageChatProvider>
@@ -478,7 +499,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <ul className="flex flex-1 flex-col gap-2">
-            {NAV_MENUS.filter((menu) => !SIDEBAR_HIDDEN_PATHS.has(menu.path)).map((menu) => {
+            {NAV_MENUS.filter((menu) => {
+              if (SIDEBAR_HIDDEN_PATHS.has(menu.path)) return false
+              if (menu.path === '/knowledge' && !canSeeKnowledge) return false
+              return true
+            }).map((menu) => {
               const Icon = menu.icon
               const active = pathname === menu.path
               const label = copy.menus[menu.path] ?? menu.name

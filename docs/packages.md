@@ -1,6 +1,6 @@
 # 패키지 안내 (frontend · backend · ai-service · DB)
 
-최종 갱신: 2026-08-15  
+최종 갱신: 2026-08-18  
 저장소 실행·기술 스택 SSOT: [루트 README](../README.md).  
 이 파일은 **패키지 README를 한곳으로 모은** 사람용 설명이다. AI 규약은 각 `AGENTS.md` · [`.cursor/rules/kdt-project.mdc`](../.cursor/rules/kdt-project.mdc).
 
@@ -25,7 +25,7 @@
 - App Router: `src/app/(shell)/` + 공통 `AppShell`. `/` → `/main`.
 - rewrite: `/api/*` → `:3001`, `/ai/*` → `:8800`
 - `AppData.fillThreshold` 필드명 변경 금지
-- 권장 기동: AWS 루트 `npm run dev`. 이 PC 보안 워커: `npm run security-pc`. 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md).
+- 권장 기동: AWS 루트 `npm run dev`. 이 PC 보안: `npm run security-pc`. LOT 채점: `npm run score-pc`. 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md) · [`guides/aws-pc-score-worker.md`](./guides/aws-pc-score-worker.md).
 - AI 규칙: [`frontend/AGENTS.md`](../frontend/AGENTS.md)
 
 ---

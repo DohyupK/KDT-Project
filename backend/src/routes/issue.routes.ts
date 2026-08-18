@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import * as issueController from '../controllers/issue.controller.js'
-import { authMiddleware } from '../middleware/auth.middleware.js'
+import { authMiddleware, requireManage } from '../middleware/auth.middleware.js'
 
 const router = Router()
 
@@ -13,14 +13,20 @@ router.post('/lots/import', authMiddleware, issueController.importLots)
 /** Admin/dev: re-score existing LOTS via ai-service + Phase I SPC */
 router.post('/lots/score', authMiddleware, issueController.scoreLots)
 
+router.get('/issues/managers', authMiddleware, issueController.listIssueManagers)
 router.get('/issues', issueController.listIssues)
 router.get('/issues/:issueId', issueController.getIssue)
 router.put('/issues/:issueId', authMiddleware, issueController.updateIssue)
 
-router.get('/knowledge/past-issues', issueController.listPastIssues)
-router.get('/knowledge/past-issues/:issueId', issueController.getPastIssue)
-/** Knowledge AI 맞춤 분석 (보안 게이트·chatStore 미사용, 답변만 AI_LIBRARY_ANALYSIS 저장) */
-router.post('/knowledge/analyze', authMiddleware, issueController.analyzeKnowledge)
+router.get('/knowledge/past-issues', authMiddleware, requireManage, issueController.listPastIssues)
+router.get(
+  '/knowledge/past-issues/:issueId',
+  authMiddleware,
+  requireManage,
+  issueController.getPastIssue,
+)
+/** Knowledge 선택 항목 AI 분석 (보안 게이트·chatStore 미사용, 답변만 AI_LIBRARY_ANALYSIS 저장) */
+router.post('/knowledge/analyze', authMiddleware, requireManage, issueController.analyzeKnowledge)
 /** 인수인계: 등록 POST · 완료 PATCH · 목록 GET(?status=pending|completed) */
 router.get('/knowledge/handover-history', issueController.listHandoverHistory)
 router.post('/knowledge/handover', authMiddleware, issueController.createHandover)

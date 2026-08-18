@@ -1,6 +1,6 @@
 # 보안 챗 운영 매뉴얼 — AWS 앱 / 이 PC 워커
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-18
 
 보안·기밀 상담은 **두 대가 역할을 나눈다.** AWS는 화면과 질문 저장만 하고, 문서 검색과 답 생성은 **이 PC**가 한다.
 
@@ -14,8 +14,10 @@ Lightsail 이전·방화벽: [`aws-lightsail-gpu-tunnel.md`](./aws-lightsail-gpu
 
 | 기계 | 명령 | 하는 일 | 하지 않는 일 |
 |------|------|---------|--------------|
-| AWS Lightsail | `npm run dev` | 프론트 · 백엔드 · ai-service · 일반 챗 | 보안 워커 · vLLM · `USER_SECURITY_MESSAGES`를 읽고 답 만들기 |
+| AWS Lightsail | `npm run dev` | 프론트 · 백엔드 · ai-service · 일반 챗 | 보안 워커 · vLLM · `USER_SECURITY_MESSAGES`를 읽고 답 만들기 · LOT `/predict-voting` 채점 (`LOT_SCORE_ON_AWS=0`) |
 | 이 PC | `npm run security-pc` | DB 큐 감시 · Qdrant 검색 · vLLM 답 쓰기 | Next/Express/`npm run dev` |
+
+LOT 채점은 [`aws-pc-score-worker.md`](./aws-pc-score-worker.md) · `npm run score-pc`. `security-pc`와 **합치지 않는다.**
 
 `npm run dev`가 워커를 켜지 않는다. `npm run security-pc`가 프론트를 켜지 않는다. **둘을 한 명령으로 합치지 않는다.**
 

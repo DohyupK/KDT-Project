@@ -9,6 +9,7 @@ import {
   normalizeIssueRiskLevel,
   type IssueDetail as IssueApiDetail,
   type IssueListItem as IssueApiListItem,
+  type IssueManager,
 } from '@/api/issueApi';
 import { IssueDetailAnalysis } from '@/components/IssueDetailAnalysis';
 import { useUiSettings } from '@/components/layout/AppShell';
@@ -148,6 +149,7 @@ interface IssueListSectionProps {
 interface ManagementSectionProps {
   issue: Issue | null;
   form: ManagementForm;
+  managers: IssueManager[];
   message: string;
   canSave: boolean;
   isSaving?: boolean;
@@ -2127,6 +2129,7 @@ const IssueListSection = ({
 const ManagementSection = ({
   issue,
   form,
+  managers,
   message,
   canSave,
   isSaving = false,
@@ -2366,6 +2369,7 @@ export default function IssuePage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState('1');
   const [managementForm, setManagementForm] = useState<ManagementForm>(EMPTY_FORM);
+  const [managers, setManagers] = useState<IssueManager[]>([]);
   const [reportNotice, setReportNotice] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -2410,6 +2414,13 @@ export default function IssuePage() {
 
   useEffect(() => {
     void loadIssues();
+  }, []);
+
+  useEffect(() => {
+    void issueApi
+      .listManagers()
+      .then(({ data }) => setManagers(data.managers ?? []))
+      .catch(() => setManagers([]));
   }, []);
 
   useShellRefresh(() => {
@@ -2893,6 +2904,7 @@ export default function IssuePage() {
       await issueApi.update(issueId, {
         actionContent: managementForm.action.trim() || null,
         completed: true,
+        assigneeUserId: managementForm.assigneeUserId.trim() || null,
       });
       setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(
@@ -3001,6 +3013,7 @@ export default function IssuePage() {
               <ManagementSection
                 issue={selectedIssue}
                 form={managementForm}
+                managers={managers}
                 message={saveMessage}
                 canSave={canSave}
                 isSaving={isSaving}

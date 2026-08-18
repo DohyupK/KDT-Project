@@ -5,6 +5,7 @@ const FONT_SIZES = [10, 12, 14, 16, 18, 20, 22, 24] as const
 const REFRESH_INTERVALS = [1, 5, 10, 30] as const
 
 export type EmailCheck = 'O' | 'X'
+export type ManageFlag = 'O' | 'X'
 
 export type UserSettingsDto = {
   userId: string
@@ -13,7 +14,13 @@ export type UserSettingsDto = {
   refreshInterval: number
   emailCheck: EmailCheck
   n8nAlert: boolean
+  manage: ManageFlag
   updatedAt: string
+}
+
+export type ManageUserDto = {
+  userId: string
+  name: string
 }
 
 type UserSettingsRow = {
@@ -22,6 +29,7 @@ type UserSettingsRow = {
   theme_mode: number
   refresh_interval: number
   email_check: string | null
+  manage: string | null
   updated_at: Date | string
 }
 
@@ -30,6 +38,7 @@ const DEFAULTS = {
   themeMode: 1 as 0 | 1,
   refreshInterval: 1,
   emailCheck: 'X' as EmailCheck,
+  manage: 'X' as ManageFlag,
 }
 
 function formatDate(value: Date | string): string {
@@ -45,6 +54,12 @@ function toEmailCheck(value: unknown, fallback: EmailCheck = DEFAULTS.emailCheck
   return fallback
 }
 
+function toManageFlag(value: unknown, fallback: ManageFlag = DEFAULTS.manage): ManageFlag {
+  const raw = String(value ?? '').trim().toUpperCase()
+  if (raw === 'O' || raw === 'X') return raw
+  return fallback
+}
+
 function toDto(row: UserSettingsRow): UserSettingsDto {
   const emailCheck = toEmailCheck(row.email_check)
   return {
@@ -54,6 +69,7 @@ function toDto(row: UserSettingsRow): UserSettingsDto {
     refreshInterval: Number(row.refresh_interval),
     emailCheck,
     n8nAlert: emailCheck === 'O',
+    manage: toManageFlag(row.manage),
     updatedAt: formatDate(row.updated_at),
   }
 }
@@ -98,7 +114,7 @@ async function insertDefaults(userId: string): Promise<UserSettingsDto> {
 
 export async function getUserSettings(userId: string): Promise<UserSettingsDto> {
   const rows = await query<UserSettingsRow[]>(
-    `SELECT user_id, font_size, theme_mode, refresh_interval, email_check, updated_at
+    `SELECT user_id, font_size, theme_mode, refresh_interval, email_check, manage, updated_at
      FROM USER_SETTINGS WHERE user_id = ? LIMIT 1`,
     [userId],
   )
@@ -106,6 +122,23 @@ export async function getUserSettings(userId: string): Promise<UserSettingsDto> 
     return insertDefaults(userId)
   }
   return toDto(rows[0])
+}
+
+export async function isManageUser(userId: string | undefined): Promise<boolean> {
+  if (!userId?.trim()) return false
+  const settings = await getUserSettings(userId)
+  return settings.manage === 'O'
+}
+
+export async function listManageUsers(): Promise<ManageUserDto[]> {
+  const rows = await query<{ user_id: string; name: string }[]>(
+    `SELECT u.user_id, u.name
+     FROM USER_SETTINGS s
+     INNER JOIN USERS u ON u.user_id = s.user_id
+     WHERE s.manage = 'O'
+     ORDER BY u.name ASC, u.user_id ASC`,
+  )
+  return rows.map((row) => ({ userId: row.user_id, name: row.name }))
 }
 
 export async function updateUserSettings(

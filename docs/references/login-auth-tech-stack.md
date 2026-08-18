@@ -152,3 +152,4 @@ npm run dev
 | 2026-07-31 | 「내 정보」를 설정 페이지 섹션에서 분리 → 헤더 프로필 모달(`PersonalInfoModal`). 설정 페이지는 시스템 환경만. 규칙: `.cursor/rules/kdt-project.mdc`. |
 | 2026-08-13 | 헤더 알림 팝오버 「이메일 자동 발신」 토글. `GET\|PUT /api/auth/settings`의 `emailCheck` ↔ `user_settings.email_check` (`O`/`X`, 로그인 계정만 UPDATE). |
 | 2026-08-14 | 16GB 앱 서버 + 로컬 GPU 터널. `DB_HOST`는 같은 기계면 127.0.0.1. Grafana는 `NEXT_PUBLIC_GRAFANA_HOST`. 절차 [`aws-lightsail-gpu-tunnel.md`](../guides/aws-lightsail-gpu-tunnel.md). |
+| 2026-08-18 | `USER_SETTINGS.manage` (`O`/`X`, 기본 X). DB에서만 지정. 라이브러리 메뉴·비공개 문의·이슈 담당자 목록. PUT `/api/auth/settings`는 `manage`를 쓰지 않음. |

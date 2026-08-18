@@ -1,4 +1,5 @@
 import { syncSpcLotsToApp } from './spcLotSync.js'
+import { lotScoreOnAws } from './lotScoreRole.js'
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -15,7 +16,11 @@ function intervalMs(): number {
 
 async function tick() {
   try {
-    const result = await syncSpcLotsToApp({ quiet: false, concurrency: 4 })
+    const result = await syncSpcLotsToApp({
+      quiet: false,
+      concurrency: 4,
+      skipScore: !lotScoreOnAws(),
+    })
     if (result.skipped) {
       console.log('[spc-sync-poller] skipped (already running)')
       return

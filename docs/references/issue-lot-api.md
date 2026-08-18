@@ -1,6 +1,6 @@
 # Issue / LOT API · DB · 화면 연동
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-18
 
 Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. 런타임 SQL의 `FROM`/`JOIN`/`INTO`와 `ON DUPLICATE` 한정자(`JUDGMENT_LOTS.col`)도 대문자여야 한다.
 
@@ -32,21 +32,19 @@ Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. �
   1. `/predict-voting` → **`LOT_RESULTS`** NULL-fill (피더 실측은 COALESCE로 불변)
   2. **`JUDGMENT_LOTS`** — qd/residual ← `LOT_RESULTS`, capacity/probability ← voting, `spc` ← SPC
   3. **`ANALYSIS_LOTS`** — judgment 2차 추론 (`combineLotScore` + SPC → risk/`scored_at`/`spc_chart_json`)
-- **폴러:** 기동 즉시 SPC sync + analysis 틱 + `SCORE_ON_BOOT` **채점만**. 이후 SPC ~60s · analysis ~10m. `running` 락 중 다른 틱은 스킵(이슈 시드 포함).
-- **피더:** `frontend/plant_feeder_live.py` → `SPC_LOT` / `SPC_LOT_results`. 앱 `LOTS`는 피더가 직접 쓰지 않음. `spcLotSync`가 미러 후 채점.
+- **폴러:** AWS는 SPC 미러(~60s) + 이슈/메일. `LOT_SCORE_ON_AWS=0`이면 `/predict-voting` 안 함. 채점·사유·권고조치는 이 PC `npm run score-pc`. 가이드: [`aws-pc-score-worker.md`](../guides/aws-pc-score-worker.md).
+- **피더:** `frontend/plant_feeder_live.py` → `SPC_LOT` / `SPC_LOT_results`. 앱 `LOTS`는 피더가 직접 쓰지 않음. `spcLotSync`가 미러. 채점은 PC 워커.
 
 ```mermaid
 flowchart TD
   feeder["plant_feeder_live.py"] --> spcLot["SPC_LOT / SPC_LOT_results"]
-  spcLot --> sync["spcLotSync ~60s"]
+  spcLot --> sync["AWS spcLotSync 미러만"]
   sync --> lots["LOTS"]
-  lots --> score["scoreAllLots /predict-voting"]
+  lots --> score["이 PC score-pc /predict-voting"]
   score --> lr["LOT_RESULTS"]
   lr --> j["JUDGMENT_LOTS"]
-  j --> a["ANALYSIS_LOTS"]
-  a --> bootSkip["부트: skipIssues"]
-  a --> poller["폴러: vLLM risk_reason / 권고조치"]
-  poller --> issues["ISSUES if risk_level=심각"]
+  j --> a["ANALYSIS_LOTS + risk_reason / 권고조치"]
+  a --> issues["AWS: ISSUES if risk_level=심각 + n8n"]
 ```
 
 ---
@@ -90,6 +88,7 @@ erDiagram
     tinyint theme_mode
     int refresh_interval
     char email_check
+    char manage
   }
   USER_HEADER_NOTIF_STATE {
     varchar user_id PK
@@ -228,8 +227,8 @@ DDL: [`DB/schema.sql`](../../DB/schema.sql)
 | GET | `/api/lots/daily-kpi` | 선택 | 당일 probability KPI |
 | GET | `/api/lots/q-cost` | 선택 | 품질 비용 KPI |
 | GET | `/api/lots/:lotId` | 선택 | LOT 상세 (공정+채점 JOIN) |
-| POST | `/api/lots/import` | JWT | CSV→`LOTS` + 채점 + 이슈 시드 |
-| POST | `/api/lots/score` | JWT | 미채점 LOT 채점 |
+| POST | `/api/lots/import` | JWT | CSV→`LOTS`. `?score=1`은 `LOT_SCORE_ON_AWS=0`이면 채점 안 함(이슈만) |
+| POST | `/api/lots/score` | JWT | 미채점 LOT 채점. AWS `LOT_SCORE_ON_AWS=0`이면 안내 JSON만 |
 | GET | `/api/issues` | 선택 | 미완료; `riskLevel`은 ANALYSIS_LOTS |
 | GET | `/api/issues/:issueId` | 선택 | 상세+`analysis` |
 | PUT | `/api/issues/:issueId` | JWT | `actionContent`, `completed: true` |
@@ -316,16 +315,17 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 |------|-----|-----|
 | 미완료 목록 | `GET /api/issues` | `ISSUES` + `ANALYSIS_LOTS` (위험·SPC 필터) |
 | 행 선택 상세 | `GET /api/issues/:issueId` | 조치·담당자(`USERS.name`)·`analysis` |
+| 담당자 목록 | `GET /api/issues/managers` | `USER_SETTINGS.manage='O'` 의 `USERS.name` |
 | 분석 시각화 | 상세의 `analysis` | `ANALYSIS_LOTS` |
-| 저장(완료) | `PUT /api/issues/:id` `{ completed: true, actionContent }` | `completed_at`, `action_content` → 목록에서 사라지고 Knowledge 과거 자료 |
+| 저장(완료) | `PUT /api/issues/:id` `{ completed: true, actionContent, assigneeUserId }` | `completed_at`, `action_content`, `assignee_user_id` → 목록에서 사라지고 Knowledge 과거 자료 |
 
 ### Knowledge `/knowledge`
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + LOT JOIN |
+| 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + LOT JOIN. **`USER_SETTINGS.manage='O'`** |
 | 인수인계(완료) | `GET /api/knowledge/handover-history?status=completed` | `HANDOVER_HISTORY` |
-| 맞춤 분석 | `POST /api/knowledge/analyze` | `AI_LIBRARY_ANALYSIS` |
+| 선택 항목 분석 | `POST /api/knowledge/analyze` | `AI_LIBRARY_ANALYSIS`. **manage='O'** |
 | 문서 미리보기 | `GET /api/docs/file` | 파일시스템 + `TEXT_MATCH` (OCR 경로) |
 | 진단 챗(일부) | `POST /api/chat` | `USER_CHAT_*` |
 
@@ -333,9 +333,9 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES` |
+| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES`. 비공개 본문은 작성자 또는 `USER_SETTINGS.manage='O'` |
 | 첨부 | 목록 첨부 URL | `INQUIRY_ATTACHMENTS` |
-| 답변 | `POST\|PATCH /api/inquiries/:id/answer` | `INQUIRIES.answer` |
+| 답변 | `POST\|PATCH /api/inquiries/:id/answer` | `INQUIRIES.answer`. 답변은 manage='O' |
 
 ### 설정 `/setting`
 
@@ -343,7 +343,7 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 환경 저장 | `GET\|PUT /api/auth/settings` · `POST .../reset` | `USER_SETTINGS` |
+| 환경 저장 | `GET\|PUT /api/auth/settings` · `POST .../reset` | `USER_SETTINGS` (`manage`는 GET만, PUT으로 바꾸지 않음) |
 | 제어 한계치 | `GET\|PUT /api/settings/control-bounds` | JSON 파일 (테이블 아님) |
 
 ### 관리 `/management`
@@ -368,7 +368,8 @@ Grafana SPC iframe. MariaDB LOT 테이블을 직접 읽지 않음 (`NEXT_PUBLIC_
 
 - 목록 = `GET /api/issues` 미완료.
 - 행 선택 = `GET /api/issues/:issueId` → `assigneeName`, `actionContent`, `analysis`.
-- 저장 = 완료만. JWT PUT 후 Knowledge 「과거 자료」.
+- 담당자 select = `GET /api/issues/managers` (`USER_SETTINGS.manage='O'`).
+- 저장 = 완료만. JWT PUT `assigneeUserId`(관리자 user_id 또는 빈 값) 후 Knowledge 「과거 자료」.
 - 처리 상태(`status`) 필터 없음.
 
 시드: [`DB/issues_seed.sql`](../../DB/issues_seed.sql) — mock LOT만, issues INSERT 없음.

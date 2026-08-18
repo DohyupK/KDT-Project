@@ -5,6 +5,7 @@ import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.j
 import { fillRiskReasonsForLots } from '../services/lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.service.js'
 import { AppError } from '../middleware/errorHandler.js'
+import * as userSettingsService from '../services/userSettings.service.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -43,6 +44,19 @@ export const importLots = asyncHandler(async (req, res) => {
   let reasonsUpdated = 0
   let actionsUpdated = 0
   let issuesCreated = 0
+  if (doScore && !lotScoreOnAws()) {
+    issuesCreated = await lotService.ensureIssuesForRiskLots()
+    res.status(200).json({
+      message: 'LOT 적재 완료. 채점은 이 PC에서 npm run score-pc (LOT_SCORE_ON_AWS=0)',
+      imported: result.imported,
+      csvPath: result.path,
+      scoring: null,
+      reasonsUpdated: 0,
+      actionsUpdated: 0,
+      issuesCreated,
+    })
+    return
+  }
   if (doScore) {
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined
     scoring = await lotService.scoreAllLots({
@@ -81,6 +95,16 @@ export const importLots = asyncHandler(async (req, res) => {
 })
 
 export const scoreLots = asyncHandler(async (req, res) => {
+  if (!lotScoreOnAws()) {
+    res.status(200).json({
+      message: '채점은 이 PC에서 npm run score-pc (LOT_SCORE_ON_AWS=0)',
+      scoring: null,
+      reasonsUpdated: 0,
+      actionsUpdated: 0,
+      issuesCreated: 0,
+    })
+    return
+  }
   const limit = req.query.limit != null ? Number(req.query.limit) : undefined
   const offset = req.query.offset != null ? Number(req.query.offset) : 0
   const concurrency = req.query.concurrency != null ? Number(req.query.concurrency) : 4
@@ -117,6 +141,11 @@ export const scoreLots = asyncHandler(async (req, res) => {
   })
 })
 
+export const listIssueManagers = asyncHandler(async (_req, res) => {
+  const managers = await userSettingsService.listManageUsers()
+  res.status(200).json({ managers })
+})
+
 export const listIssues = asyncHandler(async (req, res) => {
   const result = await issueService.listOpenIssues({
     search: req.query.search != null ? String(req.query.search) : undefined,
@@ -140,6 +169,7 @@ export const updateIssue = asyncHandler(async (req, res) => {
     {
       actionContent: req.body?.actionContent,
       completed: req.body?.completed,
+      assigneeUserId: req.body?.assigneeUserId,
     },
     { userId: req.auth.userId, name: req.auth.name || req.auth.userId },
   )

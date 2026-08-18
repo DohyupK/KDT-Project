@@ -43,7 +43,7 @@
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 | [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 채점/이슈 지연 · spc_chart_json · 페이지×API 명세 |
-| [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 요약 |
+| [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 
@@ -53,6 +53,7 @@
 | [`aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
 | [`aws-lightsail-gpu-tunnel.md`](./guides/aws-lightsail-gpu-tunnel.md) | 앱은 Lightsail CPU, 보안 검색+vLLM은 이 PC (DB 큐) |
 | [`aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md) | 보안 챗 운영: AWS `npm run dev` / 이 PC `npm run security-pc` |
+| [`aws-pc-score-worker.md`](./guides/aws-pc-score-worker.md) | LOT 채점: AWS 미러·이슈 / 이 PC `npm run score-pc` |
 
 ### 참조 (`references/`) — 구현된 동작 명세
 

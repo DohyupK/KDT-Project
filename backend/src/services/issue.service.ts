@@ -1,6 +1,7 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
+import { isManageUser } from './userSettings.service.js'
 
 /** Open issues: not completed. risk_level comes from ANALYSIS_LOTS. */
 const OPEN_ISSUES = `i.completed_at IS NULL`
@@ -245,8 +246,9 @@ export async function updateIssue(
   body: {
     actionContent?: string | null
     completed?: boolean
+    assigneeUserId?: string | null
   },
-  actor: { userId: string; name: string },
+  _actor: { userId: string; name: string },
 ): Promise<IssueDetail> {
   if (
     body.actionContent !== undefined &&
@@ -264,13 +266,26 @@ export async function updateIssue(
   const actionContent =
     body.actionContent !== undefined ? body.actionContent : current.actionContent
 
+  let assigneeUserId = current.assigneeUserId
+  if (body.assigneeUserId !== undefined) {
+    const raw = body.assigneeUserId == null ? '' : String(body.assigneeUserId).trim()
+    if (!raw) {
+      assigneeUserId = null
+    } else {
+      if (!(await isManageUser(raw))) {
+        throw new AppError(400, '담당자는 관리자만 지정할 수 있습니다.')
+      }
+      assigneeUserId = raw
+    }
+  }
+
   // 완료 → 과거 자료 (completed_at). HANDOVER_HISTORY는 독립 — 여기서 갱신하지 않음.
   await query(
     `UPDATE ISSUES SET
        action_content = ?, assignee_user_id = ?,
        completed_at = CASE WHEN ? = 1 THEN COALESCE(completed_at, NOW()) ELSE NULL END
      WHERE issue_id = ?`,
-    [actionContent, actor.userId, completed ? 1 : 0, issueId],
+    [actionContent, assigneeUserId, completed ? 1 : 0, issueId],
   )
 
   return getIssueById(issueId)

@@ -73,6 +73,8 @@ export interface UserSettingsDto {
   n8nAlert: boolean
   /** USER_SETTINGS.email_check — O=수신, X=거부. n8nAlert is the boolean view. */
   emailCheck: 'O' | 'X'
+  /** USER_SETTINGS.manage — O=사내 관리자, X=일반. Setting UI에서 바꾸지 않음. */
+  manage: 'O' | 'X'
   updatedAt: string
 }
 
