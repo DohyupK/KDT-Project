@@ -375,7 +375,7 @@ def _predict_blend_or_symbolic(
 
     quality_defect = 1 if (blend >= blend_thr or p_sym >= sym_thr) else 0
     store = cfg_prob.get("store_probability") or {}
-    if str(store.get("mode") or "hard_ox") == "hard_ox":
+    if str(store.get("mode") or "blend") == "hard_ox":
         pos = float(store.get("pos", 0.9))
         neg = float(store.get("neg", 0.1))
         probability = pos if quality_defect else neg

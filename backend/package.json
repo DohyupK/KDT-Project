@@ -11,6 +11,7 @@
     "score:lots": "tsx scripts/score-lots.ts",
     "refresh:spc-risk": "tsx scripts/refresh-spc-risk.ts",
     "score:lots-to-temp": "tsx scripts/score-lots-to-temp.ts",
+    "score:probability-from": "tsx scripts/rescore-probability-from.ts",
     "rescore:analysis-lots": "tsx scripts/rescore-analysis-lots.ts",
     "fill:risk-reasons": "tsx scripts/fill-risk-reasons.ts",
     "fill:recommended-actions": "tsx scripts/fill-recommended-actions.ts",

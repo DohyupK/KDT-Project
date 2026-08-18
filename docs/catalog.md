@@ -1,6 +1,6 @@
 # 프로젝트 문서 목록 (사용자 작성)
 
-최종 갱신: 2026-08-15  
+최종 갱신: 2026-08-18  
 범위: **이 저장소에서 직접 쓴 마크다운**. `node_modules` README·CHANGELOG(약 1400건)는 npm 패키지 설명이며 프로젝트 문서가 아니다. Git에도 없다.
 
 `Documents/` 원본은 **삭제하지 않음** (RAG·등급 자료). 아래는 위치·한 줄 요지만.
@@ -43,6 +43,7 @@
 | [`2026-08-13.md`](./work-log/2026-08-13.md) | 이슈 메일 n8n · 포트 기동 주체 |
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 | [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 채점/이슈 지연 · spc_chart_json · 페이지×API 명세 |
+| [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 요약 |
 
 ### 가이드 (`guides/`) — 구현·운영 절차
 
@@ -60,6 +61,9 @@
 | [`agent-rules-and-skills.md`](./references/agent-rules-and-skills.md) | 룰·스킬 한곳 정리 |
 | [`issue-report.md`](./references/issue-report.md) | 이슈 보고서 메일 (n8n·Gmail) |
 | [`issue-lot-api.md`](./references/issue-lot-api.md) | 이슈/LOT API · 채점 3단 · Linux 대문자 · 페이지×API×화면 |
+| [`bug-fix-report.md`](./references/bug-fix-report.md) | 버그·충돌 수정 증거 (2026-07-21 ~ 08-15) |
+| [`test-report.md`](./references/test-report.md) | 단위·스모크·시나리오·실측 증거 (같은 기간) |
+| [`dev-timeline.md`](./references/dev-timeline.md) | 일지 날짜별 개발 요약 (2026-07-15 ~ 08-18) |
 | [`general-chatbot-page-context.md`](./references/general-chatbot-page-context.md) | 일반 챗 · 화면 컨텍스트 |
 | [`security-chatbot-guide.md`](./references/security-chatbot-guide.md) | 챗봇 이용·라우팅 |
 | [`secure-rag.md`](./references/secure-rag.md) | 보안 RAG ingest·가드레일·스모크 |

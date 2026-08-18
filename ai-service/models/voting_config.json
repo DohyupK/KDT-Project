@@ -50,7 +50,7 @@
       "symbolic_threshold": 0.08094146666984328
     },
     "store_probability": {
-      "mode": "hard_ox",
+      "mode": "blend",
       "pos": 0.9,
       "neg": 0.1
     }
