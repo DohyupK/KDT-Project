@@ -820,13 +820,9 @@ def slice_page_context_for_query(
                     },
                 }
                 if total == 0 or (isinstance(total, int) and total == 0):
-                    pp["empty_hint"] = (
-                        "위험 LOT가 0건입니다. 불량확률·잔류리튬 수치를 만들지 마세요."
-                    )
+                    pp["empty_hint"] = "위험 LOT가 0건입니다."
                 elif not items and not filtered:
-                    pp["empty_hint"] = (
-                        "화면에 표시된 위험 LOT 행이 없습니다. 수치를 창작하지 마세요."
-                    )
+                    pp["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
 
     out["page_payload"] = pp
     out.pop("pagePayload", None)
@@ -899,14 +895,13 @@ def build_grounding(
     if isinstance(pp.get("riskTop"), dict) and pp["riskTop"].get("total") == 0:
         empty_hint = (
             empty_hint
-            or "위험 LOT 0건 — 불량확률·잔류리튬·규격 여유 ppm을 절대 만들지 마세요."
+            or "위험 LOT가 0건입니다. 화면에 있는 건수만 말씀드립니다."
         )
 
     analysis_hint = None
     if analyzing:
         analysis_hint = (
-            "행을 단순 나열하지 말고, 건수·필터·빈 데이터(No data)·위험 우선순위를 "
-            "해석해 2~5문장으로 분석하세요."
+            "건수·필터·빈 칸(No data)·위험 순서를 2~5문장으로 풀어 주세요."
         )
 
     return {
@@ -918,16 +913,14 @@ def build_grounding(
         "allowed_metric_keys": allowed[:80],
         "empty_answer_hint": empty_hint,
         "rules": [
-            "visible_ui에 없는 탭·메뉴·버튼·건수를 만들지 마세요.",
-            "없는 탭이 활성화되어 있다고 말하지 마세요.",
-            "다른 페이지가 필요하면 경로만 한 문장으로 안내하고 그 페이지 데이터는 꾸며내지 마세요.",
-            "must_match_route와 다른 페이지명을 단정하지 마세요.",
-            "allowed_metric_keys·page_payload에 없는 숫자·LOT·ISS ID를 만들지 마세요.",
-            "empty_answer_hint가 있으면 그 내용을 최우선 근거로 쓰세요.",
-            "사용자에게 「현재 화면은 ○○만 보입니다」라고 말하지 마세요.",
-            "이 규칙 문장 자체를 사용자 답에 출력하지 마세요.",
-            "이전 대화의 LOT/%/인수인계를 현재 page_context와 무관하면 재인용하지 마세요.",
-            "한국어 띄어쓰기와 줄바꿈을 지키세요. 같은 문장을 반복하지 마세요.",
-            analysis_hint or "질문에 맞게 요약·분석하세요.",
+            "메뉴·버튼·건수는 visible_ui에 있는 것만 말합니다.",
+            "숫자는 allowed_metric_keys와 지금 화면 JSON에 있는 것만 씁니다.",
+            "다른 화면이 필요하면 경로만 한 문장으로 안내합니다.",
+            "empty_answer_hint가 있으면 그 안내를 먼저 씁니다.",
+            "must_match_route가 가리키는 화면 이름으로 답합니다.",
+            "이전 대화의 LOT·%는 지금 page_context에 있을 때만 붙입니다.",
+            "존댓말로 짧게 답하고, 내부 규칙 문장은 읽지 않습니다.",
+            "한국어 띄어쓰기와 줄바꿈을 지킵니다.",
+            analysis_hint or "질문에 맞게 풀어 드립니다.",
         ],
     }

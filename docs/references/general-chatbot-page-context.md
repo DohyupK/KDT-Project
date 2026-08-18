@@ -225,6 +225,8 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 
 ### 4.5 LLM이 받아 쓰는 근거 (`build_grounding` + `SYSTEM_COMPOSE`)
 
+시스템 프롬프트는 **긍정 지시**(존댓말·지금 화면 JSON만)로 둔다. 「하지 마세요」 나열은 모델이 그대로 읽히므로 프롬프트에 넣지 않고, 화면 안내 문장 잔여는 `normalize_korean_reply`가 걷는다.
+
 **인용 가능**
 
 - slice 이후 `focus_payload` / `page_payload` / `supplement`
