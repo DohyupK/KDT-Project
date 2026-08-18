@@ -12,13 +12,21 @@ import {
   isChartableSpcStatus,
   parseSpcChartSnapshot,
 } from './lot.service.js'
-import { getRecommendedActionForLot } from './lotRecommendedAction.service.js'
-import { normalizeSpcStatus, isProcessComplete, SPC_PARAM_KEYS } from './spcEngine.js'
+import { getRecommendedActionForLot, generateRecommendedActionForLot } from './lotRecommendedAction.service.js'
+import {
+  normalizeSpcStatus,
+  isProcessComplete,
+  listMissingProcessKeys,
+  SPC_PARAM_KEYS,
+  type SpcParamKey,
+} from './spcEngine.js'
 
 const OPTIMAL_SINTERING_TEMP = 800
 
-function isLotProcessComplete(row: Record<string, unknown>): boolean {
-  const bag: Partial<Record<(typeof SPC_PARAM_KEYS)[number], number | null>> = {}
+function lotProcessValueBag(
+  row: Record<string, unknown>,
+): Partial<Record<SpcParamKey, number | null>> {
+  const bag: Partial<Record<SpcParamKey, number | null>> = {}
   for (const k of SPC_PARAM_KEYS) {
     const v = row[k]
     bag[k] =
@@ -28,7 +36,11 @@ function isLotProcessComplete(row: Record<string, unknown>): boolean {
           ? v
           : Number(v)
   }
-  return isProcessComplete(bag)
+  return bag
+}
+
+function isLotProcessComplete(row: Record<string, unknown>): boolean {
+  return isProcessComplete(lotProcessValueBag(row))
 }
 
 /** Production-detail table columns (daily aggregate from LOTS + ANALYSIS_LOTS). */
@@ -63,6 +75,13 @@ const FEATURE_LABELS: Record<string, string> = {
   d50: '입도 d50',
   d90: '입도 d90',
   tank_pressure: '탱크 압력',
+}
+
+function missingSpcParamsForLot(row: Record<string, unknown>): Array<{ key: string; label: string }> {
+  return listMissingProcessKeys(lotProcessValueBag(row)).map((key) => ({
+    key,
+    label: FEATURE_LABELS[key] || key,
+  }))
 }
 
 type LotAggRow = {
@@ -391,6 +410,12 @@ export async function getLotRiskDetail(lotId: string) {
   let recommendedAction = null
   try {
     recommendedAction = await getRecommendedActionForLot(lotId)
+    const empty =
+      !recommendedAction?.summary?.trim() && !(recommendedAction?.steps?.length)
+    if (empty) {
+      await generateRecommendedActionForLot(lotId, { quiet: true })
+      recommendedAction = await getRecommendedActionForLot(lotId)
+    }
   } catch {
     recommendedAction = null
   }
@@ -403,6 +428,7 @@ export async function getLotRiskDetail(lotId: string) {
     residualMargin: residual != null ? residualMargin(residual, usl) : null,
     residualUsl: usl,
     spcStatus: resolvedSpc,
+    missingSpcParams: processComplete ? [] : missingSpcParamsForLot(r),
     riskLevel: r.risk_level != null ? normalizeRiskLevel(r.risk_level) : null,
     riskReason: r.risk_reason,
     actionContent: r.action_content,

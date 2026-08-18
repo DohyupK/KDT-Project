@@ -3,6 +3,7 @@ import { query } from '../db/connection.js'
 import { proxyExplainLot, proxyLotRecommendedAction } from './aiProxy.js'
 import { parseSpcChartSnapshot } from './lot.service.js'
 import type { ProcessFeatures } from './lotScore.js'
+import { getStandardDefaults } from './standard.js'
 
 export type RecommendedActionRow = {
   lot_id: string
@@ -87,12 +88,13 @@ function contentHash(input: {
     residualLi: input.residualLi,
     spcStatus: input.spcStatus,
     drivers: input.drivers,
-    summaryFormat: 4,
+    summaryFormat: 5,
   })
   return createHash('sha1').update(payload).digest('hex')
 }
 
 type DriverCause = {
+  feature?: string
   labelKo?: string
   directionKo?: string
   valueText?: string
@@ -101,8 +103,55 @@ type DriverCause = {
   sharePct?: number | null
 }
 
+const FEATURE_QMS: Record<string, Array<{ docId: string; title: string }>> = {
+  humidity: [
+    { docId: 'QMS-GUD-001', title: '습도 트러블슈팅' },
+    { docId: 'QMS-ACT-003', title: '드라이룸 점검' },
+  ],
+  d50: [{ docId: 'QMS-GUD-005', title: '입도 트러블슈팅' }],
+  d90: [{ docId: 'QMS-GUD-005', title: '입도 트러블슈팅' }],
+  sintering_temp: [
+    { docId: 'QMS-GUD-002', title: '소성온도 트러블슈팅' },
+    { docId: 'QMS-ACT-001', title: '소성로 점검' },
+  ],
+  temp_dev_from_800: [
+    { docId: 'QMS-GUD-002', title: '소성온도 트러블슈팅' },
+    { docId: 'QMS-ACT-001', title: '소성로 점검' },
+  ],
+  lithium_input: [
+    { docId: 'QMS-GUD-004', title: '잔류리튬 트러블슈팅' },
+    { docId: 'QMS-ACT-002', title: '배합비 재검토' },
+  ],
+  metal_impurity: [{ docId: 'QMS-GUD-003', title: '금속이물 트러블슈팅' }],
+  process_time: [{ docId: 'QMS-SOP-002', title: '공정시간 SOP' }],
+}
+
+const DOC_PATH: Record<string, string> = {
+  'QMS-GUD-001': 'Confidential/qms-source/QMS-GUD-001_습도트러블슈팅.docx',
+  'QMS-GUD-002': 'Confidential/qms-source/QMS-GUD-002_소성온도트러블슈팅.docx',
+  'QMS-GUD-003': 'Confidential/qms-source/QMS-GUD-003_금속이물트러블슈팅.docx',
+  'QMS-GUD-004': 'Confidential/qms-source/QMS-GUD-004_잔류리튬트러블슈팅.docx',
+  'QMS-GUD-005': 'Confidential/qms-source/QMS-GUD-005_입도트러블슈팅.docx',
+  'QMS-ACT-001': 'Confidential/qms-source/QMS-ACT-001_소성로점검절차.docx',
+  'QMS-ACT-002': 'Confidential/qms-source/QMS-ACT-002_배합비재검토절차.docx',
+  'QMS-ACT-003': 'Confidential/qms-source/QMS-ACT-003_드라이룸점검절차.docx',
+  'QMS-ACT-005': 'Confidential/qms-source/QMS-ACT-005_전수검사운영절차.docx',
+  'QMS-MAN-001': 'Confidential/qms-source/QMS-MAN-001_SPC운영매뉴얼.docx',
+  'QMS-RULE-003': 'Confidential/qms-source/QMS-RULE-003_검사수준운영규정.docx',
+  'QMS-STD-001': 'Confidential/qms-source/QMS-STD-001_공정흐름및검사시점기준.docx',
+  'QMS-SOP-002': 'Confidential/qms-source/QMS-SOP-002_공정시간관리SOP.docx',
+}
+
+const STABLE_STEPS = [
+  { order: 1, text: '표준 샘플링(검사 수준 3) 유지', doc_id: 'QMS-RULE-003' },
+  { order: 2, text: '공정·SPC 일상 모니터링 지속', doc_id: 'QMS-STD-001' },
+]
+
 const STABLE_SUMMARY =
   '위험 신호가 기준 범위 내입니다. STD-001에 따라 표준 샘플링·일상 모니터링을 유지합니다.'
+
+/** Same as voting_config.defect_rule.blend_threshold — below this, not judged defect. */
+export const DEFECT_ACTION_PROB_THRESHOLD = 0.55
 
 function roundDecimalText(text: string): string {
   return text.replace(/(\d+\.\d+)/g, (raw) => {
@@ -163,6 +212,10 @@ function topCausesForSummary(causes: DriverCause[]): DriverCause[] {
   return (meaningful.length > 0 ? meaningful : sorted.slice(0, 1)).slice(0, 3)
 }
 
+function isDefectJudged(probability: number | null | undefined): boolean {
+  return probability != null && Number.isFinite(probability) && probability >= DEFECT_ACTION_PROB_THRESHOLD
+}
+
 /** Rule-based summary: defect paragraph + residual paragraph, 2-decimal values. */
 export function buildRuleSummary(
   drivers: Record<string, unknown>,
@@ -170,13 +223,17 @@ export function buildRuleSummary(
     probability: number | null
     residualLi: number | null
     riskLevel: string | null
+    spcStatus?: string | null
   },
 ): string {
   if (opts.riskLevel === '안정') return STABLE_SUMMARY
 
-  const defect = topCausesForSummary(
-    (drivers.defect_causes as DriverCause[] | undefined) || [],
-  )
+  const includeDefect = isDefectJudged(opts.probability)
+  const defect = includeDefect
+    ? topCausesForSummary(
+        (drivers.defect_causes as DriverCause[] | undefined) || [],
+      )
+    : []
   const residual = topCausesForSummary(
     (drivers.residual_causes as DriverCause[] | undefined) || [],
   )
@@ -186,11 +243,14 @@ export function buildRuleSummary(
   const resTxt =
     opts.residualLi != null ? `${opts.residualLi.toFixed(2)} ppm` : '상향'
 
-  const phrase = groupedCausePhrase(defect)
-  const para1 =
-    phrase.length > 0
-      ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다.`
-      : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct})`
+  let para1 = ''
+  if (includeDefect) {
+    const phrase = groupedCausePhrase(defect)
+    para1 =
+      phrase.length > 0
+        ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다.`
+        : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct})`
+  }
 
   const resPhrase = groupedCausePhrase(residual)
   const para2 =
@@ -198,12 +258,175 @@ export function buildRuleSummary(
       ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다.`
       : ''
 
-  return para2 ? `${para1}\n\n${para2}` : para1
+  if (para1 && para2) return `${para1}\n\n${para2}`
+  if (para1) return para1
+  if (para2) return para2
+
+  const spc = (opts.spcStatus || '').trim()
+  if (spc && spc !== '안정' && spc !== '-') {
+    return `SPC ${spc}가 확인되어 운영 기준을 재확인합니다.`
+  }
+  const residualCaution = getStandardDefaults().residual_caution
+  if (opts.residualLi != null && opts.residualLi >= residualCaution) {
+    return `잔류리튬 예측 ${resTxt}이 주의 기준(${residualCaution} ppm)을 초과했습니다.`
+  }
+  return `위험등급 ${opts.riskLevel || '주의'}입니다. 공정 모니터링을 유지합니다.`
+}
+
+export function buildRuleSteps(
+  drivers: Record<string, unknown>,
+  opts: {
+    probability: number | null
+    spcStatus?: string | null
+    riskLevel?: string | null
+    residualLi?: number | null
+  },
+): Array<{ order: number; text: string; doc_id: string }> {
+  if (opts.riskLevel === '안정') return STABLE_STEPS.map((s) => ({ ...s }))
+
+  const seen = new Set<string>()
+  const steps: Array<{ order: number; text: string; doc_id: string }> = []
+  let order = 1
+  const buckets: DriverCause[][] = []
+  if (isDefectJudged(opts.probability)) {
+    buckets.push((drivers.defect_causes as DriverCause[] | undefined) || [])
+  }
+  buckets.push((drivers.residual_causes as DriverCause[] | undefined) || [])
+  for (const bucket of buckets) {
+    for (const c of bucket) {
+      const feat = String(c.feature || '')
+      for (const doc of FEATURE_QMS[feat] || []) {
+        if (seen.has(doc.docId)) continue
+        seen.add(doc.docId)
+        steps.push({
+          order,
+          text: `${doc.title} 절차에 따라 점검·개선`,
+          doc_id: doc.docId,
+        })
+        order += 1
+      }
+    }
+  }
+  const spc = (opts.spcStatus || '').trim()
+  if (spc && spc !== '안정' && spc !== '-') {
+    for (const [docId, title] of [
+      ['QMS-MAN-001', 'SPC 운영'],
+      ['QMS-ACT-005', '전수검사 운영'],
+    ] as const) {
+      if (seen.has(docId)) continue
+      seen.add(docId)
+      steps.push({ order, text: `${title} 기준 재확인`, doc_id: docId })
+      order += 1
+    }
+  }
+  const residualCaution = getStandardDefaults().residual_caution
+  if (
+    steps.length === 0 &&
+    opts.residualLi != null &&
+    opts.residualLi >= residualCaution
+  ) {
+    for (const doc of FEATURE_QMS.lithium_input || []) {
+      if (seen.has(doc.docId)) continue
+      seen.add(doc.docId)
+      steps.push({
+        order,
+        text: `${doc.title} 절차에 따라 점검·개선`,
+        doc_id: doc.docId,
+      })
+      order += 1
+    }
+  }
+  return steps.slice(0, 6)
+}
+
+function sourcesFromSteps(
+  steps: Array<{ doc_id: string }>,
+): Array<{ doc_id: string; title: string; path: string }> {
+  const out: Array<{ doc_id: string; title: string; path: string }> = []
+  const seen = new Set<string>()
+  for (const s of steps) {
+    const did = s.doc_id
+    if (!did || seen.has(did)) continue
+    seen.add(did)
+    let title = did
+    for (const docs of Object.values(FEATURE_QMS)) {
+      const hit = docs.find((d) => d.docId === did)
+      if (hit) {
+        title = hit.title
+        break
+      }
+    }
+    out.push({
+      doc_id: did,
+      title,
+      path: DOC_PATH[did] || `Confidential/qms-source/${did}_${title}.docx`,
+    })
+  }
+  return out
+}
+
+/** Rewrite stored recommended-action rows from existing drivers (no SHAP/AI). */
+export async function rewriteStoredRecommendedActions(): Promise<number> {
+  const rows = await query<
+    {
+      lot_id: string
+      drivers_json: Record<string, unknown> | null
+      probability: number | null
+      residual_li: number | null
+      risk_level: string | null
+      spc_status: string | null
+    }[]
+  >(
+    `SELECT r.lot_id, r.drivers_json,
+            COALESCE(j.probability, a.probability) AS probability,
+            a.risk_level, a.spc_status, j.residual_li
+     FROM LOT_RECOMMENDED_ACTIONS r
+     LEFT JOIN ANALYSIS_LOTS a ON a.lot_id = r.lot_id
+     LEFT JOIN JUDGMENT_LOTS j ON j.lot_id = r.lot_id
+     WHERE r.lot_id <> 'LOT-SYS-HANDOVER'`,
+  )
+  let updated = 0
+  for (const row of rows) {
+    const drivers =
+      row.drivers_json && typeof row.drivers_json === 'object' ? row.drivers_json : {}
+    const opts = {
+      probability: row.probability,
+      residualLi: row.residual_li,
+      riskLevel: row.risk_level,
+      spcStatus: row.spc_status,
+    }
+    const summary = buildRuleSummary(drivers, opts)
+    const steps = buildRuleSteps(drivers, opts)
+    const sources = sourcesFromSteps(steps)
+    const hash = contentHash({
+      lotId: row.lot_id,
+      riskLevel: row.risk_level,
+      probability: row.probability,
+      residualLi: row.residual_li,
+      spcStatus: row.spc_status,
+      drivers,
+    })
+    await query(
+      `UPDATE LOT_RECOMMENDED_ACTIONS
+       SET summary = ?, steps_json = ?, sources_json = ?, content_hash = ?, generated_at = NOW()
+       WHERE lot_id = ?`,
+      [
+        summary.slice(0, 1024),
+        JSON.stringify(steps),
+        JSON.stringify(sources),
+        hash,
+        row.lot_id,
+      ],
+    )
+    updated++
+  }
+  return updated
 }
 
 export async function loadLotContext(lotId: string): Promise<LotContext | null> {
   const rows = await query<LotContext[]>(
-    `SELECT j.lot_id, a.probability, a.spc_status, a.risk_level, a.spc_chart_json,
+    `SELECT j.lot_id, COALESCE(j.probability, a.probability) AS probability,
+            a.spc_status, a.risk_level, a.spc_chart_json,
             j.residual_li,
             l.d50, l.d90, l.metal_impurity, l.lithium_input, l.additive_ratio,
             l.process_time, l.sintering_temp, l.humidity, l.tank_pressure
@@ -330,13 +553,14 @@ export async function generateRecommendedActionForLot(
   })
 
   if (!opts.force) {
-    const existing = await query<{ content_hash: string | null; status: string }[]>(
-      `SELECT content_hash, status FROM LOT_RECOMMENDED_ACTIONS WHERE lot_id = ? LIMIT 1`,
+    const existing = await query<{ content_hash: string | null; status: string; summary: string | null }[]>(
+      `SELECT content_hash, status, summary FROM LOT_RECOMMENDED_ACTIONS WHERE lot_id = ? LIMIT 1`,
       [lotId],
     )
     if (
       existing[0]?.content_hash === hash &&
-      existing[0]?.status === 'ready'
+      existing[0]?.status === 'ready' &&
+      (existing[0]?.summary || '').trim()
     ) {
       return { ok: true, skipped: true }
     }
@@ -353,33 +577,51 @@ export async function generateRecommendedActionForLot(
     })
 
     const finalDrivers = (composed.drivers_json || driversJson) as Record<string, unknown>
+    const steps = buildRuleSteps(finalDrivers, {
+      probability: ctx.probability,
+      spcStatus: ctx.spc_status,
+      riskLevel: ctx.risk_level,
+      residualLi: ctx.residual_li,
+    })
 
     await upsertRecommendedAction(lotId, {
       summary: buildRuleSummary(finalDrivers, {
         probability: ctx.probability,
         residualLi: ctx.residual_li,
         riskLevel: ctx.risk_level,
+        spcStatus: ctx.spc_status,
       }),
-      steps: composed.steps || [],
-      sources: composed.sources || [],
+      steps,
+      sources: sourcesFromSteps(steps),
       driversJson: finalDrivers,
-      status: composed.status || 'ready',
+      status: 'ready',
       errorMessage: composed.error,
       contentHash: hash,
     })
     return { ok: true }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    const steps = buildRuleSteps(driversJson, {
+      probability: ctx.probability,
+      spcStatus: ctx.spc_status,
+      riskLevel: ctx.risk_level,
+      residualLi: ctx.residual_li,
+    })
     await upsertRecommendedAction(lotId, {
-      summary: '',
-      steps: [],
-      sources: [],
+      summary: buildRuleSummary(driversJson, {
+        probability: ctx.probability,
+        residualLi: ctx.residual_li,
+        riskLevel: ctx.risk_level,
+        spcStatus: ctx.spc_status,
+      }),
+      steps,
+      sources: sourcesFromSteps(steps),
       driversJson,
-      status: 'error',
+      status: 'ready',
       errorMessage: msg.slice(0, 255),
       contentHash: hash,
     })
-    return { ok: false, error: msg }
+    return { ok: true }
   }
 }
 
@@ -499,15 +741,22 @@ export async function generateFromFeatures(
   })
 
   const finalDrivers = (composed.drivers_json || driversJson) as Record<string, unknown>
+  const steps = buildRuleSteps(finalDrivers, {
+    probability: scored.probability,
+    spcStatus: scored.spc_status,
+    riskLevel: scored.risk_level,
+    residualLi,
+  })
 
   await upsertRecommendedAction(lotId, {
     summary: buildRuleSummary(finalDrivers, {
       probability: scored.probability,
       residualLi,
       riskLevel: scored.risk_level,
+      spcStatus: scored.spc_status,
     }),
-    steps: composed.steps || [],
-    sources: composed.sources || [],
+    steps,
+    sources: sourcesFromSteps(steps),
     driversJson: finalDrivers,
     status: composed.status || 'ready',
     errorMessage: composed.error,
