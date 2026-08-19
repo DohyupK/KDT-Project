@@ -156,4 +156,7 @@ export const issueApi = {
     apiClient.get<{ item: PastIssueDetail }>(
       `/knowledge/past-issues/${encodeURIComponent(issueId)}`,
     ),
+
+  getLotById: (lotId: string) =>
+    apiClient.get<{ lot: PastIssueLot }>(`/lots/${encodeURIComponent(lotId)}`),
 }

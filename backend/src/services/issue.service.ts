@@ -344,12 +344,58 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   return { items, total: items.length }
 }
 
-/** 과거 자료 상세: LOT 공정 + ANALYSIS_LOTS 스냅샷 + ISSUES.analysis_content. */
+/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치 + ANALYSIS_LOTS 스냅샷 + ISSUES.analysis_content. */
+export type PastIssueLot = {
+  lotId: string
+  recordedAt: string
+  riskLevel: RiskLevel
+  riskReason: string | null
+  defectProb: number | null
+  residualLithium: number | null
+  residualMargin: number | null
+  spcStatus: string | null
+  d50: number | null
+  d90: number | null
+  metalImpurity: number | null
+  lithiumInput: number | null
+  additiveRatio: number | null
+  processTime: number | null
+  sinteringTemp: number | null
+  humidity: number | null
+  tankPressure: number | null
+  operatorId: string | null
+  qualityDefect: boolean
+}
+
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
   analysis: IssueAnalysis | null
-  lot: LotDto | null
+  lot: PastIssueLot | null
   analysisContent: string | null
+}
+
+function toPastIssueLot(dto: LotDto): PastIssueLot {
+  return {
+    lotId: dto.lotId,
+    recordedAt: dto.recordedAt,
+    riskLevel: dto.riskLevel,
+    riskReason: dto.riskReason,
+    defectProb: dto.defectProb,
+    residualLithium: dto.residualLithium,
+    residualMargin: dto.residualMargin,
+    spcStatus: dto.spcStatus,
+    d50: dto.d50,
+    d90: dto.d90,
+    metalImpurity: dto.metalImpurity,
+    lithiumInput: dto.lithiumInput,
+    additiveRatio: dto.additiveRatio,
+    processTime: dto.processTime,
+    sinteringTemp: dto.sinteringTemp,
+    humidity: dto.humidity,
+    tankPressure: dto.tankPressure,
+    operatorId: dto.operatorId,
+    qualityDefect: dto.qualityDefect,
+  }
 }
 
 export async function getPastIssueById(issueId: string): Promise<PastIssueDetail> {
@@ -358,9 +404,9 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
   }
 
-  let lot: LotDto | null = null
+  let lot: PastIssueLot | null = null
   try {
-    lot = await getLotById(issue.lotId)
+    lot = toPastIssueLot(await getLotById(issue.lotId))
   } catch (err) {
     if (!(err instanceof AppError) || err.statusCode !== 404) throw err
   }
