@@ -399,11 +399,20 @@ def chat_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift, is_page_summary_intent
+    from agent.api_llm.grounding import (
+        detect_topic_shift,
+        filter_history_for_entities,
+        is_page_summary_intent,
+        message_lot_issue_ids,
+        route_without_lot_table,
+    )
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    route_now = str((page_ctx or {}).get("route") or "")
     if is_page_summary_intent(body.message):
         history_text = ""
+    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
+        history_text = filter_history_for_entities(window_text, body.message)
     elif topic_shift:
         # Facts come from page_context only; keep a tiny history window for pronouns.
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
@@ -529,11 +538,20 @@ async def chat_stream_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift, is_page_summary_intent
+    from agent.api_llm.grounding import (
+        detect_topic_shift,
+        filter_history_for_entities,
+        is_page_summary_intent,
+        message_lot_issue_ids,
+        route_without_lot_table,
+    )
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
+    route_now = str((page_ctx or {}).get("route") or "")
     if is_page_summary_intent(body.message):
         history_text = ""
+    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
+        history_text = filter_history_for_entities(window_text, body.message)
     elif topic_shift:
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
     else:
