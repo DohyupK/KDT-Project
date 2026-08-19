@@ -1503,14 +1503,14 @@ export default function KnowledgePage() {
         setPastDetail({ ...item, lot: lotSnapshot });
       }
       setLotLoading(false);
-      const cached = item.libraryAnalysis?.analysisContent?.trim() || '';
+      const cached = item.analysisContent?.trim() || '';
       if (cached) {
         setDiagnosisReply(cached);
         return;
       }
       setDiagnosisReply('');
       try {
-        const response = await knowledgeApi.analyze({ lotId: item.lotId });
+        const response = await knowledgeApi.analyze({ issueId: item.issueId });
         if (response.error) {
           console.error('[knowledge-diagnose] ai.error', response.error);
           setDiagnosisError(`AI error: ${response.error}`);
@@ -1525,7 +1525,7 @@ export default function KnowledgePage() {
         setDiagnosisReply(reply);
       } catch (err) {
         const msg = getAnalyzeErrorMessage(err, '진단을 아직 불러오지 못했습니다.');
-        console.error('[knowledge-diagnose] analyze lotId', msg, err);
+        console.error('[knowledge-diagnose] analyze issueId', msg, err);
         setDiagnosisError(`진단 준비 중: ${msg}`);
       }
     } catch (err) {

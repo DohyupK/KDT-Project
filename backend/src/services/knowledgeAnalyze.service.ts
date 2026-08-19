@@ -21,63 +21,10 @@ export type KnowledgeAnalyzeResult = {
   error: string | null
 }
 
-export type LibraryAnalysisSnapshot = {
-  id: number
-  analysisContent: string
-  createdAt: string
-}
-
-type AnalysisRow = {
-  id: number | bigint
-  analysis_content: string
-  created_at: Date | string
-}
-
-function isDupEntry(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false
-  const e = err as { code?: string; message?: string }
-  return e.code === 'ER_DUP_ENTRY' || /Duplicate entry/i.test(e.message || '')
-}
-
 function formatCreatedAt(value: Date | string | null | undefined): string {
   if (value instanceof Date) return value.toISOString()
   if (value) return String(value)
   return new Date().toISOString()
-}
-
-function toSnapshot(row: AnalysisRow): LibraryAnalysisSnapshot {
-  return {
-    id: Number(row.id),
-    analysisContent: row.analysis_content,
-    createdAt: formatCreatedAt(row.created_at),
-  }
-}
-
-function cachedResult(
-  snap: LibraryAnalysisSnapshot,
-  extras?: { mode?: string; provider?: string | null; error?: string | null },
-): KnowledgeAnalyzeResult {
-  return {
-    id: snap.id,
-    reply: snap.analysisContent,
-    created_at: snap.createdAt,
-    mode: extras?.mode ?? 'cached',
-    provider: extras?.provider ?? null,
-    error: extras?.error ?? null,
-  }
-}
-
-export async function getLibraryAnalysisByLotId(
-  lotId: string,
-): Promise<LibraryAnalysisSnapshot | null> {
-  const rows = await query<AnalysisRow[]>(
-    `SELECT id, analysis_content, created_at
-     FROM AI_LIBRARY_ANALYSIS
-     WHERE lot_id = ?
-     LIMIT 1`,
-    [lotId],
-  )
-  return rows[0] ? toSnapshot(rows[0]) : null
 }
 
 async function callApiLlm(message: string): Promise<{
@@ -192,8 +139,8 @@ export async function runKnowledgeAnalyze(
   let insertId: number
   try {
     const result = (await query(
-      `INSERT INTO AI_LIBRARY_ANALYSIS (user_id, name, lot_id, analysis_content)
-       VALUES (?, ?, NULL, ?)`,
+      `INSERT INTO AI_LIBRARY_ANALYSIS (user_id, name, analysis_content)
+       VALUES (?, ?, ?)`,
       [input.userId, name, ai.reply],
     )) as { insertId?: number | bigint }
     insertId = Number(result?.insertId ?? 0)
@@ -222,39 +169,51 @@ export async function runKnowledgeAnalyze(
   }
 }
 
-/** Idempotent LOT diagnosis: return cache or generate once via API_LLM. */
-export async function runLotDiagnosisAnalyze(lotIdRaw: string): Promise<KnowledgeAnalyzeResult> {
-  const lotId = (lotIdRaw || '').trim()
-  if (!lotId) {
-    throw new AppError(400, 'lotId is required')
+/** Idempotent past-issue diagnosis → ISSUES.analysis_content. */
+export async function runIssueDiagnosisAnalyze(
+  issueIdRaw: string,
+): Promise<KnowledgeAnalyzeResult> {
+  const issueId = (issueIdRaw || '').trim()
+  if (!issueId) {
+    throw new AppError(400, 'issueId is required')
   }
-
-  const cached = await getLibraryAnalysisByLotId(lotId)
-  if (cached) return cachedResult(cached)
 
   const issueRows = await query<
     {
       issue_id: string
       issue_content: string
       action_content: string | null
+      analysis_content: string | null
       lot_id: string
+      completed_at: Date | string | null
     }[]
   >(
-    `SELECT issue_id, issue_content, action_content, lot_id
+    `SELECT issue_id, issue_content, action_content, analysis_content, lot_id, completed_at
      FROM ISSUES
-     WHERE lot_id = ? AND completed_at IS NOT NULL
-     ORDER BY completed_at DESC, created_at DESC
+     WHERE issue_id = ?
      LIMIT 1`,
-    [lotId],
+    [issueId],
   )
   const issue = issueRows[0]
-  if (!issue) {
-    throw new AppError(404, '해당 LOT의 완료 이슈(과거 자료)를 찾을 수 없습니다.')
+  if (!issue || issue.completed_at == null) {
+    throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
+  }
+
+  const existing = (issue.analysis_content || '').trim()
+  if (existing) {
+    return {
+      id: 0,
+      reply: existing,
+      created_at: formatCreatedAt(issue.completed_at),
+      mode: 'cached',
+      provider: null,
+      error: null,
+    }
   }
 
   let lot: LotDto | null = null
   try {
-    lot = await getLotById(lotId)
+    lot = await getLotById(issue.lot_id)
   } catch (err) {
     if (!(err instanceof AppError) || err.statusCode !== 404) throw err
   }
@@ -271,36 +230,24 @@ export async function runLotDiagnosisAnalyze(lotIdRaw: string): Promise<Knowledg
     ),
   )
 
-  try {
-    const result = (await query(
-      `INSERT INTO AI_LIBRARY_ANALYSIS (user_id, name, lot_id, analysis_content)
-       VALUES (NULL, NULL, ?, ?)`,
-      [lotId, ai.reply],
-    )) as { insertId?: number | bigint }
-    const insertId = Number(result?.insertId ?? 0)
-    if (!insertId) {
-      throw new AppError(500, '분석 결과 저장 실패: insertId 없음')
-    }
-    const rows = await query<{ created_at: Date | string }[]>(
-      `SELECT created_at FROM AI_LIBRARY_ANALYSIS WHERE id = ? LIMIT 1`,
-      [insertId],
-    )
-    return {
-      id: insertId,
-      reply: ai.reply,
-      created_at: formatCreatedAt(rows[0]?.created_at),
-      mode: ai.mode,
-      provider: ai.provider,
-      error: ai.error,
-    }
-  } catch (err) {
-    if (isDupEntry(err)) {
-      const again = await getLibraryAnalysisByLotId(lotId)
-      if (again) return cachedResult(again, { mode: ai.mode, provider: ai.provider, error: ai.error })
-    }
-    if (err instanceof AppError) throw err
-    const detail = err instanceof Error ? err.message : String(err)
-    console.error('[POST /api/knowledge/analyze] lot_insert_failed:', detail)
-    throw new AppError(500, `분석 결과 저장 실패: ${detail}`)
+  await query(
+    `UPDATE ISSUES SET analysis_content = ?
+     WHERE issue_id = ? AND (analysis_content IS NULL OR analysis_content = '')`,
+    [ai.reply, issueId],
+  )
+
+  const again = await query<{ analysis_content: string | null }[]>(
+    `SELECT analysis_content FROM ISSUES WHERE issue_id = ? LIMIT 1`,
+    [issueId],
+  )
+  const saved = (again[0]?.analysis_content || '').trim() || ai.reply
+
+  return {
+    id: 0,
+    reply: saved,
+    created_at: formatCreatedAt(issue.completed_at),
+    mode: ai.mode,
+    provider: ai.provider,
+    error: ai.error,
   }
 }

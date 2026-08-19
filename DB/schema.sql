@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS ISSUES (
   lot_id            VARCHAR(64)  NOT NULL,
   issue_content     VARCHAR(255) NOT NULL,
   action_content    TEXT         NULL,
+  analysis_content  TEXT         NULL COMMENT 'API_LLM diagnosis after completed_at',
   assignee_user_id  VARCHAR(50)  NULL,
   completed_at      DATETIME     NULL,
   created_at        DATETIME     NOT NULL,
@@ -245,28 +246,19 @@ CREATE TABLE IF NOT EXISTS INQUIRY_ATTACHMENTS (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Knowledge AI answers only (prompt/docs are not persisted).
--- XOR: user_id = 선택 항목 분석, lot_id = 과거 자료 LOT 진단 캐시.
+-- user_id = 선택 항목 분석. 과거 자료 진단은 ISSUES.analysis_content.
 CREATE TABLE IF NOT EXISTS AI_LIBRARY_ANALYSIS (
   id                BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  user_id           VARCHAR(50)  NULL,
-  name              VARCHAR(50)  NULL,
-  lot_id            VARCHAR(64)  NULL COMMENT 'LOTS.id — past-issue diagnosis cache',
+  user_id           VARCHAR(50)  NOT NULL,
+  name              VARCHAR(50)  NOT NULL,
   analysis_content  TEXT         NOT NULL,
   created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_ai_library_analysis_user
     FOREIGN KEY (user_id) REFERENCES USERS(user_id)
     ON DELETE CASCADE,
-  CONSTRAINT fk_ai_library_analysis_lot
-    FOREIGN KEY (lot_id) REFERENCES LOTS(id)
-    ON DELETE CASCADE,
-  CONSTRAINT chk_ai_library_analysis_owner CHECK (
-    (user_id IS NOT NULL AND lot_id IS NULL)
-    OR (user_id IS NULL AND lot_id IS NOT NULL)
-  ),
-  UNIQUE KEY uq_ai_library_analysis_lot (lot_id),
   INDEX idx_ai_library_analysis_user_created (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
--- See also DB/alter_ai_library_analysis_lot_id.sql (live: user_id/name nullable + lot_id)
+-- See also DB/alter_issues_analysis_content.sql
 
 -- OCR / empty-text sidecar: source image|scan PDF ↔ Markdown/*.md (path meta only).
 CREATE TABLE IF NOT EXISTS TEXT_MATCH (

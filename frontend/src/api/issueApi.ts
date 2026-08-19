@@ -110,17 +110,11 @@ export type PastIssueLot = {
   riskReason: string | null
 }
 
-export type LibraryAnalysisSnapshot = {
-  id: number
-  analysisContent: string
-  createdAt: string
-}
-
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
   analysis: IssueAnalysis | null
   lot: PastIssueLot | null
-  libraryAnalysis: LibraryAnalysisSnapshot | null
+  analysisContent: string | null
 }
 
 export const issueApi = {

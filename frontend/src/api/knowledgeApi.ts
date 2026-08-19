@@ -9,10 +9,10 @@ export type KnowledgeAnalyzeResponse = {
   error: string | null
 }
 
-export type KnowledgeAnalyzeBody = { message: string } | { lotId: string }
+export type KnowledgeAnalyzeBody = { message: string } | { issueId: string }
 
 export const knowledgeApi = {
-  /** Dedicated Knowledge AI analysis — API_LLM; stored in AI_LIBRARY_ANALYSIS. */
+  /** Dedicated Knowledge AI analysis — API_LLM. message→user row, issueId→ISSUES.analysis_content. */
   async analyze(body: KnowledgeAnalyzeBody): Promise<KnowledgeAnalyzeResponse> {
     const { data } = await apiClient.post<KnowledgeAnalyzeResponse>('/knowledge/analyze', body)
     return data

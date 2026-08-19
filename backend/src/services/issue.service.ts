@@ -1,6 +1,6 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { getLibraryAnalysisByLotId, runLotDiagnosisAnalyze, type LibraryAnalysisSnapshot } from './knowledgeAnalyze.service.js'
+import { runIssueDiagnosisAnalyze } from './knowledgeAnalyze.service.js'
 import { getLotById, type LotDto } from './lot.service.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
 import { isManageUser } from './userSettings.service.js'
@@ -291,11 +291,10 @@ export async function updateIssue(
   )
 
   if (!current.completed && completed) {
-    const lotId = current.lotId
-    void runLotDiagnosisAnalyze(lotId).catch((err) => {
+    void runIssueDiagnosisAnalyze(issueId).catch((err) => {
       console.error(
-        '[updateIssue] lot diagnosis background failed:',
-        lotId,
+        '[updateIssue] issue diagnosis background failed:',
+        issueId,
         err instanceof Error ? err.message : err,
       )
     })
@@ -345,7 +344,7 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   return { items, total: items.length }
 }
 
-/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치 + ANALYSIS_LOTS 스냅샷 + 진단 캐시. */
+/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치 + ANALYSIS_LOTS 스냅샷 + ISSUES.analysis_content. */
 export type PastIssueLot = {
   lotId: string
   recordedAt: string
@@ -372,7 +371,7 @@ export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
   analysis: IssueAnalysis | null
   lot: PastIssueLot | null
-  libraryAnalysis: LibraryAnalysisSnapshot | null
+  analysisContent: string | null
 }
 
 function toPastIssueLot(dto: LotDto): PastIssueLot {
@@ -412,7 +411,11 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     if (!(err instanceof AppError) || err.statusCode !== 404) throw err
   }
 
-  const libraryAnalysis = await getLibraryAnalysisByLotId(issue.lotId)
+  const contentRows = await query<{ analysis_content: string | null }[]>(
+    `SELECT analysis_content FROM ISSUES WHERE issue_id = ? LIMIT 1`,
+    [issueId],
+  )
+  const analysisContent = contentRows[0]?.analysis_content?.trim() || null
 
   return {
     issueId: issue.issueId,
@@ -424,7 +427,7 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     actionContent: issue.actionContent,
     analysis: issue.analysis,
     lot,
-    libraryAnalysis,
+    analysisContent,
   }
 }
 

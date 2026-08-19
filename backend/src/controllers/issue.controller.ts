@@ -5,6 +5,7 @@ import * as knowledgeAnalyzeService from '../services/knowledgeAnalyze.service.j
 import { fillRiskReasonsForLots } from '../services/lotRiskReason.service.js'
 import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.service.js'
 import { AppError } from '../middleware/errorHandler.js'
+import { lotScoreOnAws } from '../services/lotScoreRole.js'
 import * as userSettingsService from '../services/userSettings.service.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
@@ -220,9 +221,9 @@ export const getPastIssue = asyncHandler(async (req, res) => {
 export const analyzeKnowledge = asyncHandler(async (req, res) => {
   if (!req.auth) throw new AppError(401, '인증이 필요합니다.')
 
-  const lotId = typeof req.body?.lotId === 'string' ? req.body.lotId.trim() : ''
-  const result = lotId
-    ? await knowledgeAnalyzeService.runLotDiagnosisAnalyze(lotId)
+  const issueId = typeof req.body?.issueId === 'string' ? req.body.issueId.trim() : ''
+  const result = issueId
+    ? await knowledgeAnalyzeService.runIssueDiagnosisAnalyze(issueId)
     : await knowledgeAnalyzeService.runKnowledgeAnalyze({
         message: typeof req.body?.message === 'string' ? req.body.message : '',
         userId: req.auth.userId,
