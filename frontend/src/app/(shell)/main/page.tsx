@@ -983,8 +983,8 @@ export default function MainPage() {
               issueId: null,
             },
           });
-          return;
-        }
+      return;
+    }
         const { data: detailData } = await issueApi.getById(first.issueId);
         if (seq !== issueDetailSeqRef.current) return;
         const analysis = issueDetailToAnalysisModel(detailData.issue);
@@ -1092,9 +1092,9 @@ export default function MainPage() {
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
               {language === 'en' ? 'Sintering Process Forecast' : '소성 공정 예측 현황'}
-            </h2>
+          </h2>
             <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               금일 00시 기준
             </span>
@@ -1120,10 +1120,10 @@ export default function MainPage() {
                 >
                   <div
                     className={`mb-3 text-sm font-medium ${
-                      isDark ? 'text-slate-400' : 'text-slate-500'
-                    }`}
-                  >
-                    {kpi.title}
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      {kpi.title}
                   </div>
                   <div
                     className={`text-xl font-bold tabular-nums tracking-tight sm:text-2xl lg:text-3xl ${
@@ -1156,11 +1156,11 @@ export default function MainPage() {
                   }`}
                 >
                   Q-Cost
-                </h2>
+            </h2>
                 <p className={`mt-1 text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   Tier-based Quality Cost · 월 단위 집계
                 </p>
-              </div>
+          </div>
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex items-center gap-1.5">
                   <button
@@ -1187,7 +1187,7 @@ export default function MainPage() {
                   >
                     {qCostExporting === 'pdf' ? 'PDF…' : 'PDF'}
                   </button>
-                </div>
+                    </div>
                 <QCostMonthPicker
                   value={qCostMonth}
                   onChange={(month) => {
@@ -1202,7 +1202,7 @@ export default function MainPage() {
                   }}
                   isDark={isDark}
                 />
-              </div>
+                  </div>
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -1232,7 +1232,7 @@ export default function MainPage() {
                     {qCostError}
                   </p>
                 ) : null}
-              </div>
+                  </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {(
@@ -1281,9 +1281,9 @@ export default function MainPage() {
                     <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       {card.description}
                     </p>
-                  </div>
-                ))}
-              </div>
+                </div>
+              ))}
+            </div>
 
               <div className={`${subpanelClass} p-4`}>
                 <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
@@ -1343,7 +1343,7 @@ export default function MainPage() {
                             <span className={`text-xs tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                               {row.count.toLocaleString('ko-KR')} LOT · {formatKRW(row.unit)}/LOT
                             </span>
-                          </div>
+              </div>
                           <span
                             className={`text-sm font-semibold tabular-nums ${
                               isDark ? 'text-slate-100' : 'text-slate-900'
@@ -1351,7 +1351,7 @@ export default function MainPage() {
                           >
                             {formatKRW(row.amount)}
                           </span>
-                        </div>
+            </div>
                         <div
                           className={`h-2 overflow-hidden rounded-full ${
                             isDark ? 'bg-slate-800' : 'bg-slate-100'
@@ -1360,8 +1360,8 @@ export default function MainPage() {
                           <div
                             className={`h-full rounded-full transition-[width] ${row.bar}`}
                             style={{ width: `${pct}%` }}
-                          />
-                        </div>
+                />
+              </div>
                       </li>
                     )
                   })}
@@ -1379,8 +1379,8 @@ export default function MainPage() {
                   >
                     {formatKRW(qCostResult?.appraisalCost ?? 0)}
                   </span>
-                </div>
-              </div>
+            </div>
+          </div>
             </div>
           </section>
 
@@ -1391,14 +1391,14 @@ export default function MainPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2
+                <h2
                     id="risk-lot-heading"
                     className={`text-base font-semibold tracking-tight ${
                       isDark ? 'text-slate-100' : 'text-slate-900'
                     }`}
-                  >
-                    위험 LOT Top
-                  </h2>
+                >
+                  위험 LOT Top
+                </h2>
                   <span
                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                       isDark
@@ -1480,7 +1480,7 @@ export default function MainPage() {
                   ) : null}
                 </tbody>
               </table>
-            </div>
+      </div>
 
             {riskTopTotalPages > 1 ? (
               <div
@@ -1525,9 +1525,9 @@ export default function MainPage() {
                         …
                       </span>
                     ) : (
-                      <button
+            <button
                         key={item}
-                        type="button"
+              type="button"
                         aria-current={item === riskTopPage ? 'page' : undefined}
                         disabled={riskLotsLoading}
                         onClick={() => handleRiskTopPageChange(item)}
@@ -1540,7 +1540,7 @@ export default function MainPage() {
                         }`}
                       >
                         {item}
-                      </button>
+            </button>
                     ),
                   )}
                   <button
@@ -1556,8 +1556,8 @@ export default function MainPage() {
                     다음
                   </button>
                 </nav>
-              </div>
-            ) : null}
+          </div>
+        ) : null}
           </section>
         </section>
       </div>
@@ -1584,3 +1584,4 @@ export default function MainPage() {
     </div>
   );
 }
+   

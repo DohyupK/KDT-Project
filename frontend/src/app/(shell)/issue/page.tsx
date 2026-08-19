@@ -1298,27 +1298,27 @@ const IssueReportModal = ({
                   </button>
                 );
               })}
-            </div>
+              </div>
 
             {reportType === 'lot' ? (
-              <div>
-                <label
+                <div>
+                  <label
                   htmlFor="report-lot"
-                  className={`mb-1.5 block text-xs font-semibold ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                   LOT 선택
-                </label>
+                  </label>
                 <select
                   id="report-lot"
                   value={selectedLot}
                   onChange={(event) => setSelectedLot(event.target.value)}
                   className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-950/40 text-slate-100'
-                      : 'border-slate-200 bg-white text-slate-900'
-                  }`}
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-white text-slate-900'
+                    }`}
                 >
                   {lots.length === 0 ? (
                     <option value="">선택 가능한 LOT 없음</option>
@@ -1330,31 +1330,31 @@ const IssueReportModal = ({
                     ))
                   )}
                 </select>
-              </div>
+                </div>
             ) : null}
 
             {reportType === 'weekly' ? (
-              <div>
-                <label
+                <div>
+                  <label
                   htmlFor="report-week"
-                  className={`mb-1.5 block text-xs font-semibold ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
+                    className={`mb-1.5 block text-xs font-semibold ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                   주간 기준일 (해당 주 월~일)
-                </label>
+                  </label>
                 <DateInput
                   id="report-week"
                   value={weekAnchor}
                   onChange={setWeekAnchor}
                   className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-950/40 text-slate-100'
-                      : 'border-slate-200 bg-white text-slate-900'
-                  }`}
-                />
-              </div>
-            ) : null}
+                      isDark
+                        ? 'border-slate-600 bg-slate-950/40 text-slate-100'
+                        : 'border-slate-200 bg-white text-slate-900'
+                    }`}
+                  />
+                </div>
+              ) : null}
 
             {reportType === 'monthly' ? (
               <div>
@@ -1372,13 +1372,13 @@ const IssueReportModal = ({
                   value={yearMonth}
                   onChange={(event) => setYearMonth(event.target.value)}
                   className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
-                    isDark
+              isDark
                       ? 'border-slate-600 bg-slate-950/40 text-slate-100'
                       : 'border-slate-200 bg-white text-slate-900'
                   }`}
                 />
               </div>
-            ) : null}
+                        ) : null}
 
             <p className={`mt-3 m-0 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               대상: {scopeLabel}
@@ -1388,7 +1388,7 @@ const IssueReportModal = ({
               <p className={`mt-2 m-0 text-xs font-semibold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>
                 {error}
               </p>
-            ) : null}
+                ) : null}
           </section>
 
           <section className="mb-5">
@@ -1410,28 +1410,28 @@ const IssueReportModal = ({
               ].map(([label, value]) => (
                 <div
                   key={String(label)}
-                  className={`rounded-xl border p-3.5 shadow-sm ${
-                    isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
-                  }`}
-                >
+                className={`rounded-xl border p-3.5 shadow-sm ${
+                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200/80 bg-white'
+                }`}
+              >
                   <div
                     className={`text-[11px] font-semibold ${
                       isDark ? 'text-slate-400' : 'text-slate-500'
                     }`}
                   >
                     {label}
-                  </div>
-                  <div
-                    className={`mt-1 text-base font-bold tabular-nums ${
-                      isDark ? 'text-slate-100' : 'text-slate-900'
-                    }`}
-                  >
-                    {value}
-                  </div>
                 </div>
+                <div
+                  className={`mt-1 text-base font-bold tabular-nums ${
+                    isDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}
+                >
+                    {value}
+                </div>
+              </div>
               ))}
-            </div>
-            <div
+                </div>
+                <div
               className={`mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] ${
                 isDark ? 'text-slate-400' : 'text-slate-500'
               }`}
@@ -1492,14 +1492,14 @@ const IssueReportModal = ({
                           className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left"
                         >
                           <div className="flex flex-wrap items-center gap-2">
-                            <span
+              <span
                               className={`text-sm font-bold ${
                                 isDark ? 'text-slate-100' : 'text-slate-900'
                               }`}
                             >
                               {group.title}
-                            </span>
-                            <span
+              </span>
+              <span
                               className={`text-xs font-semibold tabular-nums ${
                                 isDark ? 'text-blue-300' : 'text-blue-700'
                               }`}
@@ -1514,8 +1514,8 @@ const IssueReportModal = ({
                             </span>
                             <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                               배정 완료 {group.assignedCount}건 · 미배정 {group.unassignedCount}건
-                            </span>
-                          </div>
+              </span>
+            </div>
                           <p
                             className={`mt-1.5 mb-0 truncate text-xs leading-relaxed ${
                               isDark ? 'text-slate-400' : 'text-slate-500'
@@ -1533,14 +1533,14 @@ const IssueReportModal = ({
                             }))
                           }
                           className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
-                            isDark
+                  isDark
                               ? 'border-slate-600 bg-slate-900/60 text-slate-200 hover:bg-slate-700'
                               : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                          }`}
-                        >
+                }`}
+              >
                           {isOpen ? '접기' : '펼치기'}
                         </button>
-                      </div>
+              </div>
                       {isOpen ? (
                         <div
                           className={`border-t px-3.5 py-2.5 ${
@@ -1557,8 +1557,8 @@ const IssueReportModal = ({
                               const spc = issue.analysis?.spcStatus ?? issue.listSpcStatus ?? '—';
                               const prob = formatAnalysisProbability(issue.analysis?.probability).label;
                               return (
-                                <li
-                                  key={issue.id}
+                  <li
+                    key={issue.id}
                                   className={`rounded-lg px-2.5 py-2 ${
                                     isDark ? 'bg-slate-900/50' : 'bg-slate-50'
                                   }`}
@@ -1569,11 +1569,11 @@ const IssueReportModal = ({
                                         isDark ? 'text-blue-300' : 'text-blue-700'
                                       }`}
                                     >
-                                      {issue.id}
-                                    </span>
+                      {issue.id}
+                    </span>
                                     <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
                                       {issue.lot}
-                                    </span>
+                    </span>
                                     <span style={{ ...badgeBase, ...riskStyle(issue.risk, isDark) }}>
                                       {issue.analysis?.riskLevel ?? issue.risk}
                                     </span>
@@ -1592,9 +1592,9 @@ const IssueReportModal = ({
                                     </span>
                                     <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>
                                       {issue.createdAt}
-                                    </span>
-                                    <button
-                                      type="button"
+            </span>
+            <button
+              type="button"
                                       onClick={() =>
                                         setDetailIssueId((prev) => (prev === issue.id ? null : issue.id))
                                       }
@@ -1605,8 +1605,8 @@ const IssueReportModal = ({
                                       }`}
                                     >
                                       {isDetailOpen ? '닫기' : '상세 보기'}
-                                    </button>
-                                  </div>
+            </button>
+          </div>
                                   {isDetailOpen ? (
                                     <p
                                       className={`mt-1.5 mb-0 break-keep text-xs leading-relaxed ${
@@ -1635,16 +1635,16 @@ const IssueReportModal = ({
                                   }))
                                 }
                                 className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
-                                  isDark
+                  isDark
                                     ? 'border-slate-600 bg-slate-900/60 text-slate-200 hover:bg-slate-700'
                                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
                                 }`}
                               >
                                 더 보기 (+{ISSUE_GROUP_VISIBLE_STEP})
-                              </button>
+          </button>
                             ) : null}
-                            <button
-                              type="button"
+                  <button
+                    type="button"
                               onClick={() => {
                                 setVisibleCounts((prev) => ({
                                   ...prev,
@@ -1659,16 +1659,16 @@ const IssueReportModal = ({
                               }`}
                             >
                               접기
-                            </button>
-                          </div>
-                        </div>
+                  </button>
+                </div>
+              </div>
                       ) : null}
                     </li>
                   );
                 })}
               </ul>
-            )}
-          </section>
+        )}
+      </section>
         </div>
       </div>
     </div>
@@ -2018,14 +2018,14 @@ const IssueListSection = ({
       >
         <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
           {rangeLabel} / 총 {totalCount}건
-        </span>
+      </span>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <nav
             aria-label="이슈 목록 페이지"
             className="flex flex-wrap items-center justify-center gap-1.5"
           >
-          <button
-            type="button"
+            <button
+              type="button"
             onClick={() => onPageChange(Math.max(1, currentPage - 1))}
             disabled={currentPage <= 1}
             className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -2035,7 +2035,7 @@ const IssueListSection = ({
             }`}
           >
             이전
-          </button>
+            </button>
           {pageItems.map((item, index) =>
             item === 'ellipsis' ? (
               <span
@@ -2118,11 +2118,11 @@ const IssueListSection = ({
               이동
             </button>
           </form>
-        </div>
+      </div>
       </div>
       </>
     )}
-  </section>
+    </section>
   );
 };
 
@@ -2279,7 +2279,7 @@ const ManagementSection = ({
               }}
             >
               {issue?.assignedAt ?? '—'}
-            </div>
+        </div>
           </div>
         </div>
         <div
@@ -2297,7 +2297,7 @@ const ManagementSection = ({
             value={form.action}
             onChange={(event) => onChange('action', event.target.value)}
             placeholder="분석 내용과 조치 사항을 입력해주세요."
-            style={{
+          style={{
               ...getInputStyle(c),
               flex: 1,
               minHeight: 110,
@@ -2785,7 +2785,7 @@ export default function IssuePage() {
       }
       if (!hasAssigneeName(selectedIssue.assignee) && nextStatus !== '미배정') {
         setToastMessage('담당 실무자를 먼저 지정해 주세요.');
-        setShowToast(true);
+      setShowToast(true);
         return;
       }
       if ((nextStatus === '처리 완료' || nextStatus === '종결') && !managementForm.action.trim()) {
@@ -2904,9 +2904,8 @@ export default function IssuePage() {
       await issueApi.update(issueId, {
         actionContent: managementForm.action.trim() || null,
         completed: true,
-        assigneeUserId: managementForm.assigneeUserId.trim() || null,
       });
-      setIssues((current) => current.filter((issue) => issue.id !== issueId));
+        setIssues((current) => current.filter((issue) => issue.id !== issueId));
       const nextTotalPages = Math.max(
         1,
         Math.ceil(Math.max(0, filteredIssues.length - 1) / ISSUE_PAGE_SIZE),
@@ -2914,16 +2913,16 @@ export default function IssuePage() {
       const nextPage = Math.min(safePage, nextTotalPages);
       setCurrentPage(nextPage);
       setPageInput(String(nextPage));
-      setSelectedId(null);
-      setSaveMessage('');
+        setSelectedId(null);
+        setSaveMessage('');
       setToastMessage('✓ 이슈가 완료 처리되어 목록에서 제거되었습니다.');
       setShowToast(true);
     } catch (error) {
       setToastMessage(getApiErrorMessage(error, '이슈 완료 처리에 실패했습니다.'));
       setShowToast(true);
-    } finally {
-      setIsSaving(false);
-    }
+      } finally {
+        setIsSaving(false);
+      }
   };
 
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
@@ -2936,7 +2935,7 @@ export default function IssuePage() {
     }
     if (!managementForm.action.trim()) {
       setToastMessage('처리 완료로 변경하려면 조치 내용을 입력해 주세요.');
-      setShowToast(true);
+    setShowToast(true);
       return;
     }
     if (!canSave) return;
@@ -3010,21 +3009,21 @@ export default function IssuePage() {
               />
             </div>
             <div style={{ minHeight: 0, height: '100%' }}>
-              <ManagementSection
-                issue={selectedIssue}
-                form={managementForm}
+            <ManagementSection
+              issue={selectedIssue}
+              form={managementForm}
                 managers={managers}
-                message={saveMessage}
-                canSave={canSave}
-                isSaving={isSaving}
-                onChange={handleFormChange}
+              message={saveMessage}
+              canSave={canSave}
+              isSaving={isSaving}
+              onChange={handleFormChange}
                 onAssign={handleAssignPractitioner}
                 onRequestUnassign={handleRequestUnassign}
-                onSave={handleSave}
-              />
-            </div>
+              onSave={handleSave}
+            />
           </div>
         </div>
+      </div>
       </div>
       {isReportOpen ? (
         <IssueReportModal
