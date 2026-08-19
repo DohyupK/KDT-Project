@@ -68,38 +68,170 @@ const GRAFANA_PANEL_URLS: Record<SpcCardTitle, string> = {
 
 type DateRangeFilter = {
   startDate: string
+  startTime: string
   endDate: string
+  endTime: string
+}
+
+function todayIsoDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function isValidRange(range: DateRangeFilter): boolean {
   if (!range.startDate || !range.endDate) return false
-  return range.startDate <= range.endDate
+  const from = localDateTimeMs(range.startDate, range.startTime, false)
+  const to = localDateTimeMs(range.endDate, range.endTime, true)
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return false
+  return from <= to
 }
 
-function localDayStartMs(isoDate: string): number {
+function localDateTimeMs(isoDate: string, time: string, endOfDayFallback: boolean): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
   if (!match) return Number.NaN
   const year = Number(match[1])
   const month = Number(match[2])
   const day = Number(match[3])
-  return new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(time)
+  const hours = timeMatch ? Number(timeMatch[1]) : endOfDayFallback ? 23 : 0
+  const minutes = timeMatch ? Number(timeMatch[2]) : endOfDayFallback ? 59 : 0
+  const seconds = endOfDayFallback && !timeMatch ? 59 : 0
+  const milliseconds = endOfDayFallback && !timeMatch ? 999 : 0
+  return new Date(year, month - 1, day, hours, minutes, seconds, milliseconds).getTime()
 }
 
-function localDayEndMs(isoDate: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
-  if (!match) return Number.NaN
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  return new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
+const TIME_HOUR_OPTIONS = [
+  '00',
+  '02',
+  '04',
+  '06',
+  '08',
+  '10',
+  '12',
+  '14',
+  '16',
+  '18',
+  '20',
+  '22',
+  '23',
+] as const
+const TIME_MINUTE_OPTIONS = ['00', '10', '20', '30', '40', '50', '59'] as const
+
+function parseTimeParts(value: string): { hour: string; minute: string } {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return { hour: '', minute: '' }
+  return { hour: match[1], minute: match[2] }
+}
+
+function hourOptionsForValue(hour: string): string[] {
+  const base: string[] = [...TIME_HOUR_OPTIONS]
+  if (hour && !base.includes(hour)) {
+    base.push(hour)
+    base.sort((a, b) => Number(a) - Number(b))
+  }
+  return base
+}
+
+function minuteOptionsForValue(minute: string): string[] {
+  const base: string[] = [...TIME_MINUTE_OPTIONS]
+  if (minute && !base.includes(minute)) {
+    base.push(minute)
+    base.sort((a, b) => Number(a) - Number(b))
+  }
+  return base
+}
+
+function TimeInput24({
+  value,
+  onChange,
+  ariaLabel,
+  isDark,
+}: {
+  value: string
+  onChange: (next: string) => void
+  ariaLabel: string
+  isDark: boolean
+}) {
+  const { hour, minute } = parseTimeParts(value)
+  const hourOptions = hourOptionsForValue(hour)
+  const minuteOptions = minuteOptionsForValue(minute)
+  const fieldClass = `h-8 rounded-md border px-1.5 text-xs font-medium tabular-nums outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+    isDark
+      ? 'border-slate-600 bg-slate-950 text-slate-100 [color-scheme:dark]'
+      : 'border-slate-200 bg-white text-slate-700 [color-scheme:light]'
+  }`
+
+  const emitTime = (nextHour: string, nextMinute: string) => {
+    if (!nextHour && !nextMinute) {
+      onChange('')
+      return
+    }
+    if (!nextHour) return
+    onChange(`${nextHour}:${nextMinute || '00'}`)
+  }
+
+  const handleHourChange = (nextHour: string) => {
+    if (!nextHour) {
+      onChange('')
+      return
+    }
+    emitTime(nextHour, minute)
+  }
+
+  const handleMinuteChange = (nextMinute: string) => {
+    if (!nextMinute) {
+      onChange('')
+      return
+    }
+    emitTime(hour || '00', nextMinute)
+  }
+
+  return (
+    <div
+      className="inline-flex shrink-0 items-center gap-0.5"
+      role="group"
+      aria-label={ariaLabel}
+    >
+      <select
+        aria-label={`${ariaLabel} 시`}
+        value={hour}
+        onChange={(event) => handleHourChange(event.target.value)}
+        className={`${fieldClass} w-[3.25rem]`}
+      >
+        <option value="">--</option>
+        {hourOptions.map((label) => (
+          <option key={label} value={label}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>:</span>
+      <select
+        aria-label={`${ariaLabel} 분`}
+        value={minute}
+        onChange={(event) => handleMinuteChange(event.target.value)}
+        className={`${fieldClass} w-[3.25rem]`}
+      >
+        <option value="">--</option>
+        {minuteOptions.map((label) => (
+          <option key={label} value={label}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 }
 
 function applyDateRangeToGrafanaUrl(baseUrl: string, range: DateRangeFilter | null): string {
   if (!range || !isValidRange(range)) return baseUrl
   try {
     const url = new URL(baseUrl)
-    const from = localDayStartMs(range.startDate)
-    const to = localDayEndMs(range.endDate)
+    const from = localDateTimeMs(range.startDate, range.startTime, false)
+    const to = localDateTimeMs(range.endDate, range.endTime, true)
     if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return baseUrl
     url.searchParams.set('from', String(from))
     url.searchParams.set('to', String(to))
@@ -129,7 +261,6 @@ function GrafanaDateRangeFilter({
   const secondaryBtnClass = isDark
     ? 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-600 px-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
     : 'inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40'
-
   return (
     <div
       className={`inline-flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
@@ -146,6 +277,12 @@ function GrafanaDateRangeFilter({
         compact
         className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
       />
+      <TimeInput24
+        ariaLabel="시작 시간"
+        value={draft.startTime}
+        onChange={(startTime) => onDraftChange({ ...draft, startTime })}
+        isDark={isDark}
+      />
       <span className={`shrink-0 text-xs ${muted}`}>~</span>
       <DateInput
         aria-label="종료일"
@@ -154,6 +291,12 @@ function GrafanaDateRangeFilter({
         isDark={isDark}
         compact
         className="!h-8 !w-[9.5rem] !max-w-none shrink-0"
+      />
+      <TimeInput24
+        ariaLabel="종료 시간"
+        value={draft.endTime}
+        onChange={(endTime) => onDraftChange({ ...draft, endTime })}
+        isDark={isDark}
       />
       <button
         type="button"
@@ -303,7 +446,13 @@ export default function SpcManagementPage() {
   const { isDark, language, copy } = useUiSettings()
   const { setPagePayload, trackPageChatEvent } = usePageChat()
   const [embedRefreshKey, setEmbedRefreshKey] = useState(0)
-  const [rangeDraft, setRangeDraft] = useState<DateRangeFilter>({ startDate: '', endDate: '' })
+  const defaultDate = useMemo(() => todayIsoDate(), [])
+  const [rangeDraft, setRangeDraft] = useState<DateRangeFilter>({
+    startDate: defaultDate,
+    startTime: '',
+    endDate: defaultDate,
+    endTime: '',
+  })
   const [rangeApplied, setRangeApplied] = useState<DateRangeFilter | null>(null)
   const [expandedTitle, setExpandedTitle] = useState<SpcCardTitle | null>(null)
   const expandButtonRefs = useRef<Partial<Record<SpcCardTitle, HTMLButtonElement | null>>>({})
@@ -377,7 +526,7 @@ export default function SpcManagementPage() {
   }, [rangeDraft, trackPageChatEvent])
 
   const handleResetRange = useCallback(() => {
-    setRangeDraft({ startDate: '', endDate: '' })
+    setRangeDraft({ startDate: defaultDate, startTime: '', endDate: defaultDate, endTime: '' })
     setRangeApplied(null)
     trackPageChatEvent({
       type: 'clear',
@@ -385,7 +534,7 @@ export default function SpcManagementPage() {
       target: 'spc-date-range-reset',
     })
     setEmbedRefreshKey((key) => key + 1)
-  }, [trackPageChatEvent])
+  }, [defaultDate, trackPageChatEvent])
 
   useEffect(() => {
     if (!expandedTitle) return
