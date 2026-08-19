@@ -87,6 +87,16 @@ _NON_HANGUL_CHAR = (
     r"%#@&*/\\|_+=<>\[\]{}()（）「」『』·•…$€¥£!?"
     r"\"'`~^"
 )
+_SETTING_UI_KEYS = (
+    "fontSize",
+    "themeMode",
+    "autoRefreshEnabled",
+    "refreshIntervalMinutes",
+    "n8nAlertEnabled",
+    "sections",
+    "llmApiKeysNote",
+)
+_NO_LOT_TABLE_ROUTES = ("/setting", "/inquiry", "/management")
 _LIST_LIMIT = 10
 
 _RECORD_KEYS = (
@@ -109,6 +119,66 @@ def wants_full_detail(message: str) -> bool:
 def is_page_summary_intent(message: str) -> bool:
     """Chip or explicit 「이 화면/이 페이지 요약」 — ignore prior turns."""
     return bool(_PAGE_SUMMARY_RE.search((message or "").strip()))
+
+
+def message_lot_issue_ids(message: str) -> set[str]:
+    """LOT-/ISS- ids mentioned in the user message (not inquiry numbers)."""
+    out: set[str] = set()
+    for raw in _ENTITY_RE.findall(message or ""):
+        token = str(raw).upper()
+        if token.startswith("LOT") or token.startswith("ISS"):
+            out.add(token)
+    return out
+
+
+def is_lot_why_intent(message: str) -> bool:
+    """Causal question about a LOT / defect rate — RAG + that LOT's fields."""
+    m = (message or "").strip()
+    if not m:
+        return False
+    if not re.search(r"(왜|원인|이유)", m):
+        return False
+    if message_lot_issue_ids(m):
+        return True
+    return bool(re.search(r"(불량률|불량\s*확률|불량|잔류|위험등급)", m))
+
+
+def _focus_matches_entities(focus: Any, focus_id: Any, ents: set[str]) -> bool:
+    if not ents:
+        return False
+    blob = json.dumps({"f": focus, "id": focus_id}, ensure_ascii=False, default=str).upper()
+    return any(e in blob for e in ents)
+
+
+def route_without_lot_table(route: str) -> bool:
+    r = (route or "").lower()
+    return any(x in r for x in _NO_LOT_TABLE_ROUTES)
+
+
+def filter_history_for_entities(history_text: str | None, message: str) -> str:
+    """Keep only turns that mention the LOT/ISS ids in the current question."""
+    ents = message_lot_issue_ids(message)
+    raw = (history_text or "").strip()
+    if not ents or not raw:
+        return raw
+    kept: list[str] = []
+    buf: list[str] = []
+
+    def flush() -> None:
+        if not buf:
+            return
+        block = "\n".join(buf)
+        blob = block.upper()
+        if any(e in blob for e in ents):
+            kept.append(block)
+        buf.clear()
+
+    for line in raw.splitlines():
+        if line.startswith("User:") and buf:
+            flush()
+        buf.append(line)
+    flush()
+    return "\n".join(kept)
 
 
 def _slim_focus_payload(focus: Any, full: bool) -> Any:
@@ -137,6 +207,11 @@ def should_prefer_focus(
         return True
     if is_page_summary_intent(m):
         return False
+    msg_ents = message_lot_issue_ids(m)
+    route = str(page_context.get("route") or "").lower()
+    if msg_ents and route_without_lot_table(route):
+        if not _focus_matches_entities(focus, focus_id, msg_ents):
+            return False
     if re.search(r"(그건\s*말고|다른\s*얘기)", m):
         return False
     # 「이 로트 / 방금 클릭」 등은 항상 선택 행 우선 (SPC·왜 포함)
@@ -528,6 +603,9 @@ def _keep_route_tables(pp: dict[str, Any], route: str) -> dict[str, Any]:
         )
     for key in drops:
         out.pop(key, None)
+    if "/setting" not in (route or "").lower():
+        for key in _SETTING_UI_KEYS:
+            out.pop(key, None)
     return out
 
 
@@ -803,6 +881,22 @@ def _page_summary_slice(pp: dict[str, Any], route: str) -> dict[str, Any]:
     }
 
 
+def _entity_offpage_slice(
+    route: str,
+    focus: Any,
+    focus_id: Any,
+    ents: set[str],
+) -> dict[str, Any]:
+    """LOT/ISS question on a screen with no LOT table — drop setting/inquiry UI."""
+    sliced: dict[str, Any] = {
+        "primary_table": "entity",
+        "page": route_label(route),
+    }
+    if _focus_matches_entities(focus, focus_id, ents):
+        sliced["matched_entity"] = True
+    return sliced
+
+
 def slice_page_context_for_query(
     message: str,
     page_context: dict[str, Any] | None,
@@ -893,6 +987,23 @@ def slice_page_context_for_query(
     if is_page_summary_intent(m):
         sliced = _page_summary_slice(pp, route)
         out["page_payload"] = _keep_route_tables(sliced, route)
+        out.pop("pagePayload", None)
+        out["supplement"] = None
+        if last_ev is not None:
+            out["last_event"] = last_ev
+        return out
+
+    ents = message_lot_issue_ids(m)
+    if ents and route_without_lot_table(route):
+        focus = out.get("focus_payload") or out.get("focusPayload")
+        focus_id = out.get("focus_id") or out.get("focusId")
+        sliced = _entity_offpage_slice(route, focus, focus_id, ents)
+        if not _focus_matches_entities(focus, focus_id, ents):
+            out["focus_payload"] = None
+            out.pop("focusPayload", None)
+            out.pop("focus_id", None)
+            out.pop("focusId", None)
+        out["page_payload"] = sliced
         out.pop("pagePayload", None)
         out["supplement"] = None
         if last_ev is not None:
@@ -1177,7 +1288,12 @@ def build_grounding(
         )
 
     analysis_hint = None
-    if analyzing:
+    if is_lot_why_intent(message):
+        analysis_hint = (
+            "해당 LOT의 page_payload/focus 필드와 rag_sources로 원인을 설명하세요. "
+            "폰트·테마·새로고침·n8n은 말하지 마세요."
+        )
+    elif analyzing:
         analysis_hint = (
             "건수·필터·빈 칸(No data)·위험 순서를 2~5문장으로 풀어 주세요."
         )

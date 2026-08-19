@@ -208,7 +208,7 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 ### 4.2 답변 결정 순서 (엄수)
 
 1. **(BE)** 보안 게이트 → 해당 시 종료.  
-2. **히스토리:** `detect_topic_shift`(`그건 말고` · `다른 얘기` · 화면 경로 불일치)면 축소. **「이 화면 요약」/페이지 요약 intent**면 `history_text`를 비우고 시맨틱 검색도 안 한다. 그 외는 직전 주제를 이어 대화. 새 LOT·수치는 지금 `page_context` / `rag_sources`에 있을 때만.  
+2. **히스토리:** `detect_topic_shift`(`그건 말고` · `다른 얘기` · 화면 경로 불일치)면 축소. **「이 화면 요약」/페이지 요약 intent**면 `history_text`를 비우고 시맨틱 검색도 안 한다. **LOT/이슈 ID 질문 + 설정·문의·SPC 화면**이면 그 ID가 있는 턴만 남긴다. 그 외는 직전 주제를 이어 대화. 새 LOT·수치는 지금 `page_context` / `rag_sources`에 있을 때만.  
 3. **`slice_page_context_for_query(message, page_context)`**  
    1. `visible_ui_for_route`  
    2. **offscreen**이면 focus 제거 + `empty_hint` + `primary_table=offscreen` → 종료  
@@ -217,9 +217,10 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
       - SPC 질문 + 그래프 없음 → `focus_spc_absent` (deterministic)  
       - 그 외 → `primary_table=focus` **이되 page_payload 목록은 유지** (`last_event` 포함). 목록 omit 없음.  
    4. **페이지 요약 intent**이면 지금 route 테이블 전체(`page_payload`). 쿼리 토큰으로 행을 깎지 않음. payload가 비면 `empty_hint`만 (히스토리로 이전 화면을 채우지 않음).  
-   5. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
+   5. **LOT/이슈 ID가 메시지에 있고** route가 `/setting`·`/inquiry`·`/management`이면 설정/문의 UI 필드를 제거 (`primary_table=entity`). 폰트·테마를 근거로 쓰지 않음.  
+   6. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
 4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
-5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석). 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 JSON으로 메우지 않되 **page_context는 유지**.  
+5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석) 또는 **왜/원인 + LOT·불량률·잔류**. 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 KPI로 메우지 않되 **page_context는 유지**.  LOT 왜-질문은 설정 JSON으로 메우지 않음.  
 6. **predict/whatif:** features 있을 때 registry 헤드.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
@@ -231,7 +232,7 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 ### 4.3 focus를 쓰는가 (`should_prefer_focus`)
 
 - **유지:** 「이거 / 이 로트 / 방금 클릭」 등 deixis, 또는 목록 질문이 아닌 일반 질문 + focus 존재  
-- **이탈:** 「그건 말고」, 메시지 LOT와 focus LOT가 서로소, **페이지 요약 intent**, 「이 화면·목록·몇 건·KPI·Q-COST·설정·문의 게시판」 등 **목록성** 질문(deixis 없을 때)
+- **이탈:** 「그건 말고」, 메시지 LOT와 focus LOT가 서로소, **페이지 요약 intent**, **설정/문의에서 LOT·이슈 ID 질문**(focus가 그 ID가 아니면), 「이 화면·목록·몇 건·KPI·Q-COST·설정·문의 게시판」 등 **목록성** 질문(deixis 없을 때)
 
 ### 4.4 확정 답 (LLM 없이)
 
@@ -322,6 +323,7 @@ LLM이면 1차 초안은 클라이언트에 안 흘리고, **2차 polish 텍스�
 | 임의 + 문서 분석 요청 | 「SOP 찾아줘」 / 「규정 요약해줘」 | RAG ON + LLM 합성 + 2차 polish |
 | 문서 후속 | 「그건 왜야」 | 히스토리 유지, retrieve 쿼리 확장 |
 | 칩 「이 화면 요약」 | 「지금 보고 있는 화면 데이터를 요약해 주세요」 | 히스토리/RAG/focus 없음. 지금 route `page_payload`만 |
+| 임의 + LOT 왜 불량률 | 「LOT-…은 왜 불량률이 높지」 | RAG ON. 설정/문의 UI 금지. 해당 LOT 필드 + 문서로 원인 |
 | 문서 질문 0히트 | 「SOP 찾아줘」 무히트 | 화면 KPI로 메우지 않음 |
 | 공정값 features 첨부 | 「불량 진단해줘」 | predict 헤드 + compose |
 

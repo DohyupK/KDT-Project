@@ -25,6 +25,7 @@ from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
 from agent.api_llm.grounding import (
     deterministic_user_reply,
+    is_lot_why_intent,
     is_page_summary_intent,
     join_spaced_parts,
     normalize_korean_reply,
@@ -142,6 +143,8 @@ def needs_rag(
         return False
     if is_page_summary_intent(m):
         return False
+    if is_lot_why_intent(m):
+        return True
     if _DOC_INTENT_RE.search(m):
         return True
     if _DOC_SYNTH_RE.search(m) and _DOC_NOUN_RE.search(m):

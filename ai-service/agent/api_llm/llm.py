@@ -23,7 +23,9 @@ from agent.api_llm.prompts import (
 from agent.api_llm.grounding import (
     analysis_mode,
     build_grounding,
+    is_lot_why_intent,
     is_page_summary_intent,
+    message_lot_issue_ids,
     normalize_korean_reply,
     route_label,
 )
@@ -70,11 +72,13 @@ def _build_messages(
     sources = list(rag_sources or [])
     pc_out = page_context
     if sources:
-        grounding.pop("analysis_hint", None)
+        if not is_lot_why_intent(message):
+            grounding.pop("analysis_hint", None)
     elif need_rag:
         grounding["empty_answer_hint"] = RAG_EMPTY_HINT
 
     page_sum = is_page_summary_intent(message)
+    ents = message_lot_issue_ids(message)
     payload = {
         "user_message": message,
         "recent_turns": None if page_sum else ((history_text or "").strip() or None),
@@ -93,11 +97,15 @@ def _build_messages(
         "rag_sources": sources,
         "error": error,
     }
-    follow = (
-        "이전 대화는 무시하고 지금 page_payload만 요약하세요. "
-        if page_sum
-        else "recent_turns가 있으면 이어서 대화하세요. "
-    )
+    if page_sum:
+        follow = "이전 대화는 무시하고 지금 page_payload만 요약하세요. "
+    elif ents:
+        follow = (
+            "질문에 있는 LOT/이슈만 답하세요. "
+            "page_payload의 설정/문의 필드는 인용하지 마세요. "
+        )
+    else:
+        follow = "recent_turns가 있으면 이어서 대화하세요. "
     return [
         SystemMessage(content=system),
         HumanMessage(
