@@ -10,15 +10,6 @@ import {
   type ReactNode,
 } from 'react'
 
-/** Internal page-chat context (not shown in UI). Sent with general /api/chat. */
-export type PageChatContextPayload = {
-  route: string
-  focusId?: string | null
-  focusPayload?: unknown
-  pagePayload?: unknown
-  supplementHints?: string[]
-}
-
 export type PageChatEventType =
   | 'row_click'
   | 'row_select'
@@ -27,6 +18,24 @@ export type PageChatEventType =
   | 'kpi_click'
   | 'download'
   | 'clear'
+
+/** Last UI action on the current page (sent with pagePayload every chat turn). */
+export type PageChatLastEvent = {
+  type: PageChatEventType
+  target: string
+  entityId?: string | null
+  ts: string
+}
+
+/** Internal page-chat context (not shown in UI). Sent with general /api/chat. */
+export type PageChatContextPayload = {
+  route: string
+  focusId?: string | null
+  focusPayload?: unknown
+  pagePayload?: unknown
+  lastEvent?: PageChatLastEvent | null
+  supplementHints?: string[]
+}
 
 export type PageChatEventInput = {
   type: PageChatEventType
@@ -71,6 +80,7 @@ function logPageChat(label: string, ctx: PageChatContextPayload) {
   console.info('[page-chat]', label, {
     route: ctx.route,
     focusId: ctx.focusId ?? null,
+    lastEvent: ctx.lastEvent ?? null,
     focusChars: payloadChars(ctx.focusPayload),
     pageChars: payloadChars(ctx.pagePayload),
     hints: ctx.supplementHints ?? [],
@@ -112,6 +122,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
     focusId: null,
     focusPayload: null,
     pagePayload: null,
+    lastEvent: null,
     supplementHints: [],
   })
   const snapshotRef = useRef(snapshot)
@@ -148,6 +159,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
         ...prev,
         focusId: null,
         focusPayload: null,
+        lastEvent: null,
       }
       logPageChat('clearFocus', next)
       return next
@@ -166,6 +178,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
           route,
           focusId: null,
           focusPayload: null,
+          lastEvent: null,
         }
         logPageChat('track:clear', next)
         return next
@@ -173,13 +186,20 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const lastEvent: PageChatLastEvent = {
+      type: event.type,
+      target: event.target,
+      entityId: event.entityId != null ? String(event.entityId) : null,
+      ts: new Date().toISOString(),
+    }
+
     setSnapshot((prev) => {
       const next: PageChatContextPayload = {
         ...prev,
         route,
-        // Prefer entityId (e.g. LOT-…) so chat grounding keys the clicked row
         focusId: (event.entityId && String(event.entityId).trim()) || event.target,
         focusPayload: truncated,
+        lastEvent,
       }
       logPageChat('track:focus', next)
       return next
@@ -193,6 +213,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
       focusId: null,
       focusPayload: null,
       pagePayload: null,
+      lastEvent: null,
       supplementHints: [],
     })
     logPageChat('resetForRoute', {
@@ -200,6 +221,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
       focusId: null,
       focusPayload: null,
       pagePayload: null,
+      lastEvent: null,
       supplementHints: [],
     })
     console.info('[page-chat-event]', {
@@ -219,6 +241,7 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
       focusId: cur.focusId ?? null,
       focusPayload: truncateJson(cur.focusPayload),
       pagePayload: truncateJson(cur.pagePayload),
+      lastEvent: cur.lastEvent ?? null,
       supplementHints: cur.supplementHints ?? [],
     }
     logPageChat('attach', out)

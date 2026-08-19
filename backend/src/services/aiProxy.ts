@@ -29,6 +29,20 @@ export type AiChatRequest = {
     focus_payload?: unknown
     pagePayload?: unknown
     page_payload?: unknown
+    lastEvent?: {
+      type?: string
+      target?: string
+      entityId?: string | null
+      entity_id?: string | null
+      ts?: string
+    } | null
+    last_event?: {
+      type?: string
+      target?: string
+      entityId?: string | null
+      entity_id?: string | null
+      ts?: string
+    } | null
     supplement?: Record<string, unknown> | null
     supplementHints?: string[]
     supplement_hints?: string[]
@@ -151,6 +165,19 @@ export async function predictVoting(features: PredictFeatureBody): Promise<AiVot
   return postAiJson<AiVotingResult>('/predict-voting', sanitizePredictBody(features))
 }
 
+function lastEventSnake(
+  pc: NonNullable<AiChatRequest['page_context']>,
+): Record<string, string | null> | null {
+  const raw = pc.last_event ?? pc.lastEvent ?? null
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    type: raw.type ?? null,
+    target: raw.target ?? null,
+    entity_id: raw.entity_id ?? raw.entityId ?? null,
+    ts: raw.ts ?? null,
+  }
+}
+
 export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
   const pc = body.page_context
   const page_context = pc
@@ -159,6 +186,7 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
         focus_id: pc.focus_id ?? pc.focusId ?? null,
         focus_payload: pc.focus_payload ?? pc.focusPayload ?? null,
         page_payload: pc.page_payload ?? pc.pagePayload ?? null,
+        last_event: lastEventSnake(pc),
         supplement: pc.supplement ?? null,
         supplement_hints: pc.supplement_hints ?? pc.supplementHints ?? [],
       }
@@ -198,6 +226,7 @@ export async function proxyChatStream(body: AiChatRequest): Promise<Response> {
         focus_id: pc.focus_id ?? pc.focusId ?? null,
         focus_payload: pc.focus_payload ?? pc.focusPayload ?? null,
         page_payload: pc.page_payload ?? pc.pagePayload ?? null,
+        last_event: lastEventSnake(pc),
         supplement: pc.supplement ?? null,
         supplement_hints: pc.supplement_hints ?? pc.supplementHints ?? [],
       }

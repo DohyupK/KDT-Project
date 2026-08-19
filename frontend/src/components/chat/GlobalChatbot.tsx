@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { Maximize2, MessageCircle, Minimize2, Shield, X } from 'lucide-react'
 import { useUiSettings } from '@/components/layout/AppShell'
 import SecurityChatbot from '@/components/chat/SecurityChatbot'
@@ -161,6 +162,7 @@ function formatThreadTime(iso?: string | null): string {
 
 export default function GlobalChatbot() {
   const { isDark } = useUiSettings()
+  const pathname = usePathname()
   const pageChat = usePageChatOptional()
   const [chatOpen, setChatOpen] = useState(false)
 
@@ -424,6 +426,7 @@ export default function GlobalChatbot() {
 
     try {
       const page_context = pageChat?.getChatPageContext()
+      const route = (pathname || page_context?.route || '/').trim() || '/'
       idRef.current += 1
       const aiId = idRef.current
       setMessages((prev) => [
@@ -439,13 +442,14 @@ export default function GlobalChatbot() {
           llm_mode: llmMode || 'auto',
           page_context: page_context
             ? {
-                route: page_context.route,
+                route,
                 focusId: page_context.focusId,
                 focusPayload: page_context.focusPayload,
                 pagePayload: page_context.pagePayload,
+                lastEvent: page_context.lastEvent ?? null,
                 supplementHints: page_context.supplementHints,
               }
-            : undefined,
+            : { route },
           // Models run whenever features exist on the AI side.
           enable_api_llm: Boolean(attached) || undefined,
         },

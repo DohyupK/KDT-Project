@@ -1,16 +1,23 @@
 /**
- * Hybrid page-context supplement: when FE payload is thin, fetch allowlisted
- * route summaries (top-N / KPI only — never full table dumps).
+ * Route-strict page-context hydrate: re-query this page's API with the
+ * screen filters and overwrite pagePayload lists. Never mix other pages.
  */
 import * as lotService from './lot.service.js'
 import * as issueService from './issue.service.js'
 import * as dashboardService from './dashboard.service.js'
+import type { LotRiskListQuery } from './dashboard.service.js'
 
 export type PageContextIn = {
   route?: string | null
   focusId?: string | null
   focusPayload?: unknown
   pagePayload?: unknown
+  lastEvent?: {
+    type?: string
+    target?: string
+    entityId?: string | null
+    ts?: string
+  } | null
   supplementHints?: string[] | null
 }
 
@@ -19,10 +26,14 @@ export type PageContextOut = {
   focusId: string | null
   focusPayload: unknown
   pagePayload: unknown
+  lastEvent: PageContextIn['lastEvent']
   supplement: Record<string, unknown> | null
 }
 
 const MAX_CHARS = 6_000
+const DASHBOARD_PAGE_SIZE = 8
+const MAIN_PAGE_SIZE = 8
+const ISSUE_PAGE_SIZE = 5
 
 function truncate(value: unknown): unknown {
   if (value == null) return value
@@ -45,122 +56,407 @@ function payloadThin(payload: unknown): boolean {
   }
 }
 
-async function supplementForRoute(
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function asStr(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function asPositiveInt(value: unknown, fallback: number): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
+}
+
+function isLotId(id: string): boolean {
+  return /^LOT[-_]/i.test(id)
+}
+
+function isIssueId(id: string): boolean {
+  return /^ISS[-_]/i.test(id)
+}
+
+function mapSpcToFilter(spcStatus: string | null | undefined): string {
+  const raw = (spcStatus || '').trim()
+  if (!raw) return '안정'
+  if (raw.includes('이탈') || raw.includes('이상')) return '이상'
+  if (raw.includes('주의')) return '주의'
+  return '안정'
+}
+
+function omitAll(value: string): string | undefined {
+  const v = value.trim()
+  if (!v || v === 'all') return undefined
+  return v
+}
+
+function lotRiskQueryFromPayload(pagePayload: Record<string, unknown>): LotRiskListQuery {
+  const lotRisks = asRecord(pagePayload.lotRisks) ?? {}
+  const filter = asRecord(lotRisks.filter) ?? {}
+  const probLevel = asStr(filter.probLevel)
+  const probParams =
+    probLevel === 'high'
+      ? { minProb: 0.4 }
+      : probLevel === 'mid'
+        ? { minProb: 0.2, maxProb: 0.4 }
+        : probLevel === 'low'
+          ? { maxProb: 0.2 }
+          : {}
+  return {
+    page: asPositiveInt(lotRisks.page, 1),
+    pageSize: DASHBOARD_PAGE_SIZE,
+    search: asStr(filter.lotQuery) || asStr(filter.search) || undefined,
+    marginLevel: omitAll(asStr(filter.marginLevel)),
+    residualLevel: omitAll(asStr(filter.residualLevel)),
+    riskLevel: omitAll(asStr(filter.grade) || asStr(filter.riskLevel)),
+    spc: omitAll(asStr(filter.spc)),
+    ...probParams,
+  }
+}
+
+function mapLotRiskItem(item: {
+  lotId: string
+  recordedAt?: string
+  defectProb: number | null
+  residualLithium: number | null
+  residualMargin: number | null
+  spcStatus: string | null
+  riskLevel: string | null
+  riskReason?: string | null
+}) {
+  return {
+    lotId: item.lotId,
+    recordedAt: item.recordedAt,
+    defectProb: item.defectProb,
+    residualLithium: item.residualLithium,
+    residualMargin: item.residualMargin,
+    spcStatus: item.spcStatus,
+    riskLevel: item.riskLevel,
+    riskReason: item.riskReason ?? null,
+    grade: item.riskLevel,
+    prob: item.defectProb,
+    predLi: item.residualLithium,
+    margin: item.residualMargin,
+    spc: item.spcStatus,
+  }
+}
+
+function mapIssueRow(item: {
+  issueId: string
+  lotId: string
+  riskLevel: string
+  spcStatus: string | null
+  createdAt: string
+  issueContent: string
+  hasAction: boolean
+}) {
+  return {
+    issueId: item.issueId,
+    lotId: item.lotId,
+    riskLevel: item.riskLevel,
+    risk: item.riskLevel,
+    spcStatus: item.spcStatus,
+    spc: item.spcStatus,
+    createdAt: item.createdAt,
+    date: item.createdAt.slice(0, 10),
+    issueContent: item.issueContent.slice(0, 200),
+    hasAction: item.hasAction,
+  }
+}
+
+function mergeRecord(base: unknown, overlay: Record<string, unknown>): Record<string, unknown> {
+  const current = asRecord(base) ?? {}
+  return { ...current, ...overlay }
+}
+
+async function hydrateDashboard(
+  pagePayload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const lotRisks = asRecord(pagePayload.lotRisks)
+  if (!lotRisks) return pagePayload
+
+  const query = lotRiskQueryFromPayload(pagePayload)
+  const listed = await dashboardService.listLotRisks(query)
+  const next: Record<string, unknown> = {
+    ...pagePayload,
+    lotRisks: {
+      ...lotRisks,
+      page: listed.page,
+      total: listed.total,
+      totalPages: listed.totalPages,
+      items: listed.items.map(mapLotRiskItem),
+    },
+  }
+
+  const selectedLot = asRecord(pagePayload.selectedLot)
+  const selectedId = asStr(selectedLot?.lotId)
+  if (selectedLot && selectedId) {
+    const row = listed.items.find((item) => item.lotId === selectedId)
+    if (row) {
+      next.selectedLot = mergeRecord(selectedLot, {
+        lotId: row.lotId,
+        detail: mergeRecord(selectedLot.detail, {
+          lotId: row.lotId,
+          defectProb: row.defectProb,
+          residualLithium: row.residualLithium,
+          residualMargin: row.residualMargin,
+          spcStatus: row.spcStatus,
+          riskLevel: row.riskLevel,
+          riskReason: row.riskReason,
+        }),
+      })
+    }
+  }
+
+  return next
+}
+
+async function hydrateIssue(
+  pagePayload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!('filters' in pagePayload)) return pagePayload
+
+  const filters = asRecord(pagePayload.filters) ?? {}
+  const search = asStr(filters.search)
+  const date = asStr(filters.date)
+  const lotId = asStr(filters.lot)
+  const riskLevel = asStr(filters.risk)
+  const spc = asStr(filters.spc)
+  const assignment = asStr(filters.assignment)
+  const page = asPositiveInt(pagePayload.page, 1)
+
+  const listed = await issueService.listOpenIssues({
+    search: search || undefined,
+    date: date || undefined,
+    lotId: lotId || undefined,
+    riskLevel: riskLevel || undefined,
+  })
+
+  let rows = listed.issues
+  if (spc) {
+    rows = rows.filter((item) => mapSpcToFilter(item.spcStatus) === spc)
+  }
+
+  const byId = new Map(rows.map((item) => [item.issueId, item]))
+  const next: Record<string, unknown> = { ...pagePayload, filters, page }
+
+  if (assignment === 'assigned' || assignment === 'unassigned') {
+    const feItems = Array.isArray(pagePayload.issues) ? pagePayload.issues : []
+    next.issues = feItems
+      .map((raw) => {
+        const fe = asRecord(raw)
+        if (!fe) return null
+        const id = asStr(fe.issueId)
+        if (!id) return null
+        const db = byId.get(id)
+        return db
+          ? {
+              ...fe,
+              ...mapIssueRow(db),
+              assignee: fe.assignee,
+              processStatus: fe.processStatus,
+              completed: fe.completed,
+            }
+          : fe
+      })
+      .filter(Boolean)
+    const feTotal = Number(pagePayload.totalOpen)
+    next.totalOpen =
+      Number.isFinite(feTotal) && feTotal >= 0
+        ? Math.floor(feTotal)
+        : (next.issues as unknown[]).length
+  } else {
+    const start = (page - 1) * ISSUE_PAGE_SIZE
+    next.totalOpen = rows.length
+    next.issues = rows.slice(start, start + ISSUE_PAGE_SIZE).map(mapIssueRow)
+  }
+
+  const selected = asRecord(pagePayload.selected)
+  const selectedId = asStr(selected?.issueId)
+  if (selected && isIssueId(selectedId)) {
+    try {
+      const detail = await issueService.getIssueById(selectedId)
+      next.selected = mergeRecord(selected, {
+        issueId: detail.issueId,
+        lotId: detail.lotId,
+        risk: detail.riskLevel,
+        riskLevel: detail.riskLevel,
+        issueContent: detail.issueContent.slice(0, 400),
+        assignee: detail.assigneeName,
+        completed: detail.completed,
+        action: (detail.actionContent ?? '').slice(0, 400),
+        analysis: detail.analysis,
+      })
+    } catch {
+      // keep FE selected
+    }
+  }
+
+  return next
+}
+
+async function hydrateMain(
+  pagePayload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const hasMain =
+    'riskTop' in pagePayload || 'dailyKpi' in pagePayload || 'qCost' in pagePayload
+  if (!hasMain) return pagePayload
+
+  const next: Record<string, unknown> = { ...pagePayload }
+  const riskTop = asRecord(pagePayload.riskTop)
+  if (riskTop) {
+    const top = await lotService.getRiskTop({
+      page: asPositiveInt(riskTop.page, 1),
+      pageSize: MAIN_PAGE_SIZE,
+    })
+    next.riskTop = {
+      ...riskTop,
+      page: top.page,
+      total: top.total,
+      totalPages: top.totalPages,
+      lots: top.lots.map((lot) => ({
+        lotId: lot.lotId,
+        defectProb: lot.defectProb,
+        riskScore: lot.defectProb,
+        status: lot.riskLevel,
+        riskLevel: lot.riskLevel,
+        riskReason: lot.riskReason,
+        recordedAt: lot.recordedAt,
+        residualLithium: lot.residualLithium,
+        residualMargin: lot.residualMargin,
+        spcStatus: lot.spcStatus,
+      })),
+    }
+  }
+
+  if ('dailyKpi' in pagePayload) {
+    next.dailyKpi = await lotService.getDailyProbabilityKpi()
+  }
+
+  const qCost = asRecord(pagePayload.qCost)
+  if (qCost) {
+    const from = asStr(qCost.from)
+    const to = asStr(qCost.to)
+    next.qCost = {
+      ...qCost,
+      ...(await lotService.getQCostSummary({
+        from: from || undefined,
+        to: to || undefined,
+      })),
+    }
+  }
+
+  return next
+}
+
+async function hydratePagePayload(
   route: string,
-  hints: string[],
-): Promise<Record<string, unknown> | null> {
-  const out: Record<string, unknown> = {}
+  pagePayload: unknown,
+): Promise<unknown> {
+  if (payloadThin(pagePayload)) return pagePayload
+  const payload = asRecord(pagePayload)
+  if (!payload) return pagePayload
+
   const r = route.toLowerCase()
-  // These pages must never get LOT/handover/past-issue bleed from other routes.
-  if (
-    r.includes('/knowledge') ||
-    r.includes('/inquiry') ||
-    r.includes('/setting')
-  ) {
-    return null
-  }
-
   try {
-    const onMain = r.includes('/main')
-    if (onMain || hints.includes('risk-top') || hints.includes('daily-kpi') || hints.includes('q-cost')) {
-      if ((onMain && hints.length === 0) || hints.includes('risk-top')) {
-        const top = await lotService.getRiskTop({ page: 1, pageSize: 5 })
-        out.riskTop = {
-          total: top.total,
-          page: top.page,
-          lots: top.lots.slice(0, 5).map((l) => ({
-            lotId: l.lotId,
-            recordedAt: l.recordedAt,
-            riskLevel: l.riskLevel,
-            spcStatus: l.spcStatus,
-            defectProb: l.defectProb,
-          })),
-        }
-      }
-      if ((onMain && hints.length === 0) || hints.includes('daily-kpi')) {
-        out.dailyKpi = await lotService.getDailyProbabilityKpi()
-      }
-      if ((onMain && hints.length === 0) || hints.includes('q-cost')) {
-        out.qCost = await lotService.getQCostSummary({})
-      }
-    }
-
-    if (r.includes('/dashboard') || hints.some((h) => h.startsWith('dashboard'))) {
-      const risks = await dashboardService.listLotRisks({ page: 1, pageSize: 5 })
-      out.lotRisks = {
-        total: risks.total,
-        items: risks.items.slice(0, 5),
-      }
-    }
-
-    if (r.includes('/issue') || hints.includes('issues')) {
-      const listed = await issueService.listOpenIssues({})
-      out.issues = {
-        total: listed.total,
-        items: listed.issues.slice(0, 5).map((i) => ({
-          issueId: i.issueId,
-          lotId: i.lotId,
-          riskLevel: i.riskLevel,
-          spcStatus: i.spcStatus,
-          createdAt: i.createdAt,
-        })),
-      }
-    }
-
-    // past-issues hint only when not on knowledge (knowledge returns early above)
-    if (hints.includes('past-issues')) {
-      const past = await issueService.listPastIssues()
-      out.pastIssues = {
-        total: past.total,
-        items: past.items.slice(0, 5),
-      }
-    }
-
-    if (r.includes('/management') || r.includes('/spc') || hints.includes('spc')) {
-      out.spcPage = {
-        note: 'SPC page embeds Grafana; no dense LOT series in this supplement.',
-        route: '/management',
-      }
-    }
+    if (r.includes('/dashboard')) return await hydrateDashboard(payload)
+    if (r.includes('/issue')) return await hydrateIssue(payload)
+    if (r.includes('/main')) return await hydrateMain(payload)
   } catch (err) {
-    out._supplementError = err instanceof Error ? err.message : String(err)
+    console.debug('[page-chat] hydrate skipped', {
+      route,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return pagePayload
   }
+  return pagePayload
+}
 
-  return Object.keys(out).length ? out : null
+async function hydrateFocus(
+  route: string,
+  focusId: string | null,
+  focusPayload: unknown,
+): Promise<unknown> {
+  if (!focusId) return focusPayload
+  const r = route.toLowerCase()
+  try {
+    if (r.includes('/dashboard') && isLotId(focusId)) {
+      const detail = await dashboardService.getLotRiskDetail(focusId)
+      return mergeRecord(focusPayload, {
+        lotId: detail.lotId,
+        defectProb: detail.defectProb,
+        residualLithium: detail.residualLithium,
+        residualMargin: detail.residualMargin,
+        spcStatus: detail.spcStatus,
+        riskLevel: detail.riskLevel,
+        riskReason: detail.riskReason,
+        grade: detail.riskLevel,
+        prob: detail.defectProb,
+        predLi: detail.residualLithium,
+        margin: detail.residualMargin,
+        spc: detail.spcStatus,
+      })
+    }
+    if (r.includes('/issue') && isIssueId(focusId)) {
+      const detail = await issueService.getIssueById(focusId)
+      return mergeRecord(focusPayload, {
+        issueId: detail.issueId,
+        lotId: detail.lotId,
+        riskLevel: detail.riskLevel,
+        risk: detail.riskLevel,
+        spcStatus: detail.spcStatus,
+        spc: detail.spcStatus,
+        createdAt: detail.createdAt,
+        issueContent: detail.issueContent,
+        assignee: detail.assigneeName,
+        completed: detail.completed,
+        actionContent: detail.actionContent,
+        analysis: detail.analysis,
+      })
+    }
+    if (r.includes('/main') && isLotId(focusId)) {
+      const lot = await lotService.getLotById(focusId)
+      return mergeRecord(focusPayload, {
+        lotId: lot.lotId,
+        defectProb: lot.defectProb,
+        riskScore: lot.defectProb,
+        status: lot.riskLevel,
+        riskLevel: lot.riskLevel,
+        riskReason: lot.riskReason,
+        residualLithium: lot.residualLithium,
+        residualMargin: lot.residualMargin,
+        spcStatus: lot.spcStatus,
+      })
+    }
+  } catch {
+    return focusPayload
+  }
+  return focusPayload
 }
 
 /**
- * Merge FE page_context with optional server supplement.
- * Priority for LLM: focusPayload > pagePayload > supplement.
+ * Re-query this route's DB with screen filters. Never attach other-page rows.
  */
 export async function enrichPageContext(
   input: PageContextIn | null | undefined,
 ): Promise<PageContextOut | null> {
   if (!input || typeof input !== 'object') return null
   const route = String(input.route || '/').trim() || '/'
-  const hints = Array.isArray(input.supplementHints)
-    ? input.supplementHints.map(String)
-    : []
+  const focusId = input.focusId != null ? String(input.focusId) : null
 
-  let supplement: Record<string, unknown> | null = null
-  // Only supplement when FE payload is thin. Do not fetch LOT/risk because
-  // hints alone are present on a rich page (avoids inventing off-screen %).
-  const thin = payloadThin(input.pagePayload)
-  const routeLower = route.toLowerCase()
-  const noSupplementRoutes =
-    routeLower.includes('/knowledge') ||
-    routeLower.includes('/inquiry') ||
-    routeLower.includes('/setting')
-  if (thin && !noSupplementRoutes) {
-    supplement = await supplementForRoute(route, hints)
-  }
+  const pagePayload = await hydratePagePayload(route, input.pagePayload ?? null)
+  const focusPayload = await hydrateFocus(route, focusId, input.focusPayload ?? null)
 
   const out: PageContextOut = {
     route,
-    focusId: input.focusId != null ? String(input.focusId) : null,
-    focusPayload: truncate(input.focusPayload ?? null),
-    pagePayload: truncate(input.pagePayload ?? null),
-    supplement: supplement ? (truncate(supplement) as Record<string, unknown>) : null,
+    focusId,
+    focusPayload: truncate(focusPayload),
+    pagePayload: truncate(pagePayload),
+    lastEvent: input.lastEvent ?? null,
+    supplement: null,
   }
 
   console.debug('[page-chat] enrich', {
@@ -168,7 +464,8 @@ export async function enrichPageContext(
     focusId: out.focusId,
     hasFocus: out.focusPayload != null,
     hasPage: out.pagePayload != null,
-    hasSupplement: out.supplement != null,
+    hasLastEvent: out.lastEvent != null,
+    hasSupplement: false,
   })
 
   return out

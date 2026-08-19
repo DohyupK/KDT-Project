@@ -386,6 +386,7 @@ def chat_endpoint(
             "page_payload": raw.get("page_payload")
             if "page_payload" in raw
             else raw.get("pagePayload"),
+            "last_event": raw.get("last_event") or raw.get("lastEvent"),
             "supplement": raw.get("supplement"),
             "supplement_hints": raw.get("supplement_hints")
             or raw.get("supplementHints"),
@@ -513,6 +514,7 @@ async def chat_stream_endpoint(
             "page_payload": raw.get("page_payload")
             if "page_payload" in raw
             else raw.get("pagePayload"),
+            "last_event": raw.get("last_event") or raw.get("lastEvent"),
             "supplement": raw.get("supplement"),
             "supplement_hints": raw.get("supplement_hints")
             or raw.get("supplementHints"),

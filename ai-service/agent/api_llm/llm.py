@@ -67,14 +67,6 @@ def _build_messages(
         grounding.pop("analysis_hint", None)
     elif need_rag:
         grounding["empty_answer_hint"] = RAG_EMPTY_HINT
-        if isinstance(page_context, dict):
-            pc_out = {
-                "route": page_context.get("route") or page_context.get("Route") or "/",
-                "page_payload": {
-                    "empty_hint": RAG_EMPTY_HINT,
-                    "primary_table": "offscreen",
-                },
-            }
 
     payload = {
         "user_message": message,
@@ -100,7 +92,8 @@ def _build_messages(
             content=(
                 "아래 JSON을 보고 한국어로 답해 주세요. "
                 f"지금 화면 route={route or '/'} ({route_label(route)}). "
-                "recent_turns가 있으면 이어서 대화하세요.\n"
+                "recent_turns가 있으면 이어서 대화하세요. "
+                "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
                 + json.dumps(payload, ensure_ascii=False, default=str)
             )
         ),
