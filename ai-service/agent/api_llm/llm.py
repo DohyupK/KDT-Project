@@ -14,7 +14,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.api_llm.prompts import SYSTEM_COMPOSE, USAGE_GUIDELINE
+from agent.api_llm.prompts import (
+    RAG_EMPTY_HINT,
+    SYSTEM_COMPOSE,
+    SYSTEM_POLISH,
+    USAGE_GUIDELINE,
+)
 from agent.api_llm.grounding import analysis_mode, build_grounding, normalize_korean_reply, route_label
 from agent.api_llm.providers import (
     invoke_credential,
@@ -45,6 +50,8 @@ def _build_messages(
     head_results: dict[str, Any] | None = None,
     rag_sources: list[dict[str, Any]] | None = None,
     page_context: dict[str, Any] | None = None,
+    history_text: str | None = None,
+    need_rag: bool = False,
 ) -> list[Any]:
     system = SYSTEM_COMPOSE
     if need_guideline:
@@ -54,38 +61,119 @@ def _build_messages(
     if isinstance(page_context, dict):
         route = str(page_context.get("route") or page_context.get("Route") or "")
     grounding = build_grounding(message, page_context, predict_result)
+    sources = list(rag_sources or [])
+    pc_out = page_context
+    if sources:
+        grounding.pop("analysis_hint", None)
+    elif need_rag:
+        grounding["empty_answer_hint"] = RAG_EMPTY_HINT
+        if isinstance(page_context, dict):
+            pc_out = {
+                "route": page_context.get("route") or page_context.get("Route") or "/",
+                "page_payload": {
+                    "empty_hint": RAG_EMPTY_HINT,
+                    "primary_table": "offscreen",
+                },
+            }
+
     payload = {
         "user_message": message,
+        "recent_turns": (history_text or "").strip() or None,
         "route": route,
         "route_label": route_label(route),
-        "analysis_mode": analysis_mode(message) or grounding.get("analysis_mode"),
-        "page_context": page_context,
+        "analysis_mode": False if sources else (
+            analysis_mode(message) or grounding.get("analysis_mode")
+        ),
+        "page_context": pc_out,
         "grounding": grounding,
         "predict": predict_result,
         "capacity": capacity_result,
         "residual": residual_result,
         "heads": head_results,
         "recommendation": recommendation,
-        "rag_sources": rag_sources or [],
+        "rag_sources": sources,
         "error": error,
-        "need_guideline": need_guideline,
-        "data_note": (
-            "사실은 지금 화면 JSON과 grounding만 씁니다. empty_answer_hint가 있으면 그 안내를 먼저. "
-            "메뉴·숫자는 visible_ui·allowed_metric_keys에 있는 것만. 다른 화면은 경로만. "
-            "클릭된 lotId가 있으면 그 LOT만. analysis_mode면 해석 위주. "
-            "존댓말, 한두 문단, 띄어쓰기·줄바꿈. 내부 규칙은 읽지 않습니다."
-        ),
     }
     return [
         SystemMessage(content=system),
         HumanMessage(
             content=(
                 "아래 JSON을 보고 한국어로 답해 주세요. "
-                f"지금 화면 route={route or '/'} ({route_label(route)}).\n"
+                f"지금 화면 route={route or '/'} ({route_label(route)}). "
+                "recent_turns가 있으면 이어서 대화하세요.\n"
                 + json.dumps(payload, ensure_ascii=False, default=str)
             )
         ),
     ]
+
+
+def _invoke_text(
+    creds: list[Any],
+    messages: list[Any],
+    *,
+    llm_mode: str,
+    ladder_text: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Returns (text, provider_label, user_facing_error)."""
+    mode = (llm_mode or "auto").strip()
+    if mode != "auto":
+        chosen = next((c for c in creds if c.id == mode), None)
+        if chosen is None:
+            return None, None, "선택한 API를 찾을 수 없습니다. 설정 페이지에서 다시 저장해 주세요."
+        invoke_errors: list[str] = []
+        text = invoke_credential(chosen, messages, invoke_errors)
+        if text:
+            return text, chosen.display_name or chosen.company, None
+        err_detail = invoke_errors[-1] if invoke_errors else "invoke failed"
+        return None, chosen.display_name, translate_llm_error(err_detail)
+
+    ordered = select_auto_order(creds, ladder_text)
+    last_err: str | None = None
+    for i, cred in enumerate(ordered):
+        invoke_errors = []
+        text = invoke_credential(cred, messages, invoke_errors)
+        if text:
+            if i > 0 and AUTO_FALLBACK_NOTICE.strip() not in text:
+                text = text.rstrip() + AUTO_FALLBACK_NOTICE
+            return text, cred.display_name or cred.company, None
+        last_err = translate_llm_error(
+            invoke_errors[-1] if invoke_errors else "auto candidate failed",
+        )
+    return None, None, last_err
+
+
+def polish_reply(
+    draft: str,
+    *,
+    current_question: str,
+    llm_mode: str | None = "auto",
+    llm_credentials: list[dict[str, Any]] | None = None,
+) -> str:
+    """Second LLM pass: spacing + drop repeated numbered lists. Facts unchanged."""
+    draft = (draft or "").strip()
+    if not draft:
+        return draft
+    creds = resolve_credentials(llm_credentials)
+    if not creds:
+        return normalize_korean_reply(draft)
+    messages = [
+        SystemMessage(content=SYSTEM_POLISH),
+        HumanMessage(
+            content=(
+                f"사용자 질문:\n{(current_question or '').strip()}\n\n"
+                f"초안:\n{draft}"
+            )
+        ),
+    ]
+    text, _provider, _err = _invoke_text(
+        creds,
+        messages,
+        llm_mode=llm_mode or "auto",
+        ladder_text=draft,
+    )
+    if text and text.strip():
+        return normalize_korean_reply(text)
+    return normalize_korean_reply(draft)
 
 
 def compose_with_failover(
@@ -101,6 +189,8 @@ def compose_with_failover(
     head_results: dict[str, Any] | None = None,
     rag_sources: list[dict[str, Any]] | None = None,
     page_context: dict[str, Any] | None = None,
+    history_text: str | None = None,
+    need_rag: bool = False,
 ) -> tuple[str | None, str | None, str | None]:
     """
     Returns (reply_text, provider_label, user_facing_error).
@@ -113,7 +203,6 @@ def compose_with_failover(
     if not creds:
         return None, None, NO_CREDENTIALS_NOTICE
 
-    mode = (llm_mode or "auto").strip()
     messages = _build_messages(
         message,
         predict_result,
@@ -125,35 +214,24 @@ def compose_with_failover(
         head_results=head_results,
         rag_sources=rag_sources,
         page_context=page_context,
+        history_text=history_text,
+        need_rag=need_rag,
     )
-
-    if mode != "auto":
-        chosen = next((c for c in creds if c.id == mode), None)
-        if chosen is None:
-            return None, None, "선택한 API를 찾을 수 없습니다. 설정 페이지에서 다시 저장해 주세요."
-        invoke_errors: list[str] = []
-        text = invoke_credential(chosen, messages, invoke_errors)
-        if text:
-            return normalize_korean_reply(text), chosen.display_name or chosen.company, None
-        err_detail = invoke_errors[-1] if invoke_errors else "invoke failed"
-        return None, chosen.display_name, translate_llm_error(err_detail)
-
-    # Auto: cost ladder from floor(len/100), failover to next registered API
-    ordered = select_auto_order(creds, message)
-    last_err: str | None = None
-    for i, cred in enumerate(ordered):
-        invoke_errors = []
-        text = invoke_credential(cred, messages, invoke_errors)
-        if text:
-            if i > 0:
-                if AUTO_FALLBACK_NOTICE.strip() not in text:
-                    text = text.rstrip() + AUTO_FALLBACK_NOTICE
-            return normalize_korean_reply(text), cred.display_name or cred.company, None
-        last_err = translate_llm_error(
-            invoke_errors[-1] if invoke_errors else "auto candidate failed",
+    text, provider, llm_err = _invoke_text(
+        creds,
+        messages,
+        llm_mode=llm_mode or "auto",
+        ladder_text=message,
+    )
+    if text:
+        polished = polish_reply(
+            text,
+            current_question=message,
+            llm_mode=llm_mode,
+            llm_credentials=llm_credentials,
         )
-
-    return None, None, last_err
+        return polished, provider, None
+    return None, provider, llm_err
 
 
 def iter_compose_stream(
@@ -169,10 +247,12 @@ def iter_compose_stream(
     head_results: dict[str, Any] | None = None,
     rag_sources: list[dict[str, Any]] | None = None,
     page_context: dict[str, Any] | None = None,
+    history_text: str | None = None,
+    need_rag: bool = False,
 ):
     """
-    Yield ("delta", text) chunks then ("done", {reply, provider, error}).
-    Prefer OpenAI-compatible streaming; otherwise one-shot then chunk.
+    Buffer 1st compose, polish, then yield ("delta", polished chunks)
+    and ("done", {reply, provider, error}). Draft is not streamed.
     """
     if not llm_enabled():
         yield ("done", {"reply": None, "provider": None, "error": None})
@@ -194,6 +274,8 @@ def iter_compose_stream(
         head_results=head_results,
         rag_sources=rag_sources,
         page_context=page_context,
+        history_text=history_text,
+        need_rag=need_rag,
     )
     mode = (llm_mode or "auto").strip()
     ordered = (
@@ -221,7 +303,6 @@ def iter_compose_stream(
             if cred.provider_kind == "openai_compatible":
                 for piece in stream_openai_compatible(cred, messages):
                     buf.append(piece)
-                    yield ("delta", piece)
                 text = "".join(buf).strip()
             else:
                 errs: list[str] = []
@@ -229,18 +310,19 @@ def iter_compose_stream(
                 if not text and errs:
                     last_err = translate_llm_error(errs[-1])
                     continue
-                # Perceived streaming for non-stream providers
-                step = 48
-                for j in range(0, len(text), step):
-                    chunk = text[j : j + step]
-                    yield ("delta", chunk)
             if text:
                 if i > 0 and AUTO_FALLBACK_NOTICE.strip() not in text:
-                    notice = AUTO_FALLBACK_NOTICE
-                    yield ("delta", notice)
-                    text = text.rstrip() + notice
-                text = normalize_korean_reply(text)
-                yield ("done", {"reply": text, "provider": label, "error": None})
+                    text = text.rstrip() + AUTO_FALLBACK_NOTICE
+                polished = polish_reply(
+                    text,
+                    current_question=message,
+                    llm_mode=llm_mode,
+                    llm_credentials=llm_credentials,
+                )
+                step = 48
+                for j in range(0, len(polished), step):
+                    yield ("delta", polished[j : j + step])
+                yield ("done", {"reply": polished, "provider": label, "error": None})
                 return
         except Exception as exc:  # noqa: BLE001
             last_err = translate_llm_error(exc)

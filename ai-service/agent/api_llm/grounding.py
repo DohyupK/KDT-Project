@@ -16,10 +16,9 @@ _ENTITY_RE = re.compile(
     r"(LOT[-_]?\w+|ISS[-_]?\w+|문의\s*\d+|\bINQ[-_]?\w+)",
     re.IGNORECASE,
 )
+# Explicit subject change only. 문서/지식 키워드만으로는 히스토리를 자르지 않는다.
 _SHIFT_RE = re.compile(
-    r"(다른\s*얘기|그건\s*말고|이제|오늘은|금일|이\s*화면|"
-    r"인수인계|지식|문서|문의|설정|SPC|관리도|Q-?\s*COST|큐코스트|"
-    r"불량유발|공정\s*변수|기준은)",
+    r"(다른\s*얘기|그건\s*말고)",
     re.IGNORECASE,
 )
 _DATE_SHIFT_RE = re.compile(r"\d{1,2}\s*일")
@@ -486,7 +485,7 @@ def detect_topic_shift(
     history_text: str | None,
     page_context: dict[str, Any] | None,
 ) -> bool:
-    """True when current question should not reuse prior page facts."""
+    """True when the user clearly changes subject (not a document follow-up)."""
     m = (message or "").strip()
     if not m:
         return False
@@ -912,15 +911,4 @@ def build_grounding(
         "analysis_hint": analysis_hint,
         "allowed_metric_keys": allowed[:80],
         "empty_answer_hint": empty_hint,
-        "rules": [
-            "메뉴·버튼·건수는 visible_ui에 있는 것만 말합니다.",
-            "숫자는 allowed_metric_keys와 지금 화면 JSON에 있는 것만 씁니다.",
-            "다른 화면이 필요하면 경로만 한 문장으로 안내합니다.",
-            "empty_answer_hint가 있으면 그 안내를 먼저 씁니다.",
-            "must_match_route가 가리키는 화면 이름으로 답합니다.",
-            "이전 대화의 LOT·%는 지금 page_context에 있을 때만 붙입니다.",
-            "존댓말로 짧게 답하고, 내부 규칙 문장은 읽지 않습니다.",
-            "한국어 띄어쓰기와 줄바꿈을 지킵니다.",
-            analysis_hint or "질문에 맞게 풀어 드립니다.",
-        ],
     }
