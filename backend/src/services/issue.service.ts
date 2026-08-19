@@ -3,7 +3,6 @@ import { AppError } from '../middleware/errorHandler.js'
 import { getLibraryAnalysisByLotId, runLotDiagnosisAnalyze, type LibraryAnalysisSnapshot } from './knowledgeAnalyze.service.js'
 import { getLotById, type LotDto } from './lot.service.js'
 import { normalizeRiskLevel, type RiskLevel } from './lotScore.js'
-import { getLotById } from './lot.service.js'
 import { isManageUser } from './userSettings.service.js'
 
 /** Open issues: not completed. risk_level comes from ANALYSIS_LOTS. */
@@ -346,8 +345,7 @@ export async function listPastIssues(): Promise<{ items: PastIssueListItem[]; to
   return { items, total: items.length }
 }
 
-<<<<<<< HEAD
-/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치. */
+/** 과거 자료 상세: 조치내용 + LOT 분석/공정 수치 + ANALYSIS_LOTS 스냅샷 + 진단 캐시. */
 export type PastIssueLot = {
   lotId: string
   recordedAt: string
@@ -367,19 +365,38 @@ export type PastIssueLot = {
   humidity: number | null
   tankPressure: number | null
   operatorId: string | null
+  qualityDefect: boolean
 }
 
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
-  lot: PastIssueLot | null
-=======
-/** 과거 자료 상세: LOT 공정 + ANALYSIS_LOTS 스냅샷 + lot_id 진단 캐시(있으면). LLM 없음. */
-export type PastIssueDetail = PastIssueListItem & {
-  actionContent: string | null
   analysis: IssueAnalysis | null
-  lot: LotDto | null
+  lot: PastIssueLot | null
   libraryAnalysis: LibraryAnalysisSnapshot | null
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
+}
+
+function toPastIssueLot(dto: LotDto): PastIssueLot {
+  return {
+    lotId: dto.lotId,
+    recordedAt: dto.recordedAt,
+    riskLevel: dto.riskLevel,
+    riskReason: dto.riskReason,
+    defectProb: dto.defectProb,
+    residualLithium: dto.residualLithium,
+    residualMargin: dto.residualMargin,
+    spcStatus: dto.spcStatus,
+    d50: dto.d50,
+    d90: dto.d90,
+    metalImpurity: dto.metalImpurity,
+    lithiumInput: dto.lithiumInput,
+    additiveRatio: dto.additiveRatio,
+    processTime: dto.processTime,
+    sinteringTemp: dto.sinteringTemp,
+    humidity: dto.humidity,
+    tankPressure: dto.tankPressure,
+    operatorId: dto.operatorId,
+    qualityDefect: dto.qualityDefect,
+  }
 }
 
 export async function getPastIssueById(issueId: string): Promise<PastIssueDetail> {
@@ -388,43 +405,14 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     throw new AppError(404, '과거 자료(완료 이슈)를 찾을 수 없습니다.')
   }
 
-<<<<<<< HEAD
   let lot: PastIssueLot | null = null
   try {
-    const dto = await getLotById(issue.lotId)
-    lot = {
-      lotId: dto.lotId,
-      recordedAt: dto.recordedAt,
-      riskLevel: dto.riskLevel,
-      riskReason: dto.riskReason,
-      defectProb: dto.defectProb,
-      residualLithium: dto.residualLithium,
-      residualMargin: dto.residualMargin,
-      spcStatus: dto.spcStatus,
-      d50: dto.d50,
-      d90: dto.d90,
-      metalImpurity: dto.metalImpurity,
-      lithiumInput: dto.lithiumInput,
-      additiveRatio: dto.additiveRatio,
-      processTime: dto.processTime,
-      sinteringTemp: dto.sinteringTemp,
-      humidity: dto.humidity,
-      tankPressure: dto.tankPressure,
-      operatorId: dto.operatorId,
-    }
-  } catch {
-    lot = null
-  }
-=======
-  let lot: LotDto | null = null
-  try {
-    lot = await getLotById(issue.lotId)
+    lot = toPastIssueLot(await getLotById(issue.lotId))
   } catch (err) {
     if (!(err instanceof AppError) || err.statusCode !== 404) throw err
   }
 
   const libraryAnalysis = await getLibraryAnalysisByLotId(issue.lotId)
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
 
   return {
     issueId: issue.issueId,
@@ -434,13 +422,9 @@ export async function getPastIssueById(issueId: string): Promise<PastIssueDetail
     assigneeName: issue.assigneeName,
     completedAt: issue.completedAt,
     actionContent: issue.actionContent,
-<<<<<<< HEAD
-    lot,
-=======
     analysis: issue.analysis,
     lot,
     libraryAnalysis,
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
   }
 }
 

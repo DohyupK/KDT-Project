@@ -647,8 +647,16 @@ export default function InquiryPage() {
     setCurrentPage(1);
   };
 
-  const handleApplyFilters = () => {
-    setAppliedFilters(draftFilters);
+  const applyInstantFilters = (
+    patch: Partial<Pick<InquiryFilterState, 'category' | 'status' | 'startDate' | 'endDate'>>,
+  ) => {
+    setDraftFilters((prev) => ({ ...prev, ...patch }));
+    setAppliedFilters((prev) => ({ ...prev, ...patch }));
+    setCurrentPage(1);
+  };
+
+  const handleApplySearch = () => {
+    setAppliedFilters((prev) => ({ ...prev, search: draftFilters.search }));
     setCurrentPage(1);
   };
 
@@ -1029,110 +1037,101 @@ export default function InquiryPage() {
             className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault();
-              handleApplyFilters();
+              handleApplySearch();
             }}
           >
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 카테고리
               </span>
               {CATEGORY_FILTERS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() =>
-                    setDraftFilters((prev) => ({ ...prev, category: item.key }))
-                  }
+                  onClick={() => applyInstantFilters({ category: item.key })}
                   className={filterChipClass(draftFilters.category === item.key)}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                상태
-              </span>
-              {STATUS_FILTERS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() =>
-                    setDraftFilters((prev) => ({ ...prev, status: item.key }))
-                  }
-                  className={filterChipClass(draftFilters.status === item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  상태
+                </span>
+                {STATUS_FILTERS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => applyInstantFilters({ status: item.key })}
+                    className={filterChipClass(draftFilters.status === item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="flex flex-wrap items-center gap-2"
+                aria-label="문의 기간"
+              >
+                <span className={`shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  기간
+                </span>
+                <div className="w-[9.75rem] shrink-0">
+                  <DateInput
+                    id="inquiry-start-date"
+                    aria-label="문의 시작일"
+                    value={draftFilters.startDate}
+                    onChange={(startDate) => applyInstantFilters({ startDate })}
+                    isDark={isDark}
+                  />
+                </div>
+                <span className={`shrink-0 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  ~
+                </span>
+                <div className="w-[9.75rem] shrink-0">
+                  <DateInput
+                    id="inquiry-end-date"
+                    aria-label="문의 종료일"
+                    value={draftFilters.endDate}
+                    onChange={(endDate) => applyInstantFilters({ endDate })}
+                    isDark={isDark}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="w-full min-w-[140px] sm:w-[148px]">
-                <label
-                  htmlFor="inquiry-start-date"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  시작일
-                </label>
-                <DateInput
-                  id="inquiry-start-date"
-                  aria-label="문의 시작일"
-                  value={draftFilters.startDate}
-                  onChange={(startDate) =>
-                    setDraftFilters((prev) => ({ ...prev, startDate }))
-                  }
-                  isDark={isDark}
-                />
-              </div>
-              <div className="w-full min-w-[140px] sm:w-[148px]">
-                <label
-                  htmlFor="inquiry-end-date"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  종료일
-                </label>
-                <DateInput
-                  id="inquiry-end-date"
-                  aria-label="문의 종료일"
-                  value={draftFilters.endDate}
-                  onChange={(endDate) =>
-                    setDraftFilters((prev) => ({ ...prev, endDate }))
-                  }
-                  isDark={isDark}
-                />
-              </div>
-              <div className="min-w-[200px] flex-1">
-                <label
-                  htmlFor="inquiry-search"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  검색
-                </label>
-                <input
-                  id="inquiry-search"
-                  type="search"
-                  value={draftFilters.search}
-                  onChange={(event) =>
-                    setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
-                  }
-                  placeholder="제목 또는 내용 검색..."
-                  className={`h-9 w-full rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
-                      : 'border-slate-200 bg-white text-slate-800'
-                  }`}
-                />
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="inquiry-search"
+                className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+              >
+                검색
+              </label>
+              <input
+                id="inquiry-search"
+                type="search"
+                value={draftFilters.search}
+                onChange={(event) =>
+                  setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
+                }
+                placeholder="제목 또는 내용 검색..."
+                className={`h-9 min-w-[200px] flex-1 rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
+                    : 'border-slate-200 bg-white text-slate-800'
+                }`}
+              />
               <button
                 type="submit"
-                className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                className="inline-flex h-9 shrink-0 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 검색
               </button>
               <button
                 type="button"
                 onClick={resetFilters}
-                className={`inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                className={`inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   isDark
                     ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
                     : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'

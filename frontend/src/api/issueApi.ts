@@ -91,15 +91,6 @@ export type PastIssueListItem = {
 export type PastIssueLot = {
   lotId: string
   recordedAt: string
-<<<<<<< HEAD
-  riskLevel: IssueRiskLevel
-  riskReason: string | null
-  defectProb: number | null
-  residualLithium: number | null
-  residualMargin: number | null
-  spcStatus: string | null
-=======
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
   d50: number | null
   d90: number | null
   metalImpurity: number | null
@@ -110,8 +101,6 @@ export type PastIssueLot = {
   humidity: number | null
   tankPressure: number | null
   operatorId: string | null
-<<<<<<< HEAD
-=======
   qualityDefect: boolean
   defectProb: number | null
   residualLithium: number | null
@@ -125,18 +114,13 @@ export type LibraryAnalysisSnapshot = {
   id: number
   analysisContent: string
   createdAt: string
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
 }
 
 export type PastIssueDetail = PastIssueListItem & {
   actionContent: string | null
-<<<<<<< HEAD
-  lot: PastIssueLot | null
-=======
   analysis: IssueAnalysis | null
   lot: PastIssueLot | null
   libraryAnalysis: LibraryAnalysisSnapshot | null
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
 }
 
 export const issueApi = {

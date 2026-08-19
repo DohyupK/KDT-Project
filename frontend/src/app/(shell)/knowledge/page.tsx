@@ -12,17 +12,13 @@ import {
   consumeLocalKnowledgeForLlm,
 } from '@/lib/completedKnowledgeTransfer';
 import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
-<<<<<<< HEAD
 import {
   issueApi,
   normalizeIssueRiskLevel,
   type HandoverHistoryItem,
+  type PastIssueDetail,
   type PastIssueLot,
 } from '@/api/issueApi';
-import { postChat } from '@/api/aiApi';
-=======
-import { issueApi, normalizeIssueRiskLevel, type HandoverHistoryItem, type PastIssueDetail, type PastIssueLot } from '@/api/issueApi';
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
 import { knowledgeApi } from '@/api/knowledgeApi';
 import { fetchDocFileBlob } from '@/api/docsApi';
 import {
@@ -656,6 +652,7 @@ function toPastIssueLot(lot: PastIssueLot, lotId: string): PastIssueLot {
     humidity: lot.humidity ?? null,
     tankPressure: lot.tankPressure ?? null,
     operatorId: lot.operatorId ?? null,
+    qualityDefect: Boolean(lot.qualityDefect),
   };
 }
 
@@ -1064,12 +1061,9 @@ export default function KnowledgePage() {
   const [diagnosisReply, setDiagnosisReply] = useState('');
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState('');
-<<<<<<< HEAD
   const [detailLot, setDetailLot] = useState<PastIssueLot | null>(null);
   const [lotLoading, setLotLoading] = useState(false);
-=======
   const [pastDetail, setPastDetail] = useState<PastIssueDetail | null>(null);
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
   const [isSelectionListExpanded, setIsSelectionListExpanded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   /** analyzing UX: reading docs vs waiting on LLM */
@@ -1491,7 +1485,7 @@ export default function KnowledgePage() {
         detail: item.actionContent || undefined,
       };
       setDetailTarget({ kind: 'document', item: detailedDoc });
-<<<<<<< HEAD
+      setPastDetail(item);
       const lotId = (item.lotId || doc.lot || '').trim();
       let lotSnapshot = item.lot ? toPastIssueLot(item.lot, lotId) : null;
       if (lotId) {
@@ -1505,16 +1499,16 @@ export default function KnowledgePage() {
         }
       }
       setDetailLot(lotSnapshot);
+      if (lotSnapshot) {
+        setPastDetail({ ...item, lot: lotSnapshot });
+      }
       setLotLoading(false);
-=======
-      setPastDetail(item);
       const cached = item.libraryAnalysis?.analysisContent?.trim() || '';
       if (cached) {
         setDiagnosisReply(cached);
         return;
       }
       setDiagnosisReply('');
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
       try {
         const response = await knowledgeApi.analyze({ lotId: item.lotId });
         if (response.error) {
@@ -1546,6 +1540,8 @@ export default function KnowledgePage() {
 
   const openActionDetail = (item: ActionHistoryItem) => {
     setPastDetail(null);
+    setDetailLot(null);
+    setLotLoading(false);
     setDetailTarget({ kind: 'action', item });
     trackPageChatEvent({
       type: 'row_click',
@@ -1565,12 +1561,9 @@ export default function KnowledgePage() {
 
   const closeDetailModal = () => {
     setDetailTarget(null);
-<<<<<<< HEAD
     setDetailLot(null);
     setLotLoading(false);
-=======
     setPastDetail(null);
->>>>>>> 76f78eb161d478d7b9848288a1fb49d7bc924cd9
     setDiagnosisReply('');
     setDiagnosisError('');
     setDiagnosisLoading(false);
