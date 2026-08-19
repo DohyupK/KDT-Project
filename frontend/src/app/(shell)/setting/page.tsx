@@ -15,6 +15,8 @@ import { authApi } from '@/api/authApi'
 import { getAuthUser, isLoggedIn } from '@/lib/authStorage'
 import {
   applyDocumentFontSize,
+  EMAIL_CHECK_EVENT,
+  notifyEmailCheckChange,
   notifyUiSettingsChange,
 } from '@/components/layout/AppShell'
 import type { UserSettingsDto } from '@/types'
@@ -188,6 +190,7 @@ export default function SettingPage() {
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(DEFAULT_REFRESH_INTERVAL)
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(DEFAULT_AUTO_REFRESH_ENABLED)
   const [n8nAlert, setN8nAlert] = useState(DEFAULT_N8N_ALERT)
+  const [emailCheckSaving, setEmailCheckSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string>('')
   const [toastMessage, setToastMessage] = useState('')
   const toastTimerRef = useRef<number | null>(null)
@@ -369,12 +372,48 @@ export default function SettingPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const onEmailCheck = (event: Event) => {
+      const detail = (event as CustomEvent<{ emailCheck?: unknown }>).detail
+      if (detail?.emailCheck === 'O' || detail?.emailCheck === 'X') {
+        setN8nAlert(detail.emailCheck === 'O')
+      }
+    }
+    window.addEventListener(EMAIL_CHECK_EVENT, onEmailCheck)
+    return () => window.removeEventListener(EMAIL_CHECK_EVENT, onEmailCheck)
+  }, [])
+
   useShellRefresh(() => {
     void reloadPageSettings()
     setVaultRefreshKey((key) => key + 1)
   })
 
   useEffect(() => { applyGlobalThemeMode(themeMode) }, [themeMode])
+
+  const persistEmailAlert = async (next: boolean) => {
+    if (!isLoggedIn() || !getAuthUser()) {
+      showToast('로그인 후 수신 여부를 설정할 수 있습니다.')
+      return
+    }
+    if (emailCheckSaving) return
+
+    const prev = n8nAlert
+    setN8nAlert(next)
+    setEmailCheckSaving(true)
+    setSaveMessage('')
+    try {
+      const { data } = await authApi.updateSettings({ n8nAlert: next })
+      const enabled = data.settings.emailCheck === 'O' || data.settings.n8nAlert === true
+      setN8nAlert(enabled)
+      cacheSettingsLocally(data.settings)
+      notifyEmailCheckChange(enabled ? 'O' : 'X')
+    } catch {
+      setN8nAlert(prev)
+      setSaveMessage('이메일 자동 발신 설정 저장에 실패했습니다.')
+    } finally {
+      setEmailCheckSaving(false)
+    }
+  }
 
   const handleThemeModeChange = (mode: ThemeMode) => {
     setThemeMode(mode)
@@ -404,6 +443,7 @@ export default function SettingPage() {
         language: data.settings.language,
         fontSize,
       })
+      notifyEmailCheckChange(data.settings.emailCheck === 'O' ? 'O' : 'X')
       setSaveMessage(`설정이 저장되었습니다. (${data.settings.updatedAt})`)
       showToast('✓ 설정이 성공적으로 저장되었습니다.')
     } catch {
@@ -430,6 +470,7 @@ export default function SettingPage() {
         autoRefreshEnabled: s.autoRefreshEnabled,
         n8nAlert: s.n8nAlert,
       })
+      notifyEmailCheckChange(s.emailCheck === 'O' ? 'O' : 'X')
       setSaveMessage('')
       showToast('설정이 기본값으로 초기화되었습니다.')
     } catch {
@@ -623,24 +664,38 @@ export default function SettingPage() {
           </section>
 
           <section className={`rounded-2xl border p-6 shadow-sm ${cardClass}`}>
-            <div className="mb-4 flex items-center gap-2">
-              <Bell size={20} className="text-blue-500" aria-hidden />
-              <h2 className={`text-lg font-bold ${textPrimary}`}>시스템 알림 설정</h2>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="mb-2 flex items-center gap-2">
+                  <Bell size={20} className="text-blue-500" aria-hidden />
+                  <h2 className={`text-lg font-bold ${textPrimary}`}>이메일 자동 발신</h2>
+                </div>
+                <p className={`text-sm ${textSecondary}`}>
+                  위험등급이 심각인 LOT 이슈 보고서를 메일로 받습니다.
+                </p>
+              </div>
+              <button
+                id="n8n-alert-toggle"
+                type="button"
+                role="switch"
+                aria-checked={n8nAlert}
+                aria-label="이메일 자동 발신"
+                disabled={emailCheckSaving || !isLoggedIn()}
+                onClick={() => {
+                  void persistEmailAlert(!n8nAlert)
+                }}
+                className={`relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  n8nAlert ? 'bg-blue-600' : isDarkMode ? 'bg-slate-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    n8nAlert ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
-            <p className={`mb-5 text-sm ${textSecondary}`}>
-              n8n 알림을 켜면 위험 LOT 이슈 보고서 메일을 받습니다. 메일은 발신 전용(No-reply)입니다.
-            </p>
-            <ToggleSwitch
-              id="n8n-alert-toggle"
-              checked={n8nAlert}
-              onChange={(next) => {
-                setN8nAlert(next)
-                setSaveMessage('')
-              }}
-              label="n8n 알림"
-              description="위험 LOT Top 이슈 보고서 메일 수신"
-              isDarkMode={isDarkMode}
-            />
           </section>
         </div>
 

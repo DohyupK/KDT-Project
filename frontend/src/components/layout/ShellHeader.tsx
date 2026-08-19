@@ -11,6 +11,8 @@ import {
 import { usePathname, useRouter } from 'next/navigation'
 import { Bell, ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react'
 import {
+  EMAIL_CHECK_EVENT,
+  notifyEmailCheckChange,
   SHELL_REFRESH_EVENT,
   useRefreshSettings,
   useUiSettings,
@@ -168,6 +170,17 @@ export default function ShellHeader() {
     }
   }, [fetchEmailCheck, fetchNotifications])
 
+  useEffect(() => {
+    const onEmailCheck = (event: Event) => {
+      const detail = (event as CustomEvent<{ emailCheck?: unknown }>).detail
+      if (detail?.emailCheck === 'O' || detail?.emailCheck === 'X') {
+        setEmailCheck(detail.emailCheck)
+      }
+    }
+    window.addEventListener(EMAIL_CHECK_EVENT, onEmailCheck)
+    return () => window.removeEventListener(EMAIL_CHECK_EVENT, onEmailCheck)
+  }, [])
+
   /** Settings → auto refresh (skipped on management — Grafana embeds handle their own refresh). */
   useEffect(() => {
     if (!autoRefreshEnabled) return
@@ -276,7 +289,9 @@ export default function ShellHeader() {
     setEmailCheckSaving(true)
     try {
       const { data } = await authApi.updateSettings({ emailCheck: next })
-      setEmailCheck(data.settings.emailCheck === 'O' ? 'O' : 'X')
+      const confirmed: 'O' | 'X' = data.settings.emailCheck === 'O' ? 'O' : 'X'
+      setEmailCheck(confirmed)
+      notifyEmailCheckChange(confirmed)
     } catch {
       setEmailCheck(prev)
     } finally {

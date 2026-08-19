@@ -28,6 +28,8 @@ export type UiFontSize = 10 | 12 | 14 | 16 | 18 | 20 | 22 | 24
 
 export const UI_SETTINGS_EVENT = 'kdt-ui-settings-change'
 export const SHELL_REFRESH_EVENT = 'kdt-shell-refresh'
+export const EMAIL_CHECK_EVENT = 'kdt-email-check-change'
+export type EmailCheckValue = 'O' | 'X'
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
 const FONT_SCALE_STYLE_ID = 'kdt-font-scale-style'
@@ -262,6 +264,27 @@ export function notifyUiSettingsChange(settings: {
   document.documentElement.lang = settings.language
   document.documentElement.setAttribute('data-ui-lang', settings.language)
   window.dispatchEvent(new CustomEvent(UI_SETTINGS_EVENT, { detail: settings }))
+}
+
+export function notifyEmailCheckChange(emailCheck: EmailCheckValue) {
+  if (typeof window === 'undefined') return
+  const normalized: EmailCheckValue = emailCheck === 'O' ? 'O' : 'X'
+  try {
+    const raw = localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
+    const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    localStorage.setItem(
+      SYSTEM_SETTINGS_CONFIG_KEY,
+      JSON.stringify({
+        ...current,
+        n8nAlert: normalized === 'O',
+      }),
+    )
+  } catch {
+    // ignore cache write failures
+  }
+  window.dispatchEvent(
+    new CustomEvent(EMAIL_CHECK_EVENT, { detail: { emailCheck: normalized } }),
+  )
 }
 
 export function useUiSettings() {
