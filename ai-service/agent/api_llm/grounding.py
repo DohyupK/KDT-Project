@@ -68,6 +68,18 @@ _FOCUS_IDENTITY_RE = re.compile(
     r"(지금\s*(로트|LOT)|이\s*(로트|LOT)|이거\s*뭐|뭐야|뭔가요|어떤\s*(로트|LOT)|로트\s*이거)",
     re.I,
 )
+# Chip: 「지금 보고 있는 화면 데이터를 요약해 주세요」 + 이 페이지/이 화면 요약
+_PAGE_SUMMARY_RE = re.compile(
+    r"(이\s*(화면|페이지)\s*요약|"
+    r"지금\s*보고\s*있는\s*화면|"
+    r"화면\s*데이터를\s*요약|"
+    r"페이지를\s*요약|"
+    r"(화면|페이지)\s*(데이터\s*)?(를\s*)?(요약|정리)\s*해)",
+    re.I,
+)
+_SENTENCE_END_RE = re.compile(
+    r"(입니다\.|합니다\.|습니다\.|됩니다\.|니다\.|요\.)(?!\n)",
+)
 # Hangul ↔ non-Hangul (latin, digit, paren, special). Decimal 8.3 stays intact.
 # Comma/semicolon handled separately (space after, not before).
 _NON_HANGUL_CHAR = (
@@ -94,6 +106,11 @@ def wants_full_detail(message: str) -> bool:
     return bool(_FULL_DETAIL_RE.search(message or ""))
 
 
+def is_page_summary_intent(message: str) -> bool:
+    """Chip or explicit 「이 화면/이 페이지 요약」 — ignore prior turns."""
+    return bool(_PAGE_SUMMARY_RE.search((message or "").strip()))
+
+
 def _slim_focus_payload(focus: Any, full: bool) -> Any:
     if not isinstance(focus, dict) or full:
         return focus
@@ -118,6 +135,8 @@ def should_prefer_focus(
     m = (message or "").strip()
     if not m:
         return True
+    if is_page_summary_intent(m):
+        return False
     if re.search(r"(그건\s*말고|다른\s*얘기)", m):
         return False
     # 「이 로트 / 방금 클릭」 등은 항상 선택 행 우선 (SPC·왜 포함)
@@ -358,7 +377,7 @@ def normalize_korean_reply(text: str) -> str:
     """
     Reply spacing rewrite:
     - Hangul ↔ latin/digit/paren/special → exactly one space
-    - Newline only after '다.' or '요.' (not every period)
+    - Blank line after 입니다/합니다/습니다/됩니다/니다/요. (not every period)
     - Deduplicate near-identical lines
     """
     if not text:
@@ -377,11 +396,9 @@ def normalize_korean_reply(text: str) -> str:
 
     raw = _space_hangul_nonhangul(raw)
 
-    # Newline only after 다. / 요.
-    raw = re.sub(r"(다\.|요\.)(?!\n)", r"\1\n", raw)
+    raw = _SENTENCE_END_RE.sub(r"\1\n\n", raw)
     raw = re.sub(r"\n{3,}", "\n\n", raw)
 
-    # Deduplicate lines (after 다./요. breaks)
     lines = re.split(r"\n+", raw)
     out: list[str] = []
     seen: set[str] = set()
@@ -398,7 +415,7 @@ def normalize_korean_reply(text: str) -> str:
         seen.add(norm)
     if not out:
         return raw.strip()
-    return "\n".join(out)
+    return "\n\n".join(out)
 
 
 def analysis_mode(message: str) -> bool:
@@ -544,6 +561,8 @@ def detect_topic_shift(
     m = (message or "").strip()
     if not m:
         return False
+    if is_page_summary_intent(m):
+        return True
     if _SHIFT_RE.search(m) or _DATE_SHIFT_RE.search(m):
         return True
 
@@ -644,6 +663,146 @@ def _handover_slice(pp: dict[str, Any], m: str, primary: str) -> dict[str, Any]:
     return sliced
 
 
+def _page_payload_empty(pp: dict[str, Any]) -> bool:
+    if not pp:
+        return True
+    return not any(v not in (None, "", [], {}) for v in pp.values())
+
+
+def _page_summary_slice(pp: dict[str, Any], route: str) -> dict[str, Any]:
+    """Current-route tables only; do not token-filter rows (chip tokens would empty lists)."""
+    label = route_label(route)
+    if _page_payload_empty(pp):
+        return {
+            "primary_table": "page_summary",
+            "page": label,
+            "empty_hint": f"{label} 화면 데이터가 아직 없습니다.",
+        }
+    if "/dashboard" in route:
+        risk = pp.get("lotRisks") if isinstance(pp.get("lotRisks"), dict) else {}
+        items = list(risk.get("items") or [])[:_LIST_LIMIT]
+        total = risk.get("total")
+        out: dict[str, Any] = {
+            "primary_table": "lotRisks",
+            "page": label,
+            "lotRisks": {
+                "total": total,
+                "page": risk.get("page"),
+                "filter": risk.get("filter"),
+                "match_count": len(items),
+                "items": items,
+            },
+            "selectedLot": pp.get("selectedLot"),
+        }
+        if total == 0:
+            out["empty_hint"] = "위험 LOT가 0건입니다."
+        elif not items:
+            out["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
+        return out
+    if "/main" in route:
+        risk = pp.get("riskTop") if isinstance(pp.get("riskTop"), dict) else {}
+        lots = list(risk.get("lots") or risk.get("items") or [])[:_LIST_LIMIT]
+        return {
+            "primary_table": "page_summary",
+            "page": label,
+            "riskTop": {
+                "total": risk.get("total"),
+                "page": risk.get("page"),
+                "items": lots,
+            },
+            "dailyKpi": pp.get("dailyKpi") or pp.get("summaryKpis"),
+            "qCost": pp.get("qCost") or pp.get("q_cost"),
+        }
+    if "/issue" in route:
+        raw_issues = pp.get("issues")
+        if isinstance(raw_issues, dict):
+            items = list(raw_issues.get("items") or raw_issues.get("issues") or [])
+            total = raw_issues.get("total", pp.get("totalOpen"))
+        elif isinstance(raw_issues, list):
+            items = list(raw_issues)
+            total = pp.get("totalOpen")
+        else:
+            items = []
+            total = pp.get("totalOpen")
+        use_items = items[:_LIST_LIMIT]
+        out = {
+            "primary_table": "issues",
+            "page": pp.get("page"),
+            "filters": pp.get("filters"),
+            "totalOpen": total,
+            "issues": {
+                "total": total,
+                "match_count": len(use_items),
+                "items": use_items,
+            },
+            "selected": pp.get("selected"),
+        }
+        if total == 0:
+            out["empty_hint"] = "열린 이슈가 0건입니다."
+        elif not items:
+            out["empty_hint"] = "화면에 표시된 이슈 행이 없습니다."
+        return out
+    if "/knowledge" in route:
+        ho = _as_dict(pp.get("handover")) or {}
+        past = _as_dict(pp.get("pastIssues")) or {}
+        return {
+            "primary_table": "both",
+            "page": label,
+            "activeTab": pp.get("activeTab"),
+            "filters": pp.get("filters"),
+            "pastIssues": {
+                "total": past.get("total"),
+                "filteredTotal": past.get("filteredTotal", past.get("total")),
+                "items": list(past.get("items") or [])[:_LIST_LIMIT],
+            },
+            "handover": {
+                "total": ho.get("total"),
+                "filteredTotal": ho.get("filteredTotal", ho.get("total")),
+                "items": list(ho.get("items") or [])[:_LIST_LIMIT],
+            },
+            "documentsMeta": pp.get("documentsMeta"),
+            "selection": pp.get("selection"),
+        }
+    if "/inquiry" in route:
+        return {
+            "primary_table": "inquiry",
+            "page": pp.get("page") or "inquiry",
+            "filters": pp.get("filters"),
+            "total": pp.get("total"),
+            "filteredTotal": pp.get("filteredTotal"),
+            "displayLabel": pp.get("displayLabel"),
+            "items": (pp.get("items") or [])[:10],
+            "selection": pp.get("selection"),
+        }
+    if "/setting" in route:
+        return {
+            "primary_table": "setting",
+            "page": "setting",
+            "fontSize": pp.get("fontSize"),
+            "themeMode": pp.get("themeMode"),
+            "autoRefreshEnabled": pp.get("autoRefreshEnabled"),
+            "refreshIntervalMinutes": pp.get("refreshIntervalMinutes"),
+            "n8nAlertEnabled": pp.get("n8nAlertEnabled"),
+            "sections": pp.get("sections"),
+            "llmApiKeysNote": pp.get("llmApiKeysNote"),
+        }
+    if "/management" in route:
+        return {
+            "primary_table": "spc",
+            "page": pp.get("page") or "spc",
+            "panels": pp.get("panels"),
+            "dateRange": pp.get("dateRange"),
+            "expandedPanel": pp.get("expandedPanel"),
+            "note": pp.get("note"),
+            "uiNote": pp.get("uiNote"),
+        }
+    return {
+        "primary_table": "page_summary",
+        "page": label,
+        **pp,
+    }
+
+
 def slice_page_context_for_query(
     message: str,
     page_context: dict[str, Any] | None,
@@ -725,6 +884,15 @@ def slice_page_context_for_query(
         merged.pop("list_omitted", None)
         merged["note"] = "Focused UI selection — page list kept with last event."
         out["page_payload"] = _keep_route_tables(merged, route)
+        out.pop("pagePayload", None)
+        out["supplement"] = None
+        if last_ev is not None:
+            out["last_event"] = last_ev
+        return out
+
+    if is_page_summary_intent(m):
+        sliced = _page_summary_slice(pp, route)
+        out["page_payload"] = _keep_route_tables(sliced, route)
         out.pop("pagePayload", None)
         out["supplement"] = None
         if last_ev is not None:
