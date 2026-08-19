@@ -1,14 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  ChangeEvent,
-  CSSProperties,
-  DragEvent,
-  FormEvent,
-  KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent,
-} from 'react';
+import type { CSSProperties, FormEvent, MouseEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Download, Paperclip } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell';
@@ -114,22 +107,6 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 ];
 
 const PAGE_SIZE = 5;
-const MAX_INQUIRY_FILES = 5;
-const MAX_INQUIRY_FILE_BYTES = 10 * 1024 * 1024;
-const ALLOWED_INQUIRY_EXTS = [
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.pdf',
-  '.xlsx',
-  '.xls',
-  '.csv',
-  '.docx',
-  '.txt',
-] as const;
-const INQUIRY_FILE_ACCEPT = ALLOWED_INQUIRY_EXTS.join(',');
 
 const colors = {
   bg: '#f8fafc',
@@ -164,45 +141,10 @@ function canViewInquiry(item: InquiryItem) {
   return !item.masked;
 }
 
-function fileExt(name: string) {
-  const dot = name.lastIndexOf('.');
-  if (dot < 0) return '';
-  return name.slice(dot).toLowerCase();
-}
-
-function isAllowedInquiryFile(file: File) {
-  return (ALLOWED_INQUIRY_EXTS as readonly string[]).includes(fileExt(file.name));
-}
-
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function mergeInquiryFiles(prev: File[], incoming: File[]): { files: File[]; error: string } {
-  const next = [...prev];
-  const rejected: string[] = [];
-  for (const file of incoming) {
-    if (!isAllowedInquiryFile(file)) {
-      rejected.push(`${file.name} (형식)`);
-      continue;
-    }
-    if (file.size > MAX_INQUIRY_FILE_BYTES) {
-      rejected.push(`${file.name} (10MB 초과)`);
-      continue;
-    }
-    if (next.length >= MAX_INQUIRY_FILES) {
-      rejected.push(`${file.name} (최대 ${MAX_INQUIRY_FILES}개)`);
-      continue;
-    }
-    next.push(file);
-  }
-  if (rejected.length === 0) return { files: next, error: '' };
-  return {
-    files: next,
-    error: `일부 파일을 넣지 못했습니다: ${rejected.join(', ')}`,
-  };
 }
 
 function getDisplayFields(item: InquiryItem) {
@@ -297,8 +239,6 @@ export default function InquiryPage() {
   const [visibility, setVisibility] = useState<Visibility>('공개');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
-  const [fileError, setFileError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{
     category: string;
@@ -307,14 +247,12 @@ export default function InquiryPage() {
   }>({ category: '', subject: '', content: '' });
   const [toastMessage, setToastMessage] = useState('');
   const [toastTone, setToastTone] = useState<'success' | 'warning'>('success');
-  const [isDragActive, setIsDragActive] = useState(false);
   const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
   const [writerProfile, setWriterProfile] = useState<AuthUser | null>(null);
   const [isLoadingWriter, setIsLoadingWriter] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const categoryFieldRef = useRef<HTMLDivElement | null>(null);
   const subjectInputRef = useRef<HTMLInputElement | null>(null);
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -322,7 +260,6 @@ export default function InquiryPage() {
   const answerTimerRef = useRef<number | null>(null);
   const answerSectionRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToAnswerRef = useRef(false);
-  const dragDepthRef = useRef(0);
 
   const filteredInquiries = useMemo(() => {
     const keyword = appliedFilters.search.trim().toLowerCase();
@@ -582,13 +519,8 @@ export default function InquiryPage() {
     setVisibility('공개');
     setSubject('');
     setContent('');
-    setFiles([]);
-    setFileError('');
     setErrorMessage('');
     setFieldErrors({ category: '', subject: '', content: '' });
-    setIsDragActive(false);
-    dragDepthRef.current = 0;
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const closeModal = () => {
@@ -658,64 +590,6 @@ export default function InquiryPage() {
   const handleApplySearch = () => {
     setAppliedFilters((prev) => ({ ...prev, search: draftFilters.search }));
     setCurrentPage(1);
-  };
-
-  const addInquiryFiles = (incoming: File[]) => {
-    const { files: next, error } = mergeInquiryFiles(files, incoming);
-    setFiles(next);
-    setFileError(error);
-  };
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
-    addInquiryFiles(Array.from(selected));
-    e.target.value = '';
-  };
-
-  const handleFileRemove = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setFileError('');
-  };
-
-  const openFilePicker = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleDropzoneKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openFilePicker();
-    }
-  };
-
-  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current += 1;
-    setIsDragActive(true);
-  };
-
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setIsDragActive(false);
-  };
-
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = 0;
-    setIsDragActive(false);
-    const dropped = event.dataTransfer.files;
-    if (!dropped || dropped.length === 0) return;
-    addInquiryFiles(Array.from(dropped));
   };
 
   const handleOverlayClick = () => {
@@ -872,7 +746,6 @@ export default function InquiryPage() {
         visibility,
         title: subject.trim(),
         content: content.trim(),
-        files,
       });
       const created = mapApiItem(data.item);
       setInquiries((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
@@ -1845,103 +1718,6 @@ export default function InquiryPage() {
                     style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}
                   >
                     {fieldErrors.content}
-                  </div>
-                ) : null}
-              </div>
-
-              <div style={{ marginBottom: 22 }}>
-                <div style={labelStyle} id="inquiry-files-label">
-                  첨부 파일
-                </div>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-labelledby="inquiry-files-label"
-                  onClick={openFilePicker}
-                  onKeyDown={handleDropzoneKeyDown}
-                  onDragEnter={handleDragEnter}
-                  onDragLeave={handleDragLeave}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  className={`cursor-pointer rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
-                    isDragActive
-                      ? isDark
-                        ? 'border-blue-400 bg-blue-950/40'
-                        : 'border-blue-400 bg-blue-50/60'
-                      : isDark
-                        ? 'border-slate-600 bg-slate-900/50 hover:border-blue-400'
-                        : 'border-slate-200 bg-slate-50/50 hover:border-blue-400'
-                  }`}
-                >
-                  <div
-                    className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                  >
-                    {files.length > 0
-                      ? '파일을 추가하려면 클릭하거나 여기에 드래그하세요'
-                      : '스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드'}
-                  </div>
-                  <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {files.length > 0
-                      ? `${files.length}개 선택됨 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`
-                      : `여러 파일 선택 가능 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`}
-                  </div>
-                  {files.length > 0 ? (
-                    <ul
-                      className="mt-3 flex list-none flex-col gap-2 p-0 text-left"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {files.map((file, index) => (
-                        <li
-                          key={`${file.name}-${file.size}-${index}`}
-                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
-                            isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <div
-                              className={`truncate text-xs font-medium ${
-                                isDark ? 'text-slate-200' : 'text-slate-700'
-                              }`}
-                            >
-                              {file.name}
-                            </div>
-                            <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                              {formatFileSize(file.size)}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleFileRemove(index);
-                            }}
-                            aria-label={`${file.name} 삭제`}
-                            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                              isDark
-                                ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                            }`}
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-                <input
-                  id="inquiry-files"
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept={INQUIRY_FILE_ACCEPT}
-                  onChange={handleFileChange}
-                  className="sr-only"
-                  tabIndex={-1}
-                />
-                {fileError ? (
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
-                    {fileError}
                   </div>
                 ) : null}
               </div>

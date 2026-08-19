@@ -1028,11 +1028,11 @@ function ProductionTrendChart({
   };
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-x-auto pb-1">
+    <div className="relative min-h-0 w-full min-w-0 flex-1 overflow-hidden pb-1">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[300px] w-full lg:h-[320px]"
-        style={{ minWidth: `${Math.min(width, 360 + n * 48)}px` }}
+        className="h-[300px] w-full max-w-full lg:h-[320px]"
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="생산량 막대와 불량률 선 차트"
       >
@@ -1116,18 +1116,17 @@ function ProductionTrendChart({
                   })
                 }
               />
-              {isPeak ? (
-                <text
-                  x={p.x}
-                  y={Math.max(pad.top + 12, p.y - 8)}
-                  textAnchor="middle"
-                  className="text-[10px] font-semibold"
-                  fill={isDark ? '#93c5fd' : '#1d4ed8'}
-                  pointerEvents="none"
-                >
-                  {formatNumber(p.production)}
-                </text>
-              ) : null}
+              <text
+                x={p.x}
+                y={Math.max(14, p.y - 4)}
+                textAnchor="middle"
+                dominantBaseline="text-after-edge"
+                className="text-[10px] font-semibold"
+                fill={isDark ? '#93c5fd' : '#1d4ed8'}
+                pointerEvents="none"
+              >
+                {formatNumber(p.production)}
+              </text>
             </g>
           );
         })}
@@ -1151,11 +1150,13 @@ function ProductionTrendChart({
                 minRateValue !== maxRateValue;
               const isZero = rate === 0;
               const r = isMaxRate || isMinRate ? 4.5 : isZero ? 3.5 : 3;
+              const rateY = p.rateY as number;
+              const nearBarTop = Math.abs(rateY - p.y) < 22;
               return (
                 <g key={`rate-${p.date}`}>
                   <circle
                     cx={p.x}
-                    cy={p.rateY as number}
+                    cy={rateY}
                     r={12}
                     fill="transparent"
                     className="cursor-pointer"
@@ -1165,25 +1166,24 @@ function ProductionTrendChart({
                   />
                   <circle
                     cx={p.x}
-                    cy={p.rateY as number}
+                    cy={rateY}
                     r={r}
                     fill="#dc2626"
                     stroke={pointStroke}
                     strokeWidth={isMaxRate || isMinRate ? 2.5 : 2}
                     pointerEvents="none"
                   />
-                  {isMaxRate || isMinRate ? (
-                    <text
-                      x={p.x}
-                      y={(p.rateY as number) - 10}
-                      textAnchor="middle"
-                      className="text-[9px] font-semibold"
-                      fill={tickFillRight}
-                      pointerEvents="none"
-                    >
-                      {formatPercent(rate)}
-                    </text>
-                  ) : null}
+                  <text
+                    x={p.x}
+                    y={nearBarTop ? rateY + 14 : rateY - 8}
+                    textAnchor="middle"
+                    dominantBaseline={nearBarTop ? 'hanging' : 'auto'}
+                    className="text-[9px] font-semibold"
+                    fill={tickFillRight}
+                    pointerEvents="none"
+                  >
+                    {formatPercent(rate)}
+                  </text>
                 </g>
               );
             })}
