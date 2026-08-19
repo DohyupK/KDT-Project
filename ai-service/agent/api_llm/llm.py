@@ -20,7 +20,13 @@ from agent.api_llm.prompts import (
     SYSTEM_POLISH,
     USAGE_GUIDELINE,
 )
-from agent.api_llm.grounding import analysis_mode, build_grounding, normalize_korean_reply, route_label
+from agent.api_llm.grounding import (
+    analysis_mode,
+    build_grounding,
+    is_page_summary_intent,
+    normalize_korean_reply,
+    route_label,
+)
 from agent.api_llm.providers import (
     invoke_credential,
     resolve_credentials,
@@ -68,9 +74,10 @@ def _build_messages(
     elif need_rag:
         grounding["empty_answer_hint"] = RAG_EMPTY_HINT
 
+    page_sum = is_page_summary_intent(message)
     payload = {
         "user_message": message,
-        "recent_turns": (history_text or "").strip() or None,
+        "recent_turns": None if page_sum else ((history_text or "").strip() or None),
         "route": route,
         "route_label": route_label(route),
         "analysis_mode": False if sources else (
@@ -86,14 +93,19 @@ def _build_messages(
         "rag_sources": sources,
         "error": error,
     }
+    follow = (
+        "이전 대화는 무시하고 지금 page_payload만 요약하세요. "
+        if page_sum
+        else "recent_turns가 있으면 이어서 대화하세요. "
+    )
     return [
         SystemMessage(content=system),
         HumanMessage(
             content=(
                 "아래 JSON을 보고 한국어로 답해 주세요. "
                 f"지금 화면 route={route or '/'} ({route_label(route)}). "
-                "recent_turns가 있으면 이어서 대화하세요. "
-                "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
+                + follow
+                + "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
                 + json.dumps(payload, ensure_ascii=False, default=str)
             )
         ),

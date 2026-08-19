@@ -25,6 +25,7 @@ from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
 from agent.api_llm.grounding import (
     deterministic_user_reply,
+    is_page_summary_intent,
     join_spaced_parts,
     normalize_korean_reply,
     slice_page_context_for_query,
@@ -51,10 +52,6 @@ _DOC_INTENT_RE = re.compile(
 )
 _DOC_SYNTH_RE = re.compile(
     r"(요약|정리|핵심|해석|비교|설명해)",
-    re.IGNORECASE,
-)
-_SCREEN_SUMMARY_RE = re.compile(
-    r"(이\s*화면|지금\s*보고\s*있는\s*화면|화면\s*데이터)",
     re.IGNORECASE,
 )
 _SHORT_FOLLOWUP_RE = re.compile(
@@ -143,7 +140,7 @@ def needs_rag(
     m = (message or "").strip()
     if not m:
         return False
-    if _SCREEN_SUMMARY_RE.search(m):
+    if is_page_summary_intent(m):
         return False
     if _DOC_INTENT_RE.search(m):
         return True

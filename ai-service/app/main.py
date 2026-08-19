@@ -399,10 +399,12 @@ def chat_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift
+    from agent.api_llm.grounding import detect_topic_shift, is_page_summary_intent
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    if topic_shift:
+    if is_page_summary_intent(body.message):
+        history_text = ""
+    elif topic_shift:
         # Facts come from page_context only; keep a tiny history window for pronouns.
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
     else:
@@ -527,10 +529,12 @@ async def chat_stream_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift
+    from agent.api_llm.grounding import detect_topic_shift, is_page_summary_intent
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    if topic_shift:
+    if is_page_summary_intent(body.message):
+        history_text = ""
+    elif topic_shift:
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
     else:
         semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []

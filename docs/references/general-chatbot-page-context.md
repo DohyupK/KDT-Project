@@ -208,21 +208,22 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 ### 4.2 답변 결정 순서 (엄수)
 
 1. **(BE)** 보안 게이트 → 해당 시 종료.  
-2. **히스토리:** `detect_topic_shift`(`그건 말고` · `다른 얘기` · 화면 경로 불일치)면 축소. 그 외는 직전 주제를 이어 대화. 새 LOT·수치는 지금 `page_context` / `rag_sources`에 있을 때만.  
+2. **히스토리:** `detect_topic_shift`(`그건 말고` · `다른 얘기` · 화면 경로 불일치)면 축소. **「이 화면 요약」/페이지 요약 intent**면 `history_text`를 비우고 시맨틱 검색도 안 한다. 그 외는 직전 주제를 이어 대화. 새 LOT·수치는 지금 `page_context` / `rag_sources`에 있을 때만.  
 3. **`slice_page_context_for_query(message, page_context)`**  
    1. `visible_ui_for_route`  
    2. **offscreen**이면 focus 제거 + `empty_hint` + `primary_table=offscreen` → 종료  
-   3. **`should_prefer_focus`**이면  
+   3. **`should_prefer_focus`**이면 (페이지 요약 intent는 이탈)  
       - 「지금 로트 / 이거 뭐야」→ `focus_summary` + DB 필드 공백 요약 (deterministic)  
       - SPC 질문 + 그래프 없음 → `focus_spc_absent` (deterministic)  
       - 그 외 → `primary_table=focus` **이되 page_payload 목록은 유지** (`last_event` 포함). 목록 omit 없음.  
-   4. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
+   4. **페이지 요약 intent**이면 지금 route 테이블 전체(`page_payload`). 쿼리 토큰으로 행을 깎지 않음. payload가 비면 `empty_hint`만 (히스토리로 이전 화면을 채우지 않음).  
+   5. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
 4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
 5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석). 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 JSON으로 메우지 않되 **page_context는 유지**.  
 6. **predict/whatif:** features 있을 때 registry 헤드.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
-   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리) → **2차 `SYSTEM_POLISH`** (띄어쓰기·중복 번호 목록). 초안은 스트림하지 않음.  
+   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리. **페이지 요약이면 recent_turns 없음**) → **2차 `SYSTEM_POLISH`** (띄어쓰기·문장 끝 빈 줄·중복 번호 목록). 초안은 스트림하지 않음.  
    - 그 외/실패 → `_template_reply` (문서 턴·LLM 없음이면 발췌 안내)  
 8. what-if / capacity / residual 블록 필요 시 덧붙임.  
 9. polish 실패 시 **`normalize_korean_reply`** 폴백. deterministic/template은 정규화만.
@@ -230,7 +231,7 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 ### 4.3 focus를 쓰는가 (`should_prefer_focus`)
 
 - **유지:** 「이거 / 이 로트 / 방금 클릭」 등 deixis, 또는 목록 질문이 아닌 일반 질문 + focus 존재  
-- **이탈:** 「그건 말고」, 메시지 LOT와 focus LOT가 서로소, 「이 화면·목록·몇 건·KPI·Q-COST·설정·문의 게시판」 등 **목록성** 질문(deixis 없을 때)
+- **이탈:** 「그건 말고」, 메시지 LOT와 focus LOT가 서로소, **페이지 요약 intent**, 「이 화면·목록·몇 건·KPI·Q-COST·설정·문의 게시판」 등 **목록성** 질문(deixis 없을 때)
 
 ### 4.4 확정 답 (LLM 없이)
 
@@ -287,14 +288,14 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 
 ### 4.7 한국어 정규화 · 2차 polish
 
-LLM 답은 1차 compose 후 **`polish_reply`**(같은 등록 API, `SYSTEM_POLISH`)로 띄어쓰기·중복 번호 목록을 고친다. 2차 실패 시에만 `normalize_korean_reply`.
+LLM 답은 1차 compose 후 **`polish_reply`**(같은 등록 API, `SYSTEM_POLISH`)로 띄어쓰기·문장 끝 빈 줄·중복 번호 목록을 고친다. 2차 실패 시에만 `normalize_korean_reply`.
 
 `normalize_korean_reply` (deterministic / 폴백):
 
 1. 규칙 에코 문구 제거  
 2. 「현재 화면은 …만 보입니다」 / 「보이는 것은 …뿐입니다」 제거  
 3. **한글 ↔ 영문·숫자·괄호·특수문자** 경계에 공백 1칸 (숫자↔영문 예: `3071 ppm`)  
-4. **줄바꿈은 `다.` / `요.` 뒤에만** (일반 `.`·`8.3`은 개행 없음)  
+4. **줄바꿈은 `입니다.` / `합니다.` / `습니다.` / `됩니다.` / `니다.` / `요.` 뒤에 빈 줄(`\\n\\n`)** (일반 `.`·`8.3`은 개행 없음)  
 5. 거의 동일 문장 dedupe  
 
 청크·DB 필드 조립은 `join_spaced_parts`로 조각마다 공백.
@@ -320,7 +321,7 @@ LLM이면 1차 초안은 클라이언트에 안 흘리고, **2차 polish 텍스�
 | Main | 「위험 LOT 몇 건」 | focus 이탈 → page `riskTop` 집계 |
 | 임의 + 문서 분석 요청 | 「SOP 찾아줘」 / 「규정 요약해줘」 | RAG ON + LLM 합성 + 2차 polish |
 | 문서 후속 | 「그건 왜야」 | 히스토리 유지, retrieve 쿼리 확장 |
-| 칩 「이 화면 요약」 | 「지금 보고 있는 화면 데이터를 요약해 주세요」 | RAG OFF + page_payload |
+| 칩 「이 화면 요약」 | 「지금 보고 있는 화면 데이터를 요약해 주세요」 | 히스토리/RAG/focus 없음. 지금 route `page_payload`만 |
 | 문서 질문 0히트 | 「SOP 찾아줘」 무히트 | 화면 KPI로 메우지 않음 |
 | 공정값 features 첨부 | 「불량 진단해줘」 | predict 헤드 + compose |
 
