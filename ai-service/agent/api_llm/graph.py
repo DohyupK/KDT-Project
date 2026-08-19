@@ -1,11 +1,11 @@
 """
 Minimal LangGraph chatbot (orchestrated run_chat with optional parallel RAG).
 
-Flow: predict+whatif ∥ rag(optional) → compose
+Flow: predict+whatif ∥ rag(optional) → compose → polish
 
 - predict: registry heads whenever features exist (always — not gated by turn)
-- rag: only when document/analysis intent (needs_rag); light top_k
-- compose: template / LLM (page_context in JSON only — no duplicate append)
+- rag: document/summary intent (needs_rag); Public+Confidential
+- compose: template / LLM then 2nd polish pass (page_context in JSON only)
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from agent.api_llm.llm import compose_with_failover, llm_enabled
-from agent.api_llm.prompts import USAGE_GUIDELINE
+from agent.api_llm.prompts import LLM_OFF_EXCERPT_NOTICE, RAG_EMPTY_HINT, USAGE_GUIDELINE
 from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
 from agent.api_llm.grounding import (
@@ -33,16 +33,35 @@ from agent.rag_engine import API_ALLOWED_CLEARANCES, get_engine
 
 _log = logging.getLogger(__name__)
 
-# General-chat light RAG (document questions only)
-API_RAG_TOP_K = 4
-API_RAG_RERANK_N = 2
-API_RAG_CHUNK_CHARS = 160
-API_RAG_MAX_SOURCES = 2
+# General-chat document RAG (synthesis budget)
+API_RAG_TOP_K = 8
+API_RAG_RERANK_N = 4
+API_RAG_CHUNK_CHARS = 800
+API_RAG_MAX_SOURCES = 4
 
+_DOC_NOUN_RE = re.compile(
+    r"(문서|규정|SOP|sop|매뉴얼|핸드북|가이드|자료|Knowledge|knowledge|지식|"
+    r"근거\s*문서|관련\s*문서)",
+    re.IGNORECASE,
+)
 _DOC_INTENT_RE = re.compile(
     r"(문서|규정|SOP|sop|매뉴얼|핸드북|가이드|자료|Knowledge|knowledge|지식|"
     r"분석해|상세|자세히|근거\s*문서|관련\s*문서|찾아줘|검색)",
     re.IGNORECASE,
+)
+_DOC_SYNTH_RE = re.compile(
+    r"(요약|정리|핵심|해석|비교|설명해)",
+    re.IGNORECASE,
+)
+_SCREEN_SUMMARY_RE = re.compile(
+    r"(이\s*화면|지금\s*보고\s*있는\s*화면|화면\s*데이터)",
+    re.IGNORECASE,
+)
+_SHORT_FOLLOWUP_RE = re.compile(
+    r"^(왜|뭐|무엇|그게|그건|그거|저거|이것|그것|"
+    r"자세히|더\s*알려|이유가|이유\s*가|"
+    r"요약|정리|핵심).{0,40}$",
+    re.IGNORECASE | re.DOTALL,
 )
 _LOT_MSG_RE = re.compile(
     r"(LOT[-_]?\w+|이\s*LOT|해당\s*LOT|왜\s*심각|위험\s*LOT)",
@@ -91,17 +110,50 @@ class ChatState(TypedDict, total=False):
     timing: dict[str, Any]
 
 
-def needs_rag(message: str, page_context: dict[str, Any] | None = None) -> bool:
+def _last_user_from_history(history_text: str) -> str:
+    last = ""
+    for line in (history_text or "").splitlines():
+        s = line.strip()
+        if s.startswith("User:"):
+            last = s[len("User:") :].strip()
+    return last
+
+
+def expand_rag_query(message: str, history_text: str | None = None) -> str:
+    """Merge a short follow-up with the previous user question for retrieve."""
+    msg = (message or "").strip()
+    if not _SHORT_FOLLOWUP_RE.search(msg):
+        return msg
+    prev = _last_user_from_history(history_text or "")
+    if not prev or prev == msg:
+        return msg
+    return f"{prev} / {msg}"
+
+
+def needs_rag(
+    message: str,
+    page_context: dict[str, Any] | None = None,
+    history_text: str | None = None,
+) -> bool:
     """
-    RAG only for explicit document/analysis intent.
-    Screen / LOT questions default to skip (prefer page_context + models).
+    RAG for document/analysis intent.
+    Screen-summary chips skip RAG. Short follow-ups inherit prior doc topic.
     """
+    del page_context  # route is not a RAG trigger; selected paths stay out of scope
     m = (message or "").strip()
     if not m:
         return False
+    if _SCREEN_SUMMARY_RE.search(m):
+        return False
     if _DOC_INTENT_RE.search(m):
         return True
-    # Ambiguous → skip
+    if _DOC_SYNTH_RE.search(m) and _DOC_NOUN_RE.search(m):
+        return True
+    hist = history_text or ""
+    if _SHORT_FOLLOWUP_RE.search(m) and (
+        _DOC_NOUN_RE.search(hist) or _DOC_INTENT_RE.search(hist)
+    ):
+        return True
     return False
 
 
@@ -272,12 +324,16 @@ def _template_reply(
     residual_result: dict[str, Any] | None = None,
     page_context: dict[str, Any] | None = None,
     rag_sources: list[dict[str, Any]] | None = None,
+    need_rag: bool = False,
 ) -> str:
     if error and predict_result is None and not page_context:
         return f"진단에 실패했습니다: {error}"
 
+    if need_rag and not rag_sources:
+        return RAG_EMPTY_HINT
+
     parts: list[str] = []
-    if page_context:
+    if page_context and not rag_sources:
         route = page_context.get("route") or "/"
         focus = page_context.get("focus_id") or page_context.get("focusId")
         parts.append(
@@ -370,6 +426,7 @@ def _template_reply(
                 pass
 
     if rag_sources:
+        parts.append(LLM_OFF_EXCERPT_NOTICE)
         parts.append("관련 문서 발췌:")
         for s in rag_sources[:API_RAG_MAX_SOURCES]:
             title = s.get("title") or s.get("doc_id") or "doc"
@@ -469,10 +526,10 @@ def _compact_rag_sources(
     return out
 
 
-def rag_bundle(message: str) -> list[dict[str, Any]]:
-    """Public+Confidential light retrieve."""
-    message = (message or "").strip()
-    if not message:
+def rag_bundle(message: str, history_text: str | None = None) -> list[dict[str, Any]]:
+    """Public+Confidential retrieve."""
+    query = expand_rag_query(message, history_text)
+    if not query:
         return []
     try:
         engine = get_engine()
@@ -480,7 +537,7 @@ def rag_bundle(message: str) -> list[dict[str, Any]]:
         if not engine.ready:
             return []
         hits = engine.retrieve(
-            message,
+            query,
             top_k=API_RAG_TOP_K,
             rerank_top_n=API_RAG_RERANK_N,
             llm_invoke=None,
@@ -495,10 +552,7 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
     message = state.get("message") or ""
     history = (state.get("history_text") or "").strip()
     page_context = state.get("page_context")
-    # page_context only in JSON payload (llm.py) — do not duplicate into message string
-    message_for_llm = (
-        f"이전 대화:\n{history}\n\n현재 질문:\n{message}" if history else message
-    )
+    need_rag = bool(state.get("need_rag"))
 
     predict_result = state.get("predict_result")
     capacity_result = state.get("capacity_result")
@@ -521,7 +575,7 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
 
     if llm_enabled():
         reply, provider, llm_err = compose_with_failover(
-            message_for_llm,
+            message,
             predict_result,
             error,
             need_guideline=need_guideline,
@@ -531,6 +585,8 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
             head_results=state.get("head_results"),
             rag_sources=rag_sources,
             page_context=page_context,
+            history_text=history,
+            need_rag=need_rag,
             llm_mode=state.get("llm_mode"),
             llm_credentials=state.get("llm_credentials"),
         )
@@ -557,6 +613,7 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
                 residual_result,
                 page_context,
                 rag_sources,
+                need_rag=need_rag,
             )
             return {
                 "reply": normalize_korean_reply(
@@ -582,6 +639,7 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
                     residual_result,
                     page_context,
                     rag_sources,
+                    need_rag=need_rag,
                 ),
                 need_guideline,
             )
@@ -621,7 +679,7 @@ def whatif_node(state: ChatState) -> dict[str, Any]:
 def rag_node(state: ChatState) -> dict[str, Any]:
     if not state.get("need_rag", True):
         return {"rag_sources": []}
-    return {"rag_sources": rag_bundle(state.get("message") or "")}
+    return {"rag_sources": rag_bundle(state.get("message") or "", state.get("history_text"))}
 
 
 def compose_node(state: ChatState) -> dict[str, Any]:
@@ -675,7 +733,7 @@ def run_chat(
     feats = features
     if not feats and _wants_api_llm(message):
         feats = extract_features_from_page_context(page_context)
-    need = needs_rag(message, page_context)
+    need = needs_rag(message, page_context, history)
     _ = enable_api_llm
 
     base: dict[str, Any] = {
@@ -709,7 +767,7 @@ def run_chat(
 
     def _rag() -> tuple[list[dict[str, Any]], float]:
         t = time.perf_counter()
-        return rag_bundle(message), (time.perf_counter() - t) * 1000
+        return rag_bundle(message, history), (time.perf_counter() - t) * 1000
 
     if feats and need:
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -793,7 +851,7 @@ def iter_chat_events(
     feats = features
     if not feats and _wants_api_llm(message):
         feats = extract_features_from_page_context(page_context)
-    need = needs_rag(message, page_context)
+    need = needs_rag(message, page_context, history)
     _ = enable_api_llm
 
     yield {
@@ -836,7 +894,7 @@ def iter_chat_events(
 
     def _rag() -> tuple[list[dict[str, Any]], float]:
         t = time.perf_counter()
-        return rag_bundle(message), (time.perf_counter() - t) * 1000
+        return rag_bundle(message, history), (time.perf_counter() - t) * 1000
 
     if feats and need:
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -861,9 +919,6 @@ def iter_chat_events(
         },
     }
 
-    message_for_llm = (
-        f"이전 대화:\n{history}\n\n현재 질문:\n{message}" if history else message
-    )
     reply_parts: list[str] = []
     provider = "template"
     mode = "template"
@@ -918,7 +973,7 @@ def iter_chat_events(
 
     if llm_enabled():
         for kind, payload in iter_compose_stream(
-            message_for_llm,
+            message,
             model_out.get("predict_result"),
             model_out.get("error"),
             need_guideline=need_guideline,
@@ -928,6 +983,8 @@ def iter_chat_events(
             head_results=model_out.get("head_results"),
             rag_sources=rag_sources,
             page_context=page_context,
+            history_text=history,
+            need_rag=need,
             llm_mode=llm_mode,
             llm_credentials=llm_credentials,
         ):

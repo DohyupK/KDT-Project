@@ -1,6 +1,6 @@
 # 일반 챗봇 — 응답 방식 · 페이지 참조 로직 (SSOT)
 
-최종 갱신: 2026-08-18
+최종 갱신: 2026-08-19
 
 **범위:** 셸 `GlobalChatbot` → `POST /api/chat` · `/api/chat/stream` → ai-service `/chat` · `/chat/stream`  
 **제외:** 보안 오버레이(`SecurityChatbot`, `/security-chat`) — 별도 [`security-chatbot-guide.md`](./security-chatbot-guide.md)
@@ -25,6 +25,7 @@ flowchart TB
   compose{compose 분기}
   det[deterministic grounding]
   llm[등록 LLM compose]
+  polish[2차 API_LLM polish]
   tmpl[template_reply]
   norm[normalize_korean_reply]
   sse[SSE delta / done.reply]
@@ -43,7 +44,8 @@ flowchart TB
   compose -->|CHAT_USE_LLM=1 + 키| llm
   compose -->|그 외/실패| tmpl
   det --> norm
-  llm --> norm
+  llm --> polish
+  polish --> sse
   tmpl --> norm
   norm --> sse
 ```
@@ -185,13 +187,13 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 | [`ai-service/app/main.py`](../../ai-service/app/main.py) | `/chat`, `/chat/stream`, history·topic_shift |
 | [`ai-service/agent/api_llm/grounding.py`](../../ai-service/agent/api_llm/grounding.py) | slice · focus · offscreen · deterministic · normalize · grounding |
 | [`ai-service/agent/api_llm/graph.py`](../../ai-service/agent/api_llm/graph.py) | `run_chat` / `iter_chat_events` / `compose_bundle` |
-| [`ai-service/agent/api_llm/llm.py`](../../ai-service/agent/api_llm/llm.py) | LLM compose · stream |
-| [`ai-service/agent/api_llm/prompts.py`](../../ai-service/agent/api_llm/prompts.py) | `SYSTEM_COMPOSE` |
+| [`ai-service/agent/api_llm/llm.py`](../../ai-service/agent/api_llm/llm.py) | LLM compose · 2차 polish · stream |
+| [`ai-service/agent/api_llm/prompts.py`](../../ai-service/agent/api_llm/prompts.py) | `SYSTEM_COMPOSE` · `SYSTEM_POLISH` |
 
 ### 4.2 답변 결정 순서 (엄수)
 
 1. **(BE)** 보안 게이트 → 해당 시 종료.  
-2. **히스토리:** `detect_topic_shift`면 히스토리 축소. 히스토리는 말투·대명사만 — **수치 사실 금지**.  
+2. **히스토리:** `detect_topic_shift`(`그건 말고` · `다른 얘기` · 화면 경로 불일치)면 축소. 그 외는 직전 주제를 이어 대화. 새 LOT·수치는 지금 `page_context` / `rag_sources`에 있을 때만.  
 3. **`slice_page_context_for_query(message, page_context)`**  
    1. `visible_ui_for_route`  
    2. **offscreen**이면 focus 제거 + `empty_hint` + `primary_table=offscreen` → 종료  
@@ -201,14 +203,14 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
       - 그 외 → `primary_table=focus`, 목록 omit  
    4. 아니면 라우트별 페이지 슬라이스 (knowledge both/handover/past, inquiry, main qCost/KPI/riskTop …)  
 4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
-5. **RAG:** 문서·분석 intent regex일 때만 (화면/LOT 질문이면 스킵). Public+Confidential, light top_k.  
+5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석). 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 JSON으로 메우지 않음.  
 6. **predict/whatif:** features 있을 때 registry 헤드.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
-   - `CHAT_USE_LLM=1` + vault 키 → LLM  
-   - 그 외/실패 → `_template_reply`  
+   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리) → **2차 `SYSTEM_POLISH`** (띄어쓰기·중복 번호 목록). 초안은 스트림하지 않음.  
+   - 그 외/실패 → `_template_reply` (문서 턴·LLM 없음이면 발췌 안내)  
 8. what-if / capacity / residual 블록 필요 시 덧붙임.  
-9. 항상 **`normalize_korean_reply`**.
+9. polish 실패 시 **`normalize_korean_reply`** 폴백. deterministic/template은 정규화만.
 
 ### 4.3 focus를 쓰는가 (`should_prefer_focus`)
 
@@ -225,7 +227,7 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 
 ### 4.5 LLM이 받아 쓰는 근거 (`build_grounding` + `SYSTEM_COMPOSE`)
 
-시스템 프롬프트는 **긍정 지시**(존댓말·지금 화면 JSON만)로 둔다. 「하지 마세요」 나열은 모델이 그대로 읽히므로 프롬프트에 넣지 않고, 화면 안내 문장 잔여는 `normalize_korean_reply`가 걷는다.
+시스템 프롬프트는 **동료 대화·합성**(화면 JSON + `rag_sources`가 있으면 요약·포인트)이다. 규칙 체크리스트(`grounding.rules` · 긴 `data_note`)는 모델에 넣지 않는다. 같은 내용을 문단과 1.2.3으로 두 번 쓰지 않는다.
 
 **인용 가능**
 
@@ -267,9 +269,11 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 - knowledge + 「SPC」→ `/management`  
 - 비-inquiry + 「문의 내역/목록」→ `/inquiry`
 
-### 4.7 한국어 정규화 (`normalize_korean_reply`)
+### 4.7 한국어 정규화 · 2차 polish
 
-전면 교체 규칙 (2026-08-13):
+LLM 답은 1차 compose 후 **`polish_reply`**(같은 등록 API, `SYSTEM_POLISH`)로 띄어쓰기·중복 번호 목록을 고친다. 2차 실패 시에만 `normalize_korean_reply`.
+
+`normalize_korean_reply` (deterministic / 폴백):
 
 1. 규칙 에코 문구 제거  
 2. 「현재 화면은 …만 보입니다」 / 「보이는 것은 …뿐입니다」 제거  
@@ -285,7 +289,8 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 meta (start) → meta (context_ready) → delta* → done { reply, mode, provider, predict, timing, … }
 ```
 
-deterministic이면 delta 한 번에 확정 문구 + `provider: grounding`.
+deterministic이면 delta 한 번에 확정 문구 + `provider: grounding`.  
+LLM이면 1차 초안은 클라이언트에 안 흘리고, **2차 polish 텍스트만** delta.
 
 ---
 
@@ -297,7 +302,10 @@ deterministic이면 delta 한 번에 확정 문구 + `provider: grounding`.
 | Dashboard, SPC `-` | 「이 로트는 왜 SPC 그래프가 없어?」 | `focus_spc_absent` 확정 답 |
 | Knowledge | 「문의 내역이 안 보여」 | `offscreen` → `/inquiry` 안내 |
 | Main | 「위험 LOT 몇 건」 | focus 이탈 → page `riskTop` 집계 |
-| 임의 + 문서 분석 요청 | 「SOP 찾아줘」 | RAG ON + (선택) LLM |
+| 임의 + 문서 분석 요청 | 「SOP 찾아줘」 / 「규정 요약해줘」 | RAG ON + LLM 합성 + 2차 polish |
+| 문서 후속 | 「그건 왜야」 | 히스토리 유지, retrieve 쿼리 확장 |
+| 칩 「이 화면 요약」 | 「지금 보고 있는 화면 데이터를 요약해 주세요」 | RAG OFF + page_payload |
+| 문서 질문 0히트 | 「SOP 찾아줘」 무히트 | 화면 KPI로 메우지 않음 |
 | 공정값 features 첨부 | 「불량 진단해줘」 | predict 헤드 + compose |
 
 ---
@@ -323,7 +331,7 @@ focus 이벤트 자체는 **DB analytics 미저장** (F12/BE 구조화 로그만
 | Express | `:3001` |
 | ai-service | `:8800` (`AI_SERVICE_URL`) |
 | LLM | `CHAT_USE_LLM=1` + 설정 페이지 vault 키 |
-| RAG | Public+Confidential · 일반 챗 light top_k |
+| RAG | Public+Confidential · top_k 8 · 청크 800 · 최대 4건 |
 | 동시 기동 | 루트 `npm run dev` — AI는 `dev:ai`만 포트 소유 (`AI_SERVICE_AUTOSTART=0` on backend) |
 
 ---
