@@ -18,7 +18,9 @@ _ENTITY_RE = re.compile(
 )
 # Explicit subject change only. 문서/지식 키워드만으로는 히스토리를 자르지 않는다.
 _SHIFT_RE = re.compile(
-    r"(다른\s*얘기|그건\s*말고)",
+    r"(다른\s*얘기|그건\s*말고|이제|오늘은|금일|이\s*화면|"
+    r"인수인계|지식|문서|문의|설정|SPC|관리도|Q-?\s*COST|큐코스트|"
+    r"불량유발|공정\s*변수|기준은)",
     re.IGNORECASE,
 )
 _DATE_SHIFT_RE = re.compile(r"\d{1,2}\s*일")
@@ -473,11 +475,64 @@ def _as_dict(v: Any) -> dict[str, Any] | None:
     return v if isinstance(v, dict) else None
 
 
+def _keep_route_tables(pp: dict[str, Any], route: str) -> dict[str, Any]:
+    """Drop other-page lists so dashboard/main/issue never share rows."""
+    out = dict(pp)
+    drops: tuple[str, ...] = ()
+    if "/knowledge" in route:
+        drops = ("lotRisks", "riskTop", "dailyKpi", "qCost", "issues", "selectedLot")
+    elif "/inquiry" in route:
+        drops = (
+            "lotRisks",
+            "riskTop",
+            "dailyKpi",
+            "qCost",
+            "issues",
+            "handover",
+            "pastIssues",
+        )
+    elif "/setting" in route:
+        drops = ("lotRisks", "riskTop", "dailyKpi", "qCost", "issues", "handover")
+    elif "/management" in route:
+        drops = ("lotRisks", "riskTop", "dailyKpi", "qCost", "issues", "handover")
+    elif "/dashboard" in route:
+        drops = ("riskTop", "issues", "dailyKpi", "qCost", "handover", "pastIssues")
+    elif "/main" in route:
+        drops = ("lotRisks", "issues", "handover", "pastIssues", "selectedLot")
+    elif "/issue" in route:
+        drops = (
+            "lotRisks",
+            "riskTop",
+            "dailyKpi",
+            "qCost",
+            "handover",
+            "pastIssues",
+            "selectedLot",
+        )
+    for key in drops:
+        out.pop(key, None)
+    return out
+
+
 def _page_payload(page_context: dict[str, Any] | None) -> dict[str, Any]:
     if not page_context:
         return {}
     pp = page_context.get("page_payload") or page_context.get("pagePayload")
     return pp if isinstance(pp, dict) else {}
+
+
+def _last_event(page_context: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not page_context:
+        return None
+    ev = page_context.get("last_event") or page_context.get("lastEvent")
+    if not isinstance(ev, dict):
+        return None
+    return {
+        "type": ev.get("type"),
+        "target": ev.get("target"),
+        "entity_id": ev.get("entity_id") or ev.get("entityId"),
+        "ts": ev.get("ts"),
+    }
 
 
 def detect_topic_shift(
@@ -593,12 +648,18 @@ def slice_page_context_for_query(
     message: str,
     page_context: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Keep only the table/section relevant to the question."""
+    """Keep the current page lists and last event; slim only off-screen asks."""
     if not page_context:
         return None
     out = dict(page_context)
     route = str(out.get("route") or "").lower()
-    pp = dict(_page_payload(out))
+    pp = _keep_route_tables(dict(_page_payload(out)), route)
+    last_ev = _last_event(out)
+    out.pop("lastEvent", None)
+    if last_ev is not None:
+        out["last_event"] = last_ev
+    elif "last_event" in out and not isinstance(out.get("last_event"), dict):
+        out.pop("last_event", None)
     m = message or ""
     full = wants_full_detail(m)
     visible = visible_ui_for_route(route, pp)
@@ -654,23 +715,20 @@ def slice_page_context_for_query(
             empty_hint = focus_spc_absent_hint(slim, focus_id)
             primary = "focus_spc_absent"
             deterministic = True
-        out["page_payload"] = {
-            "primary_table": primary,
-            "page": pp.get("page") or route_label(route),
-            "selectedLotId": lot_id,
-            "filters": pp.get("filters"),
-            "total": pp.get("total") or pp.get("filteredTotal"),
-            "filteredTotal": pp.get("filteredTotal"),
-            "displayLabel": pp.get("displayLabel"),
-            "dateRange": pp.get("dateRange"),
-            "activeTab": pp.get("activeTab"),
-            "list_omitted": True,
-            "deterministic": deterministic,
-            "empty_hint": empty_hint,
-            "note": "Focused UI selection — answer that entity unless user asks about the whole list.",
-        }
+        merged = dict(pp)
+        merged["primary_table"] = primary
+        merged["page"] = pp.get("page") or route_label(route)
+        merged["selectedLotId"] = lot_id
+        merged["deterministic"] = deterministic
+        if empty_hint:
+            merged["empty_hint"] = empty_hint
+        merged.pop("list_omitted", None)
+        merged["note"] = "Focused UI selection — page list kept with last event."
+        out["page_payload"] = _keep_route_tables(merged, route)
         out.pop("pagePayload", None)
         out["supplement"] = None
+        if last_ev is not None:
+            out["last_event"] = last_ev
         return out
 
     primary = "all"
@@ -792,7 +850,28 @@ def slice_page_context_for_query(
             "note": pp.get("note"),
             "uiNote": pp.get("uiNote"),
         }
-    elif "/main" in route or "/dashboard" in route:
+    elif "/dashboard" in route:
+        risk = pp.get("lotRisks") if isinstance(pp.get("lotRisks"), dict) else {}
+        items = list(risk.get("items") or [])
+        filtered = _filter_items_by_query(items, m) if _LOT_RE.search(m) else items[:_LIST_LIMIT]
+        use_items = filtered if filtered else items[:_LIST_LIMIT]
+        total = risk.get("total")
+        pp = {
+            "primary_table": "lotRisks",
+            "lotRisks": {
+                "total": total,
+                "page": risk.get("page"),
+                "filter": risk.get("filter"),
+                "match_count": len(use_items),
+                "items": use_items,
+            },
+            "selectedLot": pp.get("selectedLot"),
+        }
+        if total == 0:
+            pp["empty_hint"] = "위험 LOT가 0건입니다."
+        elif not items:
+            pp["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
+    elif "/main" in route:
         if re.search(r"Q-?\s*COST|큐코스트|평가\s*비용|예방\s*비용", m, re.I):
             pp = {
                 "primary_table": "qCost",
@@ -805,30 +884,57 @@ def slice_page_context_for_query(
                 "dailyKpi": pp.get("dailyKpi") or pp.get("summaryKpis"),
             }
         elif _LOT_RE.search(m):
-            risk = pp.get("riskTop") or pp.get("lotRisks")
-            if isinstance(risk, dict):
-                items = list(risk.get("lots") or risk.get("items") or [])
-                filtered = _filter_items_by_query(items, m)
-                total = risk.get("total")
-                pp = {
-                    "primary_table": "riskTop",
-                    "riskTop": {
-                        "total": total,
-                        "match_count": len(filtered) if filtered else len(items[:_LIST_LIMIT]),
-                        "items": filtered if filtered else items[:_LIST_LIMIT],
-                    },
-                }
-                if total == 0 or (isinstance(total, int) and total == 0):
-                    pp["empty_hint"] = "위험 LOT가 0건입니다."
-                elif not items and not filtered:
-                    pp["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
+            risk = pp.get("riskTop") if isinstance(pp.get("riskTop"), dict) else {}
+            items = list(risk.get("lots") or risk.get("items") or [])
+            filtered = _filter_items_by_query(items, m)
+            use_items = filtered if filtered else items[:_LIST_LIMIT]
+            total = risk.get("total")
+            pp = {
+                "primary_table": "riskTop",
+                "riskTop": {
+                    "total": total,
+                    "page": risk.get("page"),
+                    "match_count": len(use_items),
+                    "items": use_items,
+                },
+            }
+            if total == 0:
+                pp["empty_hint"] = "위험 LOT가 0건입니다."
+            elif not items:
+                pp["empty_hint"] = "화면에 표시된 위험 LOT 행이 없습니다."
+    elif "/issue" in route:
+        raw_issues = pp.get("issues")
+        if isinstance(raw_issues, dict):
+            items = list(raw_issues.get("items") or raw_issues.get("issues") or [])
+            total = raw_issues.get("total", pp.get("totalOpen"))
+        elif isinstance(raw_issues, list):
+            items = list(raw_issues)
+            total = pp.get("totalOpen")
+        else:
+            items = []
+            total = pp.get("totalOpen")
+        filtered = _filter_items_by_query(items, m)
+        use_items = filtered if filtered else items[:_LIST_LIMIT]
+        pp = {
+            "primary_table": "issues",
+            "filters": pp.get("filters"),
+            "page": pp.get("page"),
+            "totalOpen": total,
+            "issues": {
+                "total": total,
+                "match_count": len(use_items),
+                "items": use_items,
+            },
+            "selected": pp.get("selected"),
+        }
+        if total == 0:
+            pp["empty_hint"] = "열린 이슈가 0건입니다."
+        elif not items:
+            pp["empty_hint"] = "화면에 표시된 이슈 행이 없습니다."
 
-    out["page_payload"] = pp
+    out["page_payload"] = _keep_route_tables(pp if isinstance(pp, dict) else {}, route)
     out.pop("pagePayload", None)
-    # Never keep foreign supplement on these routes
-    if any(x in route for x in ("/knowledge", "/inquiry", "/setting", "/management")):
-        if not (_LOT_RE.search(m) and "/main" in route):
-            out["supplement"] = None
+    out["supplement"] = None
     return out
 
 
@@ -839,9 +945,9 @@ def build_grounding(
 ) -> dict[str, Any]:
     """Explicit allow-list for metrics the model may cite."""
     pc = page_context or {}
-    pp = _page_payload(pc)
-    focus = pc.get("focus_payload") or pc.get("focusPayload")
     route = str(pc.get("route") or "")
+    pp = _keep_route_tables(_page_payload(pc), route)
+    focus = pc.get("focus_payload") or pc.get("focusPayload")
     allowed: list[str] = []
     empty_hint = pp.get("empty_hint") if isinstance(pp, dict) else None
     analyzing = analysis_mode(message)
@@ -896,6 +1002,11 @@ def build_grounding(
             empty_hint
             or "위험 LOT가 0건입니다. 화면에 있는 건수만 말씀드립니다."
         )
+    if isinstance(pp.get("lotRisks"), dict) and pp["lotRisks"].get("total") == 0:
+        empty_hint = (
+            empty_hint
+            or "위험 LOT가 0건입니다. 화면에 있는 건수만 말씀드립니다."
+        )
 
     analysis_hint = None
     if analyzing:
@@ -911,4 +1022,5 @@ def build_grounding(
         "analysis_hint": analysis_hint,
         "allowed_metric_keys": allowed[:80],
         "empty_answer_hint": empty_hint,
+        "last_event": _last_event(pc),
     }

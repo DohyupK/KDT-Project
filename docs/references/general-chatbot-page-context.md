@@ -51,7 +51,9 @@ flowchart TB
 ```
 
 **사실 우선순위 (인용 근거):**  
-`focusPayload` → `pagePayload` → BE `supplement`
+`focusPayload` → `pagePayload` (현재 화면 필터로 그 페이지 API만 재조회한 값)  
+다른 페이지 행·`supplement` 교차 없음.  
+매 턴 **페이지 ∩ 이벤트** (`route` + `pagePayload` + `lastEvent`). XOR로 한쪽만 쓰지 않는다.
 
 ---
 
@@ -69,22 +71,32 @@ flowchart TB
 ### 2.2 스냅샷 필드
 
 ```ts
+type PageChatLastEvent = {
+  type: PageChatEventType
+  target: string
+  entityId?: string | null
+  ts: string
+}
+
 type PageChatContextPayload = {
   route: string
   focusId?: string | null      // 보통 entityId(LOT ID 등), 없으면 target 이름
   focusPayload?: unknown       // 클릭/선택 행의 요약 JSON (최대 ~8000자 truncate)
   pagePayload?: unknown        // 현재 화면 목록·필터·탭 요약
-  supplementHints?: string[]   // BE 보충용 힌트 (risk-top, inquiry …)
+  lastEvent?: PageChatLastEvent | null  // 방금 UI 동작 (페이지와 함께 매 턴 전송)
+  supplementHints?: string[]   // 전송 필드는 유지. hydrate는 route+화면 필터만 사용 (힌트 OR 없음)
 }
 ```
+
+페이지와 이벤트는 **한 턴에 함께** 간다. 클릭이 있어도 `pagePayload`를 버리지 않는다.
 
 ### 2.3 API 동작
 
 | API | 동작 |
 |-----|------|
-| `setPagePayload(route, summary, hints?)` | 화면 요약·힌트 갱신. JSON 길면 truncate |
-| `trackPageChatEvent({ type, route?, target, entityId?, payload? })` | F12 `console.info('[page-chat-event]')`. `clear`가 아니면 `focusId = entityId \|\| target`, `focusPayload` 설정 |
-| `resetForRoute(pathname)` | 네비게이션 시 focus·pagePayload·hints 전부 비움 (페이지 간 오염 방지) |
+| `setPagePayload(route, summary, hints?)` | 화면 요약·힌트 갱신. lastEvent/focus는 유지. JSON 길면 truncate |
+| `trackPageChatEvent({ type, route?, target, entityId?, payload? })` | F12 `console.info('[page-chat-event]')`. `clear`가 아니면 `focus`와 `lastEvent`를 같이 기록. `clear`는 focus/lastEvent만 비우고 **pagePayload는 유지** |
+| `resetForRoute(pathname)` | 네비게이션 시 `route=pathname` 즉시. focus·lastEvent·pagePayload 비움 (이전 화면 목록 오염 방지) |
 | `getChatPageContext()` | 전송 직전 스냅샷. `[page-chat] attach` 로그 |
 
 이벤트 타입: `row_click` · `row_select` · `filter_apply` · `panel_open` · `kpi_click` · `download` · `clear`  
@@ -98,7 +110,8 @@ postChatStream({
   features?,           // 진단/what-if 공정값 (있을 때만)
   llm_mode,            // 'auto' | vault credential id
   page_context: {
-    route, focusId, focusPayload, pagePayload, supplementHints
+    route,             // usePathname()이 SSOT (스냅샷 route가 '/'여도 URL 우선)
+    focusId, focusPayload, pagePayload, lastEvent, supplementHints
   },
   enable_api_llm: Boolean(features) || undefined, // 레거시 힌트
 })
@@ -118,11 +131,11 @@ postChatStream({
 | `/setting` | `…/setting/page.tsx` | 폰트·테마·새로고침·알림·섹션 (**API 키 값 미포함**) | `setting` | 없음 (페이지 요약만) |
 | `/issue` | `…/issue/page.tsx` | 필터·이슈(≤15)·selected | `issues` | 이슈 행 select / clear |
 
-라우트 변경 시 `AppShell`의 `PageChatRouteReset`이 `resetForRoute`를 호출해 **이전 화면 focus/목록이 새 페이지로 새지 않음**.
+라우트 변경 시 `AppShell`의 `PageChatRouteReset`이 **첫 마운트와 경로 변경**에서 `resetForRoute`를 호출한다. `/security` 오버레이 출입은 스냅샷을 지우지 않는다.
 
 ---
 
-## 3. 백엔드 — 중계 · 보충 · 게이트
+## 3. 백엔드 — 중계 · hydrate · 게이트
 
 ### 3.1 모듈
 
@@ -135,19 +148,20 @@ postChatStream({
 
 ### 3.2 `enrichPageContext`
 
-1. FE `pagePayload`가 **얇음**(`null` / `{}` / 40자 미만)이고  
-2. 라우트가 `/knowledge` · `/inquiry` · `/setting`이 **아니면**  
-→ allowlist 보충(`supplement`) fetch.
+무필터 top-5 보충·힌트 OR·다른 화면 `supplement`는 **쓰지 않는다.** `supplement`는 항상 `null`.
 
-| 조건 | 보충 내용 |
-|------|-----------|
-| `/main` + hints | `riskTop` 상위 5, `dailyKpi`, `qCost` |
-| `/dashboard` | `lotRisks` 상위 5 |
-| `/issue` | 오픈 이슈 상위 5 |
-| hint `past-issues` | 과거 이슈 상위 5 |
-| `/management` | `{ note, route }`만 (시계열 덤프 없음) |
+`pagePayload`가 있으면 **현재 `route`의 서비스만**, FE가 실어 준 화면 필터로 DB를 다시 읽고 목록·건수를 그 결과로 덮는다. 값은 DB에 적힌 그대로다. 대시보드와 이슈는 같은 `JUDGMENT_LOTS`/`ANALYSIS_LOTS`여도 **서로 행을 가져오지 않는다.**
 
-knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인계 오염 방지).
+`pagePayload`가 아직 없으면(이동 직후, 얇은 `null`/`{}`) **무필터 목록을 채우지 않는다.** route만 두고 끝.
+
+| route | DB 호출 | 필터 |
+|-------|---------|------|
+| `/dashboard` | `dashboardService.listLotRisks` | `pagePayload.lotRisks.filter` → FE `lotRiskListParams`와 동일 (search, min/maxProb, marginLevel, residualLevel, riskLevel, spc, page) |
+| `/issue` | `issueService.listOpenIssues` | `pagePayload.filters`의 search·date·lot·risk. API에 없는 spc는 조회 후 화면 필터로 한 번 더 걸러 **화면에 뜬 이슈만**. 담당(assignment)은 목록 API에 없어 화면 페이지 행에 DB 값을 덮고 건수는 화면 `totalOpen`을 유지 |
+| `/main` | `getRiskTop` + `getDailyProbabilityKpi` + `getQCostSummary` | Main 전용. lotRisks/issues 금지 |
+| knowledge / inquiry / setting / management | 재조회 없음 | 화면 JSON만 |
+
+focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRiskDetail` / `getIssueById` / Main은 `getLotById`). 대시보드에서 이슈 상세를 치지 않음.
 
 페이로드 truncate 상한 ≈ **6000자**. 로그: `[page-chat] enrich`, 채팅 시 `[page-chat-event]`(route/focusId/hasFocus…).
 
@@ -167,7 +181,8 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
     "focus_id": "LOT-...",
     "focus_payload": { },
     "page_payload": { },
-    "supplement": { },
+    "last_event": { "type": "row_select", "target": "lot-row", "entity_id": "LOT-..." },
+    "supplement": null,
     "supplement_hints": ["dashboard-lot-risks"]
   }
 }
@@ -200,10 +215,10 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
    3. **`should_prefer_focus`**이면  
       - 「지금 로트 / 이거 뭐야」→ `focus_summary` + DB 필드 공백 요약 (deterministic)  
       - SPC 질문 + 그래프 없음 → `focus_spc_absent` (deterministic)  
-      - 그 외 → `primary_table=focus`, 목록 omit  
-   4. 아니면 라우트별 페이지 슬라이스 (knowledge both/handover/past, inquiry, main qCost/KPI/riskTop …)  
+      - 그 외 → `primary_table=focus` **이되 page_payload 목록은 유지** (`last_event` 포함). 목록 omit 없음.  
+   4. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
 4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
-5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석). 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 JSON으로 메우지 않음.  
+5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석). 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 JSON으로 메우지 않되 **page_context는 유지**.  
 6. **predict/whatif:** features 있을 때 registry 헤드.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
@@ -231,7 +246,7 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 
 **인용 가능**
 
-- slice 이후 `focus_payload` / `page_payload` / `supplement`
+- slice 이후 `focus_payload` / `page_payload` / `last_event` (현재 route 테이블만. `supplement` 없음)
 - `visible_ui`, `empty_answer_hint`, `allowed_metric_keys`
 - predict / capacity / residual / recommendation (있을 때만)
 - `rag_sources` (검색됐을 때만). 일반 챗 RAG는 `Documents/` **Public · Confidential**만. Secret·TopSecret은 보안 챗.
@@ -242,6 +257,7 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
 - 사용자 답에 「현재 화면은 ○○만 보입니다」 / 「보이는 것은 …뿐입니다」  
 - 없는 탭이 「활성」이라고 단정  
 - allowlist에 없는 LOT/%/ppm 창작  
+- 다른 화면(대시보드↔이슈↔Main) LOT·이슈 행을 현재 답에 끌어오기  
 - 이전 턴 LOT/%를 현재 화면과 무관하게 재인용  
 - 시스템 규칙 문장(「말하지 마세요」)을 사용자 답에 출력  
 - 장비 즉시 반영 주장  
