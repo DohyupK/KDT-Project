@@ -25,8 +25,11 @@ import { useShellRefresh } from '@/hooks/useShellRefresh'
 import { usePageChat } from '@/context/PageChatContext'
 import LlmApiKeyVault from '@/components/security/LlmApiKeyVault'
 
-const FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
+const FONT_SIZE_OPTIONS = [
+  10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,
+] as const
 const DEFAULT_FONT_SIZE = 18
+const SAFE_FONT_SIZE_MAX = 24
 
 const LEGACY_FONT_SCALE_MAP: Record<number, (typeof FONT_SIZE_OPTIONS)[number]> = {
   80: 12,
@@ -45,6 +48,7 @@ const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
 
 const REFRESH_INTERVAL_OPTIONS = [
+  { label: '30초', value: 0 },
   { label: '1분', value: 1 },
   { label: '5분', value: 5 },
   { label: '10분', value: 10 },
@@ -186,6 +190,7 @@ function ToggleSwitch({
 export default function SettingPage() {
   const { setPagePayload } = usePageChat()
   const [fontSize, setFontSize] = useState<FontSize>(DEFAULT_FONT_SIZE)
+  const [pendingFontSize, setPendingFontSize] = useState<FontSize | null>(null)
   const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_THEME_MODE)
   const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(DEFAULT_REFRESH_INTERVAL)
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(DEFAULT_AUTO_REFRESH_ENABLED)
@@ -214,6 +219,15 @@ export default function SettingPage() {
   useEffect(() => {
     return () => clearToastTimer()
   }, [])
+
+  useEffect(() => {
+    if (pendingFontSize === null) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingFontSize(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [pendingFontSize])
 
   useEffect(() => {
     setPagePayload(
@@ -418,6 +432,30 @@ export default function SettingPage() {
   const handleThemeModeChange = (mode: ThemeMode) => {
     setThemeMode(mode)
     setSaveMessage('')
+    notifyUiSettingsChange({
+      themeMode: mode,
+      language: DEFAULT_LANGUAGE,
+      fontSize,
+    })
+  }
+
+  const applyFontSize = (next: FontSize) => {
+    setFontSize(next)
+    setPendingFontSize(null)
+    setSaveMessage('')
+    notifyUiSettingsChange({
+      themeMode,
+      language: DEFAULT_LANGUAGE,
+      fontSize: next,
+    })
+  }
+
+  const handleFontSizeSliderChange = (next: FontSize) => {
+    if (next <= SAFE_FONT_SIZE_MAX || fontSize > SAFE_FONT_SIZE_MAX) {
+      applyFontSize(next)
+      return
+    }
+    setPendingFontSize(next)
   }
 
   const handleSaveSettings = async () => {
@@ -509,6 +547,56 @@ export default function SettingPage() {
         </div>
       ) : null}
 
+      {pendingFontSize !== null ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/50 px-4"
+          role="presentation"
+          onClick={() => setPendingFontSize(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="font-size-warning-title"
+            className={`w-full max-w-md rounded-2xl border p-6 shadow-xl ${
+              isDarkMode
+                ? 'border-slate-600 bg-slate-800 text-slate-100'
+                : 'border-gray-200 bg-white text-gray-800'
+            }`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="font-size-warning-title" className="text-lg font-bold">
+              폰트 크기
+            </h2>
+            <p className={`mt-3 text-sm leading-relaxed ${textSecondary}`}>
+              해당 픽셀을 넘어갈 경우 화면이 깨질 수 있습니다. 진행하시겠습니까?
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingFontSize(null)}
+                className={`rounded-xl border-2 px-5 py-2.5 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                  isDarkMode
+                    ? 'border-slate-500 text-slate-200 hover:bg-slate-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                아니오
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingFontSize === null) return
+                  applyFontSize(pendingFontSize)
+                }}
+                className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+              >
+                예
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className={`${SHELL_CONTENT_CLASS} flex flex-col gap-6 py-6`}>
         <header>
           <div className="mb-6 flex flex-col gap-1">
@@ -535,7 +623,7 @@ export default function SettingPage() {
               </span>
             </div>
             <p className={`mb-6 text-sm ${textSecondary}`}>
-              슬라이더로 크기를 확인한 뒤, 설정 저장 시 페이지 전체에 적용됩니다.
+              슬라이더로 크기를 바꾸면 화면 전체(글자·박스·아이콘)에 바로 적용됩니다. 서버 저장은 설정 저장 시 반영됩니다.
             </p>
             <div className="flex items-center gap-4">
               <span
@@ -552,15 +640,16 @@ export default function SettingPage() {
                 step={1}
                 value={FONT_SIZE_OPTIONS.indexOf(fontSize)}
                 onChange={(e) => {
-                  setFontSize(FONT_SIZE_OPTIONS[Number(e.target.value)])
-                  setSaveMessage('')
+                  const next = FONT_SIZE_OPTIONS[Number(e.target.value)]
+                  if (next === undefined) return
+                  handleFontSizeSliderChange(next)
                 }}
                 aria-label="폰트 크기"
                 className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-gray-300 accent-blue-600"
               />
               <span
                 className={`shrink-0 select-none font-bold leading-none ${textPrimary}`}
-                style={{ fontSize: '24px' }}
+                style={{ fontSize: '48px' }}
                 aria-hidden
               >
                 A
@@ -656,7 +745,11 @@ export default function SettingPage() {
             </select>
             {autoRefreshEnabled ? (
               <p className={`mt-4 text-sm ${textSecondary}`}>
-                현재 주기: <strong className="text-blue-600">{refreshInterval}분</strong>
+                현재 주기:{' '}
+                <strong className="text-blue-600">
+                  {REFRESH_INTERVAL_OPTIONS.find((opt) => opt.value === refreshInterval)?.label ??
+                    (refreshInterval === 0 ? '30초' : `${refreshInterval}분`)}
+                </strong>
               </p>
             ) : (
               <p className={`mt-4 text-sm font-medium ${textSecondary}`}>자동 새로고침 비활성화됨</p>
