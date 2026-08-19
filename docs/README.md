@@ -11,7 +11,7 @@
 | [packages.md](./packages.md) | frontend · backend · ai-service · DB 안내 (구 패키지 README) |
 | [work-log/](./work-log/) | 날짜별 작업 상세 · 일일업무보고용 |
 | [references/](./references/) | 구현된 동작 명세 · [이슈 보고서](./references/issue-report.md) · [룰·스킬](./references/agent-rules-and-skills.md) · [LLM 튜닝](./references/LLM%20튜닝.md) |
-| [guides/](./guides/) | 운영 절차 (MariaDB · Lightsail · AWS앱/PC워커) |
+| [guides/](./guides/) | 사용자 따라 하기 · 운영 절차 (챗봇 · MariaDB · Lightsail · AWS앱/PC워커) |
 | [prompts/](./prompts/) | Cursor에 다시 넣을 프롬프트 |
 | [plans/](./plans/) | **사용 종료** (새 할 일 계획 없음) |
 

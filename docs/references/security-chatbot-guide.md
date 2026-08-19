@@ -1,6 +1,8 @@
 # 보안·일반 챗봇 가이드 (이용 · 라우팅)
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-19
+
+**사용자(기능 따라 하기):** [일반 상담](../guides/general-chatbot-user.md) · [보안 상담](../guides/security-chatbot-user.md)
 
 챗봇 **두 계열**의 UI·API·라우팅.  
 **운영(누가 무엇을 켜나):** [`aws-pc-security-worker.md`](../guides/aws-pc-security-worker.md)  
