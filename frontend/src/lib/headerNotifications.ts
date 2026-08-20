@@ -128,11 +128,12 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
   const escalatedLotIds = new Set<string>()
   const coveredLotIds = new Set<string>()
 
-  const [riskSettled, spcSettled, issuesSettled, inquirySettled] =
+  const [riskSettled, spcSettled, issuesSettled, handoverSettled, inquirySettled] =
     await Promise.allSettled([
       mainApi.getRiskTop({ page: 1, pageSize: 50 }),
       dashboardApi.listLotRisks({ page: 1, pageSize: 50, spc: '이탈' }),
       issueApi.list(),
+      issueApi.listHandoverHistory('pending'),
       inquiryApi.list({ status: '접수', startDate, endDate, page: 1, pageSize: 50 }),
     ])
 
@@ -217,6 +218,27 @@ async function collectRaw(now = new Date()): Promise<RawNotification[]> {
         href: spec.defaultHref,
         sortAt,
         lotId: lot.lotId,
+      })
+    }
+  }
+
+  if (handoverSettled.status === 'fulfilled') {
+    const spec = NOTIFICATION_TYPE_SPEC.handover_pending
+    for (const item of handoverSettled.value.data.items ?? []) {
+      if (!isWithinLookback(item.createdAt, cutoffMs)) continue
+      const sortAt = parseTime(item.createdAt)
+      raw.push({
+        id: `handover_pending:${item.historyId}`,
+        type: 'handover_pending',
+        priority: spec.priority,
+        time: formatRelativeTime(item.createdAt, now),
+        title: spec.titleTemplate,
+        message: fillTemplate(spec.messageTemplate, {
+          handoverContent: (item.handoverContent || '').trim() || '인수인계 대기',
+        }),
+        unread: true,
+        href: spec.defaultHref,
+        sortAt,
       })
     }
   }

@@ -60,6 +60,24 @@ export type IssueManager = {
   name: string
 }
 
+export type HandoverHistoryItem = {
+  historyId: number
+  handoverContent: string
+  action: string | null
+  handoverFrom: string | null
+  handoverTo: string | null
+  category: string | null
+  createdAt: string
+  archivedAt: string | null
+}
+
+export type HandoverListStatus = 'pending' | 'completed'
+
+export type CreateHandoverBody = {
+  category: '특이사항' | '전달사항' | '주의사항'
+  content: string
+}
+
 /** Completed issues for Knowledge library (no risk in UI). */
 export type PastIssueListItem = {
   issueId: string
@@ -112,6 +130,23 @@ export const issueApi = {
     apiClient.put<{ issue: IssueDetail; message: string }>(
       `/issues/${encodeURIComponent(issueId)}`,
       body,
+    ),
+
+  listHandoverHistory: (status: HandoverListStatus = 'completed') =>
+    apiClient.get<{ items: HandoverHistoryItem[]; total: number }>(
+      '/knowledge/handover-history',
+      { params: { status } },
+    ),
+
+  createHandover: (body: CreateHandoverBody) =>
+    apiClient.post<{ item: HandoverHistoryItem; message: string }>(
+      '/knowledge/handover',
+      body,
+    ),
+
+  completeHandover: (historyId: number) =>
+    apiClient.patch<{ item: HandoverHistoryItem; message: string }>(
+      `/knowledge/handover/${encodeURIComponent(String(historyId))}/complete`,
     ),
 
   listPastIssues: () =>
