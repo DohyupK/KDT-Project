@@ -386,6 +386,7 @@ def chat_endpoint(
             "page_payload": raw.get("page_payload")
             if "page_payload" in raw
             else raw.get("pagePayload"),
+            "last_event": raw.get("last_event") or raw.get("lastEvent"),
             "supplement": raw.get("supplement"),
             "supplement_hints": raw.get("supplement_hints")
             or raw.get("supplementHints"),
@@ -398,10 +399,21 @@ def chat_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift
+    from agent.api_llm.grounding import (
+        detect_topic_shift,
+        filter_history_for_entities,
+        is_page_summary_intent,
+        message_lot_issue_ids,
+        route_without_lot_table,
+    )
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    if topic_shift:
+    route_now = str((page_ctx or {}).get("route") or "")
+    if is_page_summary_intent(body.message):
+        history_text = ""
+    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
+        history_text = filter_history_for_entities(window_text, body.message)
+    elif topic_shift:
         # Facts come from page_context only; keep a tiny history window for pronouns.
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
     else:
@@ -513,6 +525,7 @@ async def chat_stream_endpoint(
             "page_payload": raw.get("page_payload")
             if "page_payload" in raw
             else raw.get("pagePayload"),
+            "last_event": raw.get("last_event") or raw.get("lastEvent"),
             "supplement": raw.get("supplement"),
             "supplement_hints": raw.get("supplement_hints")
             or raw.get("supplementHints"),
@@ -525,10 +538,21 @@ async def chat_stream_endpoint(
     )
     history = store.load_messages(tid) if tid else []
     window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import detect_topic_shift
+    from agent.api_llm.grounding import (
+        detect_topic_shift,
+        filter_history_for_entities,
+        is_page_summary_intent,
+        message_lot_issue_ids,
+        route_without_lot_table,
+    )
 
     topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    if topic_shift:
+    route_now = str((page_ctx or {}).get("route") or "")
+    if is_page_summary_intent(body.message):
+        history_text = ""
+    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
+        history_text = filter_history_for_entities(window_text, body.message)
+    elif topic_shift:
         history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
     else:
         semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []

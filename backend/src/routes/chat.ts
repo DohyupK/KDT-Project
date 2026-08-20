@@ -30,6 +30,12 @@ type ChatBody = {
     focusId?: string | null
     focusPayload?: unknown
     pagePayload?: unknown
+    lastEvent?: {
+      type?: string
+      target?: string
+      entityId?: string | null
+      ts?: string
+    } | null
     supplementHints?: string[]
   } | null
   enable_api_llm?: boolean | null
@@ -66,6 +72,7 @@ async function prepareChatContext(body: ChatBody) {
         focusId: enriched.focusId,
         focusPayload: enriched.focusPayload,
         pagePayload: enriched.pagePayload,
+        lastEvent: enriched.lastEvent ?? null,
         supplement: enriched.supplement,
         supplementHints: body.page_context?.supplementHints ?? [],
       }
@@ -133,6 +140,7 @@ chatRouter.post('/chat', async (req, res) => {
         focusId: page_context?.focusId ?? null,
         hasFocus: page_context?.focusPayload != null,
         hasPage: page_context?.pagePayload != null,
+        hasLastEvent: page_context?.lastEvent != null,
         enrich_ms: enrichMs,
       })
       const tProxy = Date.now()
@@ -254,6 +262,7 @@ chatRouter.post('/chat/stream', async (req, res) => {
       focusId: page_context?.focusId ?? null,
       hasFocus: page_context?.focusPayload != null,
       hasPage: page_context?.pagePayload != null,
+      hasLastEvent: page_context?.lastEvent != null,
       enrich_ms: enrichMs,
     })
 

@@ -98,12 +98,13 @@ class ChatFeatures(BaseModel):
 
 
 class PageContextModel(BaseModel):
-    """Screen context from FE (not shown in UI). Hybrid with optional BE supplement."""
+    """Screen context from FE. BE hydrates this route's API only; supplement is unused."""
 
     route: str = "/"
     focus_id: str | None = None
     focus_payload: Any | None = None
     page_payload: Any | None = None
+    last_event: dict[str, Any] | None = None
     supplement: dict[str, Any] | None = None
     supplement_hints: list[str] | None = None
 

@@ -46,10 +46,12 @@
 | [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage · 화면 안내 문구 · ISSUES.analysis_content · 챗 프롬프트 톤 |
 | [`2026-08-20.md`](./work-log/2026-08-20.md) | 인수인계(HANDOVER_HISTORY) 기능 전체 제거 |
 
-### 가이드 (`guides/`) — 구현·운영 절차
+### 가이드 (`guides/`) — 사용자 따라 하기 · 구현·운영 절차
 
 | 파일 | 내용 |
 |------|------|
+| [`general-chatbot-user.md`](./guides/general-chatbot-user.md) | 일반 상담 챗봇 따라 하기 (열기·화면 질문·알림·취소) |
+| [`security-chatbot-user.md`](./guides/security-chatbot-user.md) | 보안 상담 챗봇 따라 하기 (탭·출처·알림·취소) |
 | [`login-ubuntu-mariadb.md`](./guides/login-ubuntu-mariadb.md) | 로그인 · Ubuntu MariaDB 연동 |
 | [`aws-lightsail-docker.md`](./guides/aws-lightsail-docker.md) | Lightsail에 n8n·Qdrant Docker |
 | [`aws-lightsail-gpu-tunnel.md`](./guides/aws-lightsail-gpu-tunnel.md) | 앱은 Lightsail CPU, 보안 검색+vLLM은 이 PC (DB 큐) |

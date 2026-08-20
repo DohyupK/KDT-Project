@@ -24,24 +24,34 @@ import { AUTH_CHANGED_EVENT, isLoggedIn } from '@/lib/authStorage'
 
 export type UiThemeMode = 0 | 1
 export type UiLanguage = 'ko' | 'en'
-export type UiFontSize = 10 | 12 | 14 | 16 | 18 | 20 | 22 | 24
 
 export const UI_SETTINGS_EVENT = 'kdt-ui-settings-change'
 export const SHELL_REFRESH_EVENT = 'kdt-shell-refresh'
+export const EMAIL_CHECK_EVENT = 'kdt-email-check-change'
+export type EmailCheckValue = 'O' | 'X'
 const SETTINGS_STORAGE_KEY = 'kdt-user-settings'
 const SYSTEM_SETTINGS_CONFIG_KEY = 'system_settings_config'
 const FONT_SCALE_STYLE_ID = 'kdt-font-scale-style'
 
-export const UI_FONT_SIZE_OPTIONS = [10, 12, 14, 16, 18, 20, 22, 24] as const
+export const UI_FONT_SIZE_OPTIONS = [
+  10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,
+] as const
+export type UiFontSize = (typeof UI_FONT_SIZE_OPTIONS)[number]
 export const DEFAULT_UI_FONT_SIZE: UiFontSize = 18
 
-export const REFRESH_INTERVAL_OPTIONS = [1, 5, 10, 30] as const
+export const REFRESH_INTERVAL_OPTIONS = [0, 1, 5, 10, 30] as const
 export type RefreshIntervalMinutes = (typeof REFRESH_INTERVAL_OPTIONS)[number]
 export const DEFAULT_REFRESH_INTERVAL: RefreshIntervalMinutes = 1
 export const DEFAULT_AUTO_REFRESH_ENABLED = true
 
 function isRefreshInterval(value: unknown): value is RefreshIntervalMinutes {
   return typeof value === 'number' && (REFRESH_INTERVAL_OPTIONS as readonly number[]).includes(value)
+}
+
+/** 0 = 30 seconds; other values are minutes. */
+export function refreshIntervalToMs(refreshInterval: number): number {
+  if (refreshInterval === 0) return 30_000
+  return Math.max(1, refreshInterval) * 60_000
 }
 
 function readStoredRefreshSettings(): {
@@ -219,13 +229,13 @@ export function applyDocumentTheme(themeMode: UiThemeMode) {
   document.body.style.color = isDark ? '#f8fafc' : ''
 }
 
-/** Apply Setting-page font size to the whole shell via --font-scale. */
+/** Apply Setting-page font size to the whole shell via root rem (--font-scale). */
 export function applyDocumentFontSize(fontSize: number) {
   if (typeof document === 'undefined') return
   const size = isUiFontSize(fontSize) ? fontSize : DEFAULT_UI_FONT_SIZE
   const scale = size / DEFAULT_UI_FONT_SIZE
 
-  document.documentElement.style.fontSize = '16px'
+  document.documentElement.style.fontSize = ''
   document.documentElement.style.setProperty('--font-scale', String(scale))
 
   let styleEl = document.getElementById(FONT_SCALE_STYLE_ID) as HTMLStyleElement | null
@@ -236,18 +246,14 @@ export function applyDocumentFontSize(fontSize: number) {
   }
 
   styleEl.textContent = `
-    html { font-size: 16px !important; }
-    body { font-size: 16px !important; line-height: 1.5 !important; }
-    .text-xs   { font-size: calc(0.75rem  * var(--font-scale, 1)) !important; line-height: 1rem    !important; }
-    .text-sm   { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
-    .text-base { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
-    .text-lg   { font-size: calc(1.125rem * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    .text-xl   { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    .text-2xl  { font-size: calc(1.5rem   * var(--font-scale, 1)) !important; line-height: 2rem    !important; }
-    .text-3xl  { font-size: calc(1.875rem * var(--font-scale, 1)) !important; line-height: 2.25rem !important; }
-    [data-sidebar] .sidebar-title  { font-size: calc(1.25rem  * var(--font-scale, 1)) !important; line-height: 1.75rem !important; }
-    [data-sidebar] .sidebar-menu   { font-size: calc(1rem     * var(--font-scale, 1)) !important; line-height: 1.5rem  !important; }
-    [data-sidebar] .sidebar-status { font-size: calc(0.875rem * var(--font-scale, 1)) !important; line-height: 1.25rem !important; }
+    html { font-size: calc(16px * var(--font-scale, 1)); }
+    svg.lucide { zoom: var(--font-scale, 1); }
+    @supports not (zoom: 1) {
+      svg.lucide {
+        width: calc(var(--font-scale, 1) * 20px) !important;
+        height: calc(var(--font-scale, 1) * 20px) !important;
+      }
+    }
   `
 }
 
@@ -262,6 +268,27 @@ export function notifyUiSettingsChange(settings: {
   document.documentElement.lang = settings.language
   document.documentElement.setAttribute('data-ui-lang', settings.language)
   window.dispatchEvent(new CustomEvent(UI_SETTINGS_EVENT, { detail: settings }))
+}
+
+export function notifyEmailCheckChange(emailCheck: EmailCheckValue) {
+  if (typeof window === 'undefined') return
+  const normalized: EmailCheckValue = emailCheck === 'O' ? 'O' : 'X'
+  try {
+    const raw = localStorage.getItem(SYSTEM_SETTINGS_CONFIG_KEY)
+    const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    localStorage.setItem(
+      SYSTEM_SETTINGS_CONFIG_KEY,
+      JSON.stringify({
+        ...current,
+        n8nAlert: normalized === 'O',
+      }),
+    )
+  } catch {
+    // ignore cache write failures
+  }
+  window.dispatchEvent(
+    new CustomEvent(EMAIL_CHECK_EVENT, { detail: { emailCheck: normalized } }),
+  )
 }
 
 export function useUiSettings() {
@@ -422,9 +449,13 @@ export function useRefreshSettings() {
 function PageChatRouteReset() {
   const pathname = usePathname()
   const { resetForRoute } = usePageChat()
-  const prevPath = useRef(pathname)
+  const prevPath = useRef<string | null>(null)
   useEffect(() => {
-    if (pathname === '/security' || prevPath.current === '/security') {
+    if (pathname === '/security') {
+      prevPath.current = pathname
+      return
+    }
+    if (prevPath.current === '/security') {
       prevPath.current = pathname
       return
     }
@@ -469,7 +500,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <aside
           data-sidebar
           className={`flex h-full shrink-0 flex-col overflow-hidden bg-slate-900 text-white transition-[width] duration-300 ease-in-out ${
-            isSidebarOpen ? 'w-[260px] p-6' : 'w-[72px] p-3'
+            isSidebarOpen ? 'w-[16.25rem] p-6' : 'w-[4.5rem] p-3'
           }`}
         >
           <div

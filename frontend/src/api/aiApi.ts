@@ -108,11 +108,19 @@ export type ChatRecommendation = {
   note?: string | null
 }
 
+export type PageChatLastEvent = {
+  type: string
+  target: string
+  entityId?: string | null
+  ts?: string
+}
+
 export type PageChatContextRequest = {
   route: string
   focusId?: string | null
   focusPayload?: unknown
   pagePayload?: unknown
+  lastEvent?: PageChatLastEvent | null
   supplementHints?: string[]
   supplement?: Record<string, unknown> | null
 }

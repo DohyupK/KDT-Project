@@ -18,6 +18,11 @@ import {
   type SecurityChatSource,
 } from '@/api/securityChatApi'
 import axios from 'axios'
+import {
+  applyCancelledTurns,
+  CANCELLED_TURN_NOTICE,
+  rememberCancelledTurn,
+} from '@/lib/chatCancelledTurns'
 
 type ChatRole = 'user' | 'ai'
 
@@ -40,7 +45,8 @@ function formatWallElapsed(ms: number): string {
 const WELCOME_SECURITY: ChatMessage = {
   id: 1,
   role: 'ai',
-  text: '안녕하세요, YAHO입니다.\n\n보안·기밀 관련 질문을 도와드릴게요.',
+  text:
+    '안녕하세요, YAHO입니다.\n\n보안·기밀 관련 질문을 도와드릴게요.\n창을 닫아도 답은 계속 오고, 완료되면 아이콘에 점이 표시됩니다. 대기 중 말풍선의 X는 이 질문만 취소합니다.',
   mode: 'template',
   provider: 'offline',
 }
@@ -48,6 +54,13 @@ const WELCOME_SECURITY: ChatMessage = {
 const LOCAL_THREADS_KEY = 'kdt_security_chat_recent_threads'
 const DELETED_THREADS_KEY = 'kdt_security_chat_deleted_threads'
 const LOCAL_THREADS_MAX = 20
+
+type InflightTurn = {
+  userId: number
+  aiId: number
+  userText: string
+  threadId: string
+}
 
 type LocalStoredMsg = {
   role: ChatRole
@@ -142,6 +155,8 @@ type Props = {
   newThreadNonce?: number
   /** Fullscreen only: source chips, clickable [출처], and the document panel */
   showSources?: boolean
+  /** Reply finished while the parent panel was closed */
+  onBackgroundReply?: () => void
 }
 
 function dedupeSourcesByDocId(sources: SecurityChatSource[]): SecurityChatSource[] {
@@ -327,10 +342,12 @@ export default function SecurityChatbot({
   hideHeader = false,
   newThreadNonce = 0,
   showSources = true,
+  onBackgroundReply,
 }: Props) {
   const { isDark } = useUiSettings()
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
+  const [inflight, setInflight] = useState<InflightTurn | null>(null)
   /** Active document panel: all chunks for one doc_id from the message sources. */
   const [activeDocChunks, setActiveDocChunks] = useState<SecurityChatSource[] | null>(
     null,
@@ -341,6 +358,13 @@ export default function SecurityChatbot({
   const idRef = useRef(2)
   const endRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const pendingRef = useRef(false)
+  const inflightRef = useRef<InflightTurn | null>(null)
+  const cancelledTurnRef = useRef<InflightTurn | null>(null)
+  const onBackgroundReplyRef = useRef(onBackgroundReply)
+  pendingRef.current = pending
+  inflightRef.current = inflight
+  onBackgroundReplyRef.current = onBackgroundReply
   const showSourcesRef = useRef(showSources)
   showSourcesRef.current = showSources
 
@@ -401,22 +425,43 @@ export default function SecurityChatbot({
     void refreshThreads()
   }
 
-  const applyStoredMessages = (rows: LocalStoredMsg[]) => {
+  const assignMessageIds = (rows: Omit<ChatMessage, 'id'>[]): ChatMessage[] => {
     let n = 1
-    const mapped: ChatMessage[] = rows.map((r) => {
+    const mapped = rows.map((r) => {
       n += 1
-      return {
-        id: n,
+      return { ...r, id: n }
+    })
+    idRef.current = n + 1
+    return mapped
+  }
+
+  const applyStoredMessages = (rows: LocalStoredMsg[], threadId?: string | null) => {
+    const filtered = applyCancelledTurns(
+      'security',
+      threadId ?? getSecurityChatThreadId() ?? '',
+      rows,
+      {
+        getRole: (r) => (r.role === 'user' ? 'user' : 'ai'),
+        getText: (r) => r.text || '',
+        makeNotice: () => ({
+          role: 'ai' as const,
+          text: CANCELLED_TURN_NOTICE,
+          mode: 'template',
+        }),
+      },
+    )
+    const mapped = assignMessageIds(
+      filtered.map((r) => ({
         role: r.role === 'user' ? 'user' : 'ai',
         text: r.text || '',
         mode: r.mode,
         provider: r.provider,
         sources: r.sources,
         elapsedMs: r.elapsedMs,
-      }
-    })
-    idRef.current = n + 1
+      })),
+    )
     setMessages(mapped.length ? mapped : [WELCOME_SECURITY])
+    if (!mapped.length) idRef.current = 2
   }
 
   const persistCurrentThread = (msgs: ChatMessage[], threadId?: string | null) => {
@@ -441,26 +486,39 @@ export default function SecurityChatbot({
   }
 
   const hydrateThread = async (threadId: string) => {
+    if (pendingRef.current) return
     try {
       const rows = await loadChatThreadMessages({ thread_id: threadId })
       if (rows.length) {
-        let n = 1
-        const mapped: ChatMessage[] = rows.map((r) => {
-          n += 1
-          const role: ChatRole = r.role === 'user' ? 'user' : 'ai'
-          const sources = Array.isArray(r.sources)
-            ? (r.sources as SecurityChatSource[])
-            : undefined
-          return {
-            id: n,
-            role,
-            text: r.content || '',
-            mode: r.mode ?? undefined,
-            provider: r.provider ?? undefined,
-            sources,
-          }
-        })
-        idRef.current = n + 1
+        const filtered = applyCancelledTurns(
+          'security',
+          threadId,
+          rows,
+          {
+            getRole: (r) => (r.role === 'user' ? 'user' : 'ai'),
+            getText: (r) => r.content || '',
+            makeNotice: () => ({
+              role: 'assistant',
+              content: CANCELLED_TURN_NOTICE,
+              mode: 'template',
+            }),
+          },
+        )
+        const mapped = assignMessageIds(
+          filtered.map((r) => {
+            const role: ChatRole = r.role === 'user' ? 'user' : 'ai'
+            const sources = Array.isArray(r.sources)
+              ? (r.sources as SecurityChatSource[])
+              : undefined
+            return {
+              role,
+              text: r.content || '',
+              mode: r.mode ?? undefined,
+              provider: r.provider ?? undefined,
+              sources,
+            }
+          }),
+        )
         setMessages(mapped)
         upsertLocalThread({
           id: threadId,
@@ -484,7 +542,7 @@ export default function SecurityChatbot({
     }
     const local = getLocalThread(threadId)
     if (local?.messages?.length) {
-      applyStoredMessages(local.messages)
+      applyStoredMessages(local.messages, threadId)
       return
     }
     setMessages([WELCOME_SECURITY])
@@ -493,6 +551,10 @@ export default function SecurityChatbot({
 
   const startNewThread = () => {
     abortRef.current?.abort()
+    cancelledTurnRef.current = null
+    inflightRef.current = null
+    setInflight(null)
+    setPending(false)
     const tid = newSecurityChatThreadId()
     setActiveThreadId(tid)
     setActiveDocChunks(null)
@@ -560,6 +622,32 @@ export default function SecurityChatbot({
     openDocFromSources(sources, docId)
   }
 
+  const cancelInFlight = () => {
+    const turn = inflightRef.current
+    if (!turn) return
+    cancelledTurnRef.current = turn
+    rememberCancelledTurn('security', turn.threadId, turn.userText)
+    abortRef.current?.abort()
+    setMessages((prev) => {
+      const next = prev.map((m) =>
+        m.id === turn.aiId
+          ? {
+              ...m,
+              text: CANCELLED_TURN_NOTICE,
+              mode: 'template',
+              provider: 'offline',
+              sources: [],
+            }
+          : m,
+      )
+      queueMicrotask(() => persistCurrentThread(next, turn.threadId))
+      return next
+    })
+    inflightRef.current = null
+    setInflight(null)
+    setPending(false)
+  }
+
   const renderReplyText = (m: ChatMessage) => {
     if (m.role !== 'ai' || !m.sources?.length || !showSources) {
       return m.text
@@ -606,11 +694,20 @@ export default function SecurityChatbot({
     setPending(true)
 
     abortRef.current?.abort()
+    cancelledTurnRef.current = null
     const ac = new AbortController()
     abortRef.current = ac
     const t0 = performance.now()
 
     const aiId = ++idRef.current
+    const turn: InflightTurn = {
+      userId,
+      aiId,
+      userText: text,
+      threadId: tid,
+    }
+    inflightRef.current = turn
+    setInflight(turn)
     setMessages((prev) => [
       ...prev,
       {
@@ -639,6 +736,10 @@ export default function SecurityChatbot({
       provider?: string | null
       errorText?: string
     }) => {
+      if (cancelledTurnRef.current?.aiId === aiId) {
+        takeTerminal()
+        return
+      }
       if (!takeTerminal()) return
       const sources = Array.isArray(opts.sources) ? opts.sources : []
       const elapsedMs = Math.round(performance.now() - t0)
@@ -666,6 +767,7 @@ export default function SecurityChatbot({
         )
         return next
       })
+      onBackgroundReplyRef.current?.()
       if (!opts.errorText && uniqueDocIdCount(sources) === 1) {
         const docId = sources[0].doc_id || sources[0].title
         openDocFromSources(sources, docId)
@@ -709,7 +811,9 @@ export default function SecurityChatbot({
         { message: text },
         {
           onDelta: (piece) => {
-            if (ac.signal.aborted || sawTerminal) return
+            if (ac.signal.aborted || sawTerminal || cancelledTurnRef.current?.aiId === aiId) {
+              return
+            }
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiId && m.role === 'ai'
@@ -793,7 +897,13 @@ export default function SecurityChatbot({
       if (!sawTerminal && streamFailText) {
         fillAiBubble({ reply: '', errorText: streamFailText })
       }
-      if (abortRef.current === ac) setPending(false)
+      if (abortRef.current === ac) {
+        if (cancelledTurnRef.current?.aiId !== aiId) {
+          inflightRef.current = null
+          setInflight(null)
+        }
+        setPending(false)
+      }
     }
   }
 
@@ -1044,10 +1154,14 @@ export default function SecurityChatbot({
               isDark ? 'bg-slate-950/60' : 'bg-slate-50/60'
             }`}
           >
-            {messages.map((m) => (
+            {messages.map((m) => {
+              const canCancel =
+                Boolean(inflight) &&
+                (m.id === inflight?.userId || m.id === inflight?.aiId)
+              return (
               <div
                 key={m.id}
-                className={`break-words whitespace-pre-wrap px-3.5 py-3 text-sm leading-6 ${
+                className={`relative break-words whitespace-pre-wrap px-3.5 py-3 text-sm leading-6 ${
                   m.role === 'user'
                     ? 'ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-amber-500 text-white'
                     : isDark
@@ -1055,6 +1169,22 @@ export default function SecurityChatbot({
                       : 'mr-auto max-w-[88%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50/70 text-slate-800'
                 }`}
               >
+                {canCancel ? (
+                  <button
+                    type="button"
+                    aria-label="이 대화 취소"
+                    onClick={cancelInFlight}
+                    className={`absolute -right-1 -top-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full ${
+                      m.role === 'user'
+                        ? 'bg-amber-700 text-white hover:bg-amber-800'
+                        : isDark
+                          ? 'bg-slate-600 text-slate-100 hover:bg-slate-500'
+                          : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                    }`}
+                  >
+                    <X size={10} aria-hidden />
+                  </button>
+                ) : null}
                 <div>{renderReplyText(m)}</div>
                 {m.role === 'ai' && showSources && m.sources && m.sources.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -1087,7 +1217,8 @@ export default function SecurityChatbot({
                   </div>
                 ) : null}
               </div>
-            ))}
+              )
+            })}
             {pending ? (
               <div
                 className={`mr-auto max-w-[88%] rounded-2xl rounded-tl-md border px-3.5 py-3 text-sm ${

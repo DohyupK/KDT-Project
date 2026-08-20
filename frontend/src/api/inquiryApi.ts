@@ -63,7 +63,9 @@ export const inquiryApi = {
     for (const file of body.files ?? []) {
       form.append('files', file)
     }
-    return apiClient.post<{ item: InquiryApiItem; message: string }>('/inquiries', form)
+    return apiClient.post<{ item: InquiryApiItem; message: string }>('/inquiries', form, {
+      headers: { 'Content-Type': undefined },
+    })
   },
 
   download: (inquiryId: string, attachmentId: number) =>

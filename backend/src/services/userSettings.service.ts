@@ -1,8 +1,10 @@
 import { query } from '../db/connection.js'
 import { AppError } from '../middleware/errorHandler.js'
 
-const FONT_SIZES = [10, 12, 14, 16, 18, 20, 22, 24] as const
-const REFRESH_INTERVALS = [1, 5, 10, 30] as const
+const FONT_SIZES = [
+  10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48,
+] as const
+const REFRESH_INTERVALS = [0, 1, 5, 10, 30] as const
 
 export type EmailCheck = 'O' | 'X'
 export type ManageFlag = 'O' | 'X'
