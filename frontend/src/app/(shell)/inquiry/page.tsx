@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, FormEvent, MouseEvent } from 'react';
+import type {
+  ChangeEvent,
+  CSSProperties,
+  DragEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+} from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Download, Paperclip } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell';
@@ -107,6 +114,22 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 ];
 
 const PAGE_SIZE = 5;
+const MAX_INQUIRY_FILES = 5;
+const MAX_INQUIRY_FILE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_INQUIRY_EXTS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.pdf',
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.docx',
+  '.txt',
+] as const;
+const INQUIRY_FILE_ACCEPT = ALLOWED_INQUIRY_EXTS.join(',');
 
 const colors = {
   bg: '#f8fafc',
@@ -145,6 +168,41 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileExt(name: string) {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return '';
+  return name.slice(dot).toLowerCase();
+}
+
+function isAllowedInquiryFile(file: File) {
+  return (ALLOWED_INQUIRY_EXTS as readonly string[]).includes(fileExt(file.name));
+}
+
+function mergeInquiryFiles(prev: File[], incoming: File[]): { files: File[]; error: string } {
+  const next = [...prev];
+  const rejected: string[] = [];
+  for (const file of incoming) {
+    if (!isAllowedInquiryFile(file)) {
+      rejected.push(`${file.name} (형식)`);
+      continue;
+    }
+    if (file.size > MAX_INQUIRY_FILE_BYTES) {
+      rejected.push(`${file.name} (10MB 초과)`);
+      continue;
+    }
+    if (next.length >= MAX_INQUIRY_FILES) {
+      rejected.push(`${file.name} (최대 ${MAX_INQUIRY_FILES}개)`);
+      continue;
+    }
+    next.push(file);
+  }
+  if (rejected.length === 0) return { files: next, error: '' };
+  return {
+    files: next,
+    error: `일부 파일을 넣지 못했습니다: ${rejected.join(', ')}`,
+  };
 }
 
 function getDisplayFields(item: InquiryItem) {
@@ -239,6 +297,9 @@ export default function InquiryPage() {
   const [visibility, setVisibility] = useState<Visibility>('공개');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState('');
+  const [isDragActive, setIsDragActive] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{
     category: string;
@@ -256,6 +317,8 @@ export default function InquiryPage() {
   const categoryFieldRef = useRef<HTMLDivElement | null>(null);
   const subjectInputRef = useRef<HTMLInputElement | null>(null);
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
   const answerTimerRef = useRef<number | null>(null);
   const answerSectionRef = useRef<HTMLDivElement | null>(null);
@@ -519,6 +582,11 @@ export default function InquiryPage() {
     setVisibility('공개');
     setSubject('');
     setContent('');
+    setFiles([]);
+    setFileError('');
+    setIsDragActive(false);
+    dragDepthRef.current = 0;
+    if (fileInputRef.current) fileInputRef.current.value = '';
     setErrorMessage('');
     setFieldErrors({ category: '', subject: '', content: '' });
   };
@@ -590,6 +658,64 @@ export default function InquiryPage() {
   const handleApplySearch = () => {
     setAppliedFilters((prev) => ({ ...prev, search: draftFilters.search }));
     setCurrentPage(1);
+  };
+
+  const addInquiryFiles = (incoming: File[]) => {
+    const { files: next, error } = mergeInquiryFiles(files, incoming);
+    setFiles(next);
+    setFileError(error);
+  };
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected || selected.length === 0) return;
+    addInquiryFiles(Array.from(selected));
+    e.target.value = '';
+  };
+
+  const handleFileRemove = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setFileError('');
+  };
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleDropzoneKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openFilePicker();
+    }
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    const dropped = event.dataTransfer.files;
+    if (!dropped || dropped.length === 0) return;
+    addInquiryFiles(Array.from(dropped));
   };
 
   const handleOverlayClick = () => {
@@ -746,6 +872,7 @@ export default function InquiryPage() {
         visibility,
         title: subject.trim(),
         content: content.trim(),
+        files,
       });
       const created = mapApiItem(data.item);
       setInquiries((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
