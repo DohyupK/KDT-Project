@@ -27,5 +27,13 @@ router.get(
 )
 /** Knowledge 선택 항목 AI 분석 (보안 게이트·chatStore 미사용, 답변만 AI_LIBRARY_ANALYSIS 저장) */
 router.post('/knowledge/analyze', authMiddleware, requireManage, issueController.analyzeKnowledge)
+/** 인수인계: 등록 POST · 완료 PATCH · 목록 GET(?status=pending|completed) */
+router.get('/knowledge/handover-history', issueController.listHandoverHistory)
+router.post('/knowledge/handover', authMiddleware, issueController.createHandover)
+router.patch(
+  '/knowledge/handover/:historyId/complete',
+  authMiddleware,
+  issueController.completeHandover,
+)
 
 export const issueRouter = router

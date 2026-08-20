@@ -242,6 +242,11 @@ async function main() {
         check: (j) => Array.isArray((j as { items?: unknown }).items),
       },
       {
+        name: 'api.knowledge.handover-history',
+        path: '/api/knowledge/handover-history?status=pending',
+        check: (j) => j != null,
+      },
+      {
         name: 'api.dashboard.lot-risks',
         path: '/api/dashboard/lot-risks',
         check: (j) => Array.isArray((j as { items?: unknown }).items),

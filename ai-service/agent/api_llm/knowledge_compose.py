@@ -22,7 +22,7 @@ from agent.api_llm.providers import (
     translate_llm_error,
 )
 
-SYSTEM_KNOWLEDGE = """당신은 선택한 자료(완료 이슈·사내 문서·로컬 지식)를 같이 읽는 동료입니다.
+SYSTEM_KNOWLEDGE = """당신은 선택한 자료(완료 이슈·인수인계·사내 문서·로컬 지식)를 같이 읽는 동료입니다.
 제공된 항목만 근거로, 존댓말 자연어로 답합니다.
 요약과 참고 사항을 넣고, 넘겨받은 항목은 빠짐없이 다룹니다.
 초점은 그 자료의 정리입니다.
