@@ -51,7 +51,7 @@ async function supplementForRoute(
 ): Promise<Record<string, unknown> | null> {
   const out: Record<string, unknown> = {}
   const r = route.toLowerCase()
-  // These pages must never get LOT/handover/past-issue bleed from other routes.
+  // These pages must never get LOT/past-issue bleed from other routes.
   if (
     r.includes('/knowledge') ||
     r.includes('/inquiry') ||

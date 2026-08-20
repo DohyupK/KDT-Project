@@ -1202,7 +1202,7 @@ export default function GlobalChatbot() {
                         : 'border-slate-200 bg-white text-slate-700'
                     }`}
                   >
-                    <option value="auto">Auto (단가·길이)</option>
+                    <option value="auto">Auto </option>
                     {llmOptions.map((k) => (
                       <option key={k.id} value={k.id}>
                         {k.display_name}

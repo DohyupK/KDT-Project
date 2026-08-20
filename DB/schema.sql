@@ -123,23 +123,6 @@ CREATE TABLE IF NOT EXISTS ISSUES (
   INDEX idx_issues_created (created_at)
 );
 
-CREATE TABLE IF NOT EXISTS HANDOVER_HISTORY (
-  history_id        BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  handover_content  VARCHAR(255) NOT NULL COMMENT '인수인계 내용(본문)',
-  action            TEXT         NULL COMMENT '완료 플래그: NULL=pending, ''완료''=Knowledge 표시',
-  handover_from     VARCHAR(50)  NULL COMMENT '인계자 ← USERS.name',
-  handover_to       VARCHAR(50)  NULL COMMENT '인수자(선택)',
-  assignee_user_id  VARCHAR(50)  NULL,
-  category          VARCHAR(32)  NULL COMMENT '특이사항/전달사항/주의사항',
-  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 시각',
-  archived_at       DATETIME     NULL COMMENT '완료 시각 (완료 버튼 시 NOW)',
-  CONSTRAINT fk_handover_assignee
-    FOREIGN KEY (assignee_user_id) REFERENCES USERS(user_id)
-    ON DELETE SET NULL,
-  INDEX idx_handover_created (created_at),
-  INDEX idx_handover_action (action(32))
-);
-
 -- General-chat threads only. Security chat uses USER_SECURITY_*.
 CREATE TABLE IF NOT EXISTS USER_CHAT_THREADS (
   id         CHAR(36)     NOT NULL PRIMARY KEY,

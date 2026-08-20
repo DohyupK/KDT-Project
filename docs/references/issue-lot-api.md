@@ -1,6 +1,6 @@
 # Issue / LOT API · DB · 화면 연동
 
-최종 갱신: 2026-08-18
+최종 갱신: 2026-08-20
 
 Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. 런타임 SQL의 `FROM`/`JOIN`/`INTO`와 `ON DUPLICATE` 한정자(`JUDGMENT_LOTS.col`)도 대문자여야 한다.
 
@@ -19,9 +19,8 @@ Linux MariaDB(`lower_case_table_names=0`) SSOT는 **대문자 테이블명**. �
 
 - 이슈 목록: `ISSUES.completed_at IS NULL`. `risk_level`은 **`ANALYSIS_LOTS` JOIN** (`ISSUES`에 컬럼 없음)
 - 목록 DTO에 `actionContent` 없음 (상세·PUT에만)
-- **완료 → Knowledge 「과거 자료」** (`completed_at IS NOT NULL`). 인수인계 이력으로 넣지 않음
+- **완료 → Knowledge 「과거 자료」** (`completed_at IS NOT NULL`)
 - **이슈 저장(FE):** 「조치 완료 여부」체크 필수 · `completed: true`만 PUT
-- 인수인계(`HANDOVER_HISTORY`): `ISSUES`와 **독립** · Knowledge는 `archivedAt||createdAt`
 - **라이브러리 분석 행:** 선택 항목 분석은 `AI_LIBRARY_ANALYSIS.user_id`. 과거 자료 진단은 **`ISSUES.analysis_content`** (완료 `completed_at` 직후 백그라운드 API_LLM). ALTER [`DB/alter_issues_analysis_content.sql`](../../DB/alter_issues_analysis_content.sql).
 - **이슈 ID:** `ISS-yyMMdd-001` 일별 순번은 **ISSUES** 전용
 - **이슈 자동 생성:** `ANALYSIS_LOTS.risk_level = '심각'` 이고 그 LOT에 미완료 이슈가 없을 때 (`ensureIssuesForRiskLots`). 「주의」만으로는 안 만듦. 「심각」은 불량확률·잔류 Li·SPC 이탈 중 **최악 축** (`STANDARD` 임계, 기본 확률≥0.4 / 잔류≥3500 / SPC 라벨에 「이탈」)
@@ -64,7 +63,6 @@ erDiagram
   USERS ||--o{ AI_LIBRARY_ANALYSIS : user_id
   USERS ||--o{ SEND_EMAIL : user_id
   USERS ||--o{ ISSUES : assignee
-  USERS ||--o{ HANDOVER_HISTORY : assignee
   LOTS ||--o| ANALYSIS_LOTS : lot_id
   LOTS ||--o| JUDGMENT_LOTS : lot_id
   LOTS ||--o| LOT_RECOMMENDED_ACTIONS : lot_id
@@ -151,15 +149,6 @@ erDiagram
     datetime completed_at
     datetime created_at
   }
-  HANDOVER_HISTORY {
-    bigint history_id PK
-    varchar handover_content
-    text action
-    varchar handover_from
-    varchar handover_to
-    datetime created_at
-    datetime archived_at
-  }
   USER_CHAT_THREADS {
     char id PK
     varchar user_id FK
@@ -237,8 +226,6 @@ DDL: [`DB/schema.sql`](../../DB/schema.sql)
 | PUT | `/api/issues/:issueId` | JWT | `actionContent`, `completed: true` |
 | GET | `/api/knowledge/past-issues` | 선택 | 완료 이슈 |
 | GET | `/api/knowledge/past-issues/:issueId` | 선택 | 과거 자료 상세 |
-| GET | `/api/knowledge/handover-history` | 선택 | `?status=pending\|completed` |
-| POST | `/api/knowledge/handover` | JWT | 인수인계 등록 |
 | POST | `/api/knowledge/analyze` | JWT | `{ message }` → user 행. `{ issueId }` → `ISSUES.analysis_content` 백필 |
 | GET | `/api/dashboard/lot-risks` | 선택 | 위험 LOT 목록 (`JUDGMENT_LOTS` INNER JOIN `LOTS`) |
 | GET | `/api/dashboard/lot-risks/:lotId` | 선택 | LOT 상세 · SPC 차트 · 권고조치 |
@@ -286,7 +273,7 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 | 화면 | API | DB |
 |------|-----|-----|
-| 종 알림 (3일) | `GET /api/lots/risk-top`, `/api/issues`, `/api/dashboard/lot-risks`, `/api/inquiries`, `/api/knowledge/handover-history` + `GET/POST /api/auth/notifications/*` | `ANALYSIS_LOTS` 심각, `ISSUES` 미조치, `HANDOVER_HISTORY` pending, `INQUIRIES` 미답변, `USER_HEADER_NOTIF_STATE` |
+| 종 알림 (3일) | `GET /api/lots/risk-top`, `/api/issues`, `/api/dashboard/lot-risks`, `/api/inquiries` + `GET/POST /api/auth/notifications/*` | `ANALYSIS_LOTS` 심각, `ISSUES` 미조치, `INQUIRIES` 미답변, `USER_HEADER_NOTIF_STATE` |
 | 메일 수신 토글 | `GET\|PUT /api/auth/settings` | `USER_SETTINGS.email_check` |
 | 내 정보 모달 | `GET\|PUT /api/auth/profile` | `USERS` (아이디·성명 읽기전용, 이메일·연락처·비밀번호 수정) |
 | 로그아웃 | `POST /api/auth/logout` | 세션 |
@@ -328,7 +315,6 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 | 화면 | API | DB |
 |------|-----|-----|
 | 과거 자료 | `GET /api/knowledge/past-issues` · `/:id` | 완료 `ISSUES` + `LOTS`/`ANALYSIS_LOTS` + `ISSUES.analysis_content`. **`USER_SETTINGS.manage='O'`** |
-| 인수인계(완료) | `GET /api/knowledge/handover-history?status=completed` | `HANDOVER_HISTORY` |
 | 선택 항목 분석 | `POST /api/knowledge/analyze` `{ message }` | `AI_LIBRARY_ANALYSIS.user_id`. **manage='O'** |
 | 과거 자료 진단 | 이슈 완료 시 백그라운드 / 모달은 GET `analysisContent` (없으면 1회 백필 `{ issueId }`) | `ISSUES.analysis_content` |
 | 문서 미리보기 | `GET /api/docs/file` | 파일시스템 + `TEXT_MATCH` (OCR 경로) |

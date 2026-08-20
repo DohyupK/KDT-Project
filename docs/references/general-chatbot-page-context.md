@@ -110,7 +110,7 @@ postChatStream({
 |--------|------|------------------|-----------------|-------|
 | `/main` | `app/(shell)/main/page.tsx` | `riskTop`(≤10), `dailyKpi`, `qCost`, `selectedLotId` | `risk-top`, `daily-kpi`, `q-cost` | 위험 LOT 클릭/상세 (`spcGraph`), Q-Cost download, clear |
 | `/dashboard` | `…/dashboard/page.tsx` | `lotRisks`(≤10), `selectedLot`, 추이·FI·일별·탭 | `dashboard-lot-risks`, `dashboard-trend`, `dashboard-fi` | LOT 행 선택 (`spcGraph: none\|present`), clear |
-| `/knowledge` | `…/knowledge/page.tsx` | `activeTab`, `visibleTables`, 필터, past/handover(≤10), 문서 메타, selection | `handover`, `documents` | 과거이슈·인수인계·문서 클릭 |
+| `/knowledge` | `…/knowledge/page.tsx` | `visibleTables`, 필터, pastIssues(≤10), 문서 메타, selection | `documents` | 과거이슈·문서 클릭 |
 | `/inquiry` | `…/inquiry/page.tsx` | 필터·건수·문의 목록(≤10)·selection | `inquiry` | 문의 행 select / clear |
 | `/management` | `…/management/page.tsx` | 패널·날짜·확장·Grafana 노트 | `spc` | panel_open / 날짜 filter / clear |
 | `/setting` | `…/setting/page.tsx` | 폰트·테마·새로고침·알림·섹션 (**API 키 값 미포함**) | `setting` | 없음 (페이지 요약만) |
@@ -145,7 +145,7 @@ postChatStream({
 | hint `past-issues` | 과거 이슈 상위 5 |
 | `/management` | `{ note, route }`만 (시계열 덤프 없음) |
 
-knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인계 오염 방지).
+knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·과거자료 오염 방지).
 
 페이로드 truncate 상한 ≈ **6000자**. 로그: `[page-chat] enrich`, 채팅 시 `[page-chat-event]`(route/focusId/hasFocus…).
 
@@ -199,7 +199,7 @@ knowledge / inquiry / setting은 **보충 금지** (다른 화면 LOT·인수인
       - 「지금 로트 / 이거 뭐야」→ `focus_summary` + DB 필드 공백 요약 (deterministic)  
       - SPC 질문 + 그래프 없음 → `focus_spc_absent` (deterministic)  
       - 그 외 → `primary_table=focus`, 목록 omit  
-   4. 아니면 라우트별 페이지 슬라이스 (knowledge both/handover/past, inquiry, main qCost/KPI/riskTop …)  
+   4. 아니면 라우트별 페이지 슬라이스 (knowledge both/past/documents, inquiry, main qCost/KPI/riskTop …)  
 4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
 5. **RAG:** 문서·분석 intent regex일 때만 (화면/LOT 질문이면 스킵). Public+Confidential, light top_k.  
 6. **predict/whatif:** features 있을 때 registry 헤드.  
@@ -250,7 +250,7 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 
 | 라우트 | label | 기본 visible_ui |
 |--------|-------|-----------------|
-| `/knowledge` | knowledge | 과거자료, 인수인계, 사내문서 (+ activeTab) |
+| `/knowledge` | knowledge | 과거자료, 사내문서 (+ activeTab) |
 | `/inquiry` | inquiry | 문의목록, 필터, 선택문의 |
 | `/main` | main | 위험LOT, 일일KPI, Q-COST |
 | `/dashboard` | dashboard | LOT위험, 생산추이, 상세패널 |
@@ -263,6 +263,7 @@ FE `pagePayload.visibleTables`가 있으면 그걸 우선.
 사용자에게 화면 목록을 읽혀 주지 않는다. 경로만 안내.
 
 - knowledge + 「문의」→ `/inquiry` 안내 (문의 탭 없음)  
+- knowledge + 「인수인계」→ 기능 없음 안내 (과거 자료·사내 문서만)  
 - knowledge + 「설정」→ `/setting`  
 - knowledge + 「SPC」→ `/management`  
 - 비-inquiry + 「문의 내역/목록」→ `/inquiry`
