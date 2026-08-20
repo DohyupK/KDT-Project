@@ -1,14 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  ChangeEvent,
-  CSSProperties,
-  DragEvent,
-  FormEvent,
-  KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent,
-} from 'react';
+import type { CSSProperties, FormEvent, MouseEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Download, Paperclip } from 'lucide-react';
 import { useUiSettings } from '@/components/layout/AppShell';
@@ -114,22 +107,6 @@ const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
 ];
 
 const PAGE_SIZE = 5;
-const MAX_INQUIRY_FILES = 5;
-const MAX_INQUIRY_FILE_BYTES = 10 * 1024 * 1024;
-const ALLOWED_INQUIRY_EXTS = [
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.pdf',
-  '.xlsx',
-  '.xls',
-  '.csv',
-  '.docx',
-  '.txt',
-] as const;
-const INQUIRY_FILE_ACCEPT = ALLOWED_INQUIRY_EXTS.join(',');
 
 const colors = {
   bg: '#f8fafc',
@@ -164,45 +141,10 @@ function canViewInquiry(item: InquiryItem) {
   return !item.masked;
 }
 
-function fileExt(name: string) {
-  const dot = name.lastIndexOf('.');
-  if (dot < 0) return '';
-  return name.slice(dot).toLowerCase();
-}
-
-function isAllowedInquiryFile(file: File) {
-  return (ALLOWED_INQUIRY_EXTS as readonly string[]).includes(fileExt(file.name));
-}
-
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function mergeInquiryFiles(prev: File[], incoming: File[]): { files: File[]; error: string } {
-  const next = [...prev];
-  const rejected: string[] = [];
-  for (const file of incoming) {
-    if (!isAllowedInquiryFile(file)) {
-      rejected.push(`${file.name} (형식)`);
-      continue;
-    }
-    if (file.size > MAX_INQUIRY_FILE_BYTES) {
-      rejected.push(`${file.name} (10MB 초과)`);
-      continue;
-    }
-    if (next.length >= MAX_INQUIRY_FILES) {
-      rejected.push(`${file.name} (최대 ${MAX_INQUIRY_FILES}개)`);
-      continue;
-    }
-    next.push(file);
-  }
-  if (rejected.length === 0) return { files: next, error: '' };
-  return {
-    files: next,
-    error: `일부 파일을 넣지 못했습니다: ${rejected.join(', ')}`,
-  };
 }
 
 function getDisplayFields(item: InquiryItem) {
@@ -297,8 +239,6 @@ export default function InquiryPage() {
   const [visibility, setVisibility] = useState<Visibility>('공개');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
-  const [fileError, setFileError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{
     category: string;
@@ -307,14 +247,12 @@ export default function InquiryPage() {
   }>({ category: '', subject: '', content: '' });
   const [toastMessage, setToastMessage] = useState('');
   const [toastTone, setToastTone] = useState<'success' | 'warning'>('success');
-  const [isDragActive, setIsDragActive] = useState(false);
   const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
   const [writerProfile, setWriterProfile] = useState<AuthUser | null>(null);
   const [isLoadingWriter, setIsLoadingWriter] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const categoryFieldRef = useRef<HTMLDivElement | null>(null);
   const subjectInputRef = useRef<HTMLInputElement | null>(null);
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -322,7 +260,6 @@ export default function InquiryPage() {
   const answerTimerRef = useRef<number | null>(null);
   const answerSectionRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToAnswerRef = useRef(false);
-  const dragDepthRef = useRef(0);
 
   const filteredInquiries = useMemo(() => {
     const keyword = appliedFilters.search.trim().toLowerCase();
@@ -582,13 +519,8 @@ export default function InquiryPage() {
     setVisibility('공개');
     setSubject('');
     setContent('');
-    setFiles([]);
-    setFileError('');
     setErrorMessage('');
     setFieldErrors({ category: '', subject: '', content: '' });
-    setIsDragActive(false);
-    dragDepthRef.current = 0;
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const closeModal = () => {
@@ -647,67 +579,17 @@ export default function InquiryPage() {
     setCurrentPage(1);
   };
 
-  const handleApplyFilters = () => {
-    setAppliedFilters(draftFilters);
+  const applyInstantFilters = (
+    patch: Partial<Pick<InquiryFilterState, 'category' | 'status' | 'startDate' | 'endDate'>>,
+  ) => {
+    setDraftFilters((prev) => ({ ...prev, ...patch }));
+    setAppliedFilters((prev) => ({ ...prev, ...patch }));
     setCurrentPage(1);
   };
 
-  const addInquiryFiles = (incoming: File[]) => {
-    const { files: next, error } = mergeInquiryFiles(files, incoming);
-    setFiles(next);
-    setFileError(error);
-  };
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
-    addInquiryFiles(Array.from(selected));
-    e.target.value = '';
-  };
-
-  const handleFileRemove = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setFileError('');
-  };
-
-  const openFilePicker = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleDropzoneKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openFilePicker();
-    }
-  };
-
-  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current += 1;
-    setIsDragActive(true);
-  };
-
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setIsDragActive(false);
-  };
-
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = 0;
-    setIsDragActive(false);
-    const dropped = event.dataTransfer.files;
-    if (!dropped || dropped.length === 0) return;
-    addInquiryFiles(Array.from(dropped));
+  const handleApplySearch = () => {
+    setAppliedFilters((prev) => ({ ...prev, search: draftFilters.search }));
+    setCurrentPage(1);
   };
 
   const handleOverlayClick = () => {
@@ -864,7 +746,6 @@ export default function InquiryPage() {
         visibility,
         title: subject.trim(),
         content: content.trim(),
-        files,
       });
       const created = mapApiItem(data.item);
       setInquiries((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
@@ -1029,110 +910,101 @@ export default function InquiryPage() {
             className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault();
-              handleApplyFilters();
+              handleApplySearch();
             }}
           >
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 카테고리
               </span>
               {CATEGORY_FILTERS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() =>
-                    setDraftFilters((prev) => ({ ...prev, category: item.key }))
-                  }
+                  onClick={() => applyInstantFilters({ category: item.key })}
                   className={filterChipClass(draftFilters.category === item.key)}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`mr-1 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                상태
-              </span>
-              {STATUS_FILTERS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() =>
-                    setDraftFilters((prev) => ({ ...prev, status: item.key }))
-                  }
-                  className={filterChipClass(draftFilters.status === item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  상태
+                </span>
+                {STATUS_FILTERS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => applyInstantFilters({ status: item.key })}
+                    className={filterChipClass(draftFilters.status === item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="flex flex-wrap items-center gap-2"
+                aria-label="문의 기간"
+              >
+                <span className={`shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  기간
+                </span>
+                <div className="w-[9.75rem] shrink-0">
+                  <DateInput
+                    id="inquiry-start-date"
+                    aria-label="문의 시작일"
+                    value={draftFilters.startDate}
+                    onChange={(startDate) => applyInstantFilters({ startDate })}
+                    isDark={isDark}
+                  />
+                </div>
+                <span className={`shrink-0 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  ~
+                </span>
+                <div className="w-[9.75rem] shrink-0">
+                  <DateInput
+                    id="inquiry-end-date"
+                    aria-label="문의 종료일"
+                    value={draftFilters.endDate}
+                    onChange={(endDate) => applyInstantFilters({ endDate })}
+                    isDark={isDark}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="w-full min-w-[140px] sm:w-[148px]">
-                <label
-                  htmlFor="inquiry-start-date"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  시작일
-                </label>
-                <DateInput
-                  id="inquiry-start-date"
-                  aria-label="문의 시작일"
-                  value={draftFilters.startDate}
-                  onChange={(startDate) =>
-                    setDraftFilters((prev) => ({ ...prev, startDate }))
-                  }
-                  isDark={isDark}
-                />
-              </div>
-              <div className="w-full min-w-[140px] sm:w-[148px]">
-                <label
-                  htmlFor="inquiry-end-date"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  종료일
-                </label>
-                <DateInput
-                  id="inquiry-end-date"
-                  aria-label="문의 종료일"
-                  value={draftFilters.endDate}
-                  onChange={(endDate) =>
-                    setDraftFilters((prev) => ({ ...prev, endDate }))
-                  }
-                  isDark={isDark}
-                />
-              </div>
-              <div className="min-w-[200px] flex-1">
-                <label
-                  htmlFor="inquiry-search"
-                  className={`mb-1.5 block text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  검색
-                </label>
-                <input
-                  id="inquiry-search"
-                  type="search"
-                  value={draftFilters.search}
-                  onChange={(event) =>
-                    setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
-                  }
-                  placeholder="제목 또는 내용 검색..."
-                  className={`h-9 w-full rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
-                      : 'border-slate-200 bg-white text-slate-800'
-                  }`}
-                />
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="inquiry-search"
+                className={`w-14 shrink-0 text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+              >
+                검색
+              </label>
+              <input
+                id="inquiry-search"
+                type="search"
+                value={draftFilters.search}
+                onChange={(event) =>
+                  setDraftFilters((prev) => ({ ...prev, search: event.target.value }))
+                }
+                placeholder="제목 또는 내용 검색..."
+                className={`h-9 min-w-[200px] flex-1 rounded-md border px-3 text-sm outline-none focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+                  isDark
+                    ? 'border-slate-600 bg-slate-900 text-slate-100 placeholder:text-slate-500'
+                    : 'border-slate-200 bg-white text-slate-800'
+                }`}
+              />
               <button
                 type="submit"
-                className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                className="inline-flex h-9 shrink-0 items-center rounded-md bg-slate-900 px-3.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 검색
               </button>
               <button
                 type="button"
                 onClick={resetFilters}
-                className={`inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                className={`inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   isDark
                     ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
                     : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
