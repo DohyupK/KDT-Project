@@ -1276,7 +1276,7 @@ export default function InquiryPage() {
                     }`}
                   >
                     <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      첨부 파일
+                      첨부파일
                     </div>
                     <ul className="m-0 flex list-none flex-col gap-2 p-0">
                       {selectedInquiry.attachments.map((file) => (
@@ -1718,6 +1718,117 @@ export default function InquiryPage() {
                     style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}
                   >
                     {fieldErrors.content}
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={{ marginBottom: 22 }}>
+                <div style={labelStyle} id="inquiry-files-label">
+                  첨부파일
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-labelledby="inquiry-files-label"
+                  onClick={openFilePicker}
+                  onKeyDown={handleDropzoneKeyDown}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  className={`cursor-pointer rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
+                    isDragActive
+                      ? isDark
+                        ? 'border-blue-400 bg-blue-950/40'
+                        : 'border-blue-400 bg-blue-50/60'
+                      : isDark
+                        ? 'border-slate-600 bg-slate-900/50 hover:border-blue-400'
+                        : 'border-slate-200 bg-slate-50/50 hover:border-blue-400'
+                  }`}
+                >
+                  <div
+                    className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
+                    {files.length > 0
+                      ? '파일을 추가하려면 클릭하거나 여기에 드래그하세요'
+                      : '파일을 여기에 드래그하거나 클릭하여 선택'}
+                  </div>
+                  <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {files.length > 0
+                      ? `${files.length}개 선택됨 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`
+                      : `드래그 또는 파일 선택 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`}
+                  </div>
+                  <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    png, jpg, gif, webp, pdf, xlsx, xls, csv, docx, txt
+                  </div>
+                  {files.length > 0 ? (
+                    <ul
+                      className="mt-3 flex list-none flex-col gap-2 p-0 text-left"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {files.map((file, index) => (
+                        <li
+                          key={`${file.name}-${file.size}-${index}`}
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                            isDark ? 'border-slate-600 bg-slate-800' : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div
+                              className={`truncate text-xs font-medium ${
+                                isDark ? 'text-slate-200' : 'text-slate-700'
+                              }`}
+                            >
+                              {file.name}
+                            </div>
+                            <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                              {formatFileSize(file.size)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleFileRemove(index);
+                            }}
+                            aria-label={`${file.name} 삭제`}
+                            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                              isDark
+                                ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={openFilePicker}
+                  className={`mt-2 inline-flex h-9 items-center rounded-lg border px-3 text-xs font-semibold ${
+                    isDark
+                      ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  파일 선택
+                </button>
+                <input
+                  id="inquiry-files"
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={INQUIRY_FILE_ACCEPT}
+                  onChange={handleFileChange}
+                  className="sr-only"
+                  tabIndex={-1}
+                />
+                {fileError ? (
+                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: colors.red }}>
+                    {fileError}
                   </div>
                 ) : null}
               </div>

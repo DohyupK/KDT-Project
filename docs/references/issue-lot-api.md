@@ -335,11 +335,12 @@ FE `baseURL`은 `/api` ([`frontend/src/api/axios.ts`](../../frontend/src/api/axi
 
 ### 문의 `/inquiry`
 
-| 화면 | API | DB |
-|------|-----|-----|
-| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES`. 비공개 본문은 작성자 또는 `USER_SETTINGS.manage='O'` |
-| 첨부 | 목록 첨부 URL | `INQUIRY_ATTACHMENTS` |
-| 답변 | `POST\|PATCH /api/inquiries/:id/answer` | `INQUIRIES.answer`. 답변은 manage='O' |
+| 화면 | API | DB / 디스크 |
+|------|-----|-------------|
+| 목록/작성 | `GET\|POST /api/inquiries` | `INQUIRIES`. 비공개 본문은 작성자 또는 `USER_SETTINGS.manage='O'`. `POST`는 multipart 필드 `files` (최대 5개, 파일당 10MB) |
+| 첨부 업로드 | 문의하기 「첨부파일」 (드래그 + 파일 선택) | 메타 `INQUIRY_ATTACHMENTS` (`inquiry_id` → `INQUIRIES.id`). 바이트는 `INQUIRY_UPLOADS_DIR` 또는 `backend/uploads/inquiries/{inquiry_code}/{stored_name}` |
+| 첨부 다운로드 | `GET /api/inquiries/:id/attachments/:attachmentId` | 같은 디스크 파일을 스트리밍. `:id`는 `inquiry_code` |
+| 답변 | `POST\|PATCH\|PUT /api/inquiries/:id/answer` | `INQUIRIES.answer`. 답변은 manage='O' |
 
 ### 설정 `/setting`
 

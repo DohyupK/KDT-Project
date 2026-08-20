@@ -99,6 +99,7 @@ Express 안에 n8n·Qdrant를 넣지 않는다. Qdrant는 **ai-service와 함께
 | 변수 | 용도 |
 |------|------|
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | backend MariaDB (auth·이슈·문의 등). DB명은 **이 값 기준** |
+| `INQUIRY_UPLOADS_DIR` | (선택) 문의 첨부 파일 디스크 경로. 비우면 `backend/uploads/inquiries`. 메타는 `INQUIRY_ATTACHMENTS` |
 | `DATABASE_URL` | ai-service 멀티턴 (`user_chat_*`). **`mysql+pymysql://user:pass@host:port/DB_NAME?charset=utf8mb4`** 권장. 비우면 `DB_*`로 동일 dialect 조합. bare `mysql://` 는 MySQLdb 오류 → 히스토리 안 남음 |
 | `CHAT_STORE` | **backend Express 세션**만 (`sqlite` 기본 / `mariadb`). **챗 멀티턴 SSOT와 무관** |
 | `AI_SERVICE_URL` | 기본 `http://127.0.0.1:8800` |
