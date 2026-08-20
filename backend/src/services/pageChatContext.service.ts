@@ -56,6 +56,19 @@ function payloadThin(payload: unknown): boolean {
   }
 }
 
+async function supplementForRoute(
+  route: string,
+  hints: string[],
+): Promise<Record<string, unknown> | null> {
+  const out: Record<string, unknown> = {}
+  const r = route.toLowerCase()
+  // These pages must never get LOT/past-issue bleed from other routes.
+  if (
+    r.includes('/knowledge') ||
+    r.includes('/inquiry') ||
+    r.includes('/setting')
+  ) {
+    return null
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

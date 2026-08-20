@@ -1,6 +1,6 @@
 # 현재 작업 방향 (프로젝트 전체)
 
-최종 갱신: 2026-08-18
+최종 갱신: 2026-08-20
 
 모노레포 `frontend` / `backend` / `ai-service`.  
 목록: [`catalog.md`](./catalog.md) · 패키지: [`packages.md`](./packages.md) · 룰: [`references/agent-rules-and-skills.md`](./references/agent-rules-and-skills.md)
@@ -27,6 +27,7 @@
 - 일반 챗 페이지 컨텍스트 · 보안 RAG(SSE · analytics · BM25 핫리로드)
 - 이슈/LOT API · 위험 Top 메일(n8n→Gmail) · Documents 워처·Qdrant
 - 로그인·프로필 모달 · 설정(시스템만) · Grafana SPC 임베드
+- 인수인계(`HANDOVER_HISTORY`) 기능 제거 — Knowledge는 과거 자료·사내 문서·AI 분석만
 
 상세는 [`catalog.md`](./catalog.md) · [`work-log/`](./work-log/).
 

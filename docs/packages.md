@@ -42,7 +42,7 @@ Express `:3001`. 세션 · 보안 게이트 · ai-service 프록시 · auth · �
 | `/api/auth/*` | JWT 로그인·가입·프로필·탈퇴 |
 | `POST /api/chat` · `/api/chat/stream` | 보안 게이트 → ai-service |
 | `/api/security-chat` · `/stream` | 클라우드 폴백 없음 |
-| `/api/issues` · `/api/lots/*` · `/api/dashboard/*` · `/api/knowledge/*` | 이슈·LOT·KPI·인수인계 |
+| `/api/issues` · `/api/lots/*` · `/api/dashboard/*` · `/api/knowledge/*` | 이슈·LOT·KPI·지식 라이브러리 |
 | `/api/inquiries` | 문의·첨부 |
 | `/api/docs/*` | Documents 트리·파일 (읽기 전용) |
 | `/api/settings/control-bounds` | 공정 한계치 (파일 SSOT, Setting UI 없음) |

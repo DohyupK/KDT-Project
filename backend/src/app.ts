@@ -50,8 +50,6 @@ export function createApp() {
         'GET /api/knowledge/past-issues · GET /api/knowledge/past-issues/:issueId (auth + manage=O)',
       knowledge_analyze:
         'POST /api/knowledge/analyze (auth) {message} user row | {issueId} ISSUES.analysis_content',
-      handover_history:
-        'GET /api/knowledge/handover-history?status=pending|completed · POST /api/knowledge/handover (auth)',
       docs: 'GET /api/docs/tree · GET /api/docs/file?path= (READ-ONLY, auth)',
       inquiries: 'GET|POST /api/inquiries · GET /api/inquiries/:id · GET /api/inquiries/:id/attachments/:attachmentId · POST|PATCH|PUT /api/inquiries/:id/answer',
       chat: 'POST /api/chat',

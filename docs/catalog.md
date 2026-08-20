@@ -1,6 +1,6 @@
 # 프로젝트 문서 목록 (사용자 작성)
 
-최종 갱신: 2026-08-19  
+최종 갱신: 2026-08-20  
 범위: **이 저장소에서 직접 쓴 마크다운**. `node_modules` README·CHANGELOG(약 1400건)는 npm 패키지 설명이며 프로젝트 문서가 아니다. Git에도 없다.
 
 `Documents/` 원본은 **삭제하지 않음** (RAG·등급 자료). 아래는 위치·한 줄 요지만.
@@ -44,6 +44,7 @@
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 | [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 채점/이슈 지연 · spc_chart_json · 페이지×API 명세 |
 | [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage · 화면 안내 문구 · ISSUES.analysis_content · 챗 프롬프트 톤 |
+| [`2026-08-20.md`](./work-log/2026-08-20.md) | 인수인계(HANDOVER_HISTORY) 기능 전체 제거 |
 
 ### 가이드 (`guides/`) — 사용자 따라 하기 · 구현·운영 절차
 

@@ -28,7 +28,6 @@ _ANALYSIS_RE = re.compile(
     r"(요약|분석|왜|의미|비교|해석|패턴|우선|몇\s*건|얼마나)",
     re.I,
 )
-_HANDOVER_RE = re.compile(r"(인수인계|특이사항|전달사항|주의사항|수리)", re.I)
 _PAST_RE = re.compile(r"(과거\s*(이슈|자료)|완료\s*이슈|past)", re.I)
 _DOC_RE = re.compile(r"(문서|Markdown|파일|폴더|Public|Confidential)", re.I)
 _LOT_RE = re.compile(r"(위험\s*LOT|LOT|로트|불량확률|잔류|위험등급|risk)", re.I)
@@ -517,7 +516,7 @@ def visible_ui_for_route(
         return [str(x) for x in vt]
 
     if label == "knowledge":
-        items = ["과거자료(pastIssues)", "인수인계(handover)", "사내문서(documents)"]
+        items = ["과거자료(pastIssues)", "사내문서(documents)"]
         tab = pp.get("activeTab")
         if tab:
             items.append(f"activeTab={tab}")
@@ -548,11 +547,13 @@ def offscreen_question_hint(
     _ = visible
 
     # Knowledge page: "문의" means inquiry board elsewhere — not a tab here
+    if label == "knowledge" and re.search(r"인수인계", m):
+        return "인수인계 이력은 제공하지 않습니다. 과거 자료와 사내 문서를 확인해 주세요."
     if label == "knowledge" and _INQUIRY_RE.search(m) and not re.search(
         r"ISS-|과거\s*(이슈|자료)", m, re.I
     ):
         return "문의 내역은 /inquiry (문의 게시판)으로 이동하세요."
-    if label == "knowledge" and _SETTING_RE.search(m) and "인수인계" not in m:
+    if label == "knowledge" and _SETTING_RE.search(m):
         return "설정은 /setting 으로 이동하세요."
     if label not in {"inquiry", "unknown"} and re.search(
         r"문의\s*(내역|목록|게시판|탭)", m
@@ -936,12 +937,6 @@ def slice_page_context_for_query(
                     "filteredTotal"
                 ),
             },
-            "handover": {
-                "total": (_as_dict(pp.get("handover")) or {}).get("total"),
-                "filteredTotal": (_as_dict(pp.get("handover")) or {}).get(
-                    "filteredTotal"
-                ),
-            },
             "empty_hint": off_hint,
         }
         out.pop("pagePayload", None)
@@ -1012,26 +1007,20 @@ def slice_page_context_for_query(
 
     primary = "all"
     if "/knowledge" in route:
-        want_ho = bool(_HANDOVER_RE.search(m))
         want_past = bool(_PAST_RE.search(m) or re.search(r"ISS-", m, re.I))
         want_doc = bool(_DOC_RE.search(m))
         countish = bool(re.search(r"\d+\s*건|몇\s*건|건수|필터|날짜|\d{1,2}\s*일", m))
-        if want_ho and not want_past:
-            primary = "handover"
-        elif want_past and not want_ho:
+        if want_past and not want_doc:
             primary = "pastIssues"
-        elif want_doc:
+        elif want_doc and not want_past:
             primary = "documents"
-        elif countish or (not want_ho and not want_past and not want_doc):
-            # Keep both table counts/rows as shown on UI (filter-aware)
+        elif countish or (not want_past and not want_doc):
             primary = "both"
         else:
             primary = "both"
 
     if primary == "both" and "/knowledge" in route:
-        ho = _as_dict(pp.get("handover")) or {}
         past = _as_dict(pp.get("pastIssues")) or {}
-        ho_items = list(ho.get("items") or [])[:_LIST_LIMIT]
         past_items = list(past.get("items") or [])[:_LIST_LIMIT]
         # Date token soft-filter when present
         day_m = re.search(r"(\d{1,2})\s*일", m)
@@ -1042,10 +1031,9 @@ def slice_page_context_for_query(
                 blob = json.dumps(row, ensure_ascii=False, default=str)
                 return f"-{day}" in blob or f".{day}" in blob or f"/{day}" in blob
 
-            ho_f = [x for x in ho_items if _day_match(x)]
             past_f = [x for x in past_items if _day_match(x)]
-            if ho_f or past_f:
-                ho_items, past_items = ho_f or [], past_f or []
+            if past_f:
+                past_items = past_f
         pp = {
             "activeTab": pp.get("activeTab"),
             "filters": pp.get("filters"),
@@ -1055,21 +1043,14 @@ def slice_page_context_for_query(
                 "filteredTotal": past.get("filteredTotal", past.get("total")),
                 "items": past_items,
             },
-            "handover": {
-                "total": ho.get("total"),
-                "filteredTotal": ho.get("filteredTotal", ho.get("total")),
-                "items": ho_items,
-            },
             "documentsMeta": pp.get("documentsMeta"),
             "selection": pp.get("selection"),
             "empty_hint": (
                 "해당 날짜·필터에 맞는 화면 행이 없습니다."
-                if day_m and not ho_items and not past_items
+                if day_m and not past_items
                 else None
             ),
         }
-    elif primary == "handover":
-        pp = _handover_slice(pp, m, primary)
     elif primary == "pastIssues":
         past = _as_dict(pp.get("pastIssues")) or {}
         items = list(past.get("items") or [])
@@ -1261,7 +1242,6 @@ def build_grounding(
                             "defectProb",
                             "riskScore",
                             "title",
-                            "handoverContent",
                             "category",
                             "visibility",
                             "date",
