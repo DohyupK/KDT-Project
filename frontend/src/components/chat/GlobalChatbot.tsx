@@ -116,6 +116,11 @@ type InflightTurn = {
   threadId: string
 }
 
+/** Ref is cleared with `= null` then set again from cancel; avoid TS narrowing `.current` to null. */
+function readCancelledTurn(ref: { current: InflightTurn | null }): InflightTurn | null {
+  return ref.current
+}
+
 type LocalStoredMsg = {
   role: ChatRole
   text: string
@@ -588,14 +593,14 @@ export default function GlobalChatbot() {
         },
         {
           onDelta: (chunk) => {
-            if (ac.signal.aborted || cancelledTurnRef.current?.aiId === aiId) return
+            if (ac.signal.aborted || readCancelledTurn(cancelledTurnRef)?.aiId === aiId) return
             streamed += chunk
             setMessages((prev) =>
               prev.map((m) => (m.id === aiId ? { ...m, text: streamed } : m)),
             )
           },
           onDone: (data) => {
-            if (ac.signal.aborted || cancelledTurnRef.current?.aiId === aiId) return
+            if (ac.signal.aborted || readCancelledTurn(cancelledTurnRef)?.aiId === aiId) return
             const replyTid = data.thread_id || getChatThreadId() || tid
             if (replyTid) {
               setActiveThreadId(replyTid)
@@ -625,7 +630,7 @@ export default function GlobalChatbot() {
             markUnreadIfClosed()
           },
           onError: (msg) => {
-            if (ac.signal.aborted || cancelledTurnRef.current?.aiId === aiId) return
+            if (ac.signal.aborted || readCancelledTurn(cancelledTurnRef)?.aiId === aiId) return
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiId
@@ -645,7 +650,7 @@ export default function GlobalChatbot() {
       )
       if (ac.signal.aborted) return
     } catch (err) {
-      if (ac.signal.aborted || cancelledTurnRef.current?.aiId === aiId) return
+      if (ac.signal.aborted || readCancelledTurn(cancelledTurnRef)?.aiId === aiId) return
       let detail = '요청에 실패했습니다.'
       if (err && typeof err === 'object') {
         const ax = err as {
@@ -678,7 +683,7 @@ export default function GlobalChatbot() {
       })
       markUnreadIfClosed()
     } finally {
-      if (!ac.signal.aborted && cancelledTurnRef.current?.aiId !== aiId) {
+      if (!ac.signal.aborted && readCancelledTurn(cancelledTurnRef)?.aiId !== aiId) {
         inflightRef.current = null
         setInflight(null)
         setPending(false)
