@@ -30,6 +30,8 @@ export function isAllowedInquiryFile(originalName: string): boolean {
 }
 
 export function inquiryUploadsRoot(): string {
+  const fromEnv = (process.env.INQUIRY_UPLOADS_DIR || '').trim()
+  if (fromEnv) return path.resolve(fromEnv)
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/inquiries')
 }
 

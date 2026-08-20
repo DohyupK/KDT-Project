@@ -1404,7 +1404,7 @@ export default function InquiryPage() {
                     }`}
                   >
                     <div className={`mb-2 text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      첨부 파일
+                      첨부파일
                     </div>
                     <ul className="m-0 flex list-none flex-col gap-2 p-0">
                       {selectedInquiry.attachments.map((file) => (
@@ -1852,7 +1852,7 @@ export default function InquiryPage() {
 
               <div style={{ marginBottom: 22 }}>
                 <div style={labelStyle} id="inquiry-files-label">
-                  첨부 파일
+                  첨부파일
                 </div>
                 <div
                   role="button"
@@ -1879,12 +1879,15 @@ export default function InquiryPage() {
                   >
                     {files.length > 0
                       ? '파일을 추가하려면 클릭하거나 여기에 드래그하세요'
-                      : '스크린샷 또는 파일을 여기에 드래그하거나 클릭하여 업로드'}
+                      : '파일을 여기에 드래그하거나 클릭하여 선택'}
                   </div>
                   <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     {files.length > 0
                       ? `${files.length}개 선택됨 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`
-                      : `여러 파일 선택 가능 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`}
+                      : `드래그 또는 파일 선택 · 최대 ${MAX_INQUIRY_FILES}개, 파일당 10MB`}
+                  </div>
+                  <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    png, jpg, gif, webp, pdf, xlsx, xls, csv, docx, txt
                   </div>
                   {files.length > 0 ? (
                     <ul
@@ -1930,6 +1933,17 @@ export default function InquiryPage() {
                     </ul>
                   ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={openFilePicker}
+                  className={`mt-2 inline-flex h-9 items-center rounded-lg border px-3 text-xs font-semibold ${
+                    isDark
+                      ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  파일 선택
+                </button>
                 <input
                   id="inquiry-files"
                   ref={fileInputRef}
