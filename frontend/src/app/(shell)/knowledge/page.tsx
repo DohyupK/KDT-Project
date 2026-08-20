@@ -15,16 +15,11 @@ import DocumentsBrowser from '@/components/knowledge/DocumentsBrowser';
 import {
   issueApi,
   normalizeIssueRiskLevel,
-  type HandoverHistoryItem,
   type PastIssueDetail,
   type PastIssueLot,
 } from '@/api/issueApi';
 import { knowledgeApi } from '@/api/knowledgeApi';
 import { fetchDocFileBlob } from '@/api/docsApi';
-import {
-  IssueDetailAnalysis,
-  type IssueDetailAnalysisModel,
-} from '@/components/IssueDetailAnalysis';
 import { usePageChat } from '@/context/PageChatContext';
 import { useShellRefresh } from '@/hooks/useShellRefresh';
 import { isAxiosError } from 'axios';
@@ -36,20 +31,6 @@ interface DocumentItem {
   lot: string;
   detail?: string;
   occurredAt?: string;
-}
-
-interface ActionHistoryItem {
-  id: number;
-  handoverContent: string;
-  action: string;
-  cause: string;
-  manager: string;
-  /** Display datetime: archivedAt || createdAt */
-  date: string;
-  /** 인수인계 이관 항목의 분류(특이사항/전달사항/주의사항). 정적 목업에는 없음 */
-  category?: string;
-  handoverFrom?: string;
-  handoverTo?: string;
 }
 
 interface ReportData {
@@ -75,17 +56,7 @@ interface AnalysisResult {
 
 type ViewMode = 'list' | 'analysis';
 
-interface ActionFormState {
-  situation: string;
-  action: string;
-  cause: string;
-  manager: string;
-  date: string;
-}
-
-type DetailTarget =
-  | { kind: 'document'; item: DocumentItem }
-  | { kind: 'action'; item: ActionHistoryItem };
+type DetailTarget = { kind: 'document'; item: DocumentItem };
 
 const colors = {
   background: '#f1f5f9',
@@ -210,22 +181,6 @@ function getHeadCellStyle(c: UiColors): CSSProperties {
 
 const DEFAULT_VISIBLE_COUNT = 5;
 const LIST_PAGE_SIZE = 5;
-
-function mapHandoverHistoryItem(item: HandoverHistoryItem): ActionHistoryItem {
-  const from = item.handoverFrom?.trim() || '';
-  const dateTime = item.archivedAt?.trim() || item.createdAt?.trim() || '';
-  return {
-    id: item.historyId,
-    handoverContent: item.handoverContent,
-    action: item.action ?? '',
-    cause: '',
-    manager: from,
-    date: dateTime,
-    ...(item.category ? { category: item.category } : {}),
-    ...(from ? { handoverFrom: from } : {}),
-    ...(item.handoverTo?.trim() ? { handoverTo: item.handoverTo.trim() } : {}),
-  };
-}
 
 /* Legacy static mock data intentionally disabled; past issues now load from the API.
   {
@@ -452,14 +407,6 @@ const INITIAL_REPORT: ReportData = {
   referenceCount: 126,
 };
 
-const EMPTY_ACTION_FORM: ActionFormState = {
-  situation: '',
-  action: '',
-  cause: '',
-  manager: '',
-  date: '',
-};
-
 function ReportTabIcon() {
   return (
     <svg
@@ -521,35 +468,6 @@ function getAnalyzeErrorMessage(err: unknown, fallback: string): string {
 function fmtLotField(value: string | number | null | undefined): string {
   if (value == null || value === '') return '—';
   return String(value);
-}
-
-function pastIssueToAnalysisModel(item: PastIssueDetail): IssueDetailAnalysisModel {
-  const fromLot = item.lot;
-  const analysis = item.analysis
-    ? {
-        ...item.analysis,
-        riskLevel: normalizeIssueRiskLevel(item.analysis.riskLevel),
-      }
-    : fromLot
-      ? {
-          lotId: fromLot.lotId,
-          probability: fromLot.defectProb,
-          spcStatus: fromLot.spcStatus,
-          riskLevel: normalizeIssueRiskLevel(fromLot.riskLevel),
-          riskReason: fromLot.riskReason,
-          createdAt: null,
-          scoredAt: null,
-        }
-      : null;
-  return {
-    issueId: item.issueId,
-    lotId: item.lotId,
-    createdAt: item.createdAt,
-    issueContent: item.issueContent,
-    riskLevel: normalizeIssueRiskLevel(analysis?.riskLevel),
-    listSpcStatus: analysis?.spcStatus ?? fromLot?.spcStatus ?? null,
-    analysis,
-  };
 }
 
 const LOT_PROCESS_FIELDS: Array<{
@@ -1039,21 +957,12 @@ export default function KnowledgePage() {
   });
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
-  const [actions, setActions] = useState<ActionHistoryItem[]>([]);
-  const [actionSearch, setActionSearch] = useState('');
-  const [appliedActionSearch, setAppliedActionSearch] = useState('');
-  const [, setActionForm] = useState<ActionFormState>(EMPTY_ACTION_FORM);
-  const [, setEditingId] = useState<number | null>(null);
-  const [, setFormError] = useState('');
-
   const [report, setReport] = useState<ReportData>(INITIAL_REPORT);
 
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
-  const [selectedActionIds, setSelectedActionIds] = useState<number[]>([]);
   const [selectedDocPaths, setSelectedDocPaths] = useState<string[]>([]);
   const [analysisDocIds, setAnalysisDocIds] = useState<string[]>([]);
-  const [analysisActionIds, setAnalysisActionIds] = useState<number[]>([]);
   const [analysisDocPaths, setAnalysisDocPaths] = useState<string[]>([]);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -1070,7 +979,6 @@ export default function KnowledgePage() {
   const [analyzePhase, setAnalyzePhase] = useState<'idle' | 'reading' | 'llm'>('idle');
   const [hasRunAnalysis, setHasRunAnalysis] = useState(false);
   const [docPage, setDocPage] = useState(1);
-  const [actionPage, setActionPage] = useState(1);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
   const refreshPastIssues = async () => {
@@ -1092,19 +1000,9 @@ export default function KnowledgePage() {
     }
   };
 
-  const refreshHandoverActions = async () => {
-    try {
-      const { data } = await issueApi.listHandoverHistory('completed');
-      setActions(data.items.map(mapHandoverHistoryItem));
-    } catch {
-      setActions([]);
-    }
-  };
-
   useEffect(() => {
     if (allowed !== true) return
     void refreshPastIssues();
-    void refreshHandoverActions();
   }, [allowed]);
 
   useEffect(() => {
@@ -1132,20 +1030,17 @@ export default function KnowledgePage() {
 
   useShellRefresh(() => {
     void refreshPastIssues();
-    void refreshHandoverActions();
   });
 
   useEffect(() => {
     if (pathname.includes('/knowledge')) {
       void refreshPastIssues();
-      void refreshHandoverActions();
     }
   }, [pathname]);
 
   useEffect(() => {
     if (viewMode === 'list') {
       void refreshPastIssues();
-      void refreshHandoverActions();
     }
   }, [viewMode]);
 
@@ -1153,7 +1048,6 @@ export default function KnowledgePage() {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       void refreshPastIssues();
-      void refreshHandoverActions();
     };
 
     document.addEventListener('visibilitychange', onVisible);
@@ -1165,10 +1059,7 @@ export default function KnowledgePage() {
   }, []);
 
   const allDocuments = documents;
-
-  const allActions = useMemo(() => actions, [actions]);
-
-  const libraryTotalCount = allDocuments.length + allActions.length;
+  const libraryTotalCount = allDocuments.length;
 
   // pagePayload is set after filtered* memos below
 
@@ -1192,32 +1083,15 @@ export default function KnowledgePage() {
     [selectedDocId, allDocuments],
   );
 
-  const filteredActions = useMemo(() => {
-    const keyword = appliedActionSearch.trim().toLowerCase();
-    if (!keyword) return allActions;
-    return allActions.filter(
-      (item) =>
-        item.handoverContent.toLowerCase().includes(keyword) ||
-        item.action.toLowerCase().includes(keyword) ||
-        item.cause.toLowerCase().includes(keyword) ||
-        item.manager.toLowerCase().includes(keyword) ||
-        (item.category ?? '').toLowerCase().includes(keyword) ||
-        (item.handoverFrom ?? '').toLowerCase().includes(keyword) ||
-        (item.handoverTo ?? '').toLowerCase().includes(keyword) ||
-        item.date.includes(keyword),
-    );
-  }, [allActions, appliedActionSearch]);
-
   useEffect(() => {
     setPagePayload(
       '/knowledge',
       {
         page: 'knowledge',
         viewMode,
-        visibleTables: ['pastIssues', 'handover', 'documents'],
+        visibleTables: ['pastIssues', 'documents'],
         filters: {
           pastIssues: appliedFilters,
-          handoverSearch: appliedActionSearch,
         },
         pastIssues: {
           total: allDocuments.length,
@@ -1229,19 +1103,6 @@ export default function KnowledgePage() {
             date: d.date,
           })),
         },
-        handover: {
-          total: allActions.length,
-          filteredTotal: filteredActions.length,
-          items: filteredActions.slice(0, 10).map((a) => ({
-            id: a.id,
-            handoverContent: a.handoverContent.slice(0, 160),
-            action: a.action.slice(0, 120),
-            cause: a.cause.slice(0, 120),
-            manager: a.manager,
-            date: a.date,
-            category: a.category,
-          })),
-        },
         documentsMeta: {
           selectedPaths: selectedDocPaths.slice(0, 20),
           selectedPathCount: selectedDocPaths.length,
@@ -1249,39 +1110,27 @@ export default function KnowledgePage() {
         },
         selection: {
           pastIssueIds: selectedDocIds.slice(0, 20),
-          handoverIds: selectedActionIds.slice(0, 20),
-          count:
-            selectedDocIds.length + selectedActionIds.length + selectedDocPaths.length,
+          count: selectedDocIds.length + selectedDocPaths.length,
         },
         detail: detailTarget
-          ? detailTarget.kind === 'document'
-            ? {
-                kind: 'past-issue',
-                id: detailTarget.item.id,
-                title: detailTarget.item.title.slice(0, 200),
-                lot: detailTarget.item.lot,
-              }
-            : {
-                kind: 'handover',
-                id: detailTarget.item.id,
-                content: detailTarget.item.handoverContent.slice(0, 200),
-              }
+          ? {
+              kind: 'past-issue',
+              id: detailTarget.item.id,
+              title: detailTarget.item.title.slice(0, 200),
+              lot: detailTarget.item.lot,
+            }
           : null,
       },
-      ['handover', 'documents'],
+      ['documents'],
     );
   }, [
     setPagePayload,
     viewMode,
     allDocuments.length,
-    allActions.length,
     filteredDocuments,
-    filteredActions,
     appliedFilters,
-    appliedActionSearch,
     selectedDocPaths,
     selectedDocIds,
-    selectedActionIds,
     detailTarget,
   ]);
 
@@ -1289,21 +1138,12 @@ export default function KnowledgePage() {
     () => selectedDocIds.filter((id) => allDocuments.some((doc) => doc.id === id)),
     [selectedDocIds, allDocuments],
   );
-  const validSelectedActionIds = useMemo(
-    () => selectedActionIds.filter((id) => allActions.some((item) => item.id === id)),
-    [selectedActionIds, allActions],
-  );
 
-  const selectedCount =
-    validSelectedDocIds.length + validSelectedActionIds.length + selectedDocPaths.length;
+  const selectedCount = validSelectedDocIds.length + selectedDocPaths.length;
 
   const selectedDocs = useMemo(
     () => allDocuments.filter((doc) => validSelectedDocIds.includes(doc.id)),
     [validSelectedDocIds, allDocuments],
-  );
-  const selectedActions = useMemo(
-    () => allActions.filter((item) => validSelectedActionIds.includes(item.id)),
-    [validSelectedActionIds, allActions],
   );
 
   const selectedListItems = useMemo(() => {
@@ -1312,12 +1152,6 @@ export default function KnowledgePage() {
       item,
       order: index + 1,
     }));
-    const actionItems = selectedActions.map((item, index) => ({
-      kind: 'action' as const,
-      item,
-      order: selectedDocs.length + index + 1,
-    }));
-    const base = selectedDocs.length + selectedActions.length;
     const files = selectedDocPaths.map((path, index) => {
       const parts = path.replace(/\\/g, '/').split('/');
       const name = parts[parts.length - 1] || path;
@@ -1325,11 +1159,11 @@ export default function KnowledgePage() {
         kind: 'file' as const,
         path,
         name,
-        order: base + index + 1,
+        order: selectedDocs.length + index + 1,
       };
     });
-    return [...docs, ...actionItems, ...files];
-  }, [selectedDocs, selectedActions, selectedDocPaths]);
+    return [...docs, ...files];
+  }, [selectedDocs, selectedDocPaths]);
 
   const remainingSelectionCount = Math.max(0, selectedCount - DEFAULT_VISIBLE_COUNT);
   const visibleSelectionItems = isSelectionListExpanded
@@ -1340,71 +1174,43 @@ export default function KnowledgePage() {
     () => allDocuments.filter((doc) => analysisDocIds.includes(doc.id)),
     [analysisDocIds, allDocuments],
   );
-  const analysisActions = useMemo(
-    () => allActions.filter((item) => analysisActionIds.includes(item.id)),
-    [analysisActionIds, allActions],
-  );
-  const analysisCount = analysisDocs.length + analysisActions.length + analysisDocPaths.length;
+  const analysisCount = analysisDocs.length + analysisDocPaths.length;
 
   const selectionMatchesAnalysis = useMemo(() => {
     if (!hasRunAnalysis) return false;
     if (validSelectedDocIds.length !== analysisDocIds.length) return false;
-    if (validSelectedActionIds.length !== analysisActionIds.length) return false;
     if (selectedDocPaths.length !== analysisDocPaths.length) return false;
     const docsMatch = validSelectedDocIds.every((id) => analysisDocIds.includes(id));
-    const actionsMatch = validSelectedActionIds.every((id) => analysisActionIds.includes(id));
     const pathsMatch = selectedDocPaths.every((path) => analysisDocPaths.includes(path));
-    return docsMatch && actionsMatch && pathsMatch;
+    return docsMatch && pathsMatch;
   }, [
     hasRunAnalysis,
     validSelectedDocIds,
-    validSelectedActionIds,
     analysisDocIds,
-    analysisActionIds,
     selectedDocPaths,
     analysisDocPaths,
   ]);
 
   const docTotalPages = Math.max(1, Math.ceil(filteredDocuments.length / LIST_PAGE_SIZE));
-  const actionTotalPages = Math.max(1, Math.ceil(filteredActions.length / LIST_PAGE_SIZE));
   const safeDocPage = Math.min(docPage, docTotalPages);
-  const safeActionPage = Math.min(actionPage, actionTotalPages);
 
   const renderedDocuments = useMemo(() => {
     const start = (safeDocPage - 1) * LIST_PAGE_SIZE;
     return filteredDocuments.slice(start, start + LIST_PAGE_SIZE);
   }, [filteredDocuments, safeDocPage]);
 
-  const renderedActions = useMemo(() => {
-    const start = (safeActionPage - 1) * LIST_PAGE_SIZE;
-    return filteredActions.slice(start, start + LIST_PAGE_SIZE);
-  }, [filteredActions, safeActionPage]);
-
   const docPageNumbers = useMemo(
     () => Array.from({ length: docTotalPages }, (_, index) => index + 1),
     [docTotalPages],
   );
-  const actionPageNumbers = useMemo(
-    () => Array.from({ length: actionTotalPages }, (_, index) => index + 1),
-    [actionTotalPages],
-  );
 
   const visibleDocIds = useMemo(() => filteredDocuments.map((doc) => doc.id), [filteredDocuments]);
-  const visibleActionIds = useMemo(
-    () => filteredActions.map((item) => item.id),
-    [filteredActions],
-  );
 
   const docMaster = useMasterCheckbox(visibleDocIds, validSelectedDocIds);
-  const actionMaster = useMasterCheckbox(visibleActionIds, validSelectedActionIds);
 
   useEffect(() => {
     if (docPage > docTotalPages) setDocPage(docTotalPages);
   }, [docPage, docTotalPages]);
-
-  useEffect(() => {
-    if (actionPage > actionTotalPages) setActionPage(actionTotalPages);
-  }, [actionPage, actionTotalPages]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -1413,9 +1219,7 @@ export default function KnowledgePage() {
 
   const applyKnowledgeFilters = () => {
     setAppliedFilters(filters);
-    setAppliedActionSearch(actionSearch);
     setDocPage(1);
-    setActionPage(1);
     showToast('필터가 적용되었습니다.');
   };
 
@@ -1423,33 +1227,8 @@ export default function KnowledgePage() {
     const empty = { date: '', keyword: '' };
     setFilters(empty);
     setAppliedFilters(empty);
-    setActionSearch('');
-    setAppliedActionSearch('');
     setDocPage(1);
-    setActionPage(1);
     showToast('필터가 초기화되었습니다.');
-  };
-
-  const handleFormChange = (key: keyof ActionFormState, value: string) => {
-    setActionForm((current) => ({ ...current, [key]: value }));
-  };
-
-  const startEdit = (item: ActionHistoryItem) => {
-    setEditingId(item.id);
-    setActionForm({
-      situation: item.handoverContent,
-      action: item.action,
-      cause: item.cause,
-      manager: item.manager,
-      date: item.date,
-    });
-    setFormError('');
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setActionForm(EMPTY_ACTION_FORM);
-    setFormError('');
   };
 
   const openDocumentDetail = async (doc: DocumentItem) => {
@@ -1538,27 +1317,6 @@ export default function KnowledgePage() {
     }
   };
 
-  const openActionDetail = (item: ActionHistoryItem) => {
-    setPastDetail(null);
-    setDetailLot(null);
-    setLotLoading(false);
-    setDetailTarget({ kind: 'action', item });
-    trackPageChatEvent({
-      type: 'row_click',
-      route: '/knowledge',
-      target: 'knowledge-handover',
-      entityId: String(item.id),
-      payload: {
-        id: item.id,
-        handoverContent: item.handoverContent.slice(0, 200),
-        action: item.action.slice(0, 120),
-        cause: item.cause.slice(0, 120),
-        manager: item.manager,
-        date: item.date,
-      },
-    });
-  };
-
   const closeDetailModal = () => {
     setDetailTarget(null);
     setDetailLot(null);
@@ -1569,20 +1327,11 @@ export default function KnowledgePage() {
     setDiagnosisLoading(false);
   };
 
-  const handleActionSubmit = () => {
-    // 읽기 전용 화면에서는 UI를 제공하지 않으며, 기존 핸들러 시그니처·흐름은 보존합니다.
-    setFormError('읽기 전용 라이브러리에서는 등록·수정이 비활성화되어 있습니다.');
-  };
-
-  const handleDelete = (id: number) => {
-    console.log('인수인계 이력 삭제 요청(읽기 전용 무시):', { id });
-  };
-
   const handleGenerateReport = () => {
     const refreshed: ReportData = {
       ...report,
       baseDate: '2026-07-21',
-      referenceCount: report.referenceCount + actions.length,
+      referenceCount: report.referenceCount + documents.length,
     };
     setReport(refreshed);
     console.log('AI 데일리 레포트 생성:', refreshed);
@@ -1595,27 +1344,12 @@ export default function KnowledgePage() {
     );
   };
 
-  const toggleActionSelection = (id: number) => {
-    setSelectedActionIds((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
-    );
-  };
-
   const toggleVisibleDocs = (checked: boolean) => {
     setSelectedDocIds((current) => {
       if (checked) {
         return Array.from(new Set([...current, ...visibleDocIds]));
       }
       return current.filter((id) => !visibleDocIds.includes(id));
-    });
-  };
-
-  const toggleVisibleActions = (checked: boolean) => {
-    setSelectedActionIds((current) => {
-      if (checked) {
-        return Array.from(new Set([...current, ...visibleActionIds]));
-      }
-      return current.filter((id) => !visibleActionIds.includes(id));
     });
   };
 
@@ -1630,10 +1364,8 @@ export default function KnowledgePage() {
     setIsAnalyzing(false);
     setAnalyzePhase('idle');
     setSelectedDocIds([]);
-    setSelectedActionIds([]);
     setSelectedDocPaths([]);
     setAnalysisDocIds([]);
-    setAnalysisActionIds([]);
     setAnalysisDocPaths([]);
     setAnalysisResult(null);
     setAnalysisError(null);
@@ -1645,11 +1377,6 @@ export default function KnowledgePage() {
   const removeDocFromSelection = (id: string) => {
     if (isAnalyzing) return;
     setSelectedDocIds((current) => current.filter((item) => item !== id));
-  };
-
-  const removeActionFromSelection = (id: number) => {
-    if (isAnalyzing) return;
-    setSelectedActionIds((current) => current.filter((item) => item !== id));
   };
 
   const removeFileFromSelection = (path: string) => {
@@ -1671,7 +1398,6 @@ export default function KnowledgePage() {
   const executeAnalysis = async () => {
     if (selectedCount === 0 || isAnalyzing) return;
     const docSnapshot = [...validSelectedDocIds];
-    const actionSnapshot = [...validSelectedActionIds];
     const docPathSnapshot = [...selectedDocPaths];
     setIsAnalyzing(true);
     setAnalyzePhase('reading');
@@ -1683,7 +1409,6 @@ export default function KnowledgePage() {
     try {
       const localKnowledge = consumeLocalKnowledgeForLlm();
       const selectedPastIssues = allDocuments.filter((doc) => docSnapshot.includes(doc.id));
-      const selectedHandoverActions = allActions.filter((item) => actionSnapshot.includes(item.id));
       const pathsToFetch = docPathSnapshot.slice(0, MAX_DOC_FILES);
       const docSnippets = await Promise.all(
         pathsToFetch.map(async (path) => {
@@ -1725,9 +1450,6 @@ ${
     .join('\n') || '(없음)'
 }
 
-[인수인계]
-${selectedHandoverActions.map((item) => `- ${item.handoverContent}`).join('\n') || '(없음)'}
-
 [사내 문서]
 ${docSnippets.join('\n') || '(없음)'}
 
@@ -1745,7 +1467,6 @@ ${
         const msg = getAnalyzeErrorMessage(err, '알 수 없는 네트워크 오류');
         console.error('[knowledge-analyze] api', msg, err);
         setAnalysisDocIds(docSnapshot);
-        setAnalysisActionIds(actionSnapshot);
         setAnalysisDocPaths(docPathSnapshot);
         setAnalysisResult(null);
         setLlmRawReply(null);
@@ -1769,7 +1490,6 @@ ${
       }
 
       setAnalysisDocIds(docSnapshot);
-      setAnalysisActionIds(actionSnapshot);
       setAnalysisDocPaths(docPathSnapshot);
       setAnalysisResult(result);
       setLlmRawReply(raw || null);
@@ -1779,14 +1499,13 @@ ${
         showToast(warnings[warnings.length - 1]);
       } else {
         showToast(
-          `선택한 ${docSnapshot.length + actionSnapshot.length + docPathSnapshot.length}개 항목 분석을 완료했습니다.`,
+          `선택한 ${docSnapshot.length + docPathSnapshot.length}개 항목 분석을 완료했습니다.`,
         );
       }
     } catch (err) {
       const msg = getAnalyzeErrorMessage(err, '알 수 없는 오류');
       console.error('[knowledge-analyze] unexpected', msg, err);
       setAnalysisDocIds(docSnapshot);
-      setAnalysisActionIds(actionSnapshot);
       setAnalysisDocPaths(docPathSnapshot);
       setAnalysisError([...warnings, msg].join('\n'));
       setHasRunAnalysis(true);
@@ -1806,13 +1525,6 @@ ${
       open();
     }
   };
-
-  // 기존 핸들러 참조 유지 (트리셰이킹/린트 대비)
-  void handleFormChange;
-  void startEdit;
-  void cancelEdit;
-  void handleActionSubmit;
-  void handleDelete;
 
   if (allowed !== true) {
     return null;
@@ -1885,7 +1597,7 @@ ${
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 style={{ margin: 0, color: uiColors.navy, fontSize: 19 }}>
-                  {language === 'en' ? 'Library & Action History' : '라이브러리 & 대처 이력'}
+                  {language === 'en' ? 'Library' : '라이브러리'}
                 </h2>
                 <p className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   {language === 'en'
@@ -1938,18 +1650,6 @@ ${
                     setFilters((current) => ({ ...current, keyword: event.target.value }))
                   }
                   placeholder="이슈 ID, 제목, LOT 검색"
-                  style={inputStyle}
-                />
-              </div>
-              <div className="min-w-[180px] flex-1">
-                <label htmlFor="action-search" style={labelStyle}>
-                  대처 이력 검색
-                </label>
-                <input
-                  id="action-search"
-                  value={actionSearch}
-                  onChange={(event) => setActionSearch(event.target.value)}
-                  placeholder="인수인계 내용 검색"
                   style={inputStyle}
                 />
               </div>
@@ -2240,225 +1940,6 @@ ${
                 ) : null}
               </div>
 
-              {/* 인수인계 이력 */}
-              <div
-                className={`overflow-hidden rounded-xl border shadow-sm ${
-                  isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
-                }`}
-              >
-                <div
-                  className={`border-b px-4 py-3.5 sm:px-5 ${
-                    isDark ? 'border-slate-700' : 'border-slate-200'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <h3
-                      className={`m-0 text-base font-semibold ${
-                        isDark ? 'text-slate-100' : 'text-slate-800'
-                      }`}
-                    >
-                      인수인계 이력
-                    </h3>
-                    <span
-                      className={`text-sm font-semibold tabular-nums ${
-                        isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      {filteredActions.length}건
-                    </span>
-                  </div>
-                  <p className={`mb-0 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    저장된 이슈의 발생 상황과 인수인계·대응 내역입니다.
-                  </p>
-                </div>
-                <div id="action-history-list" className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] border-collapse text-left">
-                    <thead>
-                      <tr
-                        className={`border-b text-xs font-semibold ${
-                          isDark
-                            ? 'border-slate-700 bg-slate-900/60 text-slate-400'
-                            : 'border-slate-200 bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        <th className="w-12 px-3 py-3">
-                          <input
-                            ref={actionMaster.ref}
-                            type="checkbox"
-                            checked={actionMaster.allSelected}
-                            disabled={actionMaster.disabled}
-                            onChange={(event) => toggleVisibleActions(event.target.checked)}
-                            aria-label="표시된 대처 이력 전체 선택"
-                            className="h-4 w-4 accent-blue-600"
-                          />
-                        </th>
-                        <th className="w-[96px] whitespace-nowrap px-3 py-3">분류</th>
-                        <th className="min-w-[220px] px-3 py-3">발생 상황</th>
-                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인계자</th>
-                        <th className="w-[100px] whitespace-nowrap px-3 py-3">인수자</th>
-                        <th className="w-[148px] whitespace-nowrap px-3 py-3">날짜</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredActions.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={6}
-                            className={`px-4 py-12 text-center text-sm ${
-                              isDark ? 'text-slate-500' : 'text-slate-400'
-                            }`}
-                          >
-                            검색 조건에 맞는 이력이 없습니다.
-                          </td>
-                        </tr>
-                      ) : (
-                        renderedActions.map((item) => {
-                          const checked = validSelectedActionIds.includes(item.id);
-                          const fromName = item.handoverFrom?.trim() || item.manager || '-';
-                          const toName = item.handoverTo?.trim() || '-';
-                          return (
-                            <tr
-                              key={item.id}
-                              tabIndex={0}
-                              onClick={() => openActionDetail(item)}
-                              onKeyDown={(event) =>
-                                onRowKeyOpen(event, () => openActionDetail(item))
-                              }
-                              className={`cursor-pointer border-b transition-colors ${
-                                isDark
-                                  ? `border-slate-700 hover:bg-slate-700/40 ${
-                                      checked
-                                        ? 'border-l-4 border-l-blue-500 bg-blue-950/30'
-                                        : 'border-l-4 border-l-transparent bg-slate-800'
-                                    }`
-                                  : `border-slate-100 hover:bg-slate-50/80 ${
-                                      checked
-                                        ? 'border-l-4 border-l-blue-600 bg-blue-50/60'
-                                        : 'border-l-4 border-l-transparent bg-white'
-                                    }`
-                              }`}
-                            >
-                              <td
-                                className="w-12 px-3 py-3.5"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleActionSelection(item.id)}
-                                  aria-label={`${item.handoverContent} 선택`}
-                                  className="h-4 w-4 accent-blue-600"
-                                />
-                              </td>
-                              <td className="w-[96px] whitespace-nowrap px-3 py-3.5">
-                                <CategoryBadge label={item.category?.trim() || '대처 이력'} />
-                              </td>
-                              <td
-                                className={`min-w-[220px] px-3 py-3.5 text-sm font-semibold ${
-                                  isDark ? 'text-slate-100' : 'text-slate-800'
-                                }`}
-                                title={item.handoverContent}
-                              >
-                                <div className="line-clamp-2">{item.handoverContent}</div>
-                              </td>
-                              <td
-                                className={`w-[100px] whitespace-nowrap px-3 py-3.5 text-sm ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}
-                              >
-                                {fromName}
-                              </td>
-                              <td
-                                className={`w-[100px] whitespace-nowrap px-3 py-3.5 text-sm ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}
-                              >
-                                {toName}
-                              </td>
-                              <td
-                                className={`w-[148px] whitespace-nowrap px-3 py-3.5 text-sm ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}
-                              >
-                                {item.date || '-'}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {filteredActions.length > 0 ? (
-                  <div
-                    className={`flex flex-col items-center gap-2 border-t px-4 py-3 sm:flex-row sm:justify-between ${
-                      isDark
-                        ? 'border-slate-700 bg-slate-900/60'
-                        : 'border-slate-200 bg-slate-50/80'
-                    }`}
-                  >
-                    <span
-                      className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                    >
-                      {(safeActionPage - 1) * LIST_PAGE_SIZE + 1}-
-                      {Math.min(safeActionPage * LIST_PAGE_SIZE, filteredActions.length)} /{' '}
-                      {filteredActions.length}건
-                    </span>
-                    <nav
-                      aria-label="인수인계 이력 페이지"
-                      className="flex flex-wrap items-center justify-center gap-1.5"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setActionPage((page) => Math.max(1, page - 1))}
-                        disabled={safeActionPage <= 1}
-                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                          isDark
-                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        이전
-                      </button>
-                      {actionPageNumbers.map((page) => {
-                        const active = page === safeActionPage;
-                        return (
-                          <button
-                            key={page}
-                            type="button"
-                            aria-current={active ? 'page' : undefined}
-                            onClick={() => setActionPage(page)}
-                            className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                              active
-                                ? 'bg-blue-600 text-white'
-                                : isDark
-                                  ? 'border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                            }`}
-                          >
-                            {page}
-                          </button>
-                        );
-                      })}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActionPage((page) => Math.min(actionTotalPages, page + 1))
-                        }
-                        disabled={safeActionPage >= actionTotalPages}
-                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                          isDark
-                            ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        다음
-                      </button>
-                    </nav>
-                  </div>
-                ) : null}
-              </div>
-
               {/* 사내 문서 (Documents/ READ-ONLY) */}
               <DocumentsBrowser
                 selectedPaths={selectedDocPaths}
@@ -2658,54 +2139,7 @@ ${
                           </div>
                         );
                       }
-                      const item = entry.item;
-                      return (
-                        <div
-                          key={`action-${item.id}`}
-                          className={`flex gap-2 rounded-lg border p-3 ${
-                            isDark
-                              ? 'border-slate-700 bg-slate-800'
-                              : 'border-slate-200 bg-white'
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => openActionDetail(item)}
-                            className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left"
-                          >
-                            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 text-[10px] font-bold text-white">
-                                {entry.order}
-                              </span>
-                              <CategoryBadge label={item.category?.trim() || '대처 이력'} />
-                            </div>
-                            <div
-                              className={`line-clamp-2 text-sm font-semibold ${
-                                isDark ? 'text-slate-100' : 'text-slate-900'
-                              }`}
-                            >
-                              {item.handoverContent}
-                            </div>
-                            <div className="mt-1 text-[11px] text-slate-400">{item.date}</div>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isAnalyzing}
-                            aria-label={`${item.handoverContent} 분석 대상에서 제외`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removeActionFromSelection(item.id);
-                            }}
-                            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-400 disabled:cursor-not-allowed disabled:opacity-40 ${
-                              isDark
-                                ? 'hover:bg-slate-700 hover:text-slate-200'
-                                : 'hover:bg-slate-100 hover:text-slate-700'
-                            }`}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      );
+                      return null;
                     })}
                   </div>
                   {remainingSelectionCount > 0 && (
@@ -2865,7 +2299,7 @@ ${
                               isDark ? 'text-slate-100' : 'text-slate-800'
                             }`}
                           >
-                            완료 이슈 {analysisDocs.length}건 · 대처 이력 {analysisActions.length}건 · 사내 문서 {analysisDocPaths.length}건 · 총{' '}
+                            완료 이슈 {analysisDocs.length}건 · 사내 문서 {analysisDocPaths.length}건 · 총{' '}
                             {analysisCount}개 항목을 분석 참고 범위로 사용합니다.
                           </p>
                         </div>
@@ -3010,20 +2444,6 @@ ${
                                 <span className="truncate">{doc.id}</span>
                               </button>
                             ))}
-                            {analysisActions.map((item) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => openActionDetail(item)}
-                                className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${
-                                  isDark
-                                    ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/50'
-                                    : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-                                }`}
-                              >
-                                <span className="truncate">{item.handoverContent}</span>
-                              </button>
-                            ))}
                             {analysisDocPaths.map((path) => {
                               const parts = path.replace(/\\/g, '/').split('/');
                               const name = parts[parts.length - 1] || path;
@@ -3098,10 +2518,6 @@ ${
       >
         {detailTarget?.kind === 'document' && (
           <div className="space-y-4 text-sm">
-            <IssueDetailAnalysis
-              issue={pastDetail ? pastIssueToAnalysisModel(pastDetail) : null}
-              emptyMessage="과거 자료 상세를 불러오는 중입니다."
-            />
             <div
               className={`rounded-xl p-4 leading-relaxed whitespace-pre-wrap ${
                 isDark
@@ -3214,87 +2630,6 @@ ${
           </div>
         )}
 
-        {detailTarget?.kind === 'action' && (
-          <div className="space-y-4 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <CategoryBadge label={detailTarget.item.category?.trim() || '대처 이력'} />
-            </div>
-            <div>
-              <div className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                발생 상황
-              </div>
-              <div
-                className={`mt-1 whitespace-pre-wrap font-semibold ${
-                  isDark ? 'text-slate-100' : 'text-slate-900'
-                }`}
-              >
-                {detailTarget.item.handoverContent}
-              </div>
-            </div>
-            {(detailTarget.item.handoverFrom || detailTarget.item.handoverTo) ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div
-                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                  >
-                    인계자
-                  </div>
-                  <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                    {detailTarget.item.handoverFrom?.trim() || '-'}
-                  </div>
-                </div>
-                <div>
-                  <div
-                    className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                  >
-                    인수자
-                  </div>
-                  <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                    {detailTarget.item.handoverTo?.trim() || '-'}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                {detailTarget.item.action ? (
-                  <div>
-                    <div
-                      className={`text-xs font-semibold ${
-                        isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      대처 방안
-                    </div>
-                    <div
-                      className={`mt-1 whitespace-pre-wrap ${
-                        isDark ? 'text-slate-100' : 'text-slate-800'
-                      }`}
-                    >
-                      {detailTarget.item.action}
-                    </div>
-                  </div>
-                ) : null}
-                {detailTarget.item.cause ? (
-                  <div>
-                    <div
-                      className={`text-xs font-semibold ${
-                        isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      원인
-                    </div>
-                    <div className={`mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                      {detailTarget.item.cause}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            )}
-            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {[detailTarget.item.manager, detailTarget.item.date].filter(Boolean).join(' · ')}
-            </div>
-          </div>
-        )}
       </ModalShell>
     </div>
   );
