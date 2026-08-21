@@ -110,7 +110,14 @@ async function fetchAccessTokenOAuth(): Promise<string | null> {
     signal: AbortSignal.timeout(15_000),
   })
   if (!res.ok) {
-    console.error('[issue-report-mail] gmail_oauth_token_failed', res.status)
+    let detail = String(res.status)
+    try {
+      const body = (await res.json()) as { error?: string; error_description?: string }
+      detail = [res.status, body.error, body.error_description].filter(Boolean).join(' ')
+    } catch {
+      /* ignore */
+    }
+    console.error('[issue-report-mail] gmail_oauth_token_failed', detail)
     return null
   }
   const json = (await res.json()) as { access_token?: string; expires_in?: number }
@@ -542,4 +549,134 @@ export async function sendIssueReportOnce(input: {
   }
 
   return { channel, from, sent }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function formatKrw(n: number): string {
+  return `${Math.round(n).toLocaleString('ko-KR')}원`
+}
+
+export function buildQCostMailHtml(summary: {
+  from: string
+  to: string
+  stableCount: number
+  warningCount: number
+  criticalCount: number
+  internalDefectCount: number
+  externalLeakCount: number
+  appraisalCost: number
+  appraisalBreakdown: { stable: number; warning: number; critical: number }
+  internalCost: number
+  externalCost: number
+  preventionCost: number
+  totalQCost: number
+}): string {
+  const rows: [string, string][] = [
+    ['기간', `${escapeHtml(summary.from)} ~ ${escapeHtml(summary.to)}`],
+    ['안정 LOT', String(summary.stableCount)],
+    ['주의 LOT', String(summary.warningCount)],
+    ['심각 LOT', String(summary.criticalCount)],
+    ['내부 불량', String(summary.internalDefectCount)],
+    ['외부 유출', String(summary.externalLeakCount)],
+    ['평가비 (Appraisal)', formatKrw(summary.appraisalCost)],
+    ['  · 안정', formatKrw(summary.appraisalBreakdown.stable)],
+    ['  · 주의', formatKrw(summary.appraisalBreakdown.warning)],
+    ['  · 심각', formatKrw(summary.appraisalBreakdown.critical)],
+    ['내부실패비', formatKrw(summary.internalCost)],
+    ['외부실패비', formatKrw(summary.externalCost)],
+    ['예방비', formatKrw(summary.preventionCost)],
+    ['총 Q-Cost', formatKrw(summary.totalQCost)],
+  ]
+  const tr = rows
+    .map(
+      ([k, v]) =>
+        `<tr><td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#475569;">${k}</td>` +
+        `<td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:600;color:#0f172a;">${v}</td></tr>`,
+    )
+    .join('')
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="font-family:Malgun Gothic,Apple SD Gothic Neo,sans-serif;background:#f8fafc;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;">
+    <div style="padding:20px 24px;background:#0f172a;color:#fff;">
+      <div style="font-size:13px;opacity:.8;">양극재 품질 · Main</div>
+      <div style="font-size:22px;font-weight:700;margin-top:4px;">Q-Cost 리포트</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;">${tr}</table>
+    <div style="padding:16px 24px;font-size:12px;color:#94a3b8;">시연용 자동 메일 · 로그인 사용자에게만 발송</div>
+  </div></body></html>`
+}
+
+/**
+ * One-shot Q-Cost mail to the logged-in user. Does not use SEND_EMAIL (LOT UNIQUE).
+ * Prefer n8n webhook when reachable; otherwise Gmail API with the same access token.
+ */
+export async function sendQCostMailOnce(input: {
+  toEmail: string
+  userId: string
+  summary: Parameters<typeof buildQCostMailHtml>[0]
+  yearMonth?: string
+}): Promise<{
+  channel: 'n8n' | 'gmail'
+  from: string
+  to: string
+  send: 'O' | 'X'
+  error?: string
+}> {
+  const to = input.toEmail.trim()
+  if (!to) throw new Error('수신 이메일이 없습니다. USERS.email 을 확인하세요.')
+
+  const from = mailFrom() || to
+  cachedAccess = null
+  const accessToken = await getGmailAccessToken(from)
+  if (!accessToken) {
+    throw new Error(
+      'Gmail access token 실패. GMAIL_REFRESH_TOKEN 이 만료·폐기됐을 수 있습니다. backend에서 npx tsx scripts/reauth-gmail-oauth.ts 로 재발급하세요.',
+    )
+  }
+
+  const label = input.yearMonth || `${input.summary.from.slice(0, 7)}`
+  const subject = `[Q-Cost] ${label} · 총 ${formatKrw(input.summary.totalQCost)}`
+  const html = buildQCostMailHtml(input.summary)
+  const n8n = webhookUrl()
+
+  if (n8n) {
+    try {
+      const hook = await postN8nWebhook({
+        id: 0,
+        lotId: `QCOST-${label}`,
+        to,
+        subject,
+        html,
+        from,
+        noReply: true,
+        accessToken,
+      })
+      if (hook.send === 'O') {
+        return { channel: 'n8n', from, to, send: 'O' }
+      }
+      if (hook.send === 'X' && hook.error && !/^webhook_/.test(hook.error)) {
+        return { channel: 'n8n', from, to, send: 'X', error: hook.error }
+      }
+      // webhook down / empty → fall through to Gmail API
+      console.log('[qcost-mail] n8n unavailable, fallback gmail', hook.error || 'no_result')
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      console.log('[qcost-mail] n8n failed, fallback gmail', detail.slice(0, 120))
+    }
+  }
+
+  const result = await sendViaGmailApi({ accessToken, from, to, subject, html })
+  return {
+    channel: 'gmail',
+    from,
+    to,
+    send: result.send,
+    error: result.error,
+  }
 }

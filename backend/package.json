@@ -39,6 +39,8 @@
     "migrate:uppercase-tables": "tsx scripts/migrate-uppercase-tables.ts",
     "migrate:issues-refactor": "tsx scripts/migrate-issues-refactor.ts",
     "send:one-issue-report": "tsx scripts/send-one-issue-report.ts",
+    "diagnose:gmail-token": "tsx scripts/diagnose-gmail-token.ts",
+    "reauth:gmail-oauth": "tsx scripts/reauth-gmail-oauth.ts",
     "fill:all-issue-content": "tsx scripts/fill-all-issue-content.ts",
     "inspect:schema": "tsx scripts/inspect-schema.ts",
     "reload:lots-qc": "tsx scripts/reload-lots-from-qc-csv.ts",

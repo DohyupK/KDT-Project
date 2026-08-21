@@ -709,7 +709,7 @@ export default function MainPage() {
   const [qCostSummary, setQCostSummary] = useState<QCostSummaryResponse | null>(null);
   const [qCostLoading, setQCostLoading] = useState(true);
   const [qCostError, setQCostError] = useState<string | null>(null);
-  const [qCostExporting, setQCostExporting] = useState<'csv' | 'pdf' | null>(null);
+  const [qCostExporting, setQCostExporting] = useState<'csv' | 'pdf' | 'mail' | null>(null);
 
   const toastIdRef = useRef(1);
   const toastTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -895,6 +895,30 @@ export default function MainPage() {
       pushToast('Q-Cost PDF를 다운로드했습니다.', 'success');
     } catch (error) {
       pushToast(getApiErrorMessage(error, 'PDF 다운로드에 실패했습니다.'), 'error');
+    } finally {
+      setQCostExporting(null);
+    }
+  }, [qCostMonth, qCostSummary, pushToast, trackPageChatEvent]);
+
+  const handleMailQCost = useCallback(async () => {
+    if (!qCostSummary) {
+      pushToast('전송할 Q-Cost 데이터가 없습니다.', 'error');
+      return;
+    }
+    try {
+      setQCostExporting('mail');
+      trackPageChatEvent({
+        type: 'download',
+        route: '/main',
+        target: 'q-cost-mail',
+        entityId: qCostMonth,
+        payload: { month: qCostMonth, summary: qCostSummary },
+      });
+      const { from, to } = monthRange(qCostMonth);
+      const { data } = await mainApi.mailQCost({ from, to, yearMonth: qCostMonth });
+      pushToast(`Q-Cost 메일을 ${data.to} 로 보냈습니다.`, 'success');
+    } catch (error) {
+      pushToast(getApiErrorMessage(error, '메일 전송에 실패했습니다.'), 'error');
     } finally {
       setQCostExporting(null);
     }
@@ -1186,6 +1210,18 @@ export default function MainPage() {
                     }
                   >
                     {qCostExporting === 'pdf' ? 'PDF…' : 'PDF'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleMailQCost()}
+                    disabled={!qCostSummary || qCostLoading || qCostExporting !== null}
+                    className={
+                      isDark
+                        ? 'inline-flex h-9 items-center rounded-lg border border-slate-600 bg-slate-900 px-3 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40'
+                        : 'inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40'
+                    }
+                  >
+                    {qCostExporting === 'mail' ? '메일…' : '메일 전송'}
                   </button>
                     </div>
                 <QCostMonthPicker

@@ -86,4 +86,15 @@ export const mainApi = {
       },
     })
   },
+
+  mailQCost(body: { from?: string; to?: string; yearMonth?: string }) {
+    return apiClient.post<{
+      ok: boolean
+      channel: 'n8n' | 'gmail'
+      to: string
+      from: string
+      totalQCost: number
+      period: { from: string; to: string }
+    }>('/lots/q-cost/mail', body)
+  },
 }
