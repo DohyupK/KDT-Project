@@ -15,14 +15,15 @@ function vllmModel(): string {
   return (process.env.CHAT_VLLM_MODEL || process.env.VLLM_MODEL || 'local-model').trim()
 }
 
-const SYSTEM = `당신은 양극재 LOT 위험 사유를 짧게 적는 작성기입니다.
-제공된 JSON 숫자·상태만 근거로 한국어 한두 문장을 씁니다.
+const SYSTEM = `당신은 양극재 LOT 위험 사유를 짧게 해석하는 작성기입니다.
+제공된 JSON 숫자·상태만 근거로 한국어 한두 문장을 씁니다. 수치만 나열하지 말고 왜 위험한지 해석합니다.
 규칙:
 1. risk_level이 「안정」이고 spc_status도 문제 없음(안정)일 때만 「기준 범위 내」류로 짧게 적습니다.
 2. risk_level이 「주의」또는 「심각」이면 절대 「기준 범위 내」라고 쓰지 말고,
-   불량확률·잔류리튬·SPC 상태 등 주어진 값으로 왜 주의/심각인지 적습니다.
-3. 수치를 지어내거나 Main LOT 클릭·What-if·사용법 안내를 하지 않습니다.
-4. 255자 이내, 마크다운·코드펜스 없이 본문만.`
+   불량확률·잔류리튬·SPC 등 주어진 값을 묶어 왜 주의/심각인지 한두 문장으로 적습니다.
+3. 가능하면 facts에 있는 신호만으로 공정 확인 포인트 한 조각(잔류·SPC·용량 등)을 붙입니다. 없는 공정값은 만들지 않습니다.
+4. 수치를 지어내거나 Main LOT 클릭·What-if·사용법 안내·장문 조치 목록을 쓰지 않습니다. (조치는 recommended_actions가 담당)
+5. 255자 이내, 마크다운·코드펜스 없이 본문만.`
 
 export type VllmRiskFacts = {
   lot_id: string
@@ -47,30 +48,34 @@ export function isRiskReasonAcceptable(
   return true
 }
 
-/** Deterministic fallback matching combineLotScore reason style. */
+/** Deterministic fallback: one interpretive sentence, not a bare number list. */
 export function buildRuleRiskReason(facts: VllmRiskFacts): string {
-  const reasons: string[] = []
+  const bits: string[] = []
   const prob = facts.probability
   const residual = facts.residual_li
   const spc = facts.spc_status
   const level = (facts.risk_level || '').trim()
 
   if (prob != null && Number.isFinite(prob) && prob >= 0.2) {
-    reasons.push(`불량확률 ${(prob * 100).toFixed(1)}%`)
+    bits.push(`불량확률 ${(prob * 100).toFixed(1)}%`)
   }
   if (residual != null && Number.isFinite(residual) && residual >= 3000) {
-    reasons.push(`잔류리튬 ${Number(residual).toFixed(1)}ppm`)
+    bits.push(`잔류리튬 ${Number(residual).toFixed(1)}ppm`)
   }
   if (spc && spc !== '안정') {
-    reasons.push(`SPC ${spc}`)
+    bits.push(`SPC ${spc}`)
   }
-  if (reasons.length === 0) {
+  if (bits.length === 0) {
     if (level === '주의' || level === '심각') {
-      return `${level}: 모델·SPC 복합 신호`.slice(0, 255)
+      return `${level}: 모델·SPC 복합 신호로 불량 리스크 상승`.slice(0, 255)
     }
     return '기준 범위 내'
   }
-  return reasons.join(', ').slice(0, 255)
+  const joined = bits.join('·')
+  if (level === '주의' || level === '심각') {
+    return `${level}: ${joined}으로 복합 상승 — 공정·SPC 재확인 필요`.slice(0, 255)
+  }
+  return `${joined} 확인`.slice(0, 255)
 }
 
 export async function composeRiskReasonViaVllm(
@@ -93,7 +98,7 @@ export async function composeRiskReasonViaVllm(
           { role: 'system', content: SYSTEM },
           {
             role: 'user',
-            content: `다음 LOT 채점 결과로 risk_reason만 작성하세요.\n${JSON.stringify(facts)}`,
+            content: `다음 LOT 채점 결과로 risk_reason(짧은 위험 해석)만 작성하세요. 수치 나열만 하지 마세요.\n${JSON.stringify(facts)}`,
           },
         ],
       }),

@@ -363,6 +363,8 @@ export type AiLotRecommendedActionRequest = {
   residual_li?: number | null
   spc_status?: string | null
   drivers_json?: Record<string, unknown>
+  features?: Record<string, string | number | null>
+  fillThreshold?: number | null
 }
 
 export type AiLotRecommendedActionResponse = {
@@ -370,6 +372,7 @@ export type AiLotRecommendedActionResponse = {
   steps: Array<{ order: number; text: string; doc_id?: string | null }>
   sources: Array<{ doc_id: string; title?: string | null; path?: string | null }>
   drivers_json: Record<string, unknown>
+  whatif?: Record<string, unknown> | null
   status: string
   error: string | null
 }

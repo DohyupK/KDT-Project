@@ -69,6 +69,10 @@ type Props = {
   newThreadNonce?: number
   /** Fullscreen only: source chips, clickable [출처], and the document panel */
   showSources?: boolean
+  /** General-chat security gate: prefill input (does not auto-send). */
+  handoffDraft?: string | null
+  /** Bump with handoffDraft so the same text can re-apply. */
+  handoffNonce?: number
 }
 
 function dedupeSourcesByDocId(sources: SecurityChatSource[]): SecurityChatSource[] {
@@ -254,6 +258,8 @@ export default function SecurityChatbot({
   hideHeader = false,
   newThreadNonce = 0,
   showSources = true,
+  handoffDraft = null,
+  handoffNonce = 0,
 }: Props) {
   const { isDark } = useUiSettings()
   const [input, setInput] = useState('')
@@ -376,6 +382,13 @@ export default function SecurityChatbot({
     startNewThread()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- parent-driven new chat only
   }, [newThreadNonce])
+
+  useEffect(() => {
+    if (!handoffNonce) return
+    const draft = (handoffDraft || '').trim()
+    if (!draft) return
+    setInput(draft)
+  }, [handoffNonce, handoffDraft])
 
   const selectThread = async (threadId: string) => {
     if (pending) return

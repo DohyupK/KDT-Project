@@ -58,13 +58,15 @@ STABLE_SOURCES = [
 ]
 
 SYSTEM_COMPOSE = """당신은 양극재 LOT 조치 권고 작성기입니다.
+목표는 이 LOT의 불량률(불량확률)을 낮추는 실행 가능한 조치입니다.
 제공된 drivers JSON과 QMS 발췌만 근거로 JSON만 출력합니다.
 형식:
 {"summary":"한두 문장","steps":[{"order":1,"text":"...","doc_id":"QMS-..."}]}
 규칙:
-1. summary는 자연스러운 한국어 문장. 각 원인에 방향어(상승·변동·과다 등)+측정값+근거를 괄호로 포함.
-2. steps는 2~5개 번호 조치. doc_id는 제공 QMS id만 사용.
-3. 수치·doc_id를 지어내지 않음. 마크다운·코드펜스 없이 JSON만."""
+1. summary는 원인 요약 + 불량확률 저감 방향을 한두 문장으로. 각 원인에 방향어(상승·변동·과다 등)+측정값+근거를 괄호로 포함.
+2. steps는 2~5개. 측정·점검·조정 중 불량률 저감에 직결되는 조치만. doc_id는 제공 QMS id만 사용.
+3. 수치·doc_id를 지어내지 않음. 마크다운·코드펜스 없이 JSON만.
+4. 챗봇용 대화체가 아니라 DB 적재용 조치문입니다."""
 
 
 def _resolve_doc_path(doc_id: str, title: str) -> str:
@@ -158,13 +160,18 @@ def _rule_summary(
     if include_defect:
         phrase = _grouped_cause_phrase(defect)
         para1 = (
-            f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다."
+            f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다. "
+            f"불량확률 저감을 위해 해당 인자를 우선 점검합니다."
             if phrase
-            else f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct})"
+            else (
+                f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct}) "
+                f"불량확률 저감을 위해 공정·검사 기준을 재확인합니다."
+            )
         )
     res_phrase = _grouped_cause_phrase(residual)
     para2 = (
-        f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다."
+        f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다. "
+        f"잔류 안정화로 불량 리스크를 낮춥니다."
         if res_phrase
         else ""
     )
@@ -177,7 +184,10 @@ def _rule_summary(
         return para2[:1024]
     spc = (spc_status or "").strip()
     if spc and spc not in ("안정", "-"):
-        return f"SPC {spc}가 확인되어 운영 기준을 재확인합니다."[:1024]
+        return (
+            f"SPC {spc}가 확인되어 운영 기준을 재확인합니다. "
+            f"불량확률 저감을 위해 SPC·검사 수준을 점검합니다."
+        )[:1024]
     return STABLE_SUMMARY
 
 
@@ -204,7 +214,10 @@ def _rule_steps(
                 steps.append(
                     {
                         "order": order,
-                        "text": f"{doc['title']} 절차에 따라 점검·개선",
+                        "text": (
+                            f"{doc['title']} 절차에 따라 점검·개선하여 "
+                            f"불량확률 저감에 반영"
+                        ),
                         "doc_id": did,
                     }
                 )
@@ -325,34 +338,114 @@ def compose_lot_recommended_action(body: dict[str, Any]) -> dict[str, Any]:
     risk_level = (body.get("risk_level") or "").strip()
     if risk_level == "안정":
         stable = stable_template()
-        return {**stable, "status": "ready", "error": None}
+        return {**stable, "whatif": None, "status": "ready", "error": None}
 
     drivers = body.get("drivers_json") or body.get("drivers") or {}
     probability = body.get("probability")
     residual_li = body.get("residual_li")
     spc_status = body.get("spc_status")
+    features = body.get("features") if isinstance(body.get("features"), dict) else None
 
-    query_parts = []
-    for c in (drivers.get("defect_causes") or [])[:3]:
-        query_parts.append(f"{c.get('labelKo')} {c.get('valueText')}")
-    for c in (drivers.get("residual_causes") or [])[:2]:
-        query_parts.append(f"잔류리튬 {c.get('labelKo')}")
-    if spc_status:
-        query_parts.append(f"SPC {spc_status}")
-    # 안정적인 UI 규격(문장/소수점/단락) 때문에 요약은 규칙 기반으로만 생성합니다.
-    # steps는 QMS doc mapping 기반으로 규칙 생성합니다.
+    summary = _rule_summary(
+        drivers,
+        probability=probability,
+        residual_li=residual_li,
+        risk_level=risk_level,
+        spc_status=spc_status,
+    )
     steps = _rule_steps(drivers, spc_status, probability)
-    return {
-        "summary": _rule_summary(
-            drivers,
+    whatif_payload: dict[str, Any] | None = None
+
+    if features:
+        whatif_payload = _run_whatif_for_features(
+            features,
             probability=probability,
-            residual_li=residual_li,
-            risk_level=risk_level,
-            spc_status=spc_status,
-        ),
+            fill_threshold=body.get("fillThreshold") or body.get("fill_threshold"),
+        )
+        line = _whatif_summary_line(whatif_payload)
+        model_step = _whatif_model_step(whatif_payload)
+        if line:
+            summary = f"{line}\n\n{summary}".strip()[:1024]
+        if model_step:
+            renumbered = [
+                {**s, "order": int(s.get("order") or 0) + 1}
+                for s in steps
+            ]
+            steps = [model_step, *renumbered][:6]
+
+    return {
+        "summary": summary,
         "steps": steps,
         "sources": _sources_from_steps(steps),
         "drivers_json": drivers,
+        "whatif": whatif_payload,
         "status": "ready",
         "error": None,
     }
+
+
+def _run_whatif_for_features(
+    features: dict[str, Any],
+    *,
+    probability: float | None,
+    fill_threshold: float | None = None,
+) -> dict[str, Any] | None:
+    from agent.api_llm.tools import run_predict_tool
+    from agent.api_llm.whatif import run_whatif
+
+    try:
+        baseline = run_predict_tool(features, fillThreshold=fill_threshold)
+    except Exception:  # noqa: BLE001
+        if probability is None:
+            return None
+        baseline = {
+            "probability": float(probability),
+            "defect_status": 1 if float(probability) >= 0.5 else 0,
+            "applied_threshold": float(fill_threshold or 0.5),
+        }
+    try:
+        return run_whatif(features, baseline, fillThreshold=fill_threshold)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _whatif_summary_line(whatif: dict[str, Any] | None) -> str | None:
+    if not whatif:
+        return None
+    sug = whatif.get("suggestion")
+    if not isinstance(sug, dict):
+        note = str(whatif.get("note") or "").strip()
+        return f"[모델 what-if] {note}" if note else None
+    baseline = whatif.get("baseline") or {}
+    p_before = float(baseline.get("probability") or 0)
+    p_after = float(sug.get("probability") or 0)
+    clipped = sug.get("clipped_values") or {}
+    hum = clipped.get("humidity")
+    temp = clipped.get("sintering_temp")
+    parts = [
+        f"[모델 what-if] 학습 헤드 그리드 제안: 불량확률 {p_before * 100:.2f}% → {p_after * 100:.2f}%"
+    ]
+    if hum is not None and temp is not None:
+        parts.append(f"습도 {float(hum):g}% · 소성온도 {float(temp):g}℃")
+    return " — ".join(parts)
+
+
+def _whatif_model_step(whatif: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not whatif:
+        return None
+    sug = whatif.get("suggestion")
+    if not isinstance(sug, dict):
+        return None
+    baseline = whatif.get("baseline") or {}
+    p_before = float(baseline.get("probability") or 0)
+    p_after = float(sug.get("probability") or 0)
+    clipped = sug.get("clipped_values") or {}
+    hum = clipped.get("humidity")
+    temp = clipped.get("sintering_temp")
+    if hum is None or temp is None:
+        return None
+    text = (
+        f"모델 what-if: 습도 {float(hum):g}% · 소성온도 {float(temp):g}℃로 조절 검토 "
+        f"(불량확률 {p_before * 100:.2f}% → {p_after * 100:.2f}%)"
+    )
+    return {"order": 1, "text": text, "doc_id": None}

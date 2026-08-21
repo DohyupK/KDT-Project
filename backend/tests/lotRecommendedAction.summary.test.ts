@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildRuleSteps, buildRuleSummary } from '../src/services/lotRecommendedAction.service.js'
+import {
+  buildRuleSteps,
+  buildRuleSummary,
+  mergeComposedRecommendedAction,
+} from '../src/services/lotRecommendedAction.service.js'
 
 test('stable risk uses monitoring template', () => {
   const text = buildRuleSummary(
@@ -31,12 +35,12 @@ test('summary lists raisers with value and 증가/감소, top 3', () => {
   )
   assert.match(
     text,
-    /습도\(62\.10%RH\)·금속 불순물\(0\.03ppm\)이 증가하며, 소성 온도\(760\.00°C\)이 감소하여 불량확률 90\.00%에 주요 영향을 미쳤습니다/,
+    /습도\(62\.10%RH\)·금속 불순물\(0\.03ppm\)이 증가하며, 소성 온도\(760\.00°C\)이 감소하여 불량확률 90\.00%에 주요 영향을 미쳤습니다\. 불량확률 저감을 위해 해당 인자를 우선 점검합니다/,
   )
   assert.equal(text.includes('공정 시간'), false)
   assert.match(
     text,
-    /리튬 투입량\(2\.90\)·습도\(62\.10%RH\)이 증가하여 잔류리튬 예측 3588\.40 ppm에 주요 영향을 미쳤습니다/,
+    /리튬 투입량\(2\.90\)·습도\(62\.10%RH\)이 증가하여 잔류리튬 예측 3588\.40 ppm에 주요 영향을 미쳤습니다\. 잔류 안정화로 불량 리스크를 낮춥니다/,
   )
 })
 
@@ -78,7 +82,7 @@ test('below defect threshold omits 불량확률 attribution but keeps residual',
   assert.equal(text.includes('첨가제 비율'), false)
   assert.match(
     text,
-    /소성 온도\(830\.19°C\)·리튬 투입량\(2\.67\)이 증가하여 잔류리튬 예측 3326\.41 ppm에 주요 영향을 미쳤습니다/,
+    /소성 온도\(830\.19°C\)·리튬 투입량\(2\.67\)이 증가하여 잔류리튬 예측 3326\.41 ppm에 주요 영향을 미쳤습니다\. 잔류 안정화로 불량 리스크를 낮춥니다/,
   )
 })
 
@@ -91,8 +95,11 @@ test('below defect threshold with only defect causes and SPC uses SPC line', () 
     },
     { probability: 0.1, residualLi: null, riskLevel: '주의', spcStatus: '주의' },
   )
-  assert.equal(text.includes('불량확률'), false)
-  assert.match(text, /SPC 주의가 확인되어 운영 기준을 재확인합니다/)
+  assert.equal(text.includes('습도'), false)
+  assert.match(
+    text,
+    /SPC 주의가 확인되어 운영 기준을 재확인합니다\. 불량확률 저감을 위해 SPC·검사 수준을 점검합니다/,
+  )
 })
 
 test('below defect threshold omits defect-cause steps, keeps residual steps', () => {
@@ -119,4 +126,57 @@ test('caution residual without shap still gets residual summary and lithium step
     { probability: 0.08, spcStatus: '안정', riskLevel: '주의', residualLi: 3163 },
   )
   assert.equal(steps.some((s) => s.doc_id === 'QMS-GUD-004'), true)
+})
+
+test('mergeComposedRecommendedAction prefers what-if summary and step', () => {
+  const fallbackSteps = buildRuleSteps(
+    {
+      defect_causes: [
+        { feature: 'humidity', labelKo: '습도', directionKo: '증가', valueText: '62%RH' },
+      ],
+    },
+    { probability: 0.8, riskLevel: '위험', residualLi: 3500 },
+  )
+  const fallback = {
+    summary: buildRuleSummary(
+      {
+        defect_causes: [
+          { feature: 'humidity', labelKo: '습도', directionKo: '증가', valueText: '62%RH' },
+        ],
+      },
+      { probability: 0.8, residualLi: 3500, riskLevel: '위험' },
+    ),
+    steps: fallbackSteps,
+    sources: fallbackSteps.map((s) => ({
+      doc_id: s.doc_id,
+      title: s.doc_id,
+      path: '',
+    })),
+  }
+  const merged = mergeComposedRecommendedAction(
+    {
+      summary:
+        '[모델 what-if] 학습 헤드 그리드 제안: 불량확률 80.00% → 55.00% — 습도 45% · 소성온도 800℃\n\n규칙 요약',
+      steps: [
+        {
+          order: 1,
+          text: '모델 what-if: 습도 45% · 소성온도 800℃로 조절 검토 (불량확률 80.00% → 55.00%)',
+          doc_id: null,
+        },
+        { order: 2, text: '습도 트러블슈팅 절차', doc_id: 'QMS-GUD-001' },
+      ],
+      sources: [{ doc_id: 'QMS-GUD-001', title: '습도 트러블슈팅', path: 'x' }],
+      whatif: {
+        suggestion: {
+          probability: 0.55,
+          clipped_values: { humidity: 45, sintering_temp: 800 },
+        },
+      },
+    },
+    fallback,
+  )
+  assert.match(merged.summary, /모델 what-if/)
+  assert.equal(merged.steps[0]?.order, 1)
+  assert.match(merged.steps[0]?.text || '', /소성온도 800/)
+  assert.equal(merged.whatif != null, true)
 })

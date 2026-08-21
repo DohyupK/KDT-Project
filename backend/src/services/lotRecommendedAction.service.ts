@@ -80,6 +80,8 @@ function contentHash(input: {
   residualLi: number | null
   spcStatus: string | null
   drivers: Record<string, unknown>
+  humidity?: number | null
+  sinteringTemp?: number | null
 }): string {
   const payload = JSON.stringify({
     lotId: input.lotId,
@@ -88,7 +90,10 @@ function contentHash(input: {
     residualLi: input.residualLi,
     spcStatus: input.spcStatus,
     drivers: input.drivers,
-    summaryFormat: 5,
+    humidity: input.humidity ?? null,
+    sinteringTemp: input.sinteringTemp ?? null,
+    summaryFormat: 6,
+    whatifFormat: 1,
   })
   return createHash('sha1').update(payload).digest('hex')
 }
@@ -248,14 +253,14 @@ export function buildRuleSummary(
     const phrase = groupedCausePhrase(defect)
     para1 =
       phrase.length > 0
-        ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다.`
-        : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct})`
+        ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다. 불량확률 저감을 위해 해당 인자를 우선 점검합니다.`
+        : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct}) 불량확률 저감을 위해 공정·검사 기준을 재확인합니다.`
   }
 
   const resPhrase = groupedCausePhrase(residual)
   const para2 =
     resPhrase.length > 0
-      ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다.`
+      ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다. 잔류 안정화로 불량 리스크를 낮춥니다.`
       : ''
 
   if (para1 && para2) return `${para1}\n\n${para2}`
@@ -264,7 +269,7 @@ export function buildRuleSummary(
 
   const spc = (opts.spcStatus || '').trim()
   if (spc && spc !== '안정' && spc !== '-') {
-    return `SPC ${spc}가 확인되어 운영 기준을 재확인합니다.`
+    return `SPC ${spc}가 확인되어 운영 기준을 재확인합니다. 불량확률 저감을 위해 SPC·검사 수준을 점검합니다.`
   }
   const residualCaution = getStandardDefaults().residual_caution
   if (opts.residualLi != null && opts.residualLi >= residualCaution) {
@@ -300,7 +305,7 @@ export function buildRuleSteps(
         seen.add(doc.docId)
         steps.push({
           order,
-          text: `${doc.title} 절차에 따라 점검·개선`,
+          text: `${doc.title} 절차에 따라 점검·개선하여 불량확률 저감에 반영`,
           doc_id: doc.docId,
         })
         order += 1
@@ -330,7 +335,7 @@ export function buildRuleSteps(
       seen.add(doc.docId)
       steps.push({
         order,
-        text: `${doc.title} 절차에 따라 점검·개선`,
+        text: `${doc.title} 절차에 따라 점검·개선하여 불량확률 저감에 반영`,
         doc_id: doc.docId,
       })
       order += 1
@@ -363,6 +368,58 @@ function sourcesFromSteps(
     })
   }
   return out
+}
+
+/** Prefer AI compose (incl. what-if) when present; else local QMS rules. */
+export function mergeComposedRecommendedAction(
+  composed: {
+    summary?: string
+    steps?: Array<{ order: number; text: string; doc_id?: string | null }>
+    sources?: Array<{ doc_id: string; title?: string | null; path?: string | null }>
+    whatif?: Record<string, unknown> | null
+  } | null
+  | undefined,
+  fallback: {
+    summary: string
+    steps: Array<{ order: number; text: string; doc_id: string }>
+    sources: Array<{ doc_id: string; title: string; path: string }>
+  },
+): {
+  summary: string
+  steps: Array<{ order: number; text: string; doc_id: string | null }>
+  sources: Array<{ doc_id: string; title: string; path: string }>
+  whatif: Record<string, unknown> | null
+} {
+  const whatif =
+    composed?.whatif && typeof composed.whatif === 'object'
+      ? (composed.whatif as Record<string, unknown>)
+      : null
+  const composedSummary = (composed?.summary || '').trim()
+  const summary = composedSummary || fallback.summary
+
+  const composedSteps = Array.isArray(composed?.steps) ? composed!.steps! : []
+  const steps =
+    composedSteps.length > 0
+      ? composedSteps.map((s, i) => ({
+          order: Number(s.order) || i + 1,
+          text: String(s.text || ''),
+          doc_id: s.doc_id ?? null,
+        }))
+      : fallback.steps.map((s) => ({ ...s, doc_id: s.doc_id }))
+
+  const composedSources = Array.isArray(composed?.sources) ? composed!.sources! : []
+  const sources =
+    composedSources.length > 0
+      ? composedSources
+          .filter((s) => s.doc_id)
+          .map((s) => ({
+            doc_id: String(s.doc_id),
+            title: String(s.title || s.doc_id),
+            path: String(s.path || ''),
+          }))
+      : fallback.sources
+
+  return { summary, steps, sources, whatif }
 }
 
 /** Rewrite stored recommended-action rows from existing drivers (no SHAP/AI). */
@@ -550,6 +607,8 @@ export async function generateRecommendedActionForLot(
     residualLi: ctx.residual_li,
     spcStatus: ctx.spc_status,
     drivers: driversJson,
+    humidity: ctx.humidity,
+    sinteringTemp: ctx.sintering_temp,
   })
 
   if (!opts.force) {
@@ -566,6 +625,20 @@ export async function generateRecommendedActionForLot(
     }
   }
 
+  const localSteps = buildRuleSteps(driversJson, {
+    probability: ctx.probability,
+    spcStatus: ctx.spc_status,
+    riskLevel: ctx.risk_level,
+    residualLi: ctx.residual_li,
+  })
+  const localSummary = buildRuleSummary(driversJson, {
+    probability: ctx.probability,
+    residualLi: ctx.residual_li,
+    riskLevel: ctx.risk_level,
+    spcStatus: ctx.spc_status,
+  })
+  const localSources = sourcesFromSteps(localSteps)
+
   try {
     const composed = await proxyLotRecommendedAction({
       lot_id: lotId,
@@ -574,25 +647,26 @@ export async function generateRecommendedActionForLot(
       residual_li: ctx.residual_li,
       spc_status: ctx.spc_status,
       drivers_json: driversJson,
+      features,
     })
 
     const finalDrivers = (composed.drivers_json || driversJson) as Record<string, unknown>
-    const steps = buildRuleSteps(finalDrivers, {
-      probability: ctx.probability,
-      spcStatus: ctx.spc_status,
-      riskLevel: ctx.risk_level,
-      residualLi: ctx.residual_li,
+    const merged = mergeComposedRecommendedAction(composed, {
+      summary: localSummary,
+      steps: localSteps,
+      sources: localSources,
     })
 
     await upsertRecommendedAction(lotId, {
-      summary: buildRuleSummary(finalDrivers, {
-        probability: ctx.probability,
-        residualLi: ctx.residual_li,
-        riskLevel: ctx.risk_level,
-        spcStatus: ctx.spc_status,
-      }),
-      steps,
-      sources: sourcesFromSteps(steps),
+      summary: merged.summary,
+      steps: merged.steps,
+      sources: merged.sources.length
+        ? merged.sources
+        : sourcesFromSteps(
+            merged.steps
+              .filter((s) => Boolean(s.doc_id))
+              .map((s) => ({ doc_id: String(s.doc_id) })),
+          ),
       driversJson: finalDrivers,
       status: 'ready',
       errorMessage: composed.error,
@@ -601,21 +675,10 @@ export async function generateRecommendedActionForLot(
     return { ok: true }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    const steps = buildRuleSteps(driversJson, {
-      probability: ctx.probability,
-      spcStatus: ctx.spc_status,
-      riskLevel: ctx.risk_level,
-      residualLi: ctx.residual_li,
-    })
     await upsertRecommendedAction(lotId, {
-      summary: buildRuleSummary(driversJson, {
-        probability: ctx.probability,
-        residualLi: ctx.residual_li,
-        riskLevel: ctx.risk_level,
-        spcStatus: ctx.spc_status,
-      }),
-      steps,
-      sources: sourcesFromSteps(steps),
+      summary: localSummary,
+      steps: localSteps,
+      sources: localSources,
       driversJson,
       status: 'ready',
       errorMessage: msg.slice(0, 255),

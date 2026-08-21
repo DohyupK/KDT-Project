@@ -278,6 +278,8 @@ class LotRecommendedActionRequest(BaseModel):
     residual_li: float | None = None
     spc_status: str | None = None
     drivers_json: dict[str, Any] = Field(default_factory=dict)
+    features: dict[str, Any] | None = None
+    fillThreshold: float | None = None
 
 
 class LotRecommendedActionStep(BaseModel):
@@ -297,6 +299,7 @@ class LotRecommendedActionResponse(BaseModel):
     steps: list[LotRecommendedActionStep] = Field(default_factory=list)
     sources: list[LotRecommendedActionSource] = Field(default_factory=list)
     drivers_json: dict[str, Any] = Field(default_factory=dict)
+    whatif: dict[str, Any] | None = None
     status: str = "ready"
     error: str | None = None
 
