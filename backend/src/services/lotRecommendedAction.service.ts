@@ -248,14 +248,14 @@ export function buildRuleSummary(
     const phrase = groupedCausePhrase(defect)
     para1 =
       phrase.length > 0
-        ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다.`
-        : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct})`
+        ? `${phrase} 불량확률 ${probPct}에 주요 영향을 미쳤습니다. 불량확률 저감을 위해 해당 인자를 우선 점검합니다.`
+        : `불량확률을 높인 주요 인자를 확인하세요. (불량확률 ${probPct}) 불량확률 저감을 위해 공정·검사 기준을 재확인합니다.`
   }
 
   const resPhrase = groupedCausePhrase(residual)
   const para2 =
     resPhrase.length > 0
-      ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다.`
+      ? `${resPhrase} 잔류리튬 예측 ${resTxt}에 주요 영향을 미쳤습니다. 잔류 안정화로 불량 리스크를 낮춥니다.`
       : ''
 
   if (para1 && para2) return `${para1}\n\n${para2}`
@@ -264,7 +264,7 @@ export function buildRuleSummary(
 
   const spc = (opts.spcStatus || '').trim()
   if (spc && spc !== '안정' && spc !== '-') {
-    return `SPC ${spc}가 확인되어 운영 기준을 재확인합니다.`
+    return `SPC ${spc}가 확인되어 운영 기준을 재확인합니다. 불량확률 저감을 위해 SPC·검사 수준을 점검합니다.`
   }
   const residualCaution = getStandardDefaults().residual_caution
   if (opts.residualLi != null && opts.residualLi >= residualCaution) {
@@ -300,7 +300,7 @@ export function buildRuleSteps(
         seen.add(doc.docId)
         steps.push({
           order,
-          text: `${doc.title} 절차에 따라 점검·개선`,
+          text: `${doc.title} 절차에 따라 점검·개선하여 불량확률 저감에 반영`,
           doc_id: doc.docId,
         })
         order += 1
@@ -330,7 +330,7 @@ export function buildRuleSteps(
       seen.add(doc.docId)
       steps.push({
         order,
-        text: `${doc.title} 절차에 따라 점검·개선`,
+        text: `${doc.title} 절차에 따라 점검·개선하여 불량확률 저감에 반영`,
         doc_id: doc.docId,
       })
       order += 1

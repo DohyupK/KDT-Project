@@ -31,12 +31,12 @@ test('summary lists raisers with value and 증가/감소, top 3', () => {
   )
   assert.match(
     text,
-    /습도\(62\.10%RH\)·금속 불순물\(0\.03ppm\)이 증가하며, 소성 온도\(760\.00°C\)이 감소하여 불량확률 90\.00%에 주요 영향을 미쳤습니다/,
+    /습도\(62\.10%RH\)·금속 불순물\(0\.03ppm\)이 증가하며, 소성 온도\(760\.00°C\)이 감소하여 불량확률 90\.00%에 주요 영향을 미쳤습니다\. 불량확률 저감을 위해 해당 인자를 우선 점검합니다/,
   )
   assert.equal(text.includes('공정 시간'), false)
   assert.match(
     text,
-    /리튬 투입량\(2\.90\)·습도\(62\.10%RH\)이 증가하여 잔류리튬 예측 3588\.40 ppm에 주요 영향을 미쳤습니다/,
+    /리튬 투입량\(2\.90\)·습도\(62\.10%RH\)이 증가하여 잔류리튬 예측 3588\.40 ppm에 주요 영향을 미쳤습니다\. 잔류 안정화로 불량 리스크를 낮춥니다/,
   )
 })
 
@@ -78,7 +78,7 @@ test('below defect threshold omits 불량확률 attribution but keeps residual',
   assert.equal(text.includes('첨가제 비율'), false)
   assert.match(
     text,
-    /소성 온도\(830\.19°C\)·리튬 투입량\(2\.67\)이 증가하여 잔류리튬 예측 3326\.41 ppm에 주요 영향을 미쳤습니다/,
+    /소성 온도\(830\.19°C\)·리튬 투입량\(2\.67\)이 증가하여 잔류리튬 예측 3326\.41 ppm에 주요 영향을 미쳤습니다\. 잔류 안정화로 불량 리스크를 낮춥니다/,
   )
 })
 
@@ -91,8 +91,11 @@ test('below defect threshold with only defect causes and SPC uses SPC line', () 
     },
     { probability: 0.1, residualLi: null, riskLevel: '주의', spcStatus: '주의' },
   )
-  assert.equal(text.includes('불량확률'), false)
-  assert.match(text, /SPC 주의가 확인되어 운영 기준을 재확인합니다/)
+  assert.equal(text.includes('습도'), false)
+  assert.match(
+    text,
+    /SPC 주의가 확인되어 운영 기준을 재확인합니다\. 불량확률 저감을 위해 SPC·검사 수준을 점검합니다/,
+  )
 })
 
 test('below defect threshold omits defect-cause steps, keeps residual steps', () => {

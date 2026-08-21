@@ -224,8 +224,9 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 6. **predict/whatif:** features 있을 때 registry 헤드.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
-   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리. **페이지 요약이면 recent_turns 없음**) → **2차 `SYSTEM_POLISH`** (띄어쓰기·문장 끝 빈 줄·중복 번호 목록). 초안은 스트림하지 않음.  
+   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리. **페이지 요약이면 recent_turns 없음**) → **2차 `SYSTEM_POLISH`** (띄어쓰기·문장 끝 빈 줄·중복 번호 목록). LOT·품질 질문은 **관찰 → 원인 → 불량률 저감 제안**; 저장된 `riskReason`/`recommendedAction`은 낭독하지 않고 근거로만 씀. 초안은 스트림하지 않음.  
    - 그 외/실패 → `_template_reply` (문서 턴·LLM 없음이면 발췌 안내)  
+   - DB 적재 분석과 역할이 다름: `risk_reason`=짧은 위험 해석 · `recommended_actions`=저감 조치. 챗은 대화형 재구성.  
 8. what-if / capacity / residual 블록 필요 시 덧붙임.  
 9. polish 실패 시 **`normalize_korean_reply`** 폴백. deterministic/template은 정규화만.
 

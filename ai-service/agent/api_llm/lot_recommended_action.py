@@ -58,13 +58,15 @@ STABLE_SOURCES = [
 ]
 
 SYSTEM_COMPOSE = """당신은 양극재 LOT 조치 권고 작성기입니다.
+목표는 이 LOT의 불량률(불량확률)을 낮추는 실행 가능한 조치입니다.
 제공된 drivers JSON과 QMS 발췌만 근거로 JSON만 출력합니다.
 형식:
 {"summary":"한두 문장","steps":[{"order":1,"text":"...","doc_id":"QMS-..."}]}
 규칙:
-1. summary는 자연스러운 한국어 문장. 각 원인에 방향어(상승·변동·과다 등)+측정값+근거를 괄호로 포함.
-2. steps는 2~5개 번호 조치. doc_id는 제공 QMS id만 사용.
-3. 수치·doc_id를 지어내지 않음. 마크다운·코드펜스 없이 JSON만."""
+1. summary는 원인 요약 + 불량확률 저감 방향을 한두 문장으로. 각 원인에 방향어(상승·변동·과다 등)+측정값+근거를 괄호로 포함.
+2. steps는 2~5개. 측정·점검·조정 중 불량률 저감에 직결되는 조치만. doc_id는 제공 QMS id만 사용.
+3. 수치·doc_id를 지어내지 않음. 마크다운·코드펜스 없이 JSON만.
+4. 챗봇용 대화체가 아니라 DB 적재용 조치문입니다."""
 
 
 def _resolve_doc_path(doc_id: str, title: str) -> str:
@@ -158,13 +160,18 @@ def _rule_summary(
     if include_defect:
         phrase = _grouped_cause_phrase(defect)
         para1 = (
-            f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다."
+            f"{phrase} 불량확률 {prob_pct}에 주요 영향을 미쳤습니다. "
+            f"불량확률 저감을 위해 해당 인자를 우선 점검합니다."
             if phrase
-            else f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct})"
+            else (
+                f"불량확률을 높인 주요 인자를 확인하세요. (불량확률 {prob_pct}) "
+                f"불량확률 저감을 위해 공정·검사 기준을 재확인합니다."
+            )
         )
     res_phrase = _grouped_cause_phrase(residual)
     para2 = (
-        f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다."
+        f"{res_phrase} 잔류리튬 예측 {res_txt}에 주요 영향을 미쳤습니다. "
+        f"잔류 안정화로 불량 리스크를 낮춥니다."
         if res_phrase
         else ""
     )
@@ -177,7 +184,10 @@ def _rule_summary(
         return para2[:1024]
     spc = (spc_status or "").strip()
     if spc and spc not in ("안정", "-"):
-        return f"SPC {spc}가 확인되어 운영 기준을 재확인합니다."[:1024]
+        return (
+            f"SPC {spc}가 확인되어 운영 기준을 재확인합니다. "
+            f"불량확률 저감을 위해 SPC·검사 수준을 점검합니다."
+        )[:1024]
     return STABLE_SUMMARY
 
 
@@ -204,7 +214,10 @@ def _rule_steps(
                 steps.append(
                     {
                         "order": order,
-                        "text": f"{doc['title']} 절차에 따라 점검·개선",
+                        "text": (
+                            f"{doc['title']} 절차에 따라 점검·개선하여 "
+                            f"불량확률 저감에 반영"
+                        ),
                         "doc_id": did,
                     }
                 )
