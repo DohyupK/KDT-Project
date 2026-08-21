@@ -12,7 +12,7 @@ import {
   KeyRound,
 } from 'lucide-react'
 import { authApi } from '@/api/authApi'
-import { getAuthUser, isLoggedIn } from '@/lib/authStorage'
+import { AUTH_CHANGED_EVENT, getAuthUser, isLoggedIn } from '@/lib/authStorage'
 import {
   applyDocumentFontSize,
   EMAIL_CHECK_EVENT,
@@ -196,6 +196,8 @@ export default function SettingPage() {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(DEFAULT_AUTO_REFRESH_ENABLED)
   const [n8nAlert, setN8nAlert] = useState(DEFAULT_N8N_ALERT)
   const [emailCheckSaving, setEmailCheckSaving] = useState(false)
+  /** SSR/첫 paint와 맞추기 — localStorage는 마운트 후에만 읽음 */
+  const [loggedIn, setLoggedIn] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string>('')
   const [toastMessage, setToastMessage] = useState('')
   const toastTimerRef = useRef<number | null>(null)
@@ -215,6 +217,13 @@ export default function SettingPage() {
       toastTimerRef.current = null
     }, 2500)
   }
+
+  useEffect(() => {
+    const syncAuth = () => setLoggedIn(isLoggedIn())
+    syncAuth()
+    window.addEventListener(AUTH_CHANGED_EVENT, syncAuth)
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, syncAuth)
+  }, [])
 
   useEffect(() => {
     return () => clearToastTimer()
@@ -773,7 +782,7 @@ export default function SettingPage() {
                 role="switch"
                 aria-checked={n8nAlert}
                 aria-label="이메일 자동 발신"
-                disabled={emailCheckSaving || !isLoggedIn()}
+                disabled={emailCheckSaving || !loggedIn}
                 onClick={() => {
                   void persistEmailAlert(!n8nAlert)
                 }}
