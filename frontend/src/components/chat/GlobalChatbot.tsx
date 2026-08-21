@@ -162,6 +162,7 @@ export default function GlobalChatbot() {
   const [secureNewThreadNonce, setSecureNewThreadNonce] = useState(0)
   const [secureHandoffDraft, setSecureHandoffDraft] = useState<string | null>(null)
   const [secureHandoffNonce, setSecureHandoffNonce] = useState(0)
+  const [pendingStatus, setPendingStatus] = useState('요청 보내는 중…')
   const [threads, setThreads] = useState<ChatThreadItem[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_GENERAL])
@@ -400,6 +401,18 @@ export default function GlobalChatbot() {
   const resolveFeatures = (explicit: ChatFeatures | null | undefined) =>
     explicit ?? null
 
+  const statusFromChatMeta = (data: Record<string, unknown>): string => {
+    const stage = typeof data.stage === 'string' ? data.stage : ''
+    const ragHits = Number(data.rag_hits ?? 0)
+    if (stage === 'start') return '준비 중…'
+    if (stage === 'searching') return '문서 검색 중…'
+    if (stage === 'context_ready') {
+      return ragHits > 0 ? '문서·화면 확인 중…' : '답변 준비 중…'
+    }
+    if (stage === 'composing') return '답변 작성 중…'
+    return '응답 처리 중…'
+  }
+
   const send = async (raw: string, features: ChatFeatures | null = null) => {
     const text = raw.trim()
     if (!text || pending) return
@@ -415,6 +428,7 @@ export default function GlobalChatbot() {
     setMessages((prev) => [...prev, { id: userId, role: 'user', text }])
     setInput('')
     setPending(true)
+    setPendingStatus('요청 보내는 중…')
 
     abortRef.current?.abort()
     const ac = new AbortController()
@@ -450,8 +464,12 @@ export default function GlobalChatbot() {
           enable_api_llm: Boolean(attached) || undefined,
         },
         {
+          onMeta: (data) => {
+            setPendingStatus(statusFromChatMeta(data))
+          },
           onDelta: (chunk) => {
             streamed += chunk
+            setPendingStatus('답변 작성 중…')
             setMessages((prev) =>
               prev.map((m) => (m.id === aiId ? { ...m, text: streamed } : m)),
             )
@@ -1210,7 +1228,7 @@ export default function GlobalChatbot() {
                         : 'border-blue-200 bg-white text-slate-400'
                     }`}
                   >
-                    응답 생성 중…
+                    {pendingStatus}
                   </div>
                 ) : null}
                 <div ref={endRef} />

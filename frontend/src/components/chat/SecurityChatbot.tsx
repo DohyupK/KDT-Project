@@ -264,6 +264,7 @@ export default function SecurityChatbot({
   const { isDark } = useUiSettings()
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
+  const [pendingStatus, setPendingStatus] = useState('요청 보내는 중…')
   /** Active document panel: all chunks for one doc_id from the message sources. */
   const [activeDocChunks, setActiveDocChunks] = useState<SecurityChatSource[] | null>(
     null,
@@ -493,11 +494,18 @@ export default function SecurityChatbot({
     setMessages((prev) => [...prev, { id: userId, role: 'user', text }])
     setInput('')
     setPending(true)
+    setPendingStatus('보안 문서 검색 중…')
 
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
     const t0 = monotonicNow()
+
+    const statusTimer = window.setTimeout(() => {
+      setPendingStatus((prev) =>
+        prev.includes('검색') || prev.includes('대기') ? '답변 생성 중…' : prev,
+      )
+    }, 4000)
 
     const aiId = ++idRef.current
     setMessages((prev) => [
@@ -519,6 +527,17 @@ export default function SecurityChatbot({
       if (sawTerminal) return false
       sawTerminal = true
       return true
+    }
+
+    const statusFromSecureMeta = (data: Record<string, unknown>): string => {
+      const stage = typeof data.stage === 'string' ? data.stage : ''
+      if (stage === 'queued' || stage === 'queue_wait') return '대기열에 넣는 중…'
+      if (stage === 'retrieve' || stage === 'analytics') return '보안 문서 검색 중…'
+      if (stage === 'generate' || stage === 'generate_first' || stage === 'generate_retry') {
+        return '답변 생성 중…'
+      }
+      if (stage === 'run_complete') return '답변 확인 중…'
+      return '보안 상담 처리 중…'
     }
 
     const fillAiBubble = (opts: {
@@ -595,8 +614,13 @@ export default function SecurityChatbot({
       await postSecurityChatStream(
         { message: text },
         {
+          onMeta: (data) => {
+            if (ac.signal.aborted || sawTerminal) return
+            setPendingStatus(statusFromSecureMeta(data))
+          },
           onDelta: (piece) => {
             if (ac.signal.aborted || sawTerminal) return
+            setPendingStatus('답변 작성 중…')
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiId && m.role === 'ai'
@@ -677,6 +701,7 @@ export default function SecurityChatbot({
         streamEndedAt = monotonicNow()
       }
     } finally {
+      window.clearTimeout(statusTimer)
       try {
         await pollPromise
       } catch {
@@ -1005,7 +1030,7 @@ export default function SecurityChatbot({
                     : 'border-amber-200 bg-white text-slate-400'
                 }`}
               >
-                응답 생성 중…
+                {pendingStatus}
               </div>
             ) : null}
             <div ref={endRef} />

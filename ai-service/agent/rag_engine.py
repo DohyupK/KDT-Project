@@ -1,10 +1,12 @@
 """
 Secure-tab RAG engine (CPU embed + CPU rerank).
 
-Pipeline:
+Pipeline (full retrieve):
   LlamaIndex Self-Query (VectorIndexAutoRetriever filter parse via vLLM)
   → Qdrant dense + BM25 → Query Fusion (RRF)
   → bge-reranker-v2-m3 (device=cpu)
+
+Routing peek (`peek_dual`): encode once → dense Qdrant × clearance (no BM25/rerank).
 
 Guardrails (required — never remove):
   C) empty fused AND had_filters → unfiltered hybrid once
@@ -20,6 +22,7 @@ import logging
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any, Collection
 
@@ -440,7 +443,114 @@ class SecureRagEngine:
             fused = _rrf_fuse(dense_hits, bm25_hits, top_k=top_k)
         if not fused:
             return []
-        return self._rerank(query, fused, top_n=rerank_top_n)
+        t_rr = time.perf_counter()
+        ranked = self._rerank(query, fused, top_n=rerank_top_n)
+        rerank_ms = (time.perf_counter() - t_rr) * 1000
+        logger.info(
+            "[secure-rag] retrieve_ms embed+search+fuse+rerank rerank_ms=%.1f hits=%s",
+            rerank_ms,
+            len(ranked),
+        )
+        return ranked
+
+    def peek_dual(
+        self,
+        query: str,
+        *,
+        public_clearances: Collection[str] | None = None,
+        secret_clearances: Collection[str] | None = None,
+        top_k: int = 3,
+        include_public_text: bool = True,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, float]]:
+        """
+        Routing peek: one encode, two dense Qdrant searches. No BM25 / RRF / CrossEncoder.
+
+        Returns (secret_meta, public_hits, timing_ms).
+        Secret hits never include chunk text. Public may include text for compose.
+        """
+        timing: dict[str, float] = {
+            "ensure_ms": 0.0,
+            "embed_ms": 0.0,
+            "qdrant_ms": 0.0,
+            "peek_ms": 0.0,
+        }
+        t0 = time.perf_counter()
+        t_e = time.perf_counter()
+        self.ensure()
+        timing["ensure_ms"] = round((time.perf_counter() - t_e) * 1000, 1)
+        if not self._ready or self._embed_model is None or self._qdrant is None:
+            timing["peek_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return [], [], timing
+
+        query = re.sub(r"\s+", " ", (query or "").strip().strip("\"'「」『』"))
+        if not query:
+            timing["peek_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return [], [], timing
+
+        pub_allowed = frozenset(public_clearances or API_ALLOWED_CLEARANCES)
+        sec_allowed = frozenset(
+            secret_clearances or frozenset({"Secret", "TopSecret"})
+        )
+
+        t_emb = time.perf_counter()
+        encoded = self._embed_model.encode(
+            [query], normalize_embeddings=True
+        )[0]
+        vector = encoded.tolist() if hasattr(encoded, "tolist") else list(encoded)
+        timing["embed_ms"] = round((time.perf_counter() - t_emb) * 1000, 1)
+
+        t_qd = time.perf_counter()
+        secret_raw = self._dense_search_vector(
+            vector, top_k=top_k, filters={}, allowed_clearances=sec_allowed
+        )
+        public_raw = self._dense_search_vector(
+            vector, top_k=top_k, filters={}, allowed_clearances=pub_allowed
+        )
+        timing["qdrant_ms"] = round((time.perf_counter() - t_qd) * 1000, 1)
+
+        secret_meta: list[dict[str, Any]] = []
+        for _key, node, score in secret_raw:
+            md = _meta(node)
+            secret_meta.append(
+                {
+                    "doc_id": str(md.get("doc_id") or ""),
+                    "title": str(md.get("title") or md.get("doc_id") or "untitled"),
+                    "clearance": md.get("clearance"),
+                    "score": float(score),
+                }
+            )
+
+        public_hits: list[dict[str, Any]] = []
+        for _key, node, score in public_raw:
+            item = source_dict_from_hit(node, score=float(score))
+            if not include_public_text:
+                item["text"] = ""
+            public_hits.append(item)
+
+        timing["peek_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        logger.info(
+            "[secure-rag] peek_dense ensure_ms=%s embed_ms=%s qdrant_ms=%s "
+            "peek_ms=%s secret=%s public=%s",
+            timing["ensure_ms"],
+            timing["embed_ms"],
+            timing["qdrant_ms"],
+            timing["peek_ms"],
+            len(secret_meta),
+            len(public_hits),
+        )
+        return secret_meta, public_hits, timing
+
+    def warm_embed(self, text: str = "warm") -> bool:
+        """Force one encode after ensure() so first chat skips cold embed spike."""
+        self.ensure()
+        if not self._ready or self._embed_model is None:
+            return False
+        try:
+            self._embed_model.encode([text], normalize_embeddings=True)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[secure-rag] warm_embed failed: %s", exc)
+            return False
 
     def _dense_search(
         self,
@@ -450,13 +560,26 @@ class SecureRagEngine:
         filters: dict[str, str],
         allowed_clearances: frozenset[str],
     ) -> list[tuple[str, dict[str, Any], float]]:
-        from qdrant_client.http import models as qm
-
-        assert self._embed_model is not None and self._qdrant is not None
+        assert self._embed_model is not None
         vector = self._embed_model.encode(
             [query], normalize_embeddings=True
         )[0].tolist()
+        return self._dense_search_vector(
+            vector,
+            top_k=top_k,
+            filters=filters,
+            allowed_clearances=allowed_clearances,
+        )
 
+    def _dense_search_vector(
+        self,
+        vector: list[float],
+        *,
+        top_k: int,
+        filters: dict[str, str],
+        allowed_clearances: frozenset[str],
+    ) -> list[tuple[str, dict[str, Any], float]]:
+        assert self._qdrant is not None
         qfilter = _qdrant_filter(filters, allowed_clearances)
 
         try:

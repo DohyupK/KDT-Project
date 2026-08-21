@@ -37,9 +37,9 @@ RAG 동작·가드레일: [`secure-rag.md`](./secure-rag.md) · 기본값·env·
   → FE가 「보안 상담」탭으로 자동 전환 · 질문을 입력란에 handoff (자동 전송은 안 함)
 
 화면·UI·로그 근거가 아닌 일반 발화 (키워드 미스 후)
-  → ai-service 이중 peek (`secure_docs`)
+  → ai-service dense peek (`secure_docs`, encode 1회 · BM25/rerank 없음)
   → Secret/TopSecret 히트 → mode=security_redirect (본문 미노출)
-  → Public/Confidential 히트 → 일반 RAG compose
+  → Public/Confidential 히트 → 일반 RAG compose (문서 intent면 본경로 hybrid+rerank)
   → 미스 → 화면·predict 경로
 
 보안 상담 메시지
