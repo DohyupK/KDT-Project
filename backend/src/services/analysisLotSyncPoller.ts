@@ -4,6 +4,7 @@
  */
 import * as lotService from './lot.service.js'
 import { fillRiskReasonsForLots } from './lotRiskReason.service.js'
+import { fillRecommendedActionsForLots } from './lotRecommendedAction.service.js'
 import { pickUnscoredLotIds, splitAnalysisOnly } from './unscoredLots.js'
 import { dispatchNewRiskTopIssueReports } from './issueReportN8n.js'
 import { lotScoreOnAws } from './lotScoreRole.js'

@@ -1,7 +1,7 @@
 'use client'
 
 import axios from 'axios';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { CSSProperties, FormEvent } from 'react';
 import {
@@ -2356,7 +2356,7 @@ function buildPaginationItems(current: number, total: number): Array<number | 'e
   return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis', total];
 }
 
-export default function IssuePage() {
+function IssuePageContent() {
   const { isDark } = useUiSettings();
   const { setPagePayload, trackPageChatEvent } = usePageChat();
   const searchParams = useSearchParams();
@@ -3176,3 +3176,11 @@ export default function IssuePage() {
     </div>
   );
 };
+
+export default function IssuePage() {
+  return (
+    <Suspense fallback={null}>
+      <IssuePageContent />
+    </Suspense>
+  );
+}

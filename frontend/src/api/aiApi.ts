@@ -1,12 +1,5 @@
-import axios from 'axios'
 import { apiClient } from '@/api/axios'
-import { getAuthToken, getAuthUser } from '@/lib/authStorage'
-
-/** Direct ai-service via next.config rewrite (`/ai` → :8800). Health / smoke only. */
-export const aiClient = axios.create({
-  baseURL: '/ai',
-  timeout: 60_000,
-})
+import { getAuthToken } from '@/lib/authStorage'
 
 const THREAD_KEY = 'kdt_chat_thread_id'
 const LEGACY_SESSION_KEY = 'kdt_chat_session_id'
@@ -74,6 +67,9 @@ export type ChatPredictResult = {
   probability: number
   applied_threshold: number
   top_risk_factors: string[]
+  risk_factor_scope?: string | null
+  decision_basis?: Record<string, unknown> | null
+  validation_notice?: string | null
 }
 
 export type WhatIfSuggestion = {
@@ -130,7 +126,6 @@ export type ChatRequest = {
   features?: ChatFeatures | null
   fillThreshold?: number | null
   thread_id?: string | null
-  user_id?: string | null
   /** @deprecated alias for thread_id */
   session_id?: string | null
   /** "auto" | stored key id from /security vault */
@@ -201,18 +196,16 @@ export type OutcomeControlResponse = {
 }
 
 /** Proxied through Express backend: security gate + session + ai-service.
- * Multi-turn (B): message + thread_id + user_id only — never history array.
+ * The backend derives user identity from JWT; the browser never sends user_id.
  */
 export async function postChat(body: ChatRequest): Promise<ChatResponse> {
   const thread_id =
     body.thread_id ?? body.session_id ?? getChatThreadId()
-  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
   const { data } = await apiClient.post<ChatResponse>('/chat', {
     message: body.message,
     features: body.features ?? undefined,
     fillThreshold: body.fillThreshold ?? undefined,
     thread_id: thread_id ?? undefined,
-    user_id: user_id ?? undefined,
     llm_mode: body.llm_mode ?? 'auto',
     page_context: body.page_context ?? undefined,
     enable_api_llm: body.enable_api_llm ?? undefined,
@@ -245,7 +238,6 @@ export async function postChatStream(
   signal?: AbortSignal,
 ): Promise<void> {
   const thread_id = body.thread_id ?? body.session_id ?? getChatThreadId()
-  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
   const token = getAuthToken()
 
   const res = await fetch('/api/chat/stream', {
@@ -260,7 +252,6 @@ export async function postChatStream(
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       thread_id: thread_id ?? undefined,
-      user_id: user_id ?? undefined,
       llm_mode: body.llm_mode ?? 'auto',
       page_context: body.page_context ?? undefined,
       enable_api_llm: body.enable_api_llm ?? undefined,
@@ -352,16 +343,12 @@ export type ChatThreadMessageItem = {
 
 export async function listChatThreads(opts: {
   channel: 'security' | 'general'
-  user_id?: string
   limit?: number
 }): Promise<ChatThreadItem[]> {
-  const user_id = opts.user_id ?? getAuthUser()?.userId
-  if (!user_id) return []
   const { data } = await apiClient.get<{ threads: ChatThreadItem[] }>(
     '/chat/threads',
     {
       params: {
-        user_id,
         channel: opts.channel,
         limit: opts.limit ?? 50,
       },
@@ -372,18 +359,24 @@ export async function listChatThreads(opts: {
 
 export async function loadChatThreadMessages(opts: {
   thread_id: string
-  user_id?: string
   limit?: number
 }): Promise<ChatThreadMessageItem[]> {
-  const user_id = opts.user_id ?? getAuthUser()?.userId
-  if (!user_id) return []
   const { data } = await apiClient.get<{
     thread_id: string
     messages: ChatThreadMessageItem[]
   }>(`/chat/threads/${encodeURIComponent(opts.thread_id)}/messages`, {
-    params: { user_id, limit: opts.limit ?? 200 },
+    params: { limit: opts.limit ?? 200 },
   })
   return data.messages ?? []
+}
+
+export async function deleteChatThread(
+  threadId: string,
+  channel: 'general' | 'security',
+): Promise<void> {
+  await apiClient.delete(`/chat/threads/${encodeURIComponent(threadId)}`, {
+    params: { channel },
+  })
 }
 
 /** Log-only control bridge: approve what-if suggestion → optimization_events row. */
@@ -428,7 +421,7 @@ export async function postOutcomeControl(
 }
 
 export async function getAiHealth(): Promise<{ status: string; model_version?: string }> {
-  const { data } = await aiClient.get<{ status: string; model_version?: string }>('/health')
+  const { data } = await apiClient.get<{ status: string; model_version?: string }>('/health')
   return data
 }
 

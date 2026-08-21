@@ -6,6 +6,7 @@ import * as lotService from './lot.service.js'
 import * as issueService from './issue.service.js'
 import * as dashboardService from './dashboard.service.js'
 import type { LotRiskListQuery } from './dashboard.service.js'
+import { runChatReadTool } from './chatReadTools.service.js'
 
 export type PageContextIn = {
   route?: string | null
@@ -34,6 +35,36 @@ const MAX_CHARS = 6_000
 const DASHBOARD_PAGE_SIZE = 8
 const MAIN_PAGE_SIZE = 8
 const ISSUE_PAGE_SIZE = 5
+const DEFAULT_HYDRATE_TIMEOUT_MS = 1_200
+
+function hydrateTimeoutMs(): number {
+  const configured = Number(process.env.PAGE_CHAT_HYDRATE_TIMEOUT_MS)
+  if (!Number.isFinite(configured)) return DEFAULT_HYDRATE_TIMEOUT_MS
+  return Math.max(100, Math.min(5_000, Math.floor(configured)))
+}
+
+async function withHydrateTimeout<T>(
+  route: string,
+  work: Promise<T>,
+  fallback: T,
+): Promise<T> {
+  const timeoutMs = hydrateTimeoutMs()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      console.debug('[page-chat] hydrate timeout; using current screen data', {
+        route,
+        timeout_ms: timeoutMs,
+      })
+      resolve(fallback)
+    }, timeoutMs)
+  })
+  try {
+    return await Promise.race([work, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 function truncate(value: unknown): unknown {
   if (value == null) return value
@@ -384,7 +415,9 @@ async function hydrateFocus(
   const r = route.toLowerCase()
   try {
     if (r.includes('/dashboard') && isLotId(focusId)) {
-      const detail = await dashboardService.getLotRiskDetail(focusId)
+      // Chat hydration must remain read-only. The dashboard detail service may
+      // generate a missing recommendation, so use the pure LOT lookup here.
+      const detail = await lotService.getLotById(focusId)
       return mergeRecord(focusPayload, {
         lotId: detail.lotId,
         defectProb: detail.defectProb,
@@ -442,13 +475,33 @@ async function hydrateFocus(
  */
 export async function enrichPageContext(
   input: PageContextIn | null | undefined,
+  request: { message?: string; viewerUserId?: string } = {},
 ): Promise<PageContextOut | null> {
   if (!input || typeof input !== 'object') return null
   const route = String(input.route || '/').trim() || '/'
   const focusId = input.focusId != null ? String(input.focusId) : null
 
-  const pagePayload = await hydratePagePayload(route, input.pagePayload ?? null)
-  const focusPayload = await hydrateFocus(route, focusId, input.focusPayload ?? null)
+  const fallback: [unknown, unknown, Record<string, unknown> | null] = [
+    input.pagePayload ?? null,
+    input.focusPayload ?? null,
+    null,
+  ]
+  const [pagePayload, focusPayload, supplement] = await withHydrateTimeout(
+    route,
+    Promise.all([
+      hydratePagePayload(route, input.pagePayload ?? null),
+      hydrateFocus(route, focusId, input.focusPayload ?? null),
+      request.viewerUserId
+        ? runChatReadTool({
+            message: request.message ?? '',
+            route,
+            pagePayload: input.pagePayload ?? null,
+            viewerUserId: request.viewerUserId,
+          })
+        : Promise.resolve(null),
+    ]),
+    fallback,
+  )
 
   const out: PageContextOut = {
     route,
@@ -456,7 +509,7 @@ export async function enrichPageContext(
     focusPayload: truncate(focusPayload),
     pagePayload: truncate(pagePayload),
     lastEvent: input.lastEvent ?? null,
-    supplement: null,
+    supplement: truncate(supplement) as Record<string, unknown> | null,
   }
 
   console.debug('[page-chat] enrich', {
@@ -465,7 +518,7 @@ export async function enrichPageContext(
     hasFocus: out.focusPayload != null,
     hasPage: out.pagePayload != null,
     hasLastEvent: out.lastEvent != null,
-    hasSupplement: false,
+    hasSupplement: out.supplement != null,
   })
 
   return out

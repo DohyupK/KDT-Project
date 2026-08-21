@@ -2,7 +2,7 @@
 ai-service FastAPI entrypoint.
 
 Run from ai-service/ (CWD must be ai-service so models/ resolves):
-  uvicorn app.main:app --host 0.0.0.0 --port 8800 --reload
+  uvicorn app.main:app --host 127.0.0.1 --port 8800 --reload
 
 Env: monorepo root `.env` only (never commit).
 """
@@ -53,6 +53,13 @@ def _configure_file_logging() -> None:
     root.addHandler(handler)
 
 
+def _env_true(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -92,27 +99,24 @@ _configure_file_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _configure_file_logging()
-    # Qdrant (:6333) — auto Docker start when AI server boots
-    try:
-        from agent.qdrant_supervisor import ensure_qdrant
+    # General chat is usable without RAG. Keep BGE/Qdrant fully lazy by default.
+    # Operators can explicitly opt in when they prefer startup cost over first-RAG cost.
+    if _env_true("CHAT_RAG_WARM_ON_STARTUP"):
+        try:
+            from agent.qdrant_supervisor import ensure_qdrant
+            from agent.rag_engine import get_engine
 
-        ok = ensure_qdrant()
-        print(f"[qdrant] ensure_ok={ok}", flush=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[qdrant] ensure skipped: {exc}", flush=True)
-    # Documents OCR/watchdog is owned by Express backend (documentWatcherSupervisor).
-    # Warm RAG embed/rerank on CPU so first chat is not a cold load.
-    try:
-        from agent.rag_engine import get_engine
-
-        eng = get_engine()
-        eng.ensure()
-        print(
-            f"[rag] warm ready={eng.ready} err={eng.init_error!r}",
-            flush=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(f"[rag] warm skipped: {exc}", flush=True)
+            ok = ensure_qdrant()
+            eng = get_engine()
+            eng.ensure()
+            print(
+                f"[rag] explicit warm qdrant={ok} ready={eng.ready} err={eng.init_error!r}",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[rag] explicit warm skipped: {exc}", flush=True)
+    else:
+        print("[rag] lazy mode; BGE/Qdrant initialize only for an actual RAG request", flush=True)
     yield
 
 
@@ -255,6 +259,52 @@ def get_chat_thread_messages(
     return ChatThreadMessagesResponse(thread_id=thread_id, messages=msgs)
 
 
+@app.delete("/chat/threads/{thread_id}")
+def delete_chat_thread(
+    thread_id: str,
+    user_id: str,
+    channel: str = "general",
+) -> dict[str, Any]:
+    """Delete one authenticated user's thread and its semantic-memory copy."""
+    from agent import chat_history_store as store
+    from agent import chat_history_vector as vec
+    from agent import security_queue_store as qstore
+
+    ch = (channel or "general").strip().lower()
+    if ch not in ("general", "security"):
+        raise HTTPException(status_code=400, detail="channel must be general|security")
+    owned = (
+        qstore.thread_owned_by(thread_id=thread_id, user_id=user_id)
+        if ch == "security"
+        else store.thread_owned_by(thread_id=thread_id, user_id=user_id)
+    )
+    if not owned:
+        raise HTTPException(status_code=404, detail="thread not found")
+    vector_deleted = vec.delete_thread_history(
+        thread_id=thread_id,
+        user_id=user_id,
+        channel=ch,
+    )
+    if not vector_deleted:
+        raise HTTPException(
+            status_code=503,
+            detail="semantic memory cleanup unavailable; thread was not deleted",
+        )
+    deleted = (
+        qstore.delete_thread(thread_id=thread_id, user_id=user_id)
+        if ch == "security"
+        else store.delete_thread(thread_id=thread_id, user_id=user_id)
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return {
+        "ok": True,
+        "thread_id": thread_id,
+        "channel": ch,
+        "vector_deleted": vector_deleted,
+    }
+
+
 @app.post("/predict-voting", response_model=VotingPredictResponse)
 def predict_voting_endpoint(body: PredictRequest) -> VotingPredictResponse:
     """Cascade multi-model voting (capacity → residual → probability /15)."""
@@ -371,6 +421,10 @@ def chat_endpoint(
 
     from agent import chat_history_store as store
     from agent import chat_history_vector as vec
+    from agent.api_llm.history_context import build_history_context
+    import time as _time
+
+    request_started = _time.perf_counter()
 
     features = body.features.model_dump(exclude_none=True) if body.features else None
     page_ctx = None
@@ -392,38 +446,20 @@ def chat_endpoint(
             or raw.get("supplementHints"),
         }
 
-    tid = store.ensure_thread(
-        thread_id=body.thread_id,
-        user_id=body.user_id,
-        channel="general",
-    )
-    history = store.load_messages(tid) if tid else []
-    window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import (
-        detect_topic_shift,
-        filter_history_for_entities,
-        is_page_summary_intent,
-        message_lot_issue_ids,
-        route_without_lot_table,
-    )
-
-    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    route_now = str((page_ctx or {}).get("route") or "")
-    if is_page_summary_intent(body.message):
-        history_text = ""
-    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
-        history_text = filter_history_for_entities(window_text, body.message)
-    elif topic_shift:
-        # Facts come from page_context only; keep a tiny history window for pronouns.
-        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
-    else:
-        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
-        history_text = vec.merge_history_with_semantic(
-            window_text,
-            semantic,
-            heuristic_truncate_fn=store.heuristic_truncate,
-            format_compact_fn=store.format_history_text_compact,
+    try:
+        tid = store.ensure_thread(
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+            channel="general",
         )
+    except store.ThreadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="thread access denied") from exc
+    history_text, history_timing = build_history_context(
+        message=body.message,
+        thread_id=tid,
+        page_context=page_ctx,
+        fallback_history_text=body.fallback_history_text,
+    )
     if tid and body.user_id:
         mid = store.insert_message(
             thread_id=tid,
@@ -476,6 +512,16 @@ def chat_endpoint(
             message_id=mid_a,
         )
 
+    graph_timing = dict(out.get("timing") or {})
+    graph_ms = graph_timing.get("total_ms", 0)
+    graph_timing.update(history_timing)
+    graph_timing["graph_ms"] = graph_ms
+    graph_timing["total_ms"] = round(
+        (_time.perf_counter() - request_started) * 1000,
+        1,
+    )
+    out["timing"] = graph_timing
+
     predict_payload = out.get("predict")
     capacity_payload = out.get("capacity")
     residual_payload = out.get("residual")
@@ -511,6 +557,10 @@ async def chat_stream_endpoint(
     from agent import chat_history_store as store
     from agent import chat_history_vector as vec
     from agent.api_llm.graph import iter_chat_events
+    from agent.api_llm.history_context import build_history_context
+    import time as _time
+
+    request_started = _time.perf_counter()
 
     features = body.features.model_dump(exclude_none=True) if body.features else None
     page_ctx = None
@@ -531,37 +581,20 @@ async def chat_stream_endpoint(
             or raw.get("supplementHints"),
         }
 
-    tid = store.ensure_thread(
-        thread_id=body.thread_id,
-        user_id=body.user_id,
-        channel="general",
-    )
-    history = store.load_messages(tid) if tid else []
-    window_text = store.format_history_text_compact(history)
-    from agent.api_llm.grounding import (
-        detect_topic_shift,
-        filter_history_for_entities,
-        is_page_summary_intent,
-        message_lot_issue_ids,
-        route_without_lot_table,
-    )
-
-    topic_shift = detect_topic_shift(body.message, window_text, page_ctx)
-    route_now = str((page_ctx or {}).get("route") or "")
-    if is_page_summary_intent(body.message):
-        history_text = ""
-    elif message_lot_issue_ids(body.message) and route_without_lot_table(route_now):
-        history_text = filter_history_for_entities(window_text, body.message)
-    elif topic_shift:
-        history_text = store.heuristic_truncate(window_text, max_chars=200) if window_text else ""
-    else:
-        semantic = vec.search_similar(thread_id=tid, query=body.message) if tid else []
-        history_text = vec.merge_history_with_semantic(
-            window_text,
-            semantic,
-            heuristic_truncate_fn=store.heuristic_truncate,
-            format_compact_fn=store.format_history_text_compact,
+    try:
+        tid = store.ensure_thread(
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+            channel="general",
         )
+    except store.ThreadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="thread access denied") from exc
+    history_text, history_timing = build_history_context(
+        message=body.message,
+        thread_id=tid,
+        page_context=page_ctx,
+        fallback_history_text=body.fallback_history_text,
+    )
     if tid and body.user_id:
         mid = store.insert_message(
             thread_id=tid,
@@ -598,11 +631,22 @@ async def chat_stream_endpoint(
             ):
                 ev = str(item.get("event") or "message")
                 data = dict(item.get("data") or {})
+                if ev == "meta":
+                    data.update(history_timing)
                 if ev == "done":
                     final_reply = str(data.get("reply") or "")
                     final_mode = str(data.get("mode") or "template")
                     final_provider = str(data.get("provider") or "template")
                     data["thread_id"] = tid
+                    graph_timing = dict(data.get("timing") or {})
+                    graph_ms = graph_timing.get("total_ms", 0)
+                    graph_timing.update(history_timing)
+                    graph_timing["graph_ms"] = graph_ms
+                    graph_timing["total_ms"] = round(
+                        (_time.perf_counter() - request_started) * 1000,
+                        1,
+                    )
+                    data["timing"] = graph_timing
                 yield _format_sse(ev, data)
         except Exception as exc:  # noqa: BLE001
             yield _format_sse("error", {"error": str(exc)[:400], "stage": "chat_stream"})
@@ -748,6 +792,7 @@ def security_chat_endpoint(
     Layer-2 Qdrant upsert via BackgroundTasks (does not touch SECURE_GENERATE / no_docs).
     """
     from agent import chat_history_vector as vec
+    from agent import security_queue_store as qstore
     import time as _time
 
     def _schedule_upsert(**kwargs: object) -> None:
@@ -755,9 +800,26 @@ def security_chat_endpoint(
 
     t0 = _time.perf_counter()
     try:
+        try:
+            secured_thread_id = qstore.ensure_thread(
+                thread_id=body.thread_id,
+                user_id=body.user_id,
+            )
+        except qstore.ThreadOwnershipError:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "reply": "",
+                    "mode": "template",
+                    "provider": "offline",
+                    "error": "thread_access_denied",
+                    "sources": [],
+                    "stage": "authorization",
+                },
+            )
         out = compose_secure(
             body.message,
-            thread_id=body.thread_id,
+            thread_id=secured_thread_id,
             user_id=body.user_id,
             schedule_upsert=_schedule_upsert,
         )
@@ -803,6 +865,14 @@ def security_chat_endpoint(
         )
 
 
+@app.get("/security-chat/readiness")
+def security_chat_readiness_endpoint() -> dict[str, Any]:
+    """Report security-chat dependencies without loading BGE or calling generation."""
+    from agent.secure_llm.readiness import security_chat_readiness
+
+    return security_chat_readiness()
+
+
 def _format_sse(event: str, data: dict) -> str:
     payload = json.dumps(data, ensure_ascii=False, default=str)
     return f"event: {event}\ndata: {payload}\n\n"
@@ -819,6 +889,15 @@ async def security_chat_stream_endpoint(
     AWS does not retrieve or call vLLM here.
     """
     from agent import chat_history_vector as vec
+    from agent import security_queue_store as qstore
+
+    try:
+        secured_thread_id = qstore.ensure_thread(
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+        )
+    except qstore.ThreadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="thread access denied") from exc
 
     def _schedule_upsert(**kwargs: object) -> None:
         background_tasks.add_task(vec.upsert_chat_message, **kwargs)
@@ -827,7 +906,7 @@ async def security_chat_stream_endpoint(
         try:
             async for item in compose_secure_stream(
                 body.message,
-                thread_id=body.thread_id,
+                thread_id=secured_thread_id,
                 user_id=body.user_id,
                 schedule_upsert=_schedule_upsert,
                 is_disconnected=request.is_disconnected,

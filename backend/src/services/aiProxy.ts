@@ -15,6 +15,7 @@ export type AiChatRequest = {
   message: string
   thread_id?: string | null
   user_id?: string | null
+  fallback_history_text?: string | null
   features?: AiChatFeatures | null
   fillThreshold?: number | null
   need_guideline?: boolean
@@ -55,6 +56,9 @@ export type AiPredictResult = {
   probability: number
   applied_threshold: number
   top_risk_factors: string[]
+  risk_factor_scope?: string | null
+  decision_basis?: Record<string, unknown> | null
+  validation_notice?: string | null
 }
 
 export type AiCapacityResult = {
@@ -88,6 +92,15 @@ export type AiChatResponse = {
   recommendation?: AiRecommendation | null
   error: string | null
   timing?: Record<string, unknown> | null
+}
+
+export class AiServiceHttpError extends Error {
+  statusCode: number
+
+  constructor(statusCode: number, message: string) {
+    super(message)
+    this.statusCode = statusCode
+  }
 }
 
 function aiServiceBase(): string {
@@ -199,6 +212,7 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
       message: body.message,
       thread_id: body.thread_id ?? undefined,
       user_id: body.user_id ?? undefined,
+      fallback_history_text: body.fallback_history_text ?? undefined,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: body.need_guideline ?? false,
@@ -211,7 +225,10 @@ export async function proxyChat(body: AiChatRequest): Promise<AiChatResponse> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`ai-service /chat ${res.status}: ${text.slice(0, 200)}`)
+    throw new AiServiceHttpError(
+      res.status,
+      `ai-service /chat ${res.status}: ${text.slice(0, 200)}`,
+    )
   }
 
   return (await res.json()) as AiChatResponse
@@ -242,6 +259,7 @@ export async function proxyChatStream(body: AiChatRequest): Promise<Response> {
       message: body.message,
       thread_id: body.thread_id ?? undefined,
       user_id: body.user_id ?? undefined,
+      fallback_history_text: body.fallback_history_text ?? undefined,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: body.need_guideline ?? false,

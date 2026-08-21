@@ -145,6 +145,9 @@ def run_all_ready_heads(
                     "probability": voted.get("probability"),
                     "applied_threshold": voted.get("applied_threshold"),
                     "top_risk_factors": voted.get("top_risk_factors") or [],
+                    "risk_factor_scope": voted.get("risk_factor_scope"),
+                    "decision_basis": voted.get("decision_basis"),
+                    "validation_notice": voted.get("validation_notice"),
                 }
                 capacity = {
                     "capacity": voted.get("capacity"),

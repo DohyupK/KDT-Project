@@ -1,12 +1,12 @@
 import axios from 'axios'
-import { clearAuthSession, getAuthToken, getAuthUser } from '@/lib/authStorage'
+import { clearAuthSession, getAuthToken } from '@/lib/authStorage'
 
 /**
  * Security-tab chat → POST /api/security-chat/stream (SSE) → ai-service /security-chat/stream.
  * Backend JSON POST /api/security-chat remains for smoke/compat (FE uses stream only).
  * Never uses general /api/chat (Groq/Gemini).
  *
- * Multi-turn (B): send message + thread_id + user_id only — never the history array.
+ * Multi-turn (B): send message + thread_id only. JWT supplies user identity.
  * Timeout is longer than general chat (60s): local RAG + LM Studio often exceeds 100s.
  */
 
@@ -53,24 +53,26 @@ securityApiClient.interceptors.response.use(
 
 export function getSecurityChatThreadId(): string | null {
   if (typeof window === 'undefined') return null
-  const modern = window.localStorage.getItem(THREAD_KEY)
-  if (modern) return modern
-  const legacy = window.localStorage.getItem(LEGACY_SESSION_KEY)
-  if (legacy) {
-    window.localStorage.setItem(THREAD_KEY, legacy)
-    return legacy
+  // One-time cleanup of the former persistent security-chat cache.
+  for (const key of [
+    THREAD_KEY,
+    LEGACY_SESSION_KEY,
+    'kdt_security_chat_recent_threads',
+    'kdt_security_chat_deleted_threads',
+  ]) {
+    window.localStorage.removeItem(key)
   }
-  return null
+  return window.sessionStorage.getItem(THREAD_KEY)
 }
 
 export function setSecurityChatThreadId(id: string): void {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(THREAD_KEY, id)
-  window.localStorage.setItem(LEGACY_SESSION_KEY, id)
+  window.sessionStorage.setItem(THREAD_KEY, id)
 }
 
 export function clearSecurityChatThreadId(): void {
   if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(THREAD_KEY)
   window.localStorage.removeItem(THREAD_KEY)
   window.localStorage.removeItem(LEGACY_SESSION_KEY)
 }
@@ -97,7 +99,6 @@ export function setSecurityChatSessionId(id: string): void {
 export type SecurityChatRequest = {
   message: string
   thread_id?: string | null
-  user_id?: string | null
   /** @deprecated alias for thread_id */
   session_id?: string | null
 }
@@ -137,6 +138,23 @@ export type SecurityChatErrorBody = {
   stage?: string
   trace?: SecurityChatTraceEntry[]
   elapsed_ms?: number
+}
+
+export type SecurityChatReadiness = {
+  ready: boolean
+  status: 'ready' | 'degraded'
+  message: string
+  checks: Record<string, { ok: boolean; label: string; detail?: string | null }>
+  checked_at: string
+  note?: string
+}
+
+export async function getSecurityChatReadiness(): Promise<SecurityChatReadiness> {
+  const response = await securityApiClient.get<SecurityChatReadiness>(
+    '/security-chat/readiness',
+    { timeout: 4_000 },
+  )
+  return response.data
 }
 
 export function formatSecurityChatFailure(opts: {
@@ -185,7 +203,13 @@ export function formatSecurityChatFailure(opts: {
       'error: AWS가 ai-service(:8800)에 연결하지 못했습니다. 보안 답은 이 PC 워커가 USER_SECURITY_MESSAGES에 씁니다.',
     )
   } else {
-    lines.push(`error: ${errText}`)
+    const friendly =
+      /enqueue_failed|security_queue_unavailable/i.test(errText)
+        ? 'MariaDB 보안 대화 큐에 저장하지 못했습니다.'
+        : /worker_timeout/i.test(errText)
+          ? 'PC 보안 워커가 응답하지 않았습니다. Qdrant·vLLM·워커 실행 상태를 확인하세요.'
+          : errText
+    lines.push(`error: ${friendly}`)
   }
 
   const msg = `${opts.message || ''} ${errText}`.toLowerCase()
@@ -249,7 +273,6 @@ export async function postSecurityChatStream(
 ): Promise<void> {
   const thread_id =
     body.thread_id ?? body.session_id ?? getSecurityChatThreadId()
-  const user_id = body.user_id ?? getAuthUser()?.userId ?? undefined
   const token = getAuthToken()
 
   const res = await fetch('/api/security-chat/stream', {
@@ -262,7 +285,6 @@ export async function postSecurityChatStream(
     body: JSON.stringify({
       message: body.message,
       thread_id: thread_id ?? undefined,
-      user_id: user_id ?? undefined,
     }),
     signal,
   })
@@ -349,16 +371,12 @@ export type ChatThreadMessageItem = {
 
 export async function listChatThreads(opts: {
   channel: 'security' | 'general'
-  user_id?: string
   limit?: number
 }): Promise<ChatThreadItem[]> {
-  const user_id = opts.user_id ?? getAuthUser()?.userId
-  if (!user_id) return []
   const { data } = await securityApiClient.get<{ threads: ChatThreadItem[] }>(
     '/chat/threads',
     {
       params: {
-        user_id,
         channel: opts.channel,
         limit: opts.limit ?? 50,
       },
@@ -369,16 +387,19 @@ export async function listChatThreads(opts: {
 
 export async function loadChatThreadMessages(opts: {
   thread_id: string
-  user_id?: string
   limit?: number
 }): Promise<ChatThreadMessageItem[]> {
-  const user_id = opts.user_id ?? getAuthUser()?.userId
-  if (!user_id) return []
   const { data } = await securityApiClient.get<{
     thread_id: string
     messages: ChatThreadMessageItem[]
   }>(`/chat/threads/${encodeURIComponent(opts.thread_id)}/messages`, {
-    params: { user_id, limit: opts.limit ?? 200 },
+    params: { limit: opts.limit ?? 200 },
   })
   return data.messages ?? []
+}
+
+export async function deleteChatThread(threadId: string): Promise<void> {
+  await securityApiClient.delete(`/chat/threads/${encodeURIComponent(threadId)}`, {
+    params: { channel: 'security' },
+  })
 }

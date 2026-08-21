@@ -1,12 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import {
   countUserMessages,
-  ensureSession,
+  ensureScopedSession,
   getChatStoreMode,
   insertMessage,
-  loadRecentUserMessages,
+  loadRecentMessages,
 } from '../services/chatStore.js'
-import { proxyChat, proxyChatStream } from '../services/aiProxy.js'
+import { authMiddleware } from '../middleware/auth.middleware.js'
+import {
+  AiServiceHttpError,
+  proxyChat,
+  proxyChatStream,
+} from '../services/aiProxy.js'
 import {
   SECURITY_REDIRECT_REPLY,
   hasSecurityKeyword,
@@ -20,7 +26,6 @@ import { enrichPageContext } from '../services/pageChatContext.service.js'
 type ChatBody = {
   message?: string
   thread_id?: string | null
-  user_id?: string | null
   session_id?: string | null
   features?: Record<string, string | number | undefined> | null
   fillThreshold?: number | null
@@ -39,6 +44,17 @@ type ChatBody = {
     supplementHints?: string[]
   } | null
   enable_api_llm?: boolean | null
+}
+
+function formatFallbackHistory(
+  messages: Awaited<ReturnType<typeof loadRecentMessages>>,
+): string {
+  return messages
+    .slice(-8)
+    .map((item) => `${item.role === 'user' ? 'User' : 'Assistant'}: ${item.content.trim()}`)
+    .filter((line) => !line.endsWith(':'))
+    .join('\n')
+    .slice(-4000)
 }
 
 function buildCredentials() {
@@ -62,9 +78,12 @@ function buildCredentials() {
   }
 }
 
-async function prepareChatContext(body: ChatBody) {
+async function prepareChatContext(body: ChatBody, viewerUserId: string) {
   const t0 = Date.now()
-  const enriched = await enrichPageContext(body.page_context ?? null)
+  const enriched = await enrichPageContext(body.page_context ?? null, {
+    message: body.message,
+    viewerUserId,
+  })
   const enrichMs = Date.now() - t0
   const page_context = enriched
     ? {
@@ -84,7 +103,7 @@ async function prepareChatContext(body: ChatBody) {
 
 export const chatRouter = Router()
 
-chatRouter.post('/chat', async (req, res) => {
+chatRouter.post('/chat', authMiddleware, async (req, res) => {
   const tAll = Date.now()
   try {
     const body = req.body as ChatBody
@@ -95,10 +114,14 @@ chatRouter.post('/chat', async (req, res) => {
       return
     }
 
-    const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
-    const userId = (body.user_id || undefined) ?? undefined
-    const sessionId = await ensureSession(threadId ?? body.session_id)
-    const previousUser = await loadRecentUserMessages(sessionId)
+    const threadId = (body.thread_id || body.session_id || '').trim() || randomUUID()
+    const userId = req.auth!.userId
+    const sessionId = await ensureScopedSession(userId, threadId, 'general')
+    const recentMessages = await loadRecentMessages(sessionId)
+    const previousUser = recentMessages
+      .filter((item) => item.role === 'user')
+      .map((item) => item.content)
+    const fallbackHistoryText = formatFallbackHistory(recentMessages)
     await insertMessage(sessionId, 'user', message)
 
     if (hasSecurityKeyword(message)) {
@@ -109,8 +132,8 @@ chatRouter.post('/chat', async (req, res) => {
         `[security_gate] session=${sessionId.slice(0, 8)} matched=${matched} ai_proxied=false`,
       )
       res.json({
-        session_id: sessionId,
-        thread_id: sessionId,
+        session_id: threadId,
+        thread_id: threadId,
         reply,
         mode: 'security_redirect',
         provider: 'security_redirect',
@@ -133,7 +156,7 @@ chatRouter.post('/chat', async (req, res) => {
 
     let ai: Awaited<ReturnType<typeof proxyChat>>
     try {
-      const { page_context, enableApiLlm, enrichMs } = await prepareChatContext(body)
+      const { page_context, enableApiLlm, enrichMs } = await prepareChatContext(body, userId)
       console.info('[page-chat-event]', {
         source: 'backend-chat',
         route: page_context?.route ?? null,
@@ -146,8 +169,9 @@ chatRouter.post('/chat', async (req, res) => {
       const tProxy = Date.now()
       ai = await proxyChat({
         message,
-        thread_id: threadId || sessionId,
+        thread_id: threadId,
         user_id: userId,
+        fallback_history_text: fallbackHistoryText,
         features: body.features ?? undefined,
         fillThreshold: body.fillThreshold ?? undefined,
         need_guideline: guideline,
@@ -186,7 +210,7 @@ chatRouter.post('/chat', async (req, res) => {
       ai.provider ?? ai.mode,
     )
 
-    const outThreadId = ai.thread_id || threadId || sessionId
+    const outThreadId = ai.thread_id || threadId
 
     res.json({
       session_id: outThreadId,
@@ -210,11 +234,12 @@ chatRouter.post('/chat', async (req, res) => {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     console.error('[POST /api/chat]', detail)
-    res.status(500).json({ error: detail })
+    const status = err instanceof AiServiceHttpError ? err.statusCode : 500
+    res.status(status).json({ error: detail })
   }
 })
 
-chatRouter.post('/chat/stream', async (req, res) => {
+chatRouter.post('/chat/stream', authMiddleware, async (req, res) => {
   const tAll = Date.now()
   try {
     const body = req.body as ChatBody
@@ -224,10 +249,14 @@ chatRouter.post('/chat/stream', async (req, res) => {
       return
     }
 
-    const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
-    const userId = (body.user_id || undefined) ?? undefined
-    const sessionId = await ensureSession(threadId ?? body.session_id)
-    const previousUser = await loadRecentUserMessages(sessionId)
+    const threadId = (body.thread_id || body.session_id || '').trim() || randomUUID()
+    const userId = req.auth!.userId
+    const sessionId = await ensureScopedSession(userId, threadId, 'general')
+    const recentMessages = await loadRecentMessages(sessionId)
+    const previousUser = recentMessages
+      .filter((item) => item.role === 'user')
+      .map((item) => item.content)
+    const fallbackHistoryText = formatFallbackHistory(recentMessages)
     await insertMessage(sessionId, 'user', message)
 
     if (hasSecurityKeyword(message)) {
@@ -242,7 +271,7 @@ chatRouter.post('/chat/stream', async (req, res) => {
           reply,
           mode: 'security_redirect',
           provider: 'security_redirect',
-          thread_id: sessionId,
+          thread_id: threadId,
           security_matched: matched,
           predict: null,
           recommendation: null,
@@ -255,7 +284,7 @@ chatRouter.post('/chat/stream', async (req, res) => {
 
     const guideline = needsGuideline(message, previousUser)
     const llm_credentials = buildCredentials()
-    const { page_context, enableApiLlm, enrichMs } = await prepareChatContext(body)
+    const { page_context, enableApiLlm, enrichMs } = await prepareChatContext(body, userId)
     console.info('[page-chat-event]', {
       source: 'backend-chat-stream',
       route: page_context?.route ?? null,
@@ -268,8 +297,9 @@ chatRouter.post('/chat/stream', async (req, res) => {
 
     const upstream = await proxyChatStream({
       message,
-      thread_id: threadId || sessionId,
+      thread_id: threadId,
       user_id: userId,
+      fallback_history_text: fallbackHistoryText,
       features: body.features ?? undefined,
       fillThreshold: body.fillThreshold ?? undefined,
       need_guideline: guideline,

@@ -23,13 +23,14 @@
 | `frontend/src/app/(shell)/security/page.tsx` | `/security` → 오버레이 보안 상담 후 `/main` |
 | `frontend/src/components/chat/GlobalChatbot.tsx` | Shell 전역 AI 챗봇 (`POST /api/chat`) |
 | `frontend/src/components/chat/SecurityChatbot.tsx` | 보안 챗봇 (SSE · PC 워커 큐) |
-| `frontend/src/api/aiApi.ts` | `POST /api/chat` + `session_id`; `/ai` health |
-| `frontend/src/api/securityChatApi.ts` | `POST /api/security-chat` · `/stream` |
+| `frontend/src/api/aiApi.ts` | 인증된 `POST /api/chat`; backend `/api/health` |
+| `frontend/src/api/securityChatApi.ts` | `POST /api/security-chat` · `/stream` · 준비 상태 |
+| `frontend/src/context/PageChatContext.tsx` | route·선택 이벤트·화면 payload |
 | `frontend/src/types/index.ts` | `AppData.fillThreshold` — 이름 변경 금지 |
 | `frontend/src/api/axios.ts` | `baseURL: '/api'` (backend) |
 | `frontend/src/components/layout/UserAuthMenu.tsx` | 헤더 로그인/프로필 · 로그아웃 |
 | `frontend/src/components/layout/PersonalInfoModal.tsx` | 내 정보 팝업 (프로필 API) |
-| `frontend/next.config.ts` | `/api` → `:3001`; `/ai` → `127.0.0.1:8800`; `allowedDevOrigins` (공인 IP `next dev`) |
+| `frontend/next.config.ts` | `/api` → `:3001`; 공개 `/ai` rewrite 없음; `allowedDevOrigins` (공인 IP `next dev`) |
 | `frontend/src/proxy.ts` | 개발 요청 추적 (`[dev-proxy]`) |
 | `deploy/nginx-kdt.conf` | :80 → :3000. HMR만 `Connection upgrade` |
 
@@ -38,8 +39,11 @@
 | 경로 | 설명 |
 |------|------|
 | `backend/src/index.ts` | Express listen `:3001` |
-| `backend/src/routes/chat.ts` | `POST /api/chat` |
-| `backend/src/routes/securityChat.ts` | 보안 프록시 |
+| `backend/src/routes/chat.ts` | `POST /api/chat` (JWT `userId`) |
+| `backend/src/routes/chatThreads.ts` | 대화 목록·조회·삭제 |
+| `backend/src/routes/securityChat.ts` | 보안 프록시 · 준비 상태 |
+| `backend/src/services/chatReadTools.service.ts` | LOT·이슈·문의 읽기 전용 조회 |
+| `backend/src/services/pageChatContext.service.ts` | 화면 payload 보강 (병렬·1.2s) |
 | `backend/src/services/securityGate.ts` | 보안 키워드 → redirect |
 | `backend/src/services/similarity.ts` | 유사 질문 ≥ 3 → guideline |
 | `backend/src/routes/issue.routes.ts` | 이슈 · LOT · Knowledge |
@@ -64,6 +68,8 @@
 | `ai-service/models/` | `voting/` · `legacy/` · `registry.json` |
 | `ai-service/app/` | FastAPI (`/health`, `/predict*`, `/chat`, `/security-chat`) |
 | `ai-service/agent/` | LangGraph · `model_registry` · tools · LLM |
+| `ai-service/agent/api_llm/history_context.py` | 백엔드 이력 폴백 |
+| `ai-service/agent/secure_llm/readiness.py` | 보안 챗 MariaDB·Qdrant·vLLM 준비 상태 |
 | `ai-service/agent/security_queue_store.py` | `USER_SECURITY_*` |
 | `ai-service/scripts/run_security_worker.py` | PC 보안 워커 |
 | `scripts/security-pc.ps1` | `npm run security-pc` (vLLM 확인 · 선택 `-L 3306`/`6333` · 워커) |

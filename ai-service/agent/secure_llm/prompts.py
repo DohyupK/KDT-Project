@@ -25,7 +25,12 @@ SYSTEM_SECURE_RAG = """당신은 사내 보안 문서(RAG) 전용 로컬 어시�
 3. `[SYS_RAG_EMPTY_RESULT]`가 아닌 정상 답변의 끝(또는 관련 문장 끝)에 `[출처: 문서 제목]` 형식으로 인용한다. 제목은 발췌 메타의 title을 그대로 쓴다.
 4. 외부 클라우드 LLM/반출을 안내하지 않는다.
 5. 한국어로 명확히 답한다.
+6. 짧은 후속(왜/그게/자세히)일 때만 이전 대화를 참고한다. 새 질문이면 지금 발췌만 답하고 직전 문서로 메우지 않는다.
+7. 사용자 요청 문장을 인용·반복·앵무새처럼 되풀이하지 않는다. 「질문:」「지금 요청:」 같은 레이블을 답에 넣지 않는다. 발췌 내용으로만 바로 답한다.
 """
+
+# User-turn label in generate prompts (discourage LM echo of the question).
+SECURE_REQUEST_LABEL = "지금 요청(답에 복사 금지)"
 
 NO_DOC_TOKEN = "[SYS_RAG_EMPTY_RESULT]"
 
@@ -116,6 +121,30 @@ FOLLOWUP_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_SECURE_SHIFT_RE = re.compile(
+    r"(그건\s*말고|다른\s*얘기|이제|오늘은)",
+    re.IGNORECASE,
+)
+
+_HISTORY_TOKEN_RE = re.compile(r"[\w가-힣]{2,}")
+
+_HISTORY_STOP = {
+    "요약",
+    "내용",
+    "무슨",
+    "알려",
+    "해줘",
+    "주세요",
+    "관련",
+    "질문",
+    "문서",
+    "답변",
+    "사용자",
+    "assistant",
+    "user",
+    "출처",
+}
+
 
 def is_summary_intent(message: str) -> bool:
     """Regex-only summary intent (no LLM)."""
@@ -198,6 +227,49 @@ def finalize_reply_sources(
     return out, list(sources or [])
 
 
+def strip_parrot_echo(reply: str, message: str) -> str:
+    """
+    Drop leading/full restatement of the user question (common LM Studio echo).
+    Returns stripped text; empty means caller should fallback.
+    """
+    r = (reply or "").strip()
+    m = (message or "").strip()
+    if not r or not m:
+        return r
+    # Drop prompt-label echoes the model sometimes copies.
+    r = re.sub(
+        r"^(지금\s*요청(\(답에\s*복사\s*금지\))?|질문)\s*[:：]\s*",
+        "",
+        r,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+    rn = re.sub(r"\s+", " ", r)
+    mn = re.sub(r"\s+", " ", m)
+    if not rn:
+        return ""
+    if rn == mn or rn.rstrip(".。!?？") == mn.rstrip(".。!?？"):
+        return ""
+    if rn.startswith(mn):
+        rest = rn[len(mn) :].lstrip(" \n\t:：.-—")
+        return rest.strip()
+    # First line equals question
+    first = (r.splitlines()[0] or "").strip()
+    first_n = re.sub(r"\s+", " ", first)
+    if first_n == mn or first_n.rstrip(".。!?？") == mn.rstrip(".。!?？"):
+        rest = "\n".join(r.splitlines()[1:]).strip()
+        return rest
+    if len(mn) >= 8 and rn.startswith(mn[: max(8, len(mn) // 2)]):
+        # Partial prefix echo of long questions
+        for cut in range(len(mn), max(7, len(mn) // 2) - 1, -1):
+            if rn.startswith(mn[:cut]):
+                rest = rn[cut:].lstrip(" \n\t:：.-—")
+                if rest:
+                    return rest.strip()
+                break
+    return r
+
+
 def is_short_followup(message: str, *, max_chars: int = 40) -> bool:
     """
     Pronoun/context-dependent follow-up only (FOLLOWUP_RE).
@@ -209,6 +281,33 @@ def is_short_followup(message: str, *, max_chars: int = 40) -> bool:
     if not t:
         return False
     return bool(FOLLOWUP_RE.search(t))
+
+
+def detect_secure_topic_shift(message: str, history_text: str | None) -> bool:
+    """True when this turn is a new subject, not a short follow-up or summary."""
+    m = (message or "").strip()
+    if not m:
+        return False
+    if is_short_followup(m):
+        return False
+    if is_summary_intent(m) and len(m) <= 40:
+        return False
+    if _SECURE_SHIFT_RE.search(m):
+        return True
+    hist = (history_text or "").strip()
+    if not hist:
+        return False
+    msg_tokens = {
+        t.lower()
+        for t in _HISTORY_TOKEN_RE.findall(m)
+        if t.lower() not in _HISTORY_STOP
+    }
+    hist_tokens = {
+        t.lower()
+        for t in _HISTORY_TOKEN_RE.findall(hist)
+        if t.lower() not in _HISTORY_STOP
+    }
+    return bool(msg_tokens and hist_tokens and msg_tokens.isdisjoint(hist_tokens))
 
 
 def last_user_utterance(history_text: str) -> str:

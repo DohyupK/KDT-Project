@@ -91,6 +91,9 @@ Qdrant·MariaDB가 이 PC면 `-KeyPath` 생략. DDL: `python DB/ai-service/apply
 | `ai-service/agent/secure_llm/` | 워커가 쓰는 LangGraph · vLLM |
 | `ai-service/agent/api_llm/` | 일반 챗 · Public/Confidential RAG |
 
+짧은 후속(왜/그게/자세히·짧은 요약)만 이전 문서·대화를 잇고, 새 질문은 이번 `secure_docs` 검색만 사용한다.  
+PC 워커의 BM25(`ai-service/data/secure_rag/bm25_nodes.json`)는 AWS ingest와 맞춰야 한다. Qdrant 포인트 수와 불일치하면 BM25를 끄고 dense+rerank만 쓴다.
+
 코드 경로 표: [`important-paths.md`](./important-paths.md)
 
 ---

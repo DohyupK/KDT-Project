@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,8 @@ type MemMessage = {
   provider?: string | null
   createdAt: number
 }
+
+export type RecentChatMessage = Pick<MemMessage, 'role' | 'content'>
 
 type MemSession = {
   id: string
@@ -36,6 +38,22 @@ function storeMode(): ChatStoreMode {
 
 export function getChatStoreMode(): ChatStoreMode {
   return storeMode()
+}
+
+/** Keep the legacy CHAT_* session isolated per authenticated user. */
+export function scopedSessionId(
+  userId: string,
+  externalThreadId: string | undefined | null,
+  channel: 'general' | 'security',
+): string | undefined {
+  const uid = userId.trim()
+  const tid = String(externalThreadId || '').trim()
+  if (!uid || !tid) return undefined
+  const hex = createHash('sha256')
+    .update(`${uid}\0${channel}\0${tid}`)
+    .digest('hex')
+    .slice(0, 32)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function getSqlite(): DatabaseSync {
@@ -101,6 +119,37 @@ export async function ensureSession(sessionId: string | undefined | null): Promi
   })
 }
 
+/**
+ * Create/load a deterministic legacy session that cannot collide across users.
+ * Unlike ensureSession(), the scoped id is inserted as-is so it can be deleted
+ * reliably from the external thread id later.
+ */
+export async function ensureScopedSession(
+  userId: string,
+  externalThreadId: string,
+  channel: 'general' | 'security',
+): Promise<string> {
+  const id = scopedSessionId(userId, externalThreadId, channel)
+  if (!id) throw new Error('authenticated user and thread id are required')
+  const mode = storeMode()
+
+  if (mode === 'memory') {
+    if (!mem.has(id)) mem.set(id, { id, messages: [] })
+    return id
+  }
+
+  if (mode === 'sqlite') {
+    const db = getSqlite()
+    db.prepare('INSERT OR IGNORE INTO CHAT_SESSIONS (id) VALUES (?)').run(id)
+    return id
+  }
+
+  return withConn(async (conn) => {
+    await conn.query('INSERT IGNORE INTO CHAT_SESSIONS (id) VALUES (?)', [id])
+    return id
+  })
+}
+
 export async function loadRecentUserMessages(sessionId: string): Promise<string[]> {
   const mode = storeMode()
 
@@ -136,6 +185,47 @@ export async function loadRecentUserMessages(sessionId: string): Promise<string[
     )
     if (!Array.isArray(rows)) return []
     return (rows as { content: string }[]).map((r) => r.content).reverse()
+  })
+}
+
+/** Recent full dialogue for the authenticated ai-service history fallback. */
+export async function loadRecentMessages(
+  sessionId: string,
+  limit = 12,
+): Promise<RecentChatMessage[]> {
+  const mode = storeMode()
+  const safeLimit = Math.max(1, Math.min(40, Math.floor(limit)))
+
+  if (mode === 'memory') {
+    const session = mem.get(sessionId)
+    return (session?.messages ?? [])
+      .slice(-safeLimit)
+      .map(({ role, content }) => ({ role, content }))
+  }
+
+  if (mode === 'sqlite') {
+    const db = getSqlite()
+    const rows = db
+      .prepare(
+        `SELECT role, content FROM CHAT_MESSAGES
+         WHERE session_id = ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(sessionId, safeLimit) as RecentChatMessage[]
+    return rows.reverse()
+  }
+
+  return withConn(async (conn) => {
+    const rows = await conn.query(
+      `SELECT role, content FROM CHAT_MESSAGES
+       WHERE session_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      [sessionId, safeLimit],
+    )
+    if (!Array.isArray(rows)) return []
+    return (rows as RecentChatMessage[]).reverse()
   })
 }
 
@@ -186,4 +276,22 @@ export async function insertMessage(
 export async function countUserMessages(sessionId: string): Promise<number> {
   const msgs = await loadRecentUserMessages(sessionId)
   return msgs.length
+}
+
+export async function deleteSession(sessionId: string | undefined | null): Promise<boolean> {
+  if (!sessionId) return false
+  const mode = storeMode()
+
+  if (mode === 'memory') return mem.delete(sessionId)
+
+  if (mode === 'sqlite') {
+    const db = getSqlite()
+    const result = db.prepare('DELETE FROM CHAT_SESSIONS WHERE id = ?').run(sessionId)
+    return Number(result.changes || 0) > 0
+  }
+
+  return withConn(async (conn) => {
+    const result = await conn.query('DELETE FROM CHAT_SESSIONS WHERE id = ?', [sessionId])
+    return Number(result?.affectedRows || 0) > 0
+  })
 }

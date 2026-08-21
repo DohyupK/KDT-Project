@@ -95,13 +95,15 @@
 | `SECURE_EMBED_MODEL` | `BAAI/bge-m3` |
 | `SECURE_RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` |
 | `SECURE_RERANK_MIN_SCORE` | **`0.15`** |
-| `SECURE_SELF_QUERY` | `1` (`0`이면 heuristic만) |
+| `SECURE_SELF_QUERY` | `1` (`0`이면 heuristic만). **보안 워커 `node_retrieve`는 `llm_invoke=None`으로 SelfQuery LM을 쓰지 않음** |
 | `SECURE_SELF_QUERY_TIMEOUT` | `20` |
 | `SECURE_SELF_QUERY_MAX_TOKENS` | `256` |
 | (하드코드) `DEVICE` | `cpu` |
 | (하드코드) RRF `k` | `60` |
 | (하드코드) diversify | doc당 2 |
-| (코드) `retrieve` / `node_retrieve` | `top_k=12`, `rerank_top_n=6` |
+| (코드) `retrieve` / `node_retrieve` | `top_k=12`, `rerank_top_n=6` · heuristic 필터 |
+| (워커) history window | `load_messages(limit=12)` · 기동 시 `get_engine().ensure()` warm |
+| (워커) BM25 | Qdrant 포인트 수와 `bm25_nodes.json` 불일치 시 BM25 스킵(dense+rerank만) |
 
 경로:
 
@@ -125,8 +127,10 @@
 | `CHAT_HISTORY_WINDOW` | `6` |
 | `CHAT_HISTORY_MSG_MAX_CHARS` | `400` |
 | `CHAT_HISTORY_MAX_CHARS` | `2000` |
+| `CHAT_HISTORY_SEMANTIC_ENABLED` | 미설정/`0` — 의미 이력 검색 끔. `1`이면 Qdrant 검색 |
 | `CHAT_HISTORY_SEMANTIC_TOP_K` | `3` |
 | `CHAT_HISTORY_QDRANT_COLLECTION` | `chat_history_collection` |
+| `CHAT_RAG_WARM_ON_STARTUP` | 미설정/`0` — 시작 시 BGE·Qdrant 안 올림. `1`이면 기동 시 준비 |
 | `DB_*` / `DATABASE_URL` | MariaDB (미설정 시 soft-fail) |
 
 ### 4.6 Ingest
