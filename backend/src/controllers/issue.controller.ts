@@ -7,6 +7,7 @@ import { fillRecommendedActionsForLots } from '../services/lotRecommendedAction.
 import { AppError } from '../middleware/errorHandler.js'
 import { lotScoreOnAws } from '../services/lotScoreRole.js'
 import * as userSettingsService from '../services/userSettings.service.js'
+import { query } from '../db/connection.js'
 
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -31,6 +32,47 @@ export const getQCost = asyncHandler(async (req, res) => {
   const to = req.query.to != null ? String(req.query.to) : undefined
   const summary = await lotService.getQCostSummary({ from, to })
   res.status(200).json(summary)
+})
+
+export const mailQCost = asyncHandler(async (req, res) => {
+  if (!req.auth?.userId) throw new AppError(401, '로그인이 필요합니다.')
+  const from = req.body?.from != null ? String(req.body.from) : undefined
+  const to = req.body?.to != null ? String(req.body.to) : undefined
+  const yearMonth =
+    req.body?.yearMonth != null ? String(req.body.yearMonth).trim() : undefined
+
+  const rows = await query<{ email: string }[]>(
+    `SELECT email FROM USERS WHERE user_id = ? LIMIT 1`,
+    [req.auth.userId],
+  )
+  const email = (rows[0]?.email || '').trim()
+  if (!email) throw new AppError(400, '계정에 이메일이 없습니다. 내 정보에서 이메일을 등록하세요.')
+
+  const summary = await lotService.getQCostSummary({ from, to })
+  const { sendQCostMailOnce } = await import('../services/issueReportN8n.js')
+  try {
+    const result = await sendQCostMailOnce({
+      toEmail: email,
+      userId: req.auth.userId,
+      summary,
+      yearMonth,
+    })
+    if (result.send !== 'O') {
+      throw new AppError(502, result.error || '메일 발송에 실패했습니다.')
+    }
+    res.status(200).json({
+      ok: true,
+      channel: result.channel,
+      to: result.to,
+      from: result.from,
+      totalQCost: summary.totalQCost,
+      period: { from: summary.from, to: summary.to },
+    })
+  } catch (err) {
+    if (err instanceof AppError) throw err
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new AppError(502, msg)
+  }
 })
 
 export const getLot = asyncHandler(async (req, res) => {

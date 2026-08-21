@@ -1,4 +1,5 @@
 import '../src/loadRootEnv.js'
+import fs from 'node:fs'
 import { query } from '../src/db/connection.js'
 import { diagnoseGmailAuth } from '../src/services/issueReportN8n.js'
 
@@ -15,10 +16,23 @@ async function main() {
     optedUsers[0]?.email ||
     ''
   const n8n = Boolean((process.env.N8N_ISSUE_REPORT_WEBHOOK_URL || '').trim())
-  const file = Boolean((process.env.GOOGLE_MAIL_SERVICE_ACCOUNT_FILE || '').trim())
+  const filePath = (process.env.GOOGLE_MAIL_SERVICE_ACCOUNT_FILE || '').trim()
+  let serviceAccountFileReadable = false
+  if (filePath) {
+    try {
+      fs.accessSync(filePath)
+      serviceAccountFileReadable = true
+    } catch {
+      serviceAccountFileReadable = false
+    }
+  }
   console.log(
     JSON.stringify({
-      serviceAccountFile: file ? 'SET' : 'EMPTY',
+      gmailClientId: (process.env.GMAIL_CLIENT_ID || '').trim() ? 'SET' : 'EMPTY',
+      gmailClientSecret: (process.env.GMAIL_CLIENT_SECRET || '').trim() ? 'SET' : 'EMPTY',
+      gmailRefreshToken: (process.env.GMAIL_REFRESH_TOKEN || '').trim() ? 'SET' : 'EMPTY',
+      serviceAccountFile: filePath ? 'SET' : 'EMPTY',
+      serviceAccountFileReadable,
       mailFrom: (process.env.ISSUE_REPORT_MAIL_FROM || '').trim() ? 'SET' : 'EMPTY',
       delegated: (process.env.GOOGLE_MAIL_DELEGATED_USER || '').trim() ? 'SET' : 'EMPTY',
       n8nWebhook: n8n ? 'SET' : 'EMPTY',
