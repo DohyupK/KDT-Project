@@ -1,10 +1,10 @@
 """
 Minimal LangGraph chatbot (orchestrated run_chat with optional parallel RAG).
 
-Flow: predict+whatif ∥ rag(optional) → compose → polish
+Flow: dual doc peek (Secret→redirect / Public→RAG) ∥ predict+whatif → compose → polish
 
 - predict: registry heads whenever features exist (always — not gated by turn)
-- rag: document/summary intent (needs_rag); Public+Confidential
+- rag/peek: screen-off or document intent; Public+Confidential compose, Secret redirect
 - compose: template / LLM then 2nd polish pass (page_context in JSON only)
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +24,21 @@ from agent.api_llm.llm import compose_with_failover, llm_enabled
 from agent.api_llm.prompts import LLM_OFF_EXCERPT_NOTICE, RAG_EMPTY_HINT, USAGE_GUIDELINE
 from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
+from agent.api_llm.grounding import (
+    build_focus_context_reply,
+    build_menu_context_reply,
+    build_read_tool_reply,
+    deterministic_user_reply,
+    is_lot_why_intent,
+    is_page_summary_intent,
+    join_spaced_parts,
+    normalize_korean_reply,
+    slice_page_context_for_query,
+)
+from agent.doc_clearance import API_ALLOWED_CLEARANCES
+from agent.rag_engine import get_engine
 
+_log = logging.getLogger(__name__)
 
 _RISK_FACTOR_LABELS = {
     "metal_impurity": "금속 불순물",
@@ -41,26 +56,22 @@ _RISK_FACTOR_LABELS = {
 def _risk_factor_label(value: Any) -> str:
     key = str(value)
     return _RISK_FACTOR_LABELS.get(key, key)
-from agent.api_llm.grounding import (
-    build_focus_context_reply,
-    build_menu_context_reply,
-    build_read_tool_reply,
-    deterministic_user_reply,
-    is_lot_why_intent,
-    is_page_summary_intent,
-    join_spaced_parts,
-    normalize_korean_reply,
-    slice_page_context_for_query,
-)
-from agent.rag_engine import API_ALLOWED_CLEARANCES, get_engine
-
-_log = logging.getLogger(__name__)
 
 # General-chat document RAG (synthesis budget)
 API_RAG_TOP_K = 8
 API_RAG_RERANK_N = 4
 API_RAG_CHUNK_CHARS = 800
 API_RAG_MAX_SOURCES = 4
+
+# Fast dual peek (screen-off utterances)
+PEEK_TOP_K = 3
+PEEK_RERANK_N = 2
+SECRET_PEEK_CLEARANCES = frozenset({"Secret", "TopSecret"})
+SECURITY_PEEK_REDIRECT_REPLY = (
+    "관련 기밀(Secret/TopSecret) 문서가 있어 일반 상담에서 다룰 수 없습니다. "
+    "「보안 상담」으로 전환했습니다. 질문을 입력란에 옮겨 두었으니 보내 주세요. "
+    "(이 PC vLLM 전용 채널)"
+)
 
 _DOC_NOUN_RE = re.compile(
     r"(문서|규정|SOP|sop|매뉴얼|핸드북|가이드|자료|Knowledge|knowledge|지식|"
@@ -81,6 +92,13 @@ _SHORT_FOLLOWUP_RE = re.compile(
     r"자세히|더\s*알려|이유가|이유\s*가|"
     r"요약|정리|핵심).{0,40}$",
     re.IGNORECASE | re.DOTALL,
+)
+# Pure UI / screen / log questions — skip Qdrant peek
+_SCREEN_UI_RE = re.compile(
+    r"(이\s*화면|이\s*페이지|지금\s*화면|몇\s*건|건수|목록|"
+    r"KPI|Q-?COST|버튼|메뉴|새로고침|폰트|테마|"
+    r"제어\s*한계|알림\s*설정|로그\s*확인)",
+    re.IGNORECASE,
 )
 _LOT_MSG_RE = re.compile(
     r"(LOT[-_]?\w+|이\s*LOT|해당\s*LOT|왜\s*심각|위험\s*LOT)",
@@ -178,14 +196,167 @@ def needs_rag(
     return False
 
 
+def should_peek_docs(
+    message: str,
+    page_context: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Fast Qdrant peek for utterances not grounded in page / button / log UI.
+    Page-summary and pure screen questions skip; other turns may peek.
+    """
+    m = (message or "").strip()
+    if not m:
+        return False
+    if is_page_summary_intent(m):
+        return False
+    if isinstance(page_context, dict):
+        pp = page_context.get("page_payload") or page_context.get("pagePayload")
+        if isinstance(pp, dict):
+            primary = str(pp.get("primary_table") or "")
+            if primary in {"offscreen", "focus_spc_absent", "focus_summary"}:
+                return False
+            if pp.get("deterministic"):
+                return False
+    # UI/KPI/log-only wording without document nouns → stay on screen path
+    if _SCREEN_UI_RE.search(m) and not _DOC_NOUN_RE.search(m):
+        if not is_lot_why_intent(m) and not _DOC_INTENT_RE.search(m):
+            return False
+    return True
+
+
+def _secure_peek_min_score() -> float:
+    raw = (os.environ.get("CHAT_SECURE_PEEK_MIN_SCORE") or "0.2").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.2
+
+
+def peek_secret_meta(
+    message: str,
+    history_text: str | None = None,
+) -> list[dict[str, Any]]:
+    """Secret/TopSecret hit metadata only — never return chunk text to general chat."""
+    query = expand_rag_query(message, history_text)
+    if not query:
+        return []
+    try:
+        engine = get_engine()
+        engine.ensure()
+        if not engine.ready:
+            return []
+        hits = engine.retrieve(
+            query,
+            top_k=PEEK_TOP_K,
+            rerank_top_n=PEEK_RERANK_N,
+            filters={},
+            llm_invoke=None,
+            allowed_clearances=SECRET_PEEK_CLEARANCES,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    min_score = _secure_peek_min_score()
+    out: list[dict[str, Any]] = []
+    for h in hits:
+        score = float(h.get("score") or 0.0)
+        if score < min_score:
+            continue
+        out.append(
+            {
+                "doc_id": h.get("doc_id"),
+                "title": h.get("title"),
+                "clearance": h.get("clearance"),
+                "score": score,
+            }
+        )
+    return out
+
+
+def peek_public_sources(
+    message: str,
+    history_text: str | None = None,
+) -> list[dict[str, Any]]:
+    """Small Public+Confidential retrieve for screen-off turns."""
+    query = expand_rag_query(message, history_text)
+    if not query:
+        return []
+    try:
+        engine = get_engine()
+        engine.ensure()
+        if not engine.ready:
+            return []
+        hits = engine.retrieve(
+            query,
+            top_k=PEEK_TOP_K,
+            rerank_top_n=PEEK_RERANK_N,
+            filters={},
+            llm_invoke=None,
+            allowed_clearances=API_ALLOWED_CLEARANCES,
+        )
+        return _compact_rag_sources(hits)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _dual_doc_peek(
+    message: str,
+    history_text: str | None,
+    *,
+    full_public: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (secret_meta_hits, public_sources). Failures → empty lists."""
+
+    def _sec() -> list[dict[str, Any]]:
+        return peek_secret_meta(message, history_text)
+
+    def _pub() -> list[dict[str, Any]]:
+        if full_public:
+            return rag_bundle(message, history_text)
+        return peek_public_sources(message, history_text)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_s = pool.submit(_sec)
+        f_p = pool.submit(_pub)
+        return f_s.result(), f_p.result()
+
+
+def _security_redirect_payload(
+    *,
+    timing: dict[str, Any],
+    secret_hits: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "reply": SECURITY_PEEK_REDIRECT_REPLY,
+        "mode": "security_redirect",
+        "provider": "security_redirect",
+        "predict": None,
+        "capacity": None,
+        "residual": None,
+        "heads": None,
+        "recommendation": None,
+        "error": None,
+        "timing": timing,
+        "rag_sources": [],
+        "need_rag": False,
+        "features_used": False,
+        "security_matched": "qdrant_peek",
+        "secure_peek_hits": secret_hits[:3],
+    }
+
+
 def _wants_api_llm(message: str) -> bool:
+    """True when page features should drive predict / what-if heads."""
     m = (message or "").strip().lower()
+    if is_lot_why_intent(m):
+        return True
     keys = (
         "what-if",
         "whatif",
         "진단",
         "예측",
         "불량 확률",
+        "불량확률",
+        "불량률",
         "용량",
         "잔여",
         "잔류",
@@ -193,6 +364,12 @@ def _wants_api_llm(message: str) -> bool:
         "조절",
         "습도",
         "소성",
+        "줄이",
+        "낮추",
+        "개선",
+        "방안",
+        "조치",
+        "위험",
     )
     return any(k in m for k in keys)
 
@@ -732,7 +909,49 @@ def run_chat(
     if not feats and _wants_api_llm(message):
         feats = extract_features_from_page_context(page_context)
     need = needs_rag(message, page_context, history)
+    peek = should_peek_docs(message, page_context)
     _ = enable_api_llm
+
+    predict_ms = 0.0
+    rag_ms = 0.0
+    model_out: dict[str, Any] = {
+        "predict_result": None,
+        "capacity_result": None,
+        "residual_result": None,
+        "head_results": None,
+        "recommendation": None,
+        "error": None,
+    }
+    rag_sources: list[dict[str, Any]] = []
+
+    # Screen-off / doc intent: dual peek first (Secret → redirect; Public → compose)
+    if peek or need:
+        t_r = time.perf_counter()
+        secret_hits, pub_sources = _dual_doc_peek(
+            message, history, full_public=need
+        )
+        rag_ms = (time.perf_counter() - t_r) * 1000
+        if secret_hits:
+            total_ms = (time.perf_counter() - t0) * 1000
+            timing = {
+                "predict_ms": 0.0,
+                "rag_ms": round(rag_ms, 1),
+                "compose_ms": 0.0,
+                "total_ms": round(total_ms, 1),
+                "need_rag": 0,
+                "has_features": int(bool(feats)),
+                "rag_hits": 0,
+                "secure_peek": 1,
+            }
+            _log.info(
+                "[chat-timing] secure_peek_redirect rag_ms=%s hits=%s",
+                timing["rag_ms"],
+                len(secret_hits),
+            )
+            return _security_redirect_payload(timing=timing, secret_hits=secret_hits)
+        rag_sources = pub_sources
+        if rag_sources:
+            need = True
 
     base: dict[str, Any] = {
         "message": message,
@@ -747,36 +966,12 @@ def run_chat(
         "enable_api_llm": True if feats else False,
     }
 
-    predict_ms = 0.0
-    rag_ms = 0.0
-    model_out: dict[str, Any] = {
-        "predict_result": None,
-        "capacity_result": None,
-        "residual_result": None,
-        "head_results": None,
-        "recommendation": None,
-        "error": None,
-    }
-    rag_sources: list[dict[str, Any]] = []
-
     def _models() -> tuple[dict[str, Any], float]:
         t = time.perf_counter()
         return predict_bundle(base), (time.perf_counter() - t) * 1000
 
-    def _rag() -> tuple[list[dict[str, Any]], float]:
-        t = time.perf_counter()
-        return rag_bundle(message, history), (time.perf_counter() - t) * 1000
-
-    if feats and need:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            f_m = pool.submit(_models)
-            f_r = pool.submit(_rag)
-            model_out, predict_ms = f_m.result()
-            rag_sources, rag_ms = f_r.result()
-    elif feats:
+    if feats:
         model_out, predict_ms = _models()
-    elif need:
-        rag_sources, rag_ms = _rag()
 
     compose_state = {
         **base,
@@ -796,6 +991,7 @@ def run_chat(
         "need_rag": int(need),
         "has_features": int(bool(feats)),
         "rag_hits": len(rag_sources),
+        "secure_peek": 0,
     }
     _log.info(
         "[chat-timing] predict_ms=%s rag_ms=%s compose_ms=%s total_ms=%s "
@@ -850,6 +1046,7 @@ def iter_chat_events(
     if not feats and _wants_api_llm(message):
         feats = extract_features_from_page_context(page_context)
     need = needs_rag(message, page_context, history)
+    peek = should_peek_docs(message, page_context)
     _ = enable_api_llm
 
     yield {
@@ -857,21 +1054,9 @@ def iter_chat_events(
         "data": {
             "need_rag": need,
             "has_features": bool(feats),
+            "peek_docs": peek,
             "stage": "start",
         },
-    }
-
-    base: dict[str, Any] = {
-        "message": message,
-        "features": feats,
-        "fillThreshold": fillThreshold,
-        "need_guideline": need_guideline,
-        "llm_mode": llm_mode,
-        "llm_credentials": llm_credentials,
-        "history_text": history,
-        "page_context": page_context,
-        "need_rag": need,
-        "enable_api_llm": True if feats else False,
     }
 
     predict_ms = 0.0
@@ -886,24 +1071,69 @@ def iter_chat_events(
     }
     rag_sources: list[dict[str, Any]] = []
 
+    if peek or need:
+        t_r = time.perf_counter()
+        secret_hits, pub_sources = _dual_doc_peek(
+            message, history, full_public=need
+        )
+        rag_ms = (time.perf_counter() - t_r) * 1000
+        if secret_hits:
+            total_ms = (time.perf_counter() - t0) * 1000
+            timing = {
+                "predict_ms": 0.0,
+                "rag_ms": round(rag_ms, 1),
+                "compose_ms": 0.0,
+                "total_ms": round(total_ms, 1),
+                "need_rag": 0,
+                "has_features": int(bool(feats)),
+                "rag_hits": 0,
+                "secure_peek": 1,
+            }
+            reply = SECURITY_PEEK_REDIRECT_REPLY
+            yield {"event": "delta", "data": {"text": reply}}
+            yield {
+                "event": "done",
+                "data": {
+                    "reply": reply,
+                    "mode": "security_redirect",
+                    "provider": "security_redirect",
+                    "predict": None,
+                    "capacity": None,
+                    "residual": None,
+                    "heads": None,
+                    "recommendation": None,
+                    "error": None,
+                    "timing": timing,
+                    "rag_sources": [],
+                    "need_rag": False,
+                    "features_used": bool(feats),
+                    "security_matched": "qdrant_peek",
+                },
+            }
+            return
+        rag_sources = pub_sources
+        if rag_sources:
+            need = True
+
+    base: dict[str, Any] = {
+        "message": message,
+        "features": feats,
+        "fillThreshold": fillThreshold,
+        "need_guideline": need_guideline,
+        "llm_mode": llm_mode,
+        "llm_credentials": llm_credentials,
+        "history_text": history,
+        "page_context": page_context,
+        "need_rag": need,
+        "enable_api_llm": True if feats else False,
+    }
+
     def _models() -> tuple[dict[str, Any], float]:
         t = time.perf_counter()
         return predict_bundle(base), (time.perf_counter() - t) * 1000
 
-    def _rag() -> tuple[list[dict[str, Any]], float]:
-        t = time.perf_counter()
-        return rag_bundle(message, history), (time.perf_counter() - t) * 1000
-
-    if feats and need:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            f_m = pool.submit(_models)
-            f_r = pool.submit(_rag)
-            model_out, predict_ms = f_m.result()
-            rag_sources, rag_ms = f_r.result()
-    elif feats:
+    if feats:
         model_out, predict_ms = _models()
-    elif need:
-        rag_sources, rag_ms = _rag()
 
     yield {
         "event": "meta",

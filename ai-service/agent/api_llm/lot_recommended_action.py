@@ -338,34 +338,114 @@ def compose_lot_recommended_action(body: dict[str, Any]) -> dict[str, Any]:
     risk_level = (body.get("risk_level") or "").strip()
     if risk_level == "안정":
         stable = stable_template()
-        return {**stable, "status": "ready", "error": None}
+        return {**stable, "whatif": None, "status": "ready", "error": None}
 
     drivers = body.get("drivers_json") or body.get("drivers") or {}
     probability = body.get("probability")
     residual_li = body.get("residual_li")
     spc_status = body.get("spc_status")
+    features = body.get("features") if isinstance(body.get("features"), dict) else None
 
-    query_parts = []
-    for c in (drivers.get("defect_causes") or [])[:3]:
-        query_parts.append(f"{c.get('labelKo')} {c.get('valueText')}")
-    for c in (drivers.get("residual_causes") or [])[:2]:
-        query_parts.append(f"잔류리튬 {c.get('labelKo')}")
-    if spc_status:
-        query_parts.append(f"SPC {spc_status}")
-    # 안정적인 UI 규격(문장/소수점/단락) 때문에 요약은 규칙 기반으로만 생성합니다.
-    # steps는 QMS doc mapping 기반으로 규칙 생성합니다.
+    summary = _rule_summary(
+        drivers,
+        probability=probability,
+        residual_li=residual_li,
+        risk_level=risk_level,
+        spc_status=spc_status,
+    )
     steps = _rule_steps(drivers, spc_status, probability)
-    return {
-        "summary": _rule_summary(
-            drivers,
+    whatif_payload: dict[str, Any] | None = None
+
+    if features:
+        whatif_payload = _run_whatif_for_features(
+            features,
             probability=probability,
-            residual_li=residual_li,
-            risk_level=risk_level,
-            spc_status=spc_status,
-        ),
+            fill_threshold=body.get("fillThreshold") or body.get("fill_threshold"),
+        )
+        line = _whatif_summary_line(whatif_payload)
+        model_step = _whatif_model_step(whatif_payload)
+        if line:
+            summary = f"{line}\n\n{summary}".strip()[:1024]
+        if model_step:
+            renumbered = [
+                {**s, "order": int(s.get("order") or 0) + 1}
+                for s in steps
+            ]
+            steps = [model_step, *renumbered][:6]
+
+    return {
+        "summary": summary,
         "steps": steps,
         "sources": _sources_from_steps(steps),
         "drivers_json": drivers,
+        "whatif": whatif_payload,
         "status": "ready",
         "error": None,
     }
+
+
+def _run_whatif_for_features(
+    features: dict[str, Any],
+    *,
+    probability: float | None,
+    fill_threshold: float | None = None,
+) -> dict[str, Any] | None:
+    from agent.api_llm.tools import run_predict_tool
+    from agent.api_llm.whatif import run_whatif
+
+    try:
+        baseline = run_predict_tool(features, fillThreshold=fill_threshold)
+    except Exception:  # noqa: BLE001
+        if probability is None:
+            return None
+        baseline = {
+            "probability": float(probability),
+            "defect_status": 1 if float(probability) >= 0.5 else 0,
+            "applied_threshold": float(fill_threshold or 0.5),
+        }
+    try:
+        return run_whatif(features, baseline, fillThreshold=fill_threshold)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _whatif_summary_line(whatif: dict[str, Any] | None) -> str | None:
+    if not whatif:
+        return None
+    sug = whatif.get("suggestion")
+    if not isinstance(sug, dict):
+        note = str(whatif.get("note") or "").strip()
+        return f"[모델 what-if] {note}" if note else None
+    baseline = whatif.get("baseline") or {}
+    p_before = float(baseline.get("probability") or 0)
+    p_after = float(sug.get("probability") or 0)
+    clipped = sug.get("clipped_values") or {}
+    hum = clipped.get("humidity")
+    temp = clipped.get("sintering_temp")
+    parts = [
+        f"[모델 what-if] 학습 헤드 그리드 제안: 불량확률 {p_before * 100:.2f}% → {p_after * 100:.2f}%"
+    ]
+    if hum is not None and temp is not None:
+        parts.append(f"습도 {float(hum):g}% · 소성온도 {float(temp):g}℃")
+    return " — ".join(parts)
+
+
+def _whatif_model_step(whatif: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not whatif:
+        return None
+    sug = whatif.get("suggestion")
+    if not isinstance(sug, dict):
+        return None
+    baseline = whatif.get("baseline") or {}
+    p_before = float(baseline.get("probability") or 0)
+    p_after = float(sug.get("probability") or 0)
+    clipped = sug.get("clipped_values") or {}
+    hum = clipped.get("humidity")
+    temp = clipped.get("sintering_temp")
+    if hum is None or temp is None:
+        return None
+    text = (
+        f"모델 what-if: 습도 {float(hum):g}% · 소성온도 {float(temp):g}℃로 조절 검토 "
+        f"(불량확률 {p_before * 100:.2f}% → {p_after * 100:.2f}%)"
+    )
+    return {"order": 1, "text": text, "doc_id": None}

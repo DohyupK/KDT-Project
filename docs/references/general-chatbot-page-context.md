@@ -21,7 +21,7 @@ flowchart TB
   enrich[enrichPageContext]
   proxy[aiProxy → ai-service]
   slice[slice_page_context_for_query]
-  work[predict/whatif ∥ RAG optional]
+  work[dual_peek_or_predict_whatif]
   compose{compose 분기}
   det[deterministic grounding]
   llm[등록 LLM compose]
@@ -188,7 +188,8 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 }
 ```
 
-보안 키워드 히트 시: `mode: security_redirect`, AI 프록시 없음.
+보안 키워드 히트 시: `mode: security_redirect`, AI 프록시 없음. FE는 보안 상담 탭으로 전환하고 질문을 입력란에 넘김.
+키워드 미스 후 화면·버튼·로그 밖 발화: ai-service가 Qdrant 이중 peek — Secret/TopSecret 히트면 같은 `security_redirect`, Public/Confidential 히트면 RAG compose.
 
 ---
 
@@ -219,14 +220,14 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
    4. **페이지 요약 intent**이면 지금 route 테이블 전체(`page_payload`). 쿼리 토큰으로 행을 깎지 않음. payload가 비면 `empty_hint`만 (히스토리로 이전 화면을 채우지 않음).  
    5. **LOT/이슈 ID가 메시지에 있고** route가 `/setting`·`/inquiry`·`/management`이면 설정/문의 UI 필드를 제거 (`primary_table=entity`). 폰트·테마를 근거로 쓰지 않음.  
    6. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
-4. **features:** FE가 준 값 우선. 없으면 진단 intent일 때만 page/focus에서 추출.  
-5. **RAG:** 문서 intent 또는 (문서 명사 + 요약/정리/해석) 또는 **왜/원인 + LOT·불량률·잔류**. 「이 화면 요약」은 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. Public+Confidential, top_k 8 · 청크 800 · 최대 4건. 0히트면 화면 KPI로 메우지 않되 **page_context는 유지**.  LOT 왜-질문은 설정 JSON으로 메우지 않음.  
-6. **predict/whatif:** features 있을 때 registry 헤드.  
+4. **features:** FE가 준 값 우선. 없으면 진단·저감·LOT why intent일 때 page/focus에서 추출 (`줄이|낮추|개선|방안|조치|what-if` 등 포함).  
+5. **RAG / peek:** 문서 intent(`needs_rag`) 또는 화면 밖 발화(`should_peek_docs`)면 Qdrant 이중 peek. Secret/TopSecret → `security_redirect`(본문 비노출). Public+Confidential → `rag_sources` 후 compose. 「이 화면 요약」·순수 UI/KPI는 스킵. 짧은 후속은 직전 User 질문과 합쳐 retrieve. top_k 8 · 청크 800 · 최대 4건(문서 intent); peek는 top_k 3.  
+6. **predict/whatif:** features 있을 때 registry 헤드. **불량확률 저감 수치 제안 = 학습 헤드 what-if 그리드**(습도·소성온도 델타 → 확률 최소). 문서만으로 공정값을 만들지 않음.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  
-   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리. **페이지 요약이면 recent_turns 없음**) → **2차 `SYSTEM_POLISH`** (띄어쓰기·문장 끝 빈 줄·중복 번호 목록). LOT·품질 질문은 **관찰 → 원인 → 불량률 저감 제안**; 저장된 `riskReason`/`recommendedAction`은 낭독하지 않고 근거로만 씀. 초안은 스트림하지 않음.  
+   - `CHAT_USE_LLM=1` + vault 키 → 1차 compose (`user_message` = 현재 질문, `recent_turns` = 히스토리. **페이지 요약이면 recent_turns 없음**) → **2차 `SYSTEM_POLISH`** (띄어쓰기·문장 끝 빈 줄·중복 번호 목록). LOT·품질 질문은 **관찰 → 원인 → 불량률 저감 제안**; 저감은 `recommendation`(what-if) 우선, 없으면 features 부족만 짧게. 저장된 `riskReason`/`recommendedAction`은 낭독하지 않고 근거로만 씀. 초안은 스트림하지 않음.  
    - 그 외/실패 → `_template_reply` (문서 턴·LLM 없음이면 발췌 안내)  
-   - DB 적재 분석과 역할이 다름: `risk_reason`=짧은 위험 해석 · `recommended_actions`=저감 조치. 챗은 대화형 재구성.  
+   - DB 적재 분석과 역할이 다름: `risk_reason`=짧은 위험 해석 · `recommended_actions`=SHAP 원인 + what-if 저감 수치. 챗은 대화형 재구성.  
 8. what-if / capacity / residual 블록 필요 시 덧붙임.  
 9. polish 실패 시 **`normalize_korean_reply`** 폴백. deterministic/template은 정규화만.
 

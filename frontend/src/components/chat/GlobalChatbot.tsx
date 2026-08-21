@@ -160,6 +160,8 @@ export default function GlobalChatbot() {
   const [isExpanded, setIsExpanded] = useState(false)
   const [chatMode, setChatMode] = useState<ChatMode>('general')
   const [secureNewThreadNonce, setSecureNewThreadNonce] = useState(0)
+  const [secureHandoffDraft, setSecureHandoffDraft] = useState<string | null>(null)
+  const [secureHandoffNonce, setSecureHandoffNonce] = useState(0)
   const [threads, setThreads] = useState<ChatThreadItem[]>([])
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_GENERAL])
@@ -466,6 +468,11 @@ export default function GlobalChatbot() {
                 : '') ||
               streamed ||
               (data.error ? `오류: ${data.error}` : '응답이 비어 있습니다.')
+            if (data.mode === 'security_redirect') {
+              setSecureHandoffDraft(text)
+              setSecureHandoffNonce((n) => n + 1)
+              setChatMode('secure')
+            }
             setMessages((prev) => {
               const next = prev.map((m) =>
                 m.id === aiId
@@ -1316,6 +1323,8 @@ export default function GlobalChatbot() {
                 hideHeader
                 showSources={isExpanded}
                 newThreadNonce={secureNewThreadNonce}
+                handoffDraft={secureHandoffDraft}
+                handoffNonce={secureHandoffNonce}
                 className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none"
               />
             </div>

@@ -48,7 +48,7 @@ flowchart TD
   a --> issues["AWS: ISSUES if risk_level=심각 + n8n"]
 ```
 
-역할 분리: 일반 챗(`SYSTEM_COMPOSE`)은 대화형 관찰·원인·불량률 저감 제안. `ANALYSIS_LOTS.risk_reason`은 짧은 위험 해석(255자). `LOT_RECOMMENDED_ACTIONS`는 불량률 저감 조치(summary+steps). 서로 복붙하지 않는다.
+역할 분리: 일반 챗(`SYSTEM_COMPOSE`)은 대화형 관찰·원인·불량률 저감 제안(저감 수치는 what-if). `ANALYSIS_LOTS.risk_reason`은 짧은 위험 해석(255자). `LOT_RECOMMENDED_ACTIONS`는 **SHAP 원인 + 학습 헤드 what-if 저감 수치**(summary 앞줄·steps order=1)와 QMS 점검. 서로 복붙하지 않는다.
 
 ---
 
