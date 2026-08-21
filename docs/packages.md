@@ -70,7 +70,8 @@ npm run send:one-issue-report
 API 목록: [`ai-service-feature-catalog.md`](./references/ai-service-feature-catalog.md).
 
 학습 스키마: [`cathode-clf-schema.md`](./references/cathode-clf-schema.md) · [reg](./references/cathode-reg-schema.md) · [residual](./references/cathode-residual-schema.md) · [학습 방법](./references/model-training-methods.md).  
-RAG: [`secure-rag.md`](./references/secure-rag.md). 원본 문서는 루트 `Documents/` (`SECURE_DOCS_DIR`).
+RAG: [`secure-rag.md`](./references/secure-rag.md). 원본 문서는 루트 `Documents/` (`SECURE_DOCS_DIR`).  
+일반 챗 라우팅 peek는 dense-only(encode 1회). 첫 채팅 스파이크를 피하려면 `.env`에 `CHAT_RAG_WARM_ON_STARTUP=1`.
 
 성능(재학습 없이 holdout 재채점):
 

@@ -225,77 +225,12 @@ def should_peek_docs(
 
 
 def _secure_peek_min_score() -> float:
-    raw = (os.environ.get("CHAT_SECURE_PEEK_MIN_SCORE") or "0.2").strip()
+    """Dense cosine threshold for Secret routing (not CrossEncoder scale)."""
+    raw = (os.environ.get("CHAT_SECURE_PEEK_MIN_SCORE") or "0.45").strip()
     try:
         return float(raw)
     except ValueError:
-        return 0.2
-
-
-def peek_secret_meta(
-    message: str,
-    history_text: str | None = None,
-) -> list[dict[str, Any]]:
-    """Secret/TopSecret hit metadata only — never return chunk text to general chat."""
-    query = expand_rag_query(message, history_text)
-    if not query:
-        return []
-    try:
-        engine = get_engine()
-        engine.ensure()
-        if not engine.ready:
-            return []
-        hits = engine.retrieve(
-            query,
-            top_k=PEEK_TOP_K,
-            rerank_top_n=PEEK_RERANK_N,
-            filters={},
-            llm_invoke=None,
-            allowed_clearances=SECRET_PEEK_CLEARANCES,
-        )
-    except Exception:  # noqa: BLE001
-        return []
-    min_score = _secure_peek_min_score()
-    out: list[dict[str, Any]] = []
-    for h in hits:
-        score = float(h.get("score") or 0.0)
-        if score < min_score:
-            continue
-        out.append(
-            {
-                "doc_id": h.get("doc_id"),
-                "title": h.get("title"),
-                "clearance": h.get("clearance"),
-                "score": score,
-            }
-        )
-    return out
-
-
-def peek_public_sources(
-    message: str,
-    history_text: str | None = None,
-) -> list[dict[str, Any]]:
-    """Small Public+Confidential retrieve for screen-off turns."""
-    query = expand_rag_query(message, history_text)
-    if not query:
-        return []
-    try:
-        engine = get_engine()
-        engine.ensure()
-        if not engine.ready:
-            return []
-        hits = engine.retrieve(
-            query,
-            top_k=PEEK_TOP_K,
-            rerank_top_n=PEEK_RERANK_N,
-            filters={},
-            llm_invoke=None,
-            allowed_clearances=API_ALLOWED_CLEARANCES,
-        )
-        return _compact_rag_sources(hits)
-    except Exception:  # noqa: BLE001
-        return []
+        return 0.45
 
 
 def _dual_doc_peek(
@@ -303,21 +238,67 @@ def _dual_doc_peek(
     history_text: str | None,
     *,
     full_public: bool,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (secret_meta_hits, public_sources). Failures → empty lists."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, float]]:
+    """
+    Return (secret_meta_hits, public_sources, peek_timing).
+    Routing uses dense-only encode×1; full_public uses hybrid retrieve for compose.
+    """
+    empty_timing: dict[str, float] = {
+        "ensure_ms": 0.0,
+        "embed_ms": 0.0,
+        "qdrant_ms": 0.0,
+        "peek_ms": 0.0,
+        "public_rag_ms": 0.0,
+    }
+    query = expand_rag_query(message, history_text)
+    if not query:
+        return [], [], empty_timing
 
-    def _sec() -> list[dict[str, Any]]:
-        return peek_secret_meta(message, history_text)
+    try:
+        engine = get_engine()
+        secret_meta, public_dense, timing = engine.peek_dual(
+            query,
+            public_clearances=API_ALLOWED_CLEARANCES,
+            secret_clearances=SECRET_PEEK_CLEARANCES,
+            top_k=PEEK_TOP_K,
+            include_public_text=not full_public,
+        )
+    except Exception:  # noqa: BLE001
+        return [], [], empty_timing
 
-    def _pub() -> list[dict[str, Any]]:
-        if full_public:
-            return rag_bundle(message, history_text)
-        return peek_public_sources(message, history_text)
+    timing = {**empty_timing, **timing}
+    min_score = _secure_peek_min_score()
+    secret_hits = [
+        h for h in secret_meta if float(h.get("score") or 0.0) >= min_score
+    ]
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        f_s = pool.submit(_sec)
-        f_p = pool.submit(_pub)
-        return f_s.result(), f_p.result()
+    if full_public:
+        t_p = time.perf_counter()
+        pub_sources = rag_bundle(message, history_text)
+        timing["public_rag_ms"] = round((time.perf_counter() - t_p) * 1000, 1)
+        return secret_hits, pub_sources, timing
+
+    # Dense public hits → compact sources for compose (skip hybrid on peek-only turns)
+    pub_sources = _compact_rag_sources(public_dense)
+    return secret_hits, pub_sources, timing
+
+
+def peek_secret_meta(
+    message: str,
+    history_text: str | None = None,
+) -> list[dict[str, Any]]:
+    """Secret/TopSecret metadata via dense peek (compat wrapper)."""
+    secret, _pub, _t = _dual_doc_peek(message, history_text, full_public=False)
+    return secret
+
+
+def peek_public_sources(
+    message: str,
+    history_text: str | None = None,
+) -> list[dict[str, Any]]:
+    """Public+Confidential dense peek sources (compat wrapper)."""
+    _sec, pub, _t = _dual_doc_peek(message, history_text, full_public=False)
+    return pub
 
 
 def _security_redirect_payload(
@@ -927,7 +908,7 @@ def run_chat(
     # Screen-off / doc intent: dual peek first (Secret → redirect; Public → compose)
     if peek or need:
         t_r = time.perf_counter()
-        secret_hits, pub_sources = _dual_doc_peek(
+        secret_hits, pub_sources, peek_timing = _dual_doc_peek(
             message, history, full_public=need
         )
         rag_ms = (time.perf_counter() - t_r) * 1000
@@ -942,16 +923,25 @@ def run_chat(
                 "has_features": int(bool(feats)),
                 "rag_hits": 0,
                 "secure_peek": 1,
+                "peek_dense": 1,
+                **{k: peek_timing.get(k, 0.0) for k in (
+                    "ensure_ms", "embed_ms", "qdrant_ms", "peek_ms", "public_rag_ms"
+                )},
             }
             _log.info(
-                "[chat-timing] secure_peek_redirect rag_ms=%s hits=%s",
+                "[chat-timing] secure_peek_redirect rag_ms=%s hits=%s peek_dense=1 "
+                "embed_ms=%s qdrant_ms=%s",
                 timing["rag_ms"],
                 len(secret_hits),
+                timing.get("embed_ms"),
+                timing.get("qdrant_ms"),
             )
             return _security_redirect_payload(timing=timing, secret_hits=secret_hits)
         rag_sources = pub_sources
         if rag_sources:
             need = True
+    else:
+        peek_timing = {}
 
     base: dict[str, Any] = {
         "message": message,
@@ -992,10 +982,14 @@ def run_chat(
         "has_features": int(bool(feats)),
         "rag_hits": len(rag_sources),
         "secure_peek": 0,
+        "peek_dense": 1 if (peek or need) else 0,
+        **{k: peek_timing.get(k, 0.0) for k in (
+            "ensure_ms", "embed_ms", "qdrant_ms", "peek_ms", "public_rag_ms"
+        )},
     }
     _log.info(
         "[chat-timing] predict_ms=%s rag_ms=%s compose_ms=%s total_ms=%s "
-        "need_rag=%s has_features=%s rag_hits=%s",
+        "need_rag=%s has_features=%s rag_hits=%s peek_dense=%s embed_ms=%s",
         timing["predict_ms"],
         timing["rag_ms"],
         timing["compose_ms"],
@@ -1003,6 +997,8 @@ def run_chat(
         timing["need_rag"],
         timing["has_features"],
         timing["rag_hits"],
+        timing["peek_dense"],
+        timing.get("embed_ms"),
     )
 
     return {
@@ -1072,8 +1068,17 @@ def iter_chat_events(
     rag_sources: list[dict[str, Any]] = []
 
     if peek or need:
+        yield {
+            "event": "meta",
+            "data": {
+                "need_rag": need,
+                "has_features": bool(feats),
+                "peek_docs": peek,
+                "stage": "searching",
+            },
+        }
         t_r = time.perf_counter()
-        secret_hits, pub_sources = _dual_doc_peek(
+        secret_hits, pub_sources, peek_timing = _dual_doc_peek(
             message, history, full_public=need
         )
         rag_ms = (time.perf_counter() - t_r) * 1000
@@ -1088,6 +1093,10 @@ def iter_chat_events(
                 "has_features": int(bool(feats)),
                 "rag_hits": 0,
                 "secure_peek": 1,
+                "peek_dense": 1,
+                **{k: peek_timing.get(k, 0.0) for k in (
+                    "ensure_ms", "embed_ms", "qdrant_ms", "peek_ms", "public_rag_ms"
+                )},
             }
             reply = SECURITY_PEEK_REDIRECT_REPLY
             yield {"event": "delta", "data": {"text": reply}}
@@ -1114,6 +1123,8 @@ def iter_chat_events(
         rag_sources = pub_sources
         if rag_sources:
             need = True
+    else:
+        peek_timing = {}
 
     base: dict[str, Any] = {
         "message": message,
@@ -1147,6 +1158,16 @@ def iter_chat_events(
         },
     }
 
+    yield {
+        "event": "meta",
+        "data": {
+            "need_rag": need,
+            "has_features": bool(feats),
+            "rag_hits": len(rag_sources),
+            "stage": "composing",
+        },
+    }
+
     reply_parts: list[str] = []
     provider = "template"
     mode = "template"
@@ -1169,10 +1190,14 @@ def iter_chat_events(
             "need_rag": int(need),
             "has_features": int(bool(feats)),
             "rag_hits": len(rag_sources),
+            "peek_dense": 1 if (peek or need) else 0,
+            **{k: peek_timing.get(k, 0.0) for k in (
+                "ensure_ms", "embed_ms", "qdrant_ms", "peek_ms", "public_rag_ms"
+            )},
         }
         _log.info(
             "[chat-timing] predict_ms=%s rag_ms=%s compose_ms=%s total_ms=%s "
-            "need_rag=%s has_features=%s rag_hits=%s stream=1 grounding=1",
+            "need_rag=%s has_features=%s rag_hits=%s stream=1 grounding=1 peek_dense=%s",
             timing["predict_ms"],
             timing["rag_ms"],
             timing["compose_ms"],
@@ -1180,6 +1205,7 @@ def iter_chat_events(
             timing["need_rag"],
             timing["has_features"],
             timing["rag_hits"],
+            timing["peek_dense"],
         )
         yield {
             "event": "done",
@@ -1253,10 +1279,14 @@ def iter_chat_events(
         "need_rag": int(need),
         "has_features": int(bool(feats)),
         "rag_hits": len(rag_sources),
+        "peek_dense": 1 if (peek or need) else 0,
+        **{k: peek_timing.get(k, 0.0) for k in (
+            "ensure_ms", "embed_ms", "qdrant_ms", "peek_ms", "public_rag_ms"
+        )},
     }
     _log.info(
         "[chat-timing] predict_ms=%s rag_ms=%s compose_ms=%s total_ms=%s "
-        "need_rag=%s has_features=%s rag_hits=%s stream=1",
+        "need_rag=%s has_features=%s rag_hits=%s stream=1 peek_dense=%s embed_ms=%s",
         timing["predict_ms"],
         timing["rag_ms"],
         timing["compose_ms"],
@@ -1264,6 +1294,8 @@ def iter_chat_events(
         timing["need_rag"],
         timing["has_features"],
         timing["rag_hits"],
+        timing["peek_dense"],
+        timing.get("embed_ms"),
     )
 
     yield {

@@ -130,7 +130,7 @@
 | `CHAT_HISTORY_SEMANTIC_ENABLED` | 미설정/`0` — 의미 이력 검색 끔. `1`이면 Qdrant 검색 |
 | `CHAT_HISTORY_SEMANTIC_TOP_K` | `3` |
 | `CHAT_HISTORY_QDRANT_COLLECTION` | `chat_history_collection` |
-| `CHAT_RAG_WARM_ON_STARTUP` | 미설정/`0` — 시작 시 BGE·Qdrant 안 올림. `1`이면 기동 시 준비 |
+| `CHAT_RAG_WARM_ON_STARTUP` | 권장 `1` — 기동 시 BGE·Qdrant `ensure` + dummy encode(첫 채팅 스파이크 제거). 미설정/`0`이면 lazy |
 | `DB_*` / `DATABASE_URL` | MariaDB (미설정 시 soft-fail) |
 
 ### 4.6 Ingest

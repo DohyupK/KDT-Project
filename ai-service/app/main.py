@@ -99,8 +99,7 @@ _configure_file_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _configure_file_logging()
-    # General chat is usable without RAG. Keep BGE/Qdrant fully lazy by default.
-    # Operators can explicitly opt in when they prefer startup cost over first-RAG cost.
+    # Prefer CHAT_RAG_WARM_ON_STARTUP=1 so first chat skips BGE cold-load spike.
     if _env_true("CHAT_RAG_WARM_ON_STARTUP"):
         try:
             from agent.qdrant_supervisor import ensure_qdrant
@@ -109,14 +108,20 @@ async def lifespan(_app: FastAPI):
             ok = ensure_qdrant()
             eng = get_engine()
             eng.ensure()
+            warmed = eng.warm_embed("kdt rag warm") if eng.ready else False
             print(
-                f"[rag] explicit warm qdrant={ok} ready={eng.ready} err={eng.init_error!r}",
+                f"[rag] explicit warm qdrant={ok} ready={eng.ready} "
+                f"embed_warm={warmed} err={eng.init_error!r}",
                 flush=True,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[rag] explicit warm skipped: {exc}", flush=True)
     else:
-        print("[rag] lazy mode; BGE/Qdrant initialize only for an actual RAG request", flush=True)
+        print(
+            "[rag] lazy mode; set CHAT_RAG_WARM_ON_STARTUP=1 to preload BGE/Qdrant "
+            "(avoids first-chat spike)",
+            flush=True,
+        )
     yield
 
 
