@@ -45,6 +45,7 @@ GlobalChatbot 「제안 승인」
 GlobalChatbot 카드 「승인」|「거절」
   → POST /api/control/remediation/decide
   → OPTIMIZATION_EVENTS method=issue_remediation, status=approved|rejected
+  → 5초 Undo 스낵바 → POST /api/control/approve/:id/revert → status=reverted (카드 버튼 복구)
   → PLC·한계치·설정 API 호출 없음 (작업 의사 로그만)
 ```
 

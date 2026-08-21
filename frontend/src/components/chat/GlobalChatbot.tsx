@@ -63,6 +63,9 @@ type UndoSnack = {
   eventId: number | string
   msgId: number
   secondsLeft: number
+  kind: 'control' | 'remediation'
+  /** remediation: restore approve/reject buttons for this proposal */
+  proposalId?: string
 }
 
 const UNDO_SECONDS = 5
@@ -383,21 +386,34 @@ export default function GlobalChatbot() {
     }
   }
 
-  const startUndoWindow = (eventId: number | string, msgId: number) => {
+  const startUndoWindow = (
+    eventId: number | string,
+    msgId: number,
+    kind: 'control' | 'remediation' = 'control',
+    proposalId?: string,
+  ) => {
     clearUndoTimer()
-    setUndoSnack({ eventId, msgId, secondsLeft: UNDO_SECONDS })
+    setUndoSnack({
+      eventId,
+      msgId,
+      secondsLeft: UNDO_SECONDS,
+      kind,
+      proposalId,
+    })
     undoTimerRef.current = setInterval(() => {
       setUndoSnack((prev) => {
         if (!prev) return null
         if (prev.secondsLeft <= 1) {
           clearUndoTimer()
-          setMessages((msgs) =>
-            msgs.map((m) =>
-              m.id === prev.msgId && !m.reverted
-                ? { ...m, outcomeEligible: true }
-                : m,
-            ),
-          )
+          if (prev.kind === 'control') {
+            setMessages((msgs) =>
+              msgs.map((m) =>
+                m.id === prev.msgId && !m.reverted
+                  ? { ...m, outcomeEligible: true }
+                  : m,
+              ),
+            )
+          }
           return null
         }
         return { ...prev, secondsLeft: prev.secondsLeft - 1 }
@@ -610,10 +626,11 @@ export default function GlobalChatbot() {
           role: 'ai',
           text:
             decision === 'approved'
-              ? `「${proposal.title}」을(를) 승인했습니다. 실제 기기는 조작하지 않으며, 작업 의사만 로그에 남겼습니다. (event_id=${res.event_id})\n→ ${proposal.narrative}`
-              : `「${proposal.title}」을(를) 거절했습니다. (event_id=${res.event_id}, ${label})`,
+              ? `「${proposal.title}」을(를) 승인했습니다. 실제 기기는 조작하지 않으며, 작업 의사만 로그에 남겼습니다. (event_id=${res.event_id}) 5초 안에 취소할 수 있습니다.\n→ ${proposal.narrative}`
+              : `「${proposal.title}」을(를) 거절했습니다. (event_id=${res.event_id}, ${label}) 5초 안에 취소할 수 있습니다.`,
         },
       ])
+      startUndoWindow(res.event_id, msgId, 'remediation', proposal.id)
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
@@ -671,7 +688,7 @@ export default function GlobalChatbot() {
       setOutcomeDefect('')
       setOutcomeCapacity('')
       setOutcomeResidual('')
-      startUndoWindow(res.event_id, msgId)
+      startUndoWindow(res.event_id, msgId, 'control')
     } catch (err) {
       let detail = '승인 기록에 실패했습니다.'
       if (err && typeof err === 'object') {
@@ -752,30 +769,52 @@ export default function GlobalChatbot() {
     setUndoBusy(true)
     const eventId = undoSnack.eventId
     const msgId = undoSnack.msgId
+    const kind = undoSnack.kind
+    const proposalId = undoSnack.proposalId
     try {
       const res = await postRevertControl(eventId)
       clearUndoTimer()
       setUndoSnack(null)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msgId
-            ? {
-                ...m,
-                reverted: true,
-                outcomeEligible: false,
-              }
-            : m,
-        ),
-      )
-      idRef.current += 1
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: idRef.current,
-          role: 'ai',
-          text: `취소됨. 승인이 철회되었습니다. (event_id=${res.event_id}, status=${res.status}) 실측은 기록할 수 없습니다. 이력은 DB에 보존됩니다.`,
-        },
-      ])
+      if (kind === 'remediation' && proposalId) {
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== msgId) return m
+            const nextDecisions = { ...(m.remediationDecisions || {}) }
+            delete nextDecisions[proposalId]
+            return { ...m, remediationDecisions: nextDecisions }
+          }),
+        )
+        idRef.current += 1
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: idRef.current,
+            role: 'ai',
+            text: `조치 기록이 취소되었습니다. (event_id=${res.event_id}, status=${res.status}) 이력은 DB에 보존됩니다. 카드를 다시 승인/거절할 수 있습니다.`,
+          },
+        ])
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? {
+                  ...m,
+                  reverted: true,
+                  outcomeEligible: false,
+                }
+              : m,
+          ),
+        )
+        idRef.current += 1
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: idRef.current,
+            role: 'ai',
+            text: `취소됨. 승인이 철회되었습니다. (event_id=${res.event_id}, status=${res.status}) 실측은 기록할 수 없습니다. 이력은 DB에 보존됩니다.`,
+          },
+        ])
+      }
     } catch (err) {
       let detail = '실행 취소에 실패했습니다.'
       if (err && typeof err === 'object') {
@@ -1495,14 +1534,22 @@ export default function GlobalChatbot() {
                         : 'border-amber-200 bg-amber-50 text-amber-950'
                     }`}
                   >
-                    <span>승인 기록됨 · {undoSnack.secondsLeft}초 내 취소 가능</span>
+                    <span>
+                      {undoSnack.kind === 'remediation'
+                        ? `승인/거절 기록됨 · ${undoSnack.secondsLeft}초 내 취소 가능`
+                        : `승인 기록됨 · ${undoSnack.secondsLeft}초 내 취소 가능`}
+                    </span>
                     <button
                       type="button"
                       disabled={undoBusy}
                       onClick={() => void handleUndoApprove()}
                       className="shrink-0 rounded-lg bg-amber-700 px-2.5 py-1 font-bold text-white disabled:opacity-50"
                     >
-                      {undoBusy ? '취소 중…' : '실행 취소'}
+                      {undoBusy
+                        ? '취소 중…'
+                        : undoSnack.kind === 'remediation'
+                          ? '취소'
+                          : '실행 취소'}
                     </button>
                   </div>
                 ) : null}
