@@ -13,6 +13,7 @@ _REMEDY_INTENT_RE = re.compile(
     r"(해결|방안|조치|대응|어떻게\s*(하|해)|뭘\s*하|개선\s*(안|방안))",
     re.I,
 )
+_DEFECT_REDUCE_RE = re.compile(r"불량률\s*감소\s*방안", re.I)
 _ISSUE_ID_RE = re.compile(r"ISS-[A-Za-z0-9_-]+", re.I)
 _JSON_FENCE_RE = re.compile(
     r"###REMEDIATION_JSON###\s*(\{[\s\S]*?\})\s*(?:###END###)?\s*\Z",
@@ -25,11 +26,11 @@ _JSON_FENCE_ANY_RE = re.compile(
 
 REMEDIATION_PROMPT_SUFFIX = (
     "\n\n[이슈 소프트 조치 카드]\n"
-    "이 질문은 이슈 해결방안 요청입니다. 한국어 본문으로 관찰·원인을 짧게 답한 뒤, "
+    "이 질문은 이슈·불량률 감소 소프트 조치 요청입니다. 한국어 본문으로 관찰·원인을 짧게 답한 뒤, "
     "반드시 아래 형식으로만 JSON을 붙이세요 (PLC·자동 설정·수치 조작 금지).\n"
-    "각 narrative는 「○○(설비/공정)에서 ○○ 조치를 실시하겠습니다.」형태, 2~3개.\n"
+    "각 narrative는 「○○(설비/공정)에서 ○○ 조치하시겠습니까?」형태, 2~3개.\n"
     "###REMEDIATION_JSON###\n"
-    '{"issueId":"ISS-…","proposals":[{"id":"p1","title":"한줄제목","narrative":"…하겠습니다."}]}\n'
+    '{"issueId":"ISS-…","proposals":[{"id":"p1","title":"한줄제목","narrative":"…조치하시겠습니까?"}]}\n'
     "###END###\n"
 )
 
@@ -38,7 +39,51 @@ def wants_remediation_proposals(message: str) -> bool:
     m = (message or "").strip()
     if not m:
         return False
+    if _DEFECT_REDUCE_RE.search(m):
+        return True
     return bool(_REMEDY_INTENT_RE.search(m))
+
+
+def _as_issue_id(raw: Any) -> str | None:
+    if isinstance(raw, str) and raw.upper().startswith("ISS-"):
+        return raw.upper()
+    return None
+
+
+def _issue_from_mapping(blob: dict[str, Any] | None) -> str | None:
+    if not isinstance(blob, dict):
+        return None
+    for key in ("issueId", "id", "issue_id"):
+        got = _as_issue_id(blob.get(key))
+        if got:
+            return got
+    rec = blob.get("record") if isinstance(blob.get("record"), dict) else None
+    if isinstance(rec, dict):
+        for key in ("issueId", "id", "issue_id"):
+            got = _as_issue_id(rec.get(key))
+            if got:
+                return got
+    return None
+
+
+def _issue_from_page_lists(page_context: dict[str, Any]) -> str | None:
+    payload = page_context.get("page_payload") or page_context.get("pagePayload")
+    if not isinstance(payload, dict):
+        return None
+    selected = payload.get("selected")
+    got = _issue_from_mapping(selected if isinstance(selected, dict) else None)
+    if got:
+        return got
+    for list_key in ("issues", "lotRisks", "openIssues", "items"):
+        items = payload.get(list_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                got = _issue_from_mapping(item)
+                if got:
+                    return got
+    return None
 
 
 def resolve_issue_id(
@@ -55,20 +100,14 @@ def resolve_issue_id(
     if not isinstance(page_context, dict):
         return None
     focus_id = page_context.get("focus_id") or page_context.get("focusId")
-    if isinstance(focus_id, str) and focus_id.upper().startswith("ISS-"):
-        return focus_id.upper()
+    got = _as_issue_id(focus_id)
+    if got:
+        return got
     focus = page_context.get("focus_payload") or page_context.get("focusPayload")
-    if isinstance(focus, dict):
-        for key in ("issueId", "id", "issue_id"):
-            raw = focus.get(key)
-            if isinstance(raw, str) and raw.upper().startswith("ISS-"):
-                return raw.upper()
-        rec = focus.get("record") if isinstance(focus.get("record"), dict) else {}
-        for key in ("issueId", "id"):
-            raw = rec.get(key) if isinstance(rec, dict) else None
-            if isinstance(raw, str) and raw.upper().startswith("ISS-"):
-                return raw.upper()
-    return None
+    got = _issue_from_mapping(focus if isinstance(focus, dict) else None)
+    if got:
+        return got
+    return _issue_from_page_lists(page_context)
 
 
 def should_emit_remediation(
@@ -77,7 +116,10 @@ def should_emit_remediation(
 ) -> bool:
     if not wants_remediation_proposals(message):
         return False
-    return resolve_issue_id(message, page_context) is not None
+    if resolve_issue_id(message, page_context) is not None:
+        return True
+    # 「불량률 감소 방안 추천」칩: 화면 이슈가 없어도 소프트 카드 표시
+    return bool(_DEFECT_REDUCE_RE.search(message or ""))
 
 
 def _norm_proposal(raw: dict[str, Any], idx: int) -> dict[str, str] | None:
@@ -192,7 +234,7 @@ def fallback_remediation(
                     "title": f"권고 조치 {i}",
                     "narrative": (
                         f"{issue_id} 관련 해당 공정에서 「{step[:80]}」 "
-                        f"점검을 실시하겠습니다."
+                        f"점검 조치하시겠습니까?"
                     ),
                 }
             )
@@ -202,21 +244,21 @@ def fallback_remediation(
                 "id": f"fb1-{uuid.uuid4().hex[:6]}",
                 "title": "습도·분위기 점검",
                 "narrative": (
-                    f"{issue_id} 관련 해당 설비에서 습도·분위기 점검을 실시하겠습니다."
+                    f"{issue_id} 관련 해당 설비에서 습도·분위기 점검 조치하시겠습니까?"
                 ),
             },
             {
                 "id": f"fb2-{uuid.uuid4().hex[:6]}",
                 "title": "소성 조건 확인",
                 "narrative": (
-                    f"{issue_id} 관련 소성 구간에서 온도·체류 조건을 확인하겠습니다."
+                    f"{issue_id} 관련 소성 구간에서 온도·체류 조건 확인 조치하시겠습니까?"
                 ),
             },
             {
                 "id": f"fb3-{uuid.uuid4().hex[:6]}",
                 "title": "샘플·SPC 재확인",
                 "narrative": (
-                    f"{issue_id} 관련 검사 구간에서 샘플·SPC 상태를 재확인하겠습니다."
+                    f"{issue_id} 관련 검사 구간에서 샘플·SPC 재확인 조치하시겠습니까?"
                 ),
             },
         ]
@@ -234,7 +276,7 @@ def attach_remediation_to_compose(
         clean, _ = parse_remediation_block(reply, fallback_issue_id=None)
         # strip accidental blocks even if intent miss
         return clean if clean else reply, None
-    issue_id = resolve_issue_id(message, page_context) or "ISS-UNKNOWN"
+    issue_id = resolve_issue_id(message, page_context) or "ISS-SCREEN"
     clean, rem = parse_remediation_block(reply, fallback_issue_id=issue_id)
     if rem:
         return clean or reply, rem

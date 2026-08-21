@@ -848,6 +848,13 @@ export default function GlobalChatbot() {
     })
   }
 
+  chips.push({
+    label: '불량률 감소 방안 추천',
+    message:
+      '불량률 감소 방안을 추천해 주세요. 관련 설비에서 취할 소프트 조치를 제안하고 승인·거절할 수 있게 해 주세요.',
+    features: null,
+  })
+
   const showUsageGuide = () => {
     idRef.current += 1
     setMessages((prev) => [
