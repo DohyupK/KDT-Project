@@ -33,6 +33,9 @@ class PredictResponse(BaseModel):
     probability: float
     applied_threshold: float
     top_risk_factors: list[str]
+    risk_factor_scope: str | None = None
+    decision_basis: dict[str, Any] | None = None
+    validation_notice: str | None = None
 
 
 class CapacityResponse(BaseModel):
@@ -118,6 +121,14 @@ class ChatRequest(BaseModel):
     user_id: str | None = Field(
         default=None,
         description="USERS.user_id — required to persist multi-turn history",
+    )
+    fallback_history_text: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "Authenticated Express chat-store history used only when the "
+            "ai-service MariaDB history is unavailable or empty."
+        ),
     )
     features: ChatFeatures | None = Field(
         default=None,

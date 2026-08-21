@@ -1,6 +1,6 @@
 # 프로젝트 문서 목록 (사용자 작성)
 
-최종 갱신: 2026-08-19  
+최종 갱신: 2026-08-21  
 범위: **이 저장소에서 직접 쓴 마크다운**. `node_modules` README·CHANGELOG(약 1400건)는 npm 패키지 설명이며 프로젝트 문서가 아니다. Git에도 없다.
 
 `Documents/` 원본은 **삭제하지 않음** (RAG·등급 자료). 아래는 위치·한 줄 요지만.
@@ -44,6 +44,7 @@
 | [`2026-08-14.md`](./work-log/2026-08-14.md) | Lightsail 16GB · Grafana env · 문서 정리 · 대시보드 공란 |
 | [`2026-08-15.md`](./work-log/2026-08-15.md) | 보안 DB 큐 · PC 워커 · 채점/이슈 지연 · spc_chart_json · 페이지×API 명세 |
 | [`2026-08-18.md`](./work-log/2026-08-18.md) | 버그수정·테스트 리포트 · 일지 통합 · score-pc · manage · 화면 안내 문구 · ISSUES.analysis_content · 챗 프롬프트 톤 |
+| [`2026-08-21.md`](./work-log/2026-08-21.md) | 챗봇 수정안 반영 · production build 복구 · 생성형 LLM 준비 상태 |
 
 ### 가이드 (`guides/`) — 사용자 따라 하기 · 구현·운영 절차
 
@@ -66,6 +67,7 @@
 | [`issue-lot-api.md`](./references/issue-lot-api.md) | 이슈/LOT API · 채점 3단 · Linux 대문자 · 페이지×API×화면 |
 | [`bug-fix-report.md`](./references/bug-fix-report.md) | 버그·충돌 수정 증거 (2026-07-21 ~ 08-15) |
 | [`test-report.md`](./references/test-report.md) | 단위·스모크·시나리오·실측 증거 (같은 기간) |
+| [`build-fix-and-llm-readiness-2026-08-21.md`](./references/build-fix-and-llm-readiness-2026-08-21.md) | build 복구 · 생성형 LLM 준비 조건 |
 | [`dev-timeline.md`](./references/dev-timeline.md) | 일지 날짜별 개발 요약 (2026-07-15 ~ 08-18) |
 | [`general-chatbot-page-context.md`](./references/general-chatbot-page-context.md) | 일반 챗 · 화면 컨텍스트 |
 | [`security-chatbot-guide.md`](./references/security-chatbot-guide.md) | 챗봇 이용·라우팅 |
@@ -86,6 +88,11 @@
 | [`important-paths.md`](./references/important-paths.md) | 자주 쓰는 코드 경로 |
 | [`chat-history-qdrant.md`](./references/chat-history-qdrant.md) | 챗 장기기억 Qdrant 컬렉션 |
 | [`scenario-smoke-checklist.md`](./references/scenario-smoke-checklist.md) | 시나리오 스모크 체크리스트 |
+| [`chatbot-review.md`](./chatbot-review.md) | 챗봇 UI·모델·API 점검 |
+| [`chatbot-code-before-after.md`](./chatbot-code-before-after.md) | 메뉴 답변 개선 전·후 코드 |
+| [`chatbot-fix-report.md`](./chatbot-fix-report.md) | 메뉴·조회 답변 개선 결과 |
+| [`chatbot-security-fix-summary.md`](./chatbot-security-fix-summary.md) | 인증·소유권·삭제·localStorage |
+| [`chatbot-performance-readiness-fix-2026-08-20.md`](./chatbot-performance-readiness-fix-2026-08-20.md) | RAG 지연 초기화·준비 상태·SHAP |
 
 ### 프롬프트 (`prompts/`)
 

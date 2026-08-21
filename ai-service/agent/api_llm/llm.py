@@ -25,6 +25,7 @@ from agent.api_llm.grounding import (
     build_grounding,
     is_lot_why_intent,
     is_page_summary_intent,
+    menu_answer_contract,
     message_lot_issue_ids,
     normalize_korean_reply,
     route_label,
@@ -71,10 +72,21 @@ def _build_messages(
     grounding = build_grounding(message, page_context, predict_result)
     sources = list(rag_sources or [])
     pc_out = page_context
+    supplement = (
+        pc_out.get("supplement")
+        if isinstance(pc_out, dict) and isinstance(pc_out.get("supplement"), dict)
+        else None
+    )
+    tool_contract = supplement.get("responseContract") if supplement else None
+    answer_contract = (
+        [str(value) for value in tool_contract if str(value).strip()]
+        if isinstance(tool_contract, list)
+        else menu_answer_contract(route)
+    )
     if sources:
         if not is_lot_why_intent(message):
             grounding.pop("analysis_hint", None)
-    elif need_rag:
+    elif need_rag and not supplement:
         grounding["empty_answer_hint"] = RAG_EMPTY_HINT
 
     page_sum = is_page_summary_intent(message)
@@ -84,6 +96,7 @@ def _build_messages(
         "recent_turns": None if page_sum else ((history_text or "").strip() or None),
         "route": route,
         "route_label": route_label(route),
+        "answer_contract": answer_contract,
         "analysis_mode": False if sources else (
             analysis_mode(message) or grounding.get("analysis_mode")
         ),
@@ -101,7 +114,7 @@ def _build_messages(
         follow = "이전 대화는 무시하고 지금 page_payload만 요약하세요. "
     elif ents:
         follow = (
-            "질문에 있는 LOT/이슈만 답하세요. "
+            "질문에 있는 LOT/이슈/문의만 답하세요. "
             "page_payload의 설정/문의 필드는 인용하지 마세요. "
         )
     else:
@@ -113,6 +126,8 @@ def _build_messages(
                 "아래 JSON을 보고 한국어로 답해 주세요. "
                 f"지금 화면 route={route or '/'} ({route_label(route)}). "
                 + follow
+                + "answer_contract 순서에 맞춰 데이터의 의미, 우선순위, 다음 행동을 답하세요. "
+                + "primary_table, items 같은 내부 JSON 키와 원본 JSON은 사용자에게 출력하지 마세요. "
                 + "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
                 + json.dumps(payload, ensure_ascii=False, default=str)
             )

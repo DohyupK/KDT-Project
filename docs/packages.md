@@ -23,7 +23,7 @@
 | 내 정보 | 헤더 프로필 모달 | `/setting#personal`로 가지 않음 |
 
 - App Router: `src/app/(shell)/` + 공통 `AppShell`. `/` → `/main`.
-- rewrite: `/api/*` → `:3001`, `/ai/*` → `:8800`
+- rewrite: `/api/*` → `:3001` (공개 `/ai` rewrite 없음. ai-service는 backend 내부 호출)
 - `AppData.fillThreshold` 필드명 변경 금지
 - 권장 기동: AWS 루트 `npm run dev`. 이 PC 보안: `npm run security-pc`. LOT 채점: `npm run score-pc`. 절차: [`guides/aws-pc-security-worker.md`](./guides/aws-pc-security-worker.md) · [`guides/aws-pc-score-worker.md`](./guides/aws-pc-score-worker.md).
 - AI 규칙: [`frontend/AGENTS.md`](../frontend/AGENTS.md)

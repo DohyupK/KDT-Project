@@ -144,6 +144,8 @@ class SecureRagEngine:
         self._ready = False
         self._init_error: str | None = None
         self._auto_retriever = None  # lazy VectorIndexAutoRetriever (Self-Query)
+        self._bm25_skipped = False  # True when local BM25 ≠ Qdrant point count
+        self._qdrant_point_count: int | None = None
 
     @property
     def ready(self) -> bool:
@@ -191,12 +193,57 @@ class SecureRagEngine:
             nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
         else:
             nodes = []
+        if not isinstance(nodes, list):
+            nodes = []
         tokenized = [_tokenize(n.get("text") or "") for n in nodes]
         bm25 = BM25Okapi(tokenized) if tokenized else None
         with self._bm25_lock:
             self._nodes = nodes
             self._tokenized = tokenized
             self._bm25 = bm25
+            self._bm25_skipped = False
+
+        q_count = self._collection_point_count(name)
+        self._qdrant_point_count = q_count
+        bm25_n = len(nodes)
+        if self._should_skip_bm25(q_count, bm25_n):
+            with self._bm25_lock:
+                self._bm25 = None
+                self._bm25_skipped = True
+            logger.warning(
+                "[secure-rag] BM25 skipped (mismatch) qdrant_points=%s "
+                "bm25_nodes=%s path=%s — using dense+rerank only",
+                q_count,
+                bm25_n,
+                NODES_PATH,
+            )
+        else:
+            logger.info(
+                "[secure-rag] hybrid ready qdrant_points=%s bm25_nodes=%s",
+                q_count,
+                bm25_n,
+            )
+
+    def _collection_point_count(self, name: str) -> int:
+        assert self._qdrant is not None
+        try:
+            info = self._qdrant.get_collection(name)
+            count = getattr(info, "points_count", None)
+            return int(count or 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[secure-rag] points_count failed: %s", exc)
+            return 0
+
+    @staticmethod
+    def _should_skip_bm25(qdrant_points: int, bm25_nodes: int) -> bool:
+        """Skip BM25 when local index diverges from Qdrant (e.g. AWS ingest, PC BM25 stale)."""
+        if qdrant_points <= 0:
+            return False
+        if bm25_nodes <= 0:
+            return True
+        larger = max(qdrant_points, bm25_nodes)
+        smaller = min(qdrant_points, bm25_nodes)
+        return (larger - smaller) / larger > 0.35
 
     def reload_bm25(self) -> None:
         """Hot-reload BM25 from bm25_nodes.json (no process restart)."""
@@ -214,7 +261,23 @@ class SecureRagEngine:
             self._nodes = nodes
             self._tokenized = tokenized
             self._bm25 = bm25
-        logger.info("[secure-rag] bm25 reloaded n=%s", len(nodes))
+            self._bm25_skipped = False
+        # Re-check against last known Qdrant count (or refresh).
+        q_count = self._qdrant_point_count
+        if q_count is None and self._qdrant is not None:
+            q_count = self._collection_point_count(collection_name())
+            self._qdrant_point_count = q_count
+        if q_count is not None and self._should_skip_bm25(int(q_count), len(nodes)):
+            with self._bm25_lock:
+                self._bm25 = None
+                self._bm25_skipped = True
+            logger.warning(
+                "[secure-rag] bm25 reload skipped mismatch qdrant=%s bm25=%s",
+                q_count,
+                len(nodes),
+            )
+        else:
+            logger.info("[secure-rag] bm25 reloaded n=%s", len(nodes))
 
     def reload_bm25_nodes(self) -> None:
         """Alias for reload_bm25 (compat)."""
@@ -358,6 +421,7 @@ class SecureRagEngine:
         filters = filters if filters is not None else self.parse_metadata_filters(
             query, llm_invoke
         )
+        query = re.sub(r"\s+", " ", (query or "").strip().strip("\"'「」『』"))
         dense_hits = self._dense_search(
             query, top_k=top_k, filters=filters, allowed_clearances=allowed
         )

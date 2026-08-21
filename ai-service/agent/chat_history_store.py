@@ -20,6 +20,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+class ThreadOwnershipError(PermissionError):
+    """Raised when a supplied thread belongs to another authenticated user."""
+
 _ENGINE = None
 
 _HEADER_NOISE = re.compile(
@@ -172,11 +176,13 @@ def ensure_thread(
         with engine.begin() as conn:
             row = conn.execute(
                 text(
-                    "SELECT id FROM USER_CHAT_THREADS WHERE id = :id LIMIT 1"
+                    "SELECT id, user_id FROM USER_CHAT_THREADS WHERE id = :id LIMIT 1"
                 ),
                 {"id": tid},
             ).fetchone()
             if row:
+                if str(row[1]) != str(user_id):
+                    raise ThreadOwnershipError("thread belongs to another user")
                 conn.execute(
                     text(
                         "UPDATE USER_CHAT_THREADS SET updated_at = :now WHERE id = :id"
@@ -200,6 +206,8 @@ def ensure_thread(
                 },
             )
         return tid
+    except ThreadOwnershipError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[chat_history] ensure_thread failed: %s", exc)
         return None
@@ -361,6 +369,30 @@ def load_messages_for_ui(
     if not thread_owned_by(thread_id=thread_id, user_id=user_id):
         return None
     return load_messages(thread_id, limit=max(1, min(500, int(limit))))
+
+
+def delete_thread(*, thread_id: str | None, user_id: str | None) -> bool:
+    """Delete one owned general thread; messages cascade through the FK."""
+    engine = get_engine()
+    if engine is None or not thread_id or not user_id:
+        return False
+    try:
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    DELETE FROM USER_CHAT_THREADS
+                    WHERE id = :tid AND user_id = :uid
+                    """
+                ),
+                {"tid": thread_id, "uid": user_id},
+            )
+        return int(result.rowcount or 0) > 0
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[chat_history] delete_thread failed: %s", exc)
+        return False
 
 
 def last_assistant_sources(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

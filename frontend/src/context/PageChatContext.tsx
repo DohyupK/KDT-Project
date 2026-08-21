@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -126,7 +127,10 @@ export function PageChatProvider({ children }: { children: ReactNode }) {
     supplementHints: [],
   })
   const snapshotRef = useRef(snapshot)
-  snapshotRef.current = snapshot
+
+  useEffect(() => {
+    snapshotRef.current = snapshot
+  }, [snapshot])
 
   const setPagePayload = useCallback((route: string, summary: unknown, hints?: string[]) => {
     setSnapshot((prev) => {

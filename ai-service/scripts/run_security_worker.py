@@ -42,6 +42,7 @@ def _poll_sec() -> float:
 def main() -> int:
     from agent import chat_history_store as hist
     from agent import security_queue_store as qstore
+    from agent.rag_engine import get_engine
     from agent.secure_llm.graph import run_secure_chat
 
     db = hist.chat_history_db_status()
@@ -49,8 +50,19 @@ def main() -> int:
         logger.error("MariaDB unavailable: %s", db.get("error"))
         return 1
 
+    warm_t0 = time.perf_counter()
+    engine = get_engine()
+    engine.ensure()
     logger.info(
-        "watching USER_SECURITY_MESSAGES pending rows poll=%.2fs vllm=%s qdrant=%s",
+        "rag warm ms=%.0f ready=%s err=%s",
+        (time.perf_counter() - warm_t0) * 1000,
+        engine.ready,
+        (engine.init_error or "")[:120],
+    )
+
+    logger.info(
+        "watching USER_SECURITY_MESSAGES pending rows poll=%.2fs vllm=%s qdrant=%s "
+        "history_limit=12 self_query=off",
         _poll_sec(),
         os.environ.get("CHAT_VLLM_BASE_URL") or "http://127.0.0.1:8001/v1",
         os.environ.get("QDRANT_URL") or "http://127.0.0.1:6333",
@@ -66,14 +78,31 @@ def main() -> int:
         text = str(job.get("content") or "").strip()
         logger.info("claimed id=%s thread=%s chars=%s", mid, tid, len(text))
         try:
-            history = qstore.load_messages(tid, limit=50, exclude_pending=True)
+            db_t0 = time.perf_counter()
+            history = qstore.load_messages(tid, limit=12, exclude_pending=True)
             prior = hist.last_assistant_sources(history)
             history_text = hist.format_history_text_compact(history)
+            db_ms = (time.perf_counter() - db_t0) * 1000
+
+            run_t0 = time.perf_counter()
             out = run_secure_chat(
                 text,
                 prior_sources=prior,
                 history_text=history_text,
             )
+            run_ms = (time.perf_counter() - run_t0) * 1000
+            retrieve_ms = None
+            generate_ms = None
+            for entry in out.get("trace") or []:
+                if not isinstance(entry, dict):
+                    continue
+                stage = str(entry.get("stage") or "")
+                ms = entry.get("ms")
+                if stage == "retrieve_done" and ms is not None:
+                    retrieve_ms = ms
+                if stage in ("generate_done", "generate_fail", "generate_skipped") and ms is not None:
+                    generate_ms = ms
+
             reply = str(out.get("reply") or "")
             err = out.get("error")
             st = "error" if err else "done"
@@ -87,11 +116,16 @@ def main() -> int:
             )
             qstore.mark_user(message_id=mid, status=st)
             logger.info(
-                "done id=%s status=%s mode=%s provider=%s",
+                "done id=%s status=%s mode=%s provider=%s "
+                "db_ms=%.0f retrieve_ms=%s generate_ms=%s run_ms=%.0f",
                 mid,
                 st,
                 out.get("mode"),
                 out.get("provider"),
+                db_ms,
+                retrieve_ms,
+                generate_ms,
+                run_ms,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("job id=%s failed: %s", mid, exc)

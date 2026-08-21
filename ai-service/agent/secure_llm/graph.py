@@ -10,6 +10,7 @@ Each run accumulates `trace` stages for FE/BE diagnostics.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, AsyncIterator, Awaitable, Callable, TypedDict
 
@@ -32,8 +33,10 @@ from agent.secure_llm.prompts import (
     NO_DOC_TOKEN,
     OFFLINE_REPLY,
     RAG_NOT_READY_REPLY,
+    SECURE_REQUEST_LABEL,
     SUMMARY_INSTRUCTION_SUFFIX,
     SYSTEM_SECURE_RAG,
+    detect_secure_topic_shift,
     expand_retrieve_query,
     finalize_reply_sources,
     format_compressed_extractive_reply,
@@ -43,10 +46,54 @@ from agent.secure_llm.prompts import (
     is_analytics_intent,
     is_short_followup,
     is_summary_intent,
+    strip_parrot_echo,
     wants_explain_suffix,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _history_for_generate_turn(
+    message: str, history_text: str | None
+) -> tuple[str, bool]:
+    """
+    History only for short follow-up / short summary.
+    New questions get no previous-turn block (anti-parrot / anti-sticky).
+    """
+    msg = (message or "").strip()
+    raw = (history_text or "").strip()
+    if is_short_followup(msg) or (is_summary_intent(msg) and len(msg) <= 40):
+        return history_for_generate(raw), False
+    return "", True
+
+
+def _apply_parrot_guard(
+    reply: str,
+    message: str,
+    sources: list[dict[str, Any]],
+    *,
+    use_analytics: bool = False,
+    analytics_text: str = "",
+) -> tuple[str, list[dict[str, Any]], str]:
+    """
+    Strip question echo. Empty after strip → extractive/analytics fallback.
+    Returns (reply, sources, provider_hint).
+    """
+    cleaned = strip_parrot_echo(reply, message)
+    if cleaned:
+        out, srcs = finalize_reply_sources(cleaned, sources)
+        return out, srcs, ""
+    if use_analytics and (analytics_text or "").strip():
+        out, srcs = finalize_reply_sources(analytics_text.strip(), sources)
+        return out, srcs, "polars"
+    if sources:
+        fb = format_extractive_reply(
+            sources,
+            notice=EMPTY_VLLM_REPLY + " 아래는 검색된 원문 발췌입니다.",
+        )
+        out, srcs = finalize_reply_sources(fb, sources)
+        return out, srcs, "rag_extractive"
+    return EMPTY_RAG_REPLY, [], "vllm"
 
 
 class SecureState(TypedDict, total=False):
@@ -85,12 +132,6 @@ def _trace_append(
     prev = list(state.get("trace") or [])
     prev.append(entry)
     return prev
-
-
-def _llm_text_invoke(prompt: str) -> str:
-    llm = make_vllm()
-    out = llm.invoke([HumanMessage(content=prompt)])
-    return usable_llm_text(out.content)
 
 
 def _log_empty_llm(out: Any, *, stage: str) -> None:
@@ -133,22 +174,26 @@ def node_retrieve(state: SecureState) -> SecureState:
             state.get("message") or "",
             state.get("history_text") or "",
         )
+        query = re.sub(r"\s+", " ", (query or "").strip().strip("\"'「」『』"))
         if expanded:
             logger.info(
                 "[secure-chat] retrieve query_expanded=True expand_query=%r",
                 query[:500],
             )
+        # Heuristic filters only — no SelfQuery LM (avoids double LM Studio call).
         hits = engine.retrieve(
             query,
             top_k=12,
             rerank_top_n=6,
-            llm_invoke=_llm_text_invoke,
+            llm_invoke=None,
             allowed_clearances=SECURE_ALLOWED_CLEARANCES,
         )
         # B: prior only for short follow-up; topic switch + 0 hits → no_docs.
         used_prior = False
-        if not hits:
-            msg = state.get("message") or ""
+        msg = state.get("message") or ""
+        hist = state.get("history_text") or ""
+        topic_shift = detect_secure_topic_shift(msg, hist)
+        if not hits and not topic_shift:
             # Short follow-up OR short summary-only ("요약해줘") → reuse prior.
             if is_short_followup(msg) or (
                 is_summary_intent(msg) and len(msg.strip()) <= 40
@@ -162,7 +207,7 @@ def node_retrieve(state: SecureState) -> SecureState:
         )
         detail = (
             f"n_sources={len(hits)} docs={doc_ids} "
-            f"query_expanded={expanded}"
+            f"query_expanded={expanded} topic_shift={int(topic_shift)}"
         )
         if expanded:
             detail = f"{detail} expand_query={query[:220]}"
@@ -388,12 +433,16 @@ def node_generate(state: SecureState) -> SecureState:
         max_tokens = 256
     context = format_rag_context_for_generate(sources)
     cite_hint = ", ".join(f"[출처: {t}]" for t in titles if t)
-    history = history_for_generate(state.get("history_text") or "")
+    history, topic_shift = _history_for_generate_turn(
+        state.get("message") or "",
+        state.get("history_text") or "",
+    )
     history_block = f"이전 대화:\n{history}\n\n" if history else ""
+    req = f"{SECURE_REQUEST_LABEL}:\n{state['message']}\n\n"
     if use_analytics:
         user_block = (
             f"{history_block}"
-            f"질문:\n{state['message']}\n\n"
+            f"{req}"
             f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
             f"답변 끝에 사용한 출처를 붙여라. 예: {cite_hint}\n\n"
             f"{ANALYTICS_GROUNDING_SUFFIX}"
@@ -401,7 +450,7 @@ def node_generate(state: SecureState) -> SecureState:
     else:
         user_block = (
             f"{history_block}"
-            f"질문:\n{state['message']}\n\n"
+            f"{req}"
             f"검색된 사내 문서 발췌:\n{context}\n\n"
             f"답변 끝에 사용한 문서에 대해 반드시 인용을 붙이세요. 예: {cite_hint}"
         )
@@ -418,6 +467,7 @@ def node_generate(state: SecureState) -> SecureState:
             ok=True,
             detail=(
                 f"prompt_chars={prompt_chars} history_chars={len(history)} "
+                f"topic_shift={int(topic_shift)} "
                 f"ctx_chars={len(context)} timeout_s={timeout_s} "
                 f"max_tokens={max_tokens} summary={summary_intent} "
                 f"brief_cap={brief_path}"
@@ -444,18 +494,18 @@ def node_generate(state: SecureState) -> SecureState:
             _log_empty_llm(out, stage="generate_first")
             # One retry: no history, shorter instruction (empty content ≠ timeout).
             retry_block = (
-                f"질문:\n{state['message']}\n\n"
+                f"{SECURE_REQUEST_LABEL}:\n{state['message']}\n\n"
                 f"검색된 사내 문서 발췌:\n{context}\n\n"
                 "위 발췌만 근거로 한국어 2~5문장으로 바로 답하라. "
-                "빈 문자열·도구호출 금지. "
+                "질문을 되풀이하지 마라. 빈 문자열·도구호출 금지. "
                 f"답 끝에 인용을 붙여라. 예: {cite_hint}"
             )
             if use_analytics:
                 retry_block = (
-                    f"질문:\n{state['message']}\n\n"
+                    f"{SECURE_REQUEST_LABEL}:\n{state['message']}\n\n"
                     f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
                     "위 집계 결과만 근거로 한국어 2~5문장으로 바로 답하라. "
-                    "빈 문자열·도구호출 금지. "
+                    "질문을 되풀이하지 마라. 빈 문자열·도구호출 금지. "
                     f"답 끝에 인용을 붙여라. 예: {cite_hint}\n\n"
                     f"{ANALYTICS_GROUNDING_SUFFIX}"
                 )
@@ -513,13 +563,23 @@ def node_generate(state: SecureState) -> SecureState:
                         detail=f"empty_vllm_reply→extractive gen_ms={gen_ms}",
                     ),
                 }
-        reply, sources = finalize_reply_sources(reply, sources)
+        reply, sources, provider_hint = _apply_parrot_guard(
+            reply,
+            state.get("message") or "",
+            sources,
+            use_analytics=use_analytics,
+            analytics_text=str(state.get("analytics_text") or ""),
+        )
+        provider = (
+            provider_hint
+            or ("polars" if use_analytics else "vllm")
+        )
         return {
             **state,
             "reply": reply,
             "sources": sources,
             "mode": "security_analytics" if use_analytics else "security_rag",
-            "provider": "polars" if use_analytics else "vllm",
+            "provider": provider,
             "error": None,
             "trace": _trace_append(
                 state,
@@ -894,12 +954,16 @@ async def stream_secure_chat(
         titles = sorted({str(s.get("title") or "") for s in sources if s.get("title")})
         context = format_rag_context_for_generate(sources)
         cite_hint = ", ".join(f"[출처: {t}]" for t in titles if t)
-        history = history_for_generate(state.get("history_text") or "")
+        history, _topic_shift = _history_for_generate_turn(
+            text,
+            state.get("history_text") or "",
+        )
         history_block = f"이전 대화:\n{history}\n\n" if history else ""
+        req = f"{SECURE_REQUEST_LABEL}:\n{text}\n\n"
         if used_analytics:
             user_block = (
                 f"{history_block}"
-                f"질문:\n{text}\n\n"
+                f"{req}"
                 f"{ANALYTICS_RESULT_HEADER}\n{state.get('analytics_text')}\n\n"
                 f"답변 끝에 사용한 출처를 붙여라. 예: {cite_hint}\n\n"
                 f"{ANALYTICS_GROUNDING_SUFFIX}"
@@ -907,7 +971,7 @@ async def stream_secure_chat(
         else:
             user_block = (
                 f"{history_block}"
-                f"질문:\n{text}\n\n"
+                f"{req}"
                 f"검색된 사내 문서 발췌:\n{context}\n\n"
                 f"답변 끝에 사용한 문서에 대해 반드시 인용을 붙이세요. 예: {cite_hint}"
             )
@@ -999,13 +1063,23 @@ async def stream_secure_chat(
             )
             return
 
-        reply, sources_out = finalize_reply_sources(final_raw, sources)
+        reply, sources_out, provider_hint = _apply_parrot_guard(
+            final_raw,
+            text,
+            sources,
+            use_analytics=used_analytics,
+            analytics_text=str(state.get("analytics_text") or ""),
+        )
+        provider = (
+            provider_hint
+            or ("polars" if used_analytics else "vllm")
+        )
         yield _sse_event(
             "done",
             {
                 "reply": reply,
                 "mode": "security_analytics" if used_analytics else "security_rag",
-                "provider": "polars" if used_analytics else "vllm",
+                "provider": provider,
                 "error": None,
                 "sources": _clean_sources(sources_out),
                 "trace": list(state.get("trace") or []),

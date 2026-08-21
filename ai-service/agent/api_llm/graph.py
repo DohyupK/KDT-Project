@@ -23,7 +23,28 @@ from agent.api_llm.llm import compose_with_failover, llm_enabled
 from agent.api_llm.prompts import LLM_OFF_EXCERPT_NOTICE, RAG_EMPTY_HINT, USAGE_GUIDELINE
 from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
+
+
+_RISK_FACTOR_LABELS = {
+    "metal_impurity": "금속 불순물",
+    "temp_dev_from_800": "소결온도의 800°C 기준 편차",
+    "humidity": "습도",
+    "temp_x_humidity": "소결온도·습도 상호작용",
+    "sintering_temp": "소결온도",
+    "lithium_input": "리튬 투입량",
+    "additive_ratio": "첨가제 비율",
+    "process_time": "공정 시간",
+    "tank_pressure": "탱크 압력",
+}
+
+
+def _risk_factor_label(value: Any) -> str:
+    key = str(value)
+    return _RISK_FACTOR_LABELS.get(key, key)
 from agent.api_llm.grounding import (
+    build_focus_context_reply,
+    build_menu_context_reply,
+    build_read_tool_reply,
     deterministic_user_reply,
     is_lot_why_intent,
     is_page_summary_intent,
@@ -329,101 +350,51 @@ def _template_reply(
     if error and predict_result is None and not page_context:
         return f"진단에 실패했습니다: {error}"
 
-    if need_rag and not rag_sources:
+    has_read_tool = bool(
+        isinstance(page_context, dict)
+        and isinstance(page_context.get("supplement"), dict)
+    )
+    if need_rag and not rag_sources and not has_read_tool:
         return RAG_EMPTY_HINT
 
     parts: list[str] = []
-    if page_context and not rag_sources:
-        route = page_context.get("route") or "/"
-        focus = page_context.get("focus_id") or page_context.get("focusId")
-        parts.append(
-            join_spaced_parts(
-                [
-                    f"현재 화면 ({route})",
-                    f"포커스 = {focus}" if focus else None,
-                    "기준입니다.",
-                ]
-            )
-        )
+    if page_context:
         focus_payload = page_context.get("focus_payload") or page_context.get("focusPayload")
         page_payload = page_context.get("page_payload") or page_context.get("pagePayload")
-        if isinstance(page_payload, dict) and page_payload.get("empty_hint"):
-            parts.append(str(page_payload["empty_hint"]))
+        tool_reply = build_read_tool_reply(page_context)
+        if tool_reply:
+            parts.append(tool_reply)
         try:
-            if focus_payload is not None and not (
-                isinstance(page_payload, dict) and page_payload.get("primary_table") == "offscreen"
-            ):
-                # Prefer human summary fields over raw JSON dump when possible
-                if isinstance(focus_payload, dict):
-                    field_bits = [
-                        f"LOT {focus_payload.get('lotId')}"
-                        if focus_payload.get("lotId")
-                        else None,
-                        f"등급 {focus_payload.get('grade') or focus_payload.get('status')}"
-                        if (focus_payload.get("grade") or focus_payload.get("status"))
-                        else None,
-                        f"SPC {focus_payload.get('spcStatus') or focus_payload.get('spc')}"
-                        if (
-                            focus_payload.get("spcStatus") is not None
-                            or focus_payload.get("spc") is not None
-                        )
-                        else None,
-                    ]
-                    human = join_spaced_parts([b for b in field_bits if b])
-                    if human:
-                        parts.append(join_spaced_parts(["포커스 데이터:", human]))
-                    else:
-                        parts.append(
-                            join_spaced_parts(
-                                [
-                                    "포커스 데이터:",
-                                    json.dumps(
-                                        focus_payload, ensure_ascii=False, default=str
-                                    )[:1200],
-                                ]
-                            )
-                        )
-                else:
-                    parts.append(
-                        join_spaced_parts(
-                            [
-                                "포커스 데이터:",
-                                json.dumps(
-                                    focus_payload, ensure_ascii=False, default=str
-                                )[:1200],
-                            ]
-                        )
-                    )
-            elif page_payload is not None:
-                if not (
-                    isinstance(page_payload, dict)
-                    and page_payload.get("primary_table") == "offscreen"
+            if not tool_reply and not rag_sources:
+                if isinstance(page_payload, dict) and page_payload.get("empty_hint"):
+                    parts.append(str(page_payload["empty_hint"]))
+                if focus_payload is not None and not (
+                    isinstance(page_payload, dict) and page_payload.get("primary_table") == "offscreen"
                 ):
-                    parts.append(
-                        join_spaced_parts(
-                            [
-                                "화면 데이터:",
-                                json.dumps(
-                                    page_payload, ensure_ascii=False, default=str
-                                )[:1200],
-                            ]
-                        )
-                    )
+                    focus_reply = build_focus_context_reply(page_context)
+                    if focus_reply:
+                        parts.append(focus_reply)
+                elif page_payload is not None:
+                    if not (
+                        isinstance(page_payload, dict)
+                        and page_payload.get("primary_table") == "offscreen"
+                    ):
+                        menu_reply = build_menu_context_reply(message, page_context)
+                        if menu_reply:
+                            parts.append(menu_reply)
+                        else:
+                            parts.append(
+                                join_spaced_parts(
+                                    [
+                                        "화면 데이터:",
+                                        json.dumps(
+                                            page_payload, ensure_ascii=False, default=str
+                                        )[:1200],
+                                    ]
+                                )
+                            )
         except Exception:  # noqa: BLE001
             pass
-        supplement = page_context.get("supplement")
-        if supplement:
-            try:
-                parts.append(
-                    join_spaced_parts(
-                        [
-                            "서버 보충:",
-                            json.dumps(supplement, ensure_ascii=False, default=str)[:800],
-                        ]
-                    )
-                )
-            except Exception:  # noqa: BLE001
-                pass
 
     if rag_sources:
         parts.append(LLM_OFF_EXCERPT_NOTICE)
@@ -437,19 +408,46 @@ def _template_reply(
         prob = float(predict_result.get("probability") or 0)
         thr = float(predict_result.get("applied_threshold") or 0.5)
         defect = int(predict_result.get("defect_status") or 0)
-        factors = predict_result.get("top_factors") or []
-        factors_txt = ", ".join(str(f) for f in factors[:4]) or "(없음)"
+        factors = (
+            predict_result.get("top_risk_factors")
+            or predict_result.get("top_factors")
+            or []
+        )
+        factors_txt = ", ".join(_risk_factor_label(f) for f in factors[:4]) or "(없음)"
         label = "불량 (O)" if defect == 1 else "정상 (X)"
+        decision = predict_result.get("decision_basis")
+        probability_label = "블렌드 불량 확률" if isinstance(decision, dict) else "불량 확률"
         parts.append(
             join_spaced_parts(
                 [
                     f"모델 진단: {label},",
-                    f"불량 확률 {prob:.4f}",
+                    f"{probability_label} {prob:.4f}",
                     f"(임계 {thr}).",
                     f"전역 Top 요인: {factors_txt}.",
                 ]
             )
         )
+        if isinstance(decision, dict):
+            triggered = [str(value) for value in (decision.get("triggered_by") or [])]
+            symbolic_score = decision.get("symbolic_score")
+            symbolic_threshold = decision.get("symbolic_threshold")
+            if "symbolic" in triggered:
+                parts.append(
+                    join_spaced_parts(
+                        [
+                            "판정 근거: symbolic 규칙이 OR 조건을 충족했습니다.",
+                            (
+                                f"symbolic 점수 {float(symbolic_score):.4f}, "
+                                f"임계 {float(symbolic_threshold):.4f}."
+                                if symbolic_score is not None and symbolic_threshold is not None
+                                else None
+                            ),
+                        ]
+                    )
+                )
+        validation_notice = predict_result.get("validation_notice")
+        if validation_notice:
+            parts.append(f"검증 주의: {validation_notice}")
     body = join_spaced_parts([p for p in parts if p], sep="\n")
     if not body:
         body = (

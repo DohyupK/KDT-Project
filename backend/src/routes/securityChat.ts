@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
+import { authMiddleware } from '../middleware/auth.middleware.js'
 import {
-  ensureSession,
+  ensureScopedSession,
   getChatStoreMode,
   insertMessage,
 } from '../services/chatStore.js'
@@ -10,7 +12,7 @@ import {
  * FE SecurityChatbot → POST /api/security-chat → ai-service enqueue USER_SECURITY_MESSAGES
  * → PC worker (RAG + vLLM). Never uses general /api/chat or Groq/Gemini.
  *
- * Multi-turn (B): FE sends message + thread_id + user_id only (no history array).
+ * Multi-turn (B): FE sends message + thread_id only; JWT supplies user identity.
  * Express pass-through to ai-service; MariaDB history is loaded there.
  * Legacy chat_sessions store is kept in parallel (not removed).
  */
@@ -21,7 +23,6 @@ const SECURITY_CHAT_TIMEOUT_MS = 180_000
 type SecurityChatBody = {
   message?: string
   thread_id?: string | null
-  user_id?: string | null
   /** @deprecated alias — mapped to thread_id */
   session_id?: string | null
 }
@@ -59,6 +60,44 @@ type StructuredErrorBody = {
   stage?: string
   trace?: TraceEntry[]
   elapsed_ms?: number
+}
+
+type SecurityReadiness = {
+  ready: boolean
+  status: 'ready' | 'degraded'
+  message: string
+  checks: Record<string, { ok: boolean; label: string; detail?: string | null }>
+  checked_at: string
+  note?: string
+}
+
+async function proxySecurityReadiness(): Promise<SecurityReadiness> {
+  const base = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8800').replace(
+    /\/$/,
+    '',
+  )
+  try {
+    const response = await fetch(`${base}/security-chat/readiness`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(2_500),
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return (await response.json()) as SecurityReadiness
+  } catch {
+    return {
+      ready: false,
+      status: 'degraded',
+      message: 'AI 서비스 준비 상태를 확인할 수 없습니다.',
+      checks: {
+        aiService: {
+          ok: false,
+          label: 'AI 서비스',
+          detail: '연결할 수 없음',
+        },
+      },
+      checked_at: new Date().toISOString(),
+    }
+  }
 }
 
 function asErrorBody(raw: string): Partial<AiSecurityChatResponse> {
@@ -175,7 +214,11 @@ async function proxySecurityChat(payload: {
 
 export const securityChatRouter = Router()
 
-securityChatRouter.post('/security-chat', async (req, res) => {
+securityChatRouter.get('/security-chat/readiness', authMiddleware, async (_req, res) => {
+  res.json(await proxySecurityReadiness())
+})
+
+securityChatRouter.post('/security-chat', authMiddleware, async (req, res) => {
   const t0 = Date.now()
   try {
     const body = req.body as SecurityChatBody
@@ -189,13 +232,14 @@ securityChatRouter.post('/security-chat', async (req, res) => {
       return
     }
 
-    const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
-    const userId = (body.user_id || undefined) ?? undefined
+    const threadId =
+      (body.thread_id || body.session_id || '').trim() || randomUUID()
+    const userId = req.auth!.userId
 
     // Legacy parallel store (sqlite/mariadb chat_sessions) — keep; do not remove.
     let sessionId: string
     try {
-      sessionId = await ensureSession(threadId ?? body.session_id)
+      sessionId = await ensureScopedSession(userId, threadId, 'security')
       await insertMessage(sessionId, 'user', message, 'security_user', 'security')
     } catch (storeErr) {
       const detail =
@@ -211,11 +255,11 @@ securityChatRouter.post('/security-chat', async (req, res) => {
 
     const { ai, elapsed_ms } = await proxySecurityChat({
       message,
-      thread_id: threadId || sessionId,
+      thread_id: threadId,
       user_id: userId,
     })
 
-    const outThreadId = ai.thread_id || threadId || sessionId
+    const outThreadId = ai.thread_id || threadId
 
     try {
       await insertMessage(
@@ -281,7 +325,7 @@ securityChatRouter.post('/security-chat', async (req, res) => {
   }
 })
 
-securityChatRouter.post('/security-chat/stream', async (req, res) => {
+securityChatRouter.post('/security-chat/stream', authMiddleware, async (req, res) => {
   const t0 = Date.now()
   const body = req.body as SecurityChatBody
   const message = (body.message || '').trim()
@@ -294,12 +338,13 @@ securityChatRouter.post('/security-chat/stream', async (req, res) => {
     return
   }
 
-  const threadId = (body.thread_id || body.session_id || undefined) ?? undefined
-  const userId = (body.user_id || undefined) ?? undefined
+  const threadId =
+    (body.thread_id || body.session_id || '').trim() || randomUUID()
+  const userId = req.auth!.userId
 
   let sessionId: string
   try {
-    sessionId = await ensureSession(threadId ?? body.session_id)
+    sessionId = await ensureScopedSession(userId, threadId, 'security')
     await insertMessage(sessionId, 'user', message, 'security_user', 'security')
   } catch (storeErr) {
     const detail =
@@ -367,7 +412,7 @@ securityChatRouter.post('/security-chat/stream', async (req, res) => {
   try {
     console.info('[security-chat/stream] proxy_start', {
       base,
-      thread_id: threadId || sessionId,
+      thread_id: threadId,
       message_len: message.length,
     })
     const upstream = await fetch(`${base}/security-chat/stream`, {
@@ -378,7 +423,7 @@ securityChatRouter.post('/security-chat/stream', async (req, res) => {
       },
       body: JSON.stringify({
         message,
-        thread_id: threadId || sessionId,
+        thread_id: threadId,
         user_id: userId,
       }),
       signal: ac.signal,

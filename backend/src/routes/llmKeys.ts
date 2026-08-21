@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { authMiddleware, requireManage } from '../middleware/auth.middleware.js'
 import {
   createLlmKey,
   deleteLlmKey,
@@ -9,7 +10,7 @@ import {
 
 export const llmKeysRouter = Router()
 
-llmKeysRouter.get('/llm-keys', (_req, res) => {
+llmKeysRouter.get('/llm-keys', authMiddleware, (_req, res) => {
   try {
     const keys = listLlmKeys()
     res.json({
@@ -24,7 +25,7 @@ llmKeysRouter.get('/llm-keys', (_req, res) => {
   }
 })
 
-llmKeysRouter.post('/llm-keys', (req, res) => {
+llmKeysRouter.post('/llm-keys', authMiddleware, requireManage, (req, res) => {
   try {
     const body = req.body as CreateLlmKeyInput
     const created = createLlmKey(body)
@@ -37,9 +38,9 @@ llmKeysRouter.post('/llm-keys', (req, res) => {
   }
 })
 
-llmKeysRouter.delete('/llm-keys/:id', (req, res) => {
+llmKeysRouter.delete('/llm-keys/:id', authMiddleware, requireManage, (req, res) => {
   try {
-    const ok = deleteLlmKey(req.params.id)
+    const ok = deleteLlmKey(String(req.params.id))
     if (!ok) {
       res.status(404).json({ error: 'not found' })
       return

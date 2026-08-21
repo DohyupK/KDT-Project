@@ -19,6 +19,10 @@ from agent.chat_history_store import get_engine, heuristic_truncate, history_win
 
 logger = logging.getLogger(__name__)
 
+
+class ThreadOwnershipError(PermissionError):
+    """Raised when a supplied security thread belongs to another user."""
+
 WORKER_UNAVAILABLE_REPLY = (
     "이 PC 보안 워커가 응답하지 않았습니다.\n\n"
     "작업자 안내: vLLM(:8001)과 python ai-service/scripts/run_security_worker.py 를 "
@@ -70,10 +74,12 @@ def ensure_thread(*, thread_id: str | None, user_id: str | None) -> str | None:
 
         with engine.begin() as conn:
             row = conn.execute(
-                text("SELECT id FROM USER_SECURITY_THREADS WHERE id = :id LIMIT 1"),
+                text("SELECT id, user_id FROM USER_SECURITY_THREADS WHERE id = :id LIMIT 1"),
                 {"id": tid},
             ).fetchone()
             if row:
+                if str(row[1]) != str(user_id):
+                    raise ThreadOwnershipError("security thread belongs to another user")
                 conn.execute(
                     text(
                         "UPDATE USER_SECURITY_THREADS SET updated_at = :now WHERE id = :id"
@@ -96,6 +102,8 @@ def ensure_thread(*, thread_id: str | None, user_id: str | None) -> str | None:
                 },
             )
         return tid
+    except ThreadOwnershipError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("[security_queue] ensure_thread failed: %s", exc)
         return None
@@ -231,6 +239,30 @@ def load_messages_for_ui(
     if not thread_owned_by(thread_id=thread_id, user_id=user_id):
         return None
     return load_messages(thread_id, limit=max(1, min(500, int(limit))))
+
+
+def delete_thread(*, thread_id: str | None, user_id: str | None) -> bool:
+    """Delete one owned security thread; messages and source JSON cascade."""
+    engine = get_engine()
+    if engine is None or not thread_id or not user_id:
+        return False
+    try:
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    DELETE FROM USER_SECURITY_THREADS
+                    WHERE id = :tid AND user_id = :uid
+                    """
+                ),
+                {"tid": thread_id, "uid": user_id},
+            )
+        return int(result.rowcount or 0) > 0
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[security_queue] delete_thread failed: %s", exc)
+        return False
 
 
 def insert_user_pending(
