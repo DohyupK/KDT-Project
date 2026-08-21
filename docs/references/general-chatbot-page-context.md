@@ -189,7 +189,7 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
 ```
 
 보안 키워드 히트 시: `mode: security_redirect`, AI 프록시 없음. FE는 보안 상담 탭으로 전환하고 질문을 입력란에 넘김.
-키워드 미스 후 화면·버튼·로그 밖 발화: ai-service가 Qdrant **dense peek**(encode 1회, BM25/rerank 생략) — Secret/TopSecret 히트면 같은 `security_redirect`, Public/Confidential 히트면 RAG compose. 문서 intent 본답은 기존 hybrid+rerank. 첫 지연을 줄이려면 `CHAT_RAG_WARM_ON_STARTUP=1`.
+키워드 미스 후 화면·버튼·로그 밖 발화: ai-service가 Qdrant **dense peek**(encode 1회, BM25/rerank 생략) — Secret redirect는 **기밀/시크릿 문서 intent** + 점수≥`CHAT_SECURE_PEEK_MIN_SCORE`(기본 0.88) + Public 대비 `CHAT_SECURE_PEEK_MARGIN`(기본 0.18)일 때만. TopSecret에 모델·임계 문서가 있어도 「불량확률」「SOP」 같은 일반 질문은 탭 전환하지 않음. 문서 intent 본답은 hybrid+rerank. 첫 지연을 줄이려면 `CHAT_RAG_WARM_ON_STARTUP=1`.
 
 ---
 
@@ -221,7 +221,7 @@ focus가 LOT/이슈면 **같은 라우트 상세만** 숫자 교체 (`getLotRisk
    5. **LOT/이슈 ID가 메시지에 있고** route가 `/setting`·`/inquiry`·`/management`이면 설정/문의 UI 필드를 제거 (`primary_table=entity`). 폰트·테마를 근거로 쓰지 않음.  
    6. 아니면 라우트별 페이지 슬라이스. `/main`은 `riskTop`만, `/dashboard`는 `lotRisks`만, `/issue`는 `issues`만. 라우트에 없는 키와 `supplement`는 제거. knowledge both/handover/past, inquiry, setting, management는 기존과 동일.  
 4. **features:** FE가 준 값 우선. 없으면 진단·저감·LOT why intent일 때 page/focus에서 추출 (`줄이|낮추|개선|방안|조치|what-if` 등 포함).  
-5. **RAG / peek:** 문서 intent(`needs_rag`) 또는 화면 밖 발화(`should_peek_docs`)면 Qdrant. **라우팅 peek = dense-only·encode 1회**(Secret/Public clearance별 search). Secret/TopSecret → `security_redirect`(본문 비노출). Public+Confidential → `rag_sources` 후 compose; 문서 intent면 이어서 hybrid+rerank `rag_bundle`. 「이 화면 요약」·순수 UI/KPI는 스킵. Secret 임계 `CHAT_SECURE_PEEK_MIN_SCORE`(dense cosine, 기본 0.45).  
+5. **RAG / peek:** 문서 intent(`needs_rag`) 또는 화면 밖 발화(`should_peek_docs`)면 Qdrant. **라우팅 peek = dense-only·encode 1회**. Secret redirect는 **기밀/시크릿 문서 intent** + 임계(기본 0.88) + Public 대비 margin(기본 0.18)일 때만. Public+Confidential → `rag_sources` 후 compose; 문서 intent면 hybrid+rerank `rag_bundle`. 「이 화면 요약」·순수 UI/KPI는 스킵.
 6. **predict/whatif:** features 있을 때 registry 헤드. **불량확률 저감 수치 제안 = 학습 헤드 what-if 그리드**(습도·소성온도 델타 → 확률 최소). 문서만으로 공정값을 만들지 않음.  
 7. **compose**  
    - deterministic (`offscreen` / `focus_summary` / `focus_spc_absent`) → LLM **스킵**, `provider=grounding`  

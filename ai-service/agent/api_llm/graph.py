@@ -226,11 +226,78 @@ def should_peek_docs(
 
 def _secure_peek_min_score() -> float:
     """Dense cosine threshold for Secret routing (not CrossEncoder scale)."""
-    raw = (os.environ.get("CHAT_SECURE_PEEK_MIN_SCORE") or "0.45").strip()
+    raw = (os.environ.get("CHAT_SECURE_PEEK_MIN_SCORE") or "0.88").strip()
     try:
         return float(raw)
     except ValueError:
-        return 0.45
+        return 0.88
+
+
+def _secure_peek_margin() -> float:
+    """Secret must beat best Public/Confidential score by this margin."""
+    raw = (os.environ.get("CHAT_SECURE_PEEK_MARGIN") or "0.18").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.18
+
+
+# Peek redirect only when the user is clearly asking about classified corpus —
+# domain overlap with TopSecret model/threshold docs must not force the tab.
+_SECRET_DOC_INTENT_RE = re.compile(
+    r"(?:"
+    r"기밀\s*(?:문서|자료|파일|폴더|매뉴얼|sop)?"
+    r"|대외비"
+    r"|시크릿\s*(?:문서|자료|파일|폴더)?"
+    r"|비밀\s*(?:문서|자료)"
+    r"|보안\s*(?:문서|자료|매뉴얼|상담)"
+    r"|top\s*secret|topsecret"
+    r"|secret\s*(?:doc|document|file|folder|문서|자료)"
+    r"|열람\s*(?:제한|불가)"
+    r"|clearance"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def wants_secret_doc_redirect(message: str) -> bool:
+    """True only when utterance targets Secret/TopSecret corpus, not general QC."""
+    m = (message or "").strip()
+    if not m:
+        return False
+    return bool(_SECRET_DOC_INTENT_RE.search(m))
+
+
+def select_secret_redirect_hits(
+    secret_meta: list[dict[str, Any]],
+    public_hits: list[dict[str, Any]],
+    *,
+    message: str | None = None,
+    min_score: float | None = None,
+    margin: float | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Keep Secret hits only when:
+    1) user asks about classified/secret docs (lexical intent), and
+    2) score is high AND clearly above Public.
+    Domain overlap alone (공정/품질 ↔ TopSecret 모델 문서) must not redirect.
+    """
+    if message is not None and not wants_secret_doc_redirect(message):
+        return []
+    thr = _secure_peek_min_score() if min_score is None else float(min_score)
+    gap = _secure_peek_margin() if margin is None else float(margin)
+    pub_best = 0.0
+    for h in public_hits:
+        pub_best = max(pub_best, float(h.get("score") or 0.0))
+    out: list[dict[str, Any]] = []
+    for h in secret_meta:
+        score = float(h.get("score") or 0.0)
+        if score < thr:
+            continue
+        if score < pub_best + gap:
+            continue
+        out.append(h)
+    return out
 
 
 def _dual_doc_peek(
@@ -249,6 +316,9 @@ def _dual_doc_peek(
         "qdrant_ms": 0.0,
         "peek_ms": 0.0,
         "public_rag_ms": 0.0,
+        "secret_score": 0.0,
+        "public_score": 0.0,
+        "peek_margin": 0.0,
     }
     query = expand_rag_query(message, history_text)
     if not query:
@@ -267,10 +337,40 @@ def _dual_doc_peek(
         return [], [], empty_timing
 
     timing = {**empty_timing, **timing}
-    min_score = _secure_peek_min_score()
-    secret_hits = [
-        h for h in secret_meta if float(h.get("score") or 0.0) >= min_score
-    ]
+    thr = _secure_peek_min_score()
+    gap = _secure_peek_margin()
+    pub_best = max((float(h.get("score") or 0.0) for h in public_dense), default=0.0)
+    sec_best = max((float(h.get("score") or 0.0) for h in secret_meta), default=0.0)
+    timing["secret_score"] = round(sec_best, 4)
+    timing["public_score"] = round(pub_best, 4)
+    timing["peek_margin"] = gap
+    intent_ok = wants_secret_doc_redirect(message)
+    secret_hits = select_secret_redirect_hits(
+        secret_meta,
+        public_dense,
+        message=message,
+        min_score=thr,
+        margin=gap,
+    )
+    if secret_hits:
+        _log.info(
+            "[chat-peek] secret_redirect secret_score=%s public_score=%s "
+            "min=%s margin=%s intent=1",
+            timing["secret_score"],
+            timing["public_score"],
+            thr,
+            gap,
+        )
+    elif secret_meta:
+        _log.info(
+            "[chat-peek] secret_suppressed secret_score=%s public_score=%s "
+            "min=%s margin=%s intent=%s",
+            timing["secret_score"],
+            timing["public_score"],
+            thr,
+            gap,
+            1 if intent_ok else 0,
+        )
 
     if full_public:
         t_p = time.perf_counter()

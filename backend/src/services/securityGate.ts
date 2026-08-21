@@ -4,22 +4,19 @@
  */
 
 const DEFAULT_KEYWORDS = [
-  '보안',
   '기밀',
   '사내 기밀',
   '사내기밀',
   '대외비',
-  '유출',
-  '비밀번호',
   '시크릿',
   'api키',
   'api key',
-  'confidential',
+  'topsecret',
+  'top secret',
   'secret',
+  '비밀번호',
   'password',
-  '사내문서',
-  '내부문서',
-  '금지',
+  '유출',
 ]
 
 export const SECURITY_REDIRECT_REPLY =
