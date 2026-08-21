@@ -187,3 +187,81 @@ controlRouter.post('/control/approve/:id/outcome', async (req, res) => {
     res.status(400).json({ error: detail })
   }
 })
+
+type RemediationProposalBody = {
+  id?: string
+  title?: string
+  narrative?: string
+}
+
+type RemediationDecideBody = {
+  session_id?: string | null
+  decision?: 'approved' | 'rejected'
+  issueId?: string
+  proposal?: RemediationProposalBody | null
+}
+
+/**
+ * Soft issue remediation: log-only approve/reject. No PLC / bounds / hardware.
+ * FE: GlobalChatbot remediation cards.
+ */
+controlRouter.post('/control/remediation/decide', async (req, res) => {
+  try {
+    const body = req.body as RemediationDecideBody
+    const decision = body.decision
+    if (decision !== 'approved' && decision !== 'rejected') {
+      res.status(400).json({ error: 'decision must be approved or rejected' })
+      return
+    }
+    const issueId =
+      typeof body.issueId === 'string' && body.issueId.trim()
+        ? body.issueId.trim()
+        : null
+    const proposal = body.proposal
+    const narrative =
+      (typeof proposal?.narrative === 'string' && proposal.narrative.trim()) ||
+      ''
+    if (!issueId || !narrative) {
+      res.status(400).json({ error: 'issueId and proposal.narrative are required' })
+      return
+    }
+
+    const sessionId = await ensureSession(body.session_id)
+    const title =
+      (typeof proposal?.title === 'string' && proposal.title.trim()) || '조치 제안'
+    const proposalId =
+      (typeof proposal?.id === 'string' && proposal.id.trim()) || 'unknown'
+
+    const row = await insertOptimizationEvent({
+      sessionId,
+      lotId: issueId,
+      beforeFeatures: { issueId },
+      proposedDeltas: {
+        kind: 'issue_remediation',
+        proposalId,
+        title,
+        narrative,
+      },
+      afterFeatures: { issueId, decision },
+      probBefore: 0,
+      probAfter: 0,
+      method: 'issue_remediation',
+      status: decision,
+    })
+
+    console.info(
+      `[control_remediation] event=${row.id} issue=${issueId} decision=${decision} store=${getControlStoreMode()}`,
+    )
+
+    res.json({
+      ok: true,
+      event_id: row.id,
+      status: row.status,
+      control_store: getControlStoreMode(),
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error('[POST /api/control/remediation/decide]', detail)
+    res.status(500).json({ error: detail })
+  }
+})

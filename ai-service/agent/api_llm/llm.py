@@ -37,6 +37,11 @@ from agent.api_llm.providers import (
     stream_openai_compatible,
     translate_llm_error,
 )
+from agent.api_llm.remediation import (
+    REMEDIATION_PROMPT_SUFFIX,
+    attach_remediation_to_compose,
+    should_emit_remediation,
+)
 
 AUTO_FALLBACK_NOTICE = "\n\n[안내] 이전 API 한도/오류로 다른 등록 API가 답변했습니다."
 NO_CREDENTIALS_NOTICE = (
@@ -119,19 +124,20 @@ def _build_messages(
         )
     else:
         follow = "recent_turns가 있으면 이어서 대화하세요. "
+    human = (
+        "아래 JSON을 보고 한국어로 답해 주세요. "
+        f"지금 화면 route={route or '/'} ({route_label(route)}). "
+        + follow
+        + "answer_contract 순서에 맞춰 데이터의 의미, 우선순위, 다음 행동을 답하세요. "
+        + "primary_table, items 같은 내부 JSON 키와 원본 JSON은 사용자에게 출력하지 마세요. "
+        + "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
+        + json.dumps(payload, ensure_ascii=False, default=str)
+    )
+    if should_emit_remediation(message, page_context if isinstance(page_context, dict) else None):
+        human = human + REMEDIATION_PROMPT_SUFFIX
     return [
         SystemMessage(content=system),
-        HumanMessage(
-            content=(
-                "아래 JSON을 보고 한국어로 답해 주세요. "
-                f"지금 화면 route={route or '/'} ({route_label(route)}). "
-                + follow
-                + "answer_contract 순서에 맞춰 데이터의 의미, 우선순위, 다음 행동을 답하세요. "
-                + "primary_table, items 같은 내부 JSON 키와 원본 JSON은 사용자에게 출력하지 마세요. "
-                + "last_event가 있으면 그 동작과 지금 화면을 함께 보세요.\n"
-                + json.dumps(payload, ensure_ascii=False, default=str)
-            )
-        ),
+        HumanMessage(content=human),
     ]
 
 
@@ -181,6 +187,9 @@ def polish_reply(
     draft = (draft or "").strip()
     if not draft:
         return draft
+    # Page summary: skip 2nd API call — one compose is enough (avoids hang feel).
+    if is_page_summary_intent(current_question):
+        return normalize_korean_reply(draft)
     creds = resolve_credentials(llm_credentials)
     if not creds:
         return normalize_korean_reply(draft)
@@ -347,10 +356,22 @@ def iter_compose_stream(
                     llm_mode=llm_mode,
                     llm_credentials=llm_credentials,
                 )
+                polished, rem = attach_remediation_to_compose(
+                    message=message,
+                    page_context=page_context if isinstance(page_context, dict) else None,
+                    reply=polished,
+                )
                 step = 48
                 for j in range(0, len(polished), step):
                     yield ("delta", polished[j : j + step])
-                yield ("done", {"reply": polished, "provider": label, "error": None})
+                done_payload: dict[str, Any] = {
+                    "reply": polished,
+                    "provider": label,
+                    "error": None,
+                }
+                if rem:
+                    done_payload["remediation"] = rem
+                yield ("done", done_payload)
                 return
         except Exception as exc:  # noqa: BLE001
             last_err = translate_llm_error(exc)

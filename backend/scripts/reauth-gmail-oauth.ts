@@ -1,11 +1,11 @@
 /**
  * Interactive: renew GMAIL_REFRESH_TOKEN (expired/revoked → invalid_grant).
  *
- *   cd backend
- *   npx tsx scripts/reauth-gmail-oauth.ts
+ * Prefer AWS browser flow (no localhost):
+ *   http://3.38.135.192/api/internal/gmail-oauth/start
  *
- * Opens Google consent URL. Paste the ?code= from redirect (even if browser shows error page URL).
- * Writes GMAIL_REFRESH_TOKEN into monorepo root .env (does not print the token).
+ * CLI fallback (same redirect as env GMAIL_OAUTH_REDIRECT_URI):
+ *   cd backend && npx tsx scripts/reauth-gmail-oauth.ts
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,7 +14,17 @@ import { fileURLToPath } from 'node:url'
 import '../src/loadRootEnv.js'
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.send'
-const REDIRECT = 'http://localhost:1/oauth2callback'
+
+function redirectUri(): string {
+  const fromEnv = (process.env.GMAIL_OAUTH_REDIRECT_URI || '').trim()
+  if (fromEnv) return fromEnv
+  const host = (process.env.GMAIL_OAUTH_PUBLIC_HOST || '').trim()
+  if (host) {
+    const base = host.startsWith('http') ? host.replace(/\/$/, '') : `http://${host}`
+    return `${base}/api/internal/gmail-oauth/callback`
+  }
+  return 'http://3.38.135.192.sslip.io/api/internal/gmail-oauth/callback'
+}
 
 async function main() {
   const clientId = (process.env.GMAIL_CLIENT_ID || '').trim()
@@ -24,6 +34,7 @@ async function main() {
     process.exit(1)
   }
 
+  const REDIRECT = redirectUri()
   const authUrl =
     'https://accounts.google.com/o/oauth2/v2/auth?' +
     new URLSearchParams({
@@ -35,10 +46,12 @@ async function main() {
       prompt: 'consent',
     }).toString()
 
-  console.log('\n1) 브라우저에서 아래 URL을 여세요 (Google Cloud OAuth 클라이언트의 승인된 리다이렉트에')
-  console.log(`   ${REDIRECT} 가 등록되어 있어야 합니다).\n`)
+  console.log('\nAWS 권장: 브라우저에서 아래만 여세요 (콜백이 서버 .env에 자동 저장).\n')
+  console.log('  http://3.38.135.192.sslip.io/api/internal/gmail-oauth/start\n')
+  console.log('CLI로 할 때만 — Google Cloud 리디렉션 URI에 이게 있어야 함:')
+  console.log(`  ${REDIRECT}\n`)
   console.log(authUrl)
-  console.log('\n2) 로그인·동의 후 주소창 전체 URL 또는 code= 값을 붙여넣으세요.\n')
+  console.log('\n동의 후 주소창 URL 또는 code= 붙여넣기:\n')
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   const answer = await new Promise<string>((resolve) => {

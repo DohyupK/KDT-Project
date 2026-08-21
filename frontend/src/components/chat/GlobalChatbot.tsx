@@ -9,6 +9,7 @@ import SecurityChatbot from '@/components/chat/SecurityChatbot'
 import {
   postApproveControl,
   postOutcomeControl,
+  postRemediationDecide,
   postRevertControl,
   postChatStream,
   deleteChatThread,
@@ -19,7 +20,9 @@ import {
   setChatThreadId,
   type ChatFeatures,
   type ChatRecommendation,
+  type ChatRemediation,
   type ChatThreadItem,
+  type RemediationProposal,
 } from '@/api/aiApi'
 import { usePageChatOptional } from '@/context/PageChatContext'
 import {
@@ -40,6 +43,10 @@ type ChatMessage = {
   text: string
   mode?: string
   recommendation?: ChatRecommendation | null
+  remediation?: ChatRemediation | null
+  /** proposalId → approved | rejected */
+  remediationDecisions?: Record<string, 'approved' | 'rejected'>
+  remediationBusyId?: string | null
   approved?: boolean
   approving?: boolean
   /** After approve: event id for outcome form */
@@ -500,6 +507,8 @@ export default function GlobalChatbot() {
                       text: replyText,
                       mode: data.mode,
                       recommendation: data.recommendation ?? null,
+                      remediation: data.remediation ?? null,
+                      remediationDecisions: {},
                     }
                   : m,
               )
@@ -559,6 +568,67 @@ export default function GlobalChatbot() {
       })
     } finally {
       if (!ac.signal.aborted) setPending(false)
+    }
+  }
+
+  const decideRemediation = async (
+    msgId: number,
+    issueId: string,
+    proposal: RemediationProposal,
+    decision: 'approved' | 'rejected',
+  ) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, remediationBusyId: proposal.id } : m,
+      ),
+    )
+    try {
+      const res = await postRemediationDecide({
+        issueId,
+        proposal,
+        decision,
+      })
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId) return m
+          return {
+            ...m,
+            remediationBusyId: null,
+            remediationDecisions: {
+              ...(m.remediationDecisions || {}),
+              [proposal.id]: decision,
+            },
+          }
+        }),
+      )
+      idRef.current += 1
+      const label = decision === 'approved' ? '승인' : '거절'
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: idRef.current,
+          role: 'ai',
+          text:
+            decision === 'approved'
+              ? `「${proposal.title}」을(를) 승인했습니다. 실제 기기는 조작하지 않으며, 작업 의사만 로그에 남겼습니다. (event_id=${res.event_id})\n→ ${proposal.narrative}`
+              : `「${proposal.title}」을(를) 거절했습니다. (event_id=${res.event_id}, ${label})`,
+        },
+      ])
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId ? { ...m, remediationBusyId: null } : m,
+        ),
+      )
+      idRef.current += 1
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: idRef.current,
+          role: 'ai',
+          text: '조치 승인/거절 기록에 실패했습니다. backend 로그를 확인해 주세요.',
+        },
+      ])
     }
   }
 
@@ -1213,6 +1283,107 @@ export default function GlobalChatbot() {
                         {m.outcomeSaved ? (
                           <span className="block text-[11px] text-slate-500">실측 저장됨</span>
                         ) : null}
+                      </div>
+                    ) : null}
+                    {m.remediation?.proposals?.length && m.role === 'ai' ? (
+                      <div
+                        className={`mt-2 space-y-2 rounded-lg border p-2 ${
+                          isDark
+                            ? 'border-slate-600 bg-slate-900/80'
+                            : 'border-slate-200 bg-slate-50'
+                        }`}
+                      >
+                        <div
+                          className={`text-[11px] font-semibold ${
+                            isDark ? 'text-slate-200' : 'text-slate-800'
+                          }`}
+                        >
+                          이슈 조치 제안 ({m.remediation.issueId})
+                        </div>
+                        <p className="text-[10px] text-slate-500">
+                          승인해도 실제 기기는 조작하지 않습니다. 작업 의사만 로그에 남깁니다.
+                        </p>
+                        {m.remediation.proposals.map((p) => {
+                          const decided = m.remediationDecisions?.[p.id]
+                          const busy = m.remediationBusyId === p.id
+                          return (
+                            <div
+                              key={p.id}
+                              className={`rounded-md border px-2 py-1.5 ${
+                                isDark
+                                  ? 'border-slate-700 bg-slate-800'
+                                  : 'border-slate-200 bg-white'
+                              }`}
+                            >
+                              <div
+                                className={`text-[11px] font-medium ${
+                                  isDark ? 'text-slate-100' : 'text-slate-800'
+                                }`}
+                              >
+                                {p.title}
+                              </div>
+                              <p
+                                className={`mt-0.5 text-[11px] leading-snug ${
+                                  isDark ? 'text-slate-300' : 'text-slate-600'
+                                }`}
+                              >
+                                {p.narrative}
+                              </p>
+                              {decided ? (
+                                <span
+                                  className={`mt-1 inline-block text-[10px] font-semibold ${
+                                    decided === 'approved'
+                                      ? isDark
+                                        ? 'text-emerald-400'
+                                        : 'text-emerald-700'
+                                      : isDark
+                                        ? 'text-slate-400'
+                                        : 'text-slate-500'
+                                  }`}
+                                >
+                                  {decided === 'approved' ? '승인됨' : '거절됨'}
+                                </span>
+                              ) : (
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={pending || Boolean(m.remediationBusyId)}
+                                    onClick={() =>
+                                      void decideRemediation(
+                                        m.id,
+                                        m.remediation!.issueId,
+                                        p,
+                                        'approved',
+                                      )
+                                    }
+                                    className="rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white disabled:opacity-50"
+                                  >
+                                    {busy ? '기록 중…' : '승인'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={pending || Boolean(m.remediationBusyId)}
+                                    onClick={() =>
+                                      void decideRemediation(
+                                        m.id,
+                                        m.remediation!.issueId,
+                                        p,
+                                        'rejected',
+                                      )
+                                    }
+                                    className={`rounded-md border px-2 py-0.5 text-[10px] font-bold disabled:opacity-50 ${
+                                      isDark
+                                        ? 'border-slate-600 text-slate-200'
+                                        : 'border-slate-300 text-slate-700'
+                                    }`}
+                                  >
+                                    거절
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     ) : null}
                     {m.mode && m.mode !== 'security_redirect' && m.role === 'ai' ? (

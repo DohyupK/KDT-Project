@@ -200,6 +200,19 @@ class ChatRecommendation(BaseModel):
     note: str | None = None
 
 
+class RemediationProposal(BaseModel):
+    id: str
+    title: str
+    narrative: str
+
+
+class ChatRemediation(BaseModel):
+    """Soft issue-action cards — log-only approve/reject, no PLC."""
+
+    issueId: str
+    proposals: list[RemediationProposal] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     reply: str
     mode: str = Field(description="'template' | 'llm' | 'security_redirect'")
@@ -219,6 +232,7 @@ class ChatResponse(BaseModel):
         description="Extensible bag of registry head results (clf/reg/residual/future).",
     )
     recommendation: ChatRecommendation | None = None
+    remediation: ChatRemediation | None = None
     error: str | None = None
     timing: dict[str, Any] | None = Field(
         default=None,

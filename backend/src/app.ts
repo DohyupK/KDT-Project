@@ -63,6 +63,7 @@ export function createApp() {
       control_approve: 'POST /api/control/approve',
       control_revert: 'POST /api/control/approve/:id/revert',
       control_outcome: 'POST /api/control/approve/:id/outcome',
+      control_remediation: 'POST /api/control/remediation/decide',
       control_bounds: 'GET|PUT /api/settings/control-bounds',
       n8n_send_email: 'POST /api/internal/n8n/send-email-result',
     })
