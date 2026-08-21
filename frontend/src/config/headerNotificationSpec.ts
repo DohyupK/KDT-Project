@@ -16,7 +16,6 @@ export type HeaderNotificationType =
   | 'high_risk_lot'
   | 'spc_breach'
   | 'pending_issue'
-  | 'handover_pending'
   | 'inquiry_unanswered'
 
 export type HeaderNotification = {
@@ -62,13 +61,6 @@ export const NOTIFICATION_TYPE_SPEC: Record<HeaderNotificationType, Notification
     messageTemplate: '{issueId} {title} — 담당 확인 필요',
     defaultHref: '/issue',
     futureApiSource: 'GET /api/issues (createdAt≥30m, !hasAction)',
-  },
-  handover_pending: {
-    priority: 'P1',
-    titleTemplate: '인수인계 대기',
-    messageTemplate: '{handoverContent}',
-    defaultHref: '/knowledge',
-    futureApiSource: 'GET /api/knowledge/handover-history?status=pending',
   },
   inquiry_unanswered: {
     priority: 'P2',
