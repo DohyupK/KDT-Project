@@ -1,0 +1,213 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "KDT Issue Report Mail",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "issue-report",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-issue-report",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "webhookId": "kdt-issue-report"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $input.first().json;\nconst b = root.body && typeof root.body === 'object' ? root.body : root;\nconst headers = root.headers || {};\nconst auth =\n  headers.authorization ||\n  headers.Authorization ||\n  '';\n\nif (!b.accessToken || !b.to || !b.from || !b.html) {\n  return [{\n    json: {\n      id: Number(b.id) || 0,\n      send: 'X',\n      error: 'payload_incomplete',\n      callbackAuth: auth,\n      skipGmail: true,\n    },\n  }];\n}\n\nconst subject = String(b.subject || '');\nconst encodedSubject =\n  '=?UTF-8?B?' + Buffer.from(subject, 'utf8').toString('base64') + '?=';\nconst rfc822 = [\n  `From: ${b.from}`,\n  `To: ${b.to}`,\n  `Subject: ${encodedSubject}`,\n  'MIME-Version: 1.0',\n  'Content-Type: text/html; charset=UTF-8',\n  'Auto-Submitted: auto-generated',\n  '',\n  String(b.html),\n].join('\\r\\n');\nconst raw = Buffer.from(rfc822, 'utf8')\n  .toString('base64')\n  .replace(/\\+/g, '-')\n  .replace(/\\//g, '_')\n  .replace(/=+$/, '');\n\nreturn [{\n  json: {\n    id: Number(b.id) || 0,\n    lotId: b.lotId || '',\n    to: b.to,\n    from: b.from,\n    accessToken: b.accessToken,\n    raw,\n    callbackAuth: auth,\n    skipGmail: false,\n  },\n}];"
+      },
+      "id": "code-build-mime",
+      "name": "Build MIME",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ Boolean($json.skipGmail) }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-skip",
+      "name": "Skip Gmail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ raw: $json.raw }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-gmail",
+      "name": "Gmail API Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Build MIME').first().json;\nconst gmail = $input.first().json;\nconst status = Number(gmail.statusCode || 0);\nconst body = gmail.body && typeof gmail.body === 'object' ? gmail.body : gmail;\nconst hasId = Boolean(body && body.id);\nconst ok = (status >= 200 && status < 300) || hasId;\nlet errMsg = null;\nif (!ok) {\n  errMsg =\n    (body && body.error && (body.error.message || body.error.status)) ||\n    `gmail_${status || 'fail'}`;\n}\nreturn [{\n  json: {\n    id: prep.id,\n    send: ok ? 'O' : 'X',\n    error: ok ? null : String(errMsg).slice(0, 255),\n    callbackAuth: prep.callbackAuth,\n  },\n}];"
+      },
+      "id": "code-result",
+      "name": "Normalize Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $input.first().json;\nreturn [{\n  json: {\n    id: prep.id,\n    send: 'X',\n    error: prep.error || 'payload_incomplete',\n    callbackAuth: prep.callbackAuth,\n  },\n}];"
+      },
+      "id": "code-fail-payload",
+      "name": "Payload Fail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, -80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ Number($json.id) }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-callback",
+      "name": "Need callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3001/api/internal/n8n/send-email-result",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.callbackAuth }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: Number($json.id), send: $json.send, error: $json.error }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "http-callback",
+      "name": "Backend Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1460, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "let r;\ntry {\n  r = $('Normalize Result').first().json;\n} catch (e) {\n  r = $('Payload Fail').first().json;\n}\nreturn [{ json: { send: r.send, error: r.error } }];"
+      },
+      "id": "code-respond-body",
+      "name": "Respond Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1940, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Build MIME", "type": "main", "index": 0 }]]
+    },
+    "Build MIME": {
+      "main": [[{ "node": "Skip Gmail?", "type": "main", "index": 0 }]]
+    },
+    "Skip Gmail?": {
+      "main": [
+        [{ "node": "Payload Fail", "type": "main", "index": 0 }],
+        [{ "node": "Gmail API Send", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail API Send": {
+      "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]]
+    },
+    "Normalize Result": {
+      "main": [[{ "node": "Need callback?", "type": "main", "index": 0 }]]
+    },
+    "Payload Fail": {
+      "main": [[{ "node": "Need callback?", "type": "main", "index": 0 }]]
+    },
+    "Need callback?": {
+      "main": [
+        [{ "node": "Backend Callback", "type": "main", "index": 0 }],
+        [{ "node": "Respond Body", "type": "main", "index": 0 }]
+      ]
+    },
+    "Backend Callback": {
+      "main": [[{ "node": "Respond Body", "type": "main", "index": 0 }]]
+    },
+    "Respond Body": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "POST /webhook/issue-report — payload accessToken only (no n8n Gmail Credential). Callback when id>0. Q-Cost id=0 skips callback."
+  },
+  "tags": []
+}

@@ -104,6 +104,17 @@ export type ChatRecommendation = {
   note?: string | null
 }
 
+export type RemediationProposal = {
+  id: string
+  title: string
+  narrative: string
+}
+
+export type ChatRemediation = {
+  issueId: string
+  proposals: RemediationProposal[]
+}
+
 export type PageChatLastEvent = {
   type: string
   target: string
@@ -224,6 +235,7 @@ export type ChatStreamHandlers = {
     provider?: string
     thread_id?: string
     recommendation?: ChatRecommendation | null
+    remediation?: ChatRemediation | null
     predict?: unknown
     error?: string | null
     timing?: Record<string, unknown> | null
@@ -303,6 +315,7 @@ export async function postChatStream(
         provider: data.provider as string | undefined,
         thread_id: tid,
         recommendation: (data.recommendation as ChatRecommendation | null) ?? null,
+        remediation: (data.remediation as ChatRemediation | null) ?? null,
         predict: data.predict,
         error: (data.error as string | null) ?? null,
         timing: (data.timing as Record<string, unknown> | null) ?? null,
@@ -389,6 +402,30 @@ export async function postApproveControl(
     lot_id: body.lot_id ?? undefined,
     recommendation: body.recommendation,
   })
+  return data
+}
+
+export type RemediationDecideRequest = {
+  session_id?: string | null
+  decision: 'approved' | 'rejected'
+  issueId: string
+  proposal: RemediationProposal
+}
+
+/** Soft issue remediation — log only, no PLC. */
+export async function postRemediationDecide(
+  body: RemediationDecideRequest,
+): Promise<ApproveControlResponse> {
+  const session_id = body.session_id ?? getChatThreadId()
+  const { data } = await apiClient.post<ApproveControlResponse>(
+    '/control/remediation/decide',
+    {
+      session_id: session_id ?? undefined,
+      decision: body.decision,
+      issueId: body.issueId,
+      proposal: body.proposal,
+    },
+  )
   return data
 }
 

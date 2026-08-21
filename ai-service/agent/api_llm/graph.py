@@ -22,6 +22,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.api_llm.llm import compose_with_failover, llm_enabled
 from agent.api_llm.prompts import LLM_OFF_EXCERPT_NOTICE, RAG_EMPTY_HINT, USAGE_GUIDELINE
+from agent.api_llm.remediation import attach_remediation_to_compose
 from agent.api_llm.tools import run_registered_heads
 from agent.api_llm.whatif import run_whatif
 from agent.api_llm.grounding import (
@@ -817,17 +818,30 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
     rag_sources = state.get("rag_sources") or []
     error = state.get("error")
     need_guideline = bool(state.get("need_guideline"))
+    pc = page_context if isinstance(page_context, dict) else None
+
+    def _with_remediation(reply: str, **extra: Any) -> dict[str, Any]:
+        clean, rem = attach_remediation_to_compose(
+            message=message,
+            page_context=pc,
+            reply=reply,
+        )
+        out = {
+            "reply": normalize_korean_reply(clean),
+            **extra,
+        }
+        if rem:
+            out["remediation"] = rem
+        return out
 
     # Offscreen / SPC-absent: fixed spaced reply — do not let LLM jam/paraphrase rules
-    det = deterministic_user_reply(page_context if isinstance(page_context, dict) else None)
+    det = deterministic_user_reply(pc)
     if det:
-        return {
-            "reply": normalize_korean_reply(
-                _append_guideline(det, need_guideline)
-            ),
-            "mode": "template",
-            "provider": "grounding",
-        }
+        return _with_remediation(
+            _append_guideline(det, need_guideline),
+            mode="template",
+            provider="grounding",
+        )
 
     if llm_enabled():
         reply, provider, llm_err = compose_with_failover(
@@ -854,11 +868,11 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
                 reply = reply.rstrip() + _format_capacity(capacity_result)
             if residual_result and "[잔여 리튬 예측]" not in reply:
                 reply = reply.rstrip() + _format_residual(residual_result)
-            return {
-                "reply": normalize_korean_reply(reply),
-                "mode": "llm",
-                "provider": provider or "llm",
-            }
+            return _with_remediation(
+                reply,
+                mode="llm",
+                provider=provider or "llm",
+            )
         if llm_err:
             base = _template_reply(
                 message,
@@ -871,38 +885,34 @@ def compose_bundle(state: dict[str, Any]) -> dict[str, Any]:
                 rag_sources,
                 need_rag=need_rag,
             )
-            return {
-                "reply": normalize_korean_reply(
-                    _append_guideline(
-                        (base.rstrip() + "\n\n" + llm_err).strip(),
-                        need_guideline,
-                    )
+            return _with_remediation(
+                _append_guideline(
+                    (base.rstrip() + "\n\n" + llm_err).strip(),
+                    need_guideline,
                 ),
-                "mode": "template",
-                "provider": "template",
-                "error": llm_err,
-            }
-
-    return {
-        "reply": normalize_korean_reply(
-            _append_guideline(
-                _template_reply(
-                    message,
-                    predict_result,
-                    error,
-                    recommendation,
-                    capacity_result,
-                    residual_result,
-                    page_context,
-                    rag_sources,
-                    need_rag=need_rag,
-                ),
-                need_guideline,
+                mode="template",
+                provider="template",
+                error=llm_err,
             )
+
+    return _with_remediation(
+        _append_guideline(
+            _template_reply(
+                message,
+                predict_result,
+                error,
+                recommendation,
+                capacity_result,
+                residual_result,
+                page_context,
+                rag_sources,
+                need_rag=need_rag,
+            ),
+            need_guideline,
         ),
-        "mode": "template",
-        "provider": "template",
-    }
+        mode="template",
+        provider="template",
+    )
 
 
 # --- LangGraph node wrappers (compat / optional graph) ---
@@ -1110,6 +1120,7 @@ def run_chat(
         "residual": model_out.get("residual_result"),
         "heads": model_out.get("head_results"),
         "recommendation": model_out.get("recommendation"),
+        "remediation": composed.get("remediation"),
         "error": composed.get("error") or model_out.get("error"),
         "timing": timing,
         "rag_sources": rag_sources,
@@ -1272,12 +1283,18 @@ def iter_chat_events(
     provider = "template"
     mode = "template"
     compose_err = None
+    stream_remediation: dict[str, Any] | None = None
     t_c = time.perf_counter()
 
     det = deterministic_user_reply(page_context if isinstance(page_context, dict) else None)
     if det:
         reply = normalize_korean_reply(
             _append_guideline(det, bool(need_guideline))
+        )
+        reply, stream_remediation = attach_remediation_to_compose(
+            message=message,
+            page_context=page_context if isinstance(page_context, dict) else None,
+            reply=reply,
         )
         compose_ms = (time.perf_counter() - t_c) * 1000
         yield {"event": "delta", "data": {"text": reply}}
@@ -1307,22 +1324,22 @@ def iter_chat_events(
             timing["rag_hits"],
             timing["peek_dense"],
         )
-        yield {
-            "event": "done",
-            "data": {
-                "reply": reply,
-                "mode": "template",
-                "provider": "grounding",
-                "predict": model_out.get("predict_result"),
-                "capacity": model_out.get("capacity_result"),
-                "residual": model_out.get("residual_result"),
-                "heads": model_out.get("head_results"),
-                "recommendation": model_out.get("recommendation"),
-                "error": model_out.get("error"),
-                "timing": timing,
-                "need_rag": need,
-            },
+        done_data: dict[str, Any] = {
+            "reply": reply,
+            "mode": "template",
+            "provider": "grounding",
+            "predict": model_out.get("predict_result"),
+            "capacity": model_out.get("capacity_result"),
+            "residual": model_out.get("residual_result"),
+            "heads": model_out.get("head_results"),
+            "recommendation": model_out.get("recommendation"),
+            "error": model_out.get("error"),
+            "timing": timing,
+            "need_rag": need,
         }
+        if stream_remediation:
+            done_data["remediation"] = stream_remediation
+        yield {"event": "done", "data": done_data}
         return
 
     if llm_enabled():
@@ -1350,6 +1367,8 @@ def iter_chat_events(
                     reply_parts = [str(payload["reply"])]
                     provider = payload.get("provider") or provider
                     mode = "llm"
+                if isinstance(payload.get("remediation"), dict):
+                    stream_remediation = payload["remediation"]  # type: ignore[assignment]
                 compose_err = payload.get("error")
     compose_ms = (time.perf_counter() - t_c) * 1000
 
@@ -1360,9 +1379,17 @@ def iter_chat_events(
         mode = composed.get("mode") or "template"
         provider = composed.get("provider") or "template"
         compose_err = composed.get("error") or compose_err
+        if isinstance(composed.get("remediation"), dict):
+            stream_remediation = composed["remediation"]
         # push as one delta if nothing streamed
         if reply:
             yield {"event": "delta", "data": {"text": reply}}
+    elif stream_remediation is None:
+        reply, stream_remediation = attach_remediation_to_compose(
+            message=message,
+            page_context=page_context if isinstance(page_context, dict) else None,
+            reply=reply,
+        )
 
     rec = model_out.get("recommendation")
     if rec and rec.get("suggestion") and "[What-if 제안]" not in reply:
@@ -1398,19 +1425,19 @@ def iter_chat_events(
         timing.get("embed_ms"),
     )
 
-    yield {
-        "event": "done",
-        "data": {
-            "reply": normalize_korean_reply(reply),
-            "mode": mode,
-            "provider": provider,
-            "predict": model_out.get("predict_result"),
-            "capacity": model_out.get("capacity_result"),
-            "residual": model_out.get("residual_result"),
-            "heads": model_out.get("head_results"),
-            "recommendation": model_out.get("recommendation"),
-            "error": compose_err or model_out.get("error"),
-            "timing": timing,
-            "need_rag": need,
-        },
+    done_out: dict[str, Any] = {
+        "reply": normalize_korean_reply(reply),
+        "mode": mode,
+        "provider": provider,
+        "predict": model_out.get("predict_result"),
+        "capacity": model_out.get("capacity_result"),
+        "residual": model_out.get("residual_result"),
+        "heads": model_out.get("head_results"),
+        "recommendation": model_out.get("recommendation"),
+        "error": compose_err or model_out.get("error"),
+        "timing": timing,
+        "need_rag": need,
     }
+    if stream_remediation:
+        done_out["remediation"] = stream_remediation
+    yield {"event": "done", "data": done_out}

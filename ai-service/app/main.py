@@ -67,6 +67,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.schemas import (
     CapacityResponse,
     ChatRecommendation,
+    ChatRemediation,
     ChatRequest,
     ChatResponse,
     ChatThreadListResponse,
@@ -534,6 +535,10 @@ def chat_endpoint(
     recommendation = (
         ChatRecommendation.model_validate(rec_payload) if rec_payload else None
     )
+    rem_payload = out.get("remediation")
+    remediation = (
+        ChatRemediation.model_validate(rem_payload) if rem_payload else None
+    )
     return ChatResponse(
         reply=out["reply"],
         mode=out.get("mode") or "template",
@@ -544,6 +549,7 @@ def chat_endpoint(
         residual=ResidualResponse(**residual_payload) if residual_payload else None,
         heads=out.get("heads"),
         recommendation=recommendation,
+        remediation=remediation,
         error=out.get("error"),
         timing=out.get("timing"),
     )

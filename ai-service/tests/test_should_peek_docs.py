@@ -12,6 +12,7 @@ class ShouldPeekDocsTests(unittest.TestCase):
         self.assertFalse(
             should_peek_docs("지금 보고 있는 화면 데이터를 요약해 주세요")
         )
+        self.assertFalse(should_peek_docs("내가 보고 있는 화면 요약해줘"))
 
     def test_screen_ui_skips(self) -> None:
         self.assertFalse(should_peek_docs("이 화면 KPI 몇 건이야"))

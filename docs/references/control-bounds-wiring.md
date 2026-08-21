@@ -37,6 +37,17 @@ GlobalChatbot 「제안 승인」
 
 스토어: `CONTROL_STORE` 또는 `CHAT_STORE` (`sqlite` 기본 → `DB/data/control.sqlite`).
 
+## 이슈 소프트 조치 (승인/거절 · 기기 미조작)
+
+이슈 ID(`ISS-…`) + 해결방안/조치 질문 → 일반 챗이 `remediation` 카드(2~3문장)를 붙인다.
+
+```
+GlobalChatbot 카드 「승인」|「거절」
+  → POST /api/control/remediation/decide
+  → OPTIMIZATION_EVENTS method=issue_remediation, status=approved|rejected
+  → PLC·한계치·설정 API 호출 없음 (작업 의사 로그만)
+```
+
 ## 관련 코드 주석
 
 각 진입점에 “Wiring: …” 주석이 있다.
